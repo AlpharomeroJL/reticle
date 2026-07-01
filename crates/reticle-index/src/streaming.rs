@@ -1,4 +1,4 @@
-//! Zero-copy access to archived index payloads with [`rkyv`] 0.8 — the building
+//! Zero-copy access to archived index payloads with [`rkyv`] 0.8, the building
 //! block for out-of-core streaming.
 //!
 //! An [`IndexPayload`] serializes to a byte buffer laid out exactly as its in-memory
@@ -8,9 +8,9 @@
 //! hand these bytes in, and the OS pages in only the regions actually touched.
 //!
 //! What is **not** yet wired up: nothing in the workspace memory-maps a file into this
-//! path or streams from disk, and no renderer consumes it — today the API is exercised
+//! path or streams from disk, and no renderer consumes it, today the API is exercised
 //! over in-memory buffers only. Full out-of-core browsing (mmap plus on-demand tile
-//! paging) is a documented follow-up — see `docs/STATUS.md` and
+//! paging) is a documented follow-up, see `docs/STATUS.md` and
 //! `docs/decisions/0013-out-of-core-streaming-scope.md`. The zero-copy read primitive
 //! itself is real and validated (below).
 //!

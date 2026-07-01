@@ -2,7 +2,7 @@
 //! independent naive `O(n²)` union-find oracle over random single-layer rectangle
 //! sets.
 //!
-//! Both sides use the *same* touch rule — closed-box intersection via
+//! Both sides use the *same* touch rule, closed-box intersection via
 //! [`reticle_extract::rects_touch`] (edge- and corner-adjacent rectangles count as
 //! connected). The oracle is deliberately the obvious "connect every touching
 //! pair, then take components" reference, with a private, self-contained

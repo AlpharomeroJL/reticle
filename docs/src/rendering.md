@@ -7,7 +7,7 @@ Vulkan, Metal, or DX12 natively, with a WebGL2 fallback for reach (ADR 0009).
 
 The central trick for scale is to keep the hierarchy on the GPU. Rather than the CPU
 walking billions of leaf shapes, a compute shader tests each cell's bounding box
-against the current view and flags the visible ones — the first stage of a GPU-driven
+against the current view and flags the visible ones, the first stage of a GPU-driven
 draw list (compacting the survivors into an indirect draw is a follow-up). The work is
 proportional to the number of cells considered, not the flattened shape count. The
 interactive egui canvas currently culls on the CPU with the same R-tree, and the GPU
@@ -23,7 +23,7 @@ browsing.
 
 ## Offscreen rendering
 
-The renderer renders to an offscreen texture today — the path that drives both the
+The renderer renders to an offscreen texture today, the path that drives both the
 golden-image tests and the media capture (the hero image and browse GIF). Window and
 surface presentation, and overlays (a minimap, design-rule violation markers,
 highlighted nets, and a 3D layer-stack cross-section), are tracked follow-ups noted in

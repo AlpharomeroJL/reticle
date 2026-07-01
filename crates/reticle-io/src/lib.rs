@@ -8,12 +8,12 @@
 //!
 //! # Formats
 //!
-//! - [`Gds`] — GDSII binary. Rectangles/polygons ↔ boundaries, paths ↔ paths,
+//! - [`Gds`], GDSII binary. Rectangles/polygons ↔ boundaries, paths ↔ paths,
 //!   instances ↔ struct refs, arrays ↔ array refs. See [`mod@gds`].
-//! - [`Oasis`] — a compact, self-describing binary subset that round-trips
+//! - [`Oasis`], a compact, self-describing binary subset that round-trips
 //!   rectangles and polygons on `(layer, datatype)`. It is **not** conformant
 //!   OASIS; see [`mod@oasis`] for the honest scope and gaps.
-//! - [`parse_technology`] — a line-oriented technology-file format (resolution,
+//! - [`parse_technology`], a line-oriented technology-file format (resolution,
 //!   layer table, DRC rules). See [`mod@technology`].
 //!
 //! # Errors

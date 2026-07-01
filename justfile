@@ -27,7 +27,7 @@ lint: fmt-check clippy
 # The gate (replaces GitHub Actions): fmt, clippy(-D warnings), tests, doc,
 # wasm build, license/advisory check, spelling.
 # ---------------------------------------------------------------------------
-ci: fmt-check clippy test doctest doc-build wasm-build deny typos
+ci: fmt-check clippy test doctest doc-build wasm-build deny typos check-style
     Write-Output "ci: GREEN"
 
 # ---- Formatting ----
@@ -64,6 +64,10 @@ deny:
 # ---- Spelling ----
 typos:
     typos
+
+# ---- Style: the voice rule forbids em-dashes (U+2014) ----
+check-style:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check-style.ps1
 
 # ---- Unused dependency audit (advisory; not part of the hard gate) ----
 machete:

@@ -1,7 +1,7 @@
 //! Cross-layer connection rules.
 //!
 //! Two shapes on the *same* layer connect when their geometry touches or overlaps.
-//! Shapes on *different* layers never connect on their own — an explicit
+//! Shapes on *different* layers never connect on their own, an explicit
 //! connector (a via or contact) must bridge them. A [`ConnectionRule`] names such
 //! a bridge as an ordered triple `(bottom, via, top)`: a shape on the `via` layer
 //! connects a `bottom`-layer shape and a `top`-layer shape wherever the via

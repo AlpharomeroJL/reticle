@@ -2,8 +2,8 @@
 //!
 //! A [`RoutingGrid`] tiles a rectangular world region (in DBU) at a fixed
 //! [`pitch`](RoutingGrid::pitch) into `cols` × `rows` tracks, stacked across one
-//! or more routing layers. Every reachable location is a [`GridNode`] — a
-//! `(col, row, layer)` triple — and the grid converts between grid coordinates
+//! or more routing layers. Every reachable location is a [`GridNode`], a
+//! `(col, row, layer)` triple, and the grid converts between grid coordinates
 //! and world [`Point`]s so routed paths land back on the DBU grid.
 //!
 //! Blockage is precomputed: each `(col, row, layer)` is marked passable or

@@ -1,4 +1,4 @@
-# 0013 — Out-of-core streaming: zero-copy primitive now, mmap paging deferred
+# 0013, Out-of-core streaming: zero-copy primitive now, mmap paging deferred
 
 ## Context
 
@@ -14,7 +14,7 @@ What does **not** exist: nothing memory-maps a file into that byte slice, nothin
 tiles from disk on demand, and no renderer consumes the streamed payload. The API is
 exercised only over in-memory `Vec<u8>` buffers in its own tests. The module's original
 doc comment described the disk + mmap + demand-paging behaviour in the present tense, as
-if shipped — an overstatement corrected during the 2026-07-01 audit.
+if shipped, an overstatement corrected during the 2026-07-01 audit.
 
 The blocker to finishing it honestly is that true memory-mapping requires an `unsafe`
 call (e.g. `memmap2::Mmap::map`; a file mapped read-only can still be mutated by another
@@ -34,8 +34,8 @@ and cell culling, which are real.
 
 ## Consequences
 
-- No dishonest claim: the code does exactly what the docs now say — zero-copy access
-  over a byte buffer — and nothing pretends to page from disk.
+- No dishonest claim: the code does exactly what the docs now say, zero-copy access
+  over a byte buffer, and nothing pretends to page from disk.
 - The follow-up is well-scoped: add `memmap2` behind a tightly-reviewed
   `#[allow(unsafe_code)]` with a `SAFETY` note (or a safe `seek`+read tile reader if we
   choose to avoid `unsafe` entirely), map the archive file, feed the bytes to the

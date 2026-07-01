@@ -1,4 +1,4 @@
-# 0006 — Contract-first compiling skeleton
+# 0006, Contract-first compiling skeleton
 
 ## Context
 

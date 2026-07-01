@@ -1,4 +1,4 @@
-# 0005 — MCP servers in Rust, outside the workspace
+# 0005, MCP servers in Rust, outside the workspace
 
 ## Context
 
@@ -22,5 +22,5 @@ The repository stays pure-Rust and the MCP servers reuse the same recipes as the
 gate, so there is a single source of truth. Keeping them out of the workspace means
 their (heavier, network-capable) dependencies never affect core build times. The
 cost is a second, smaller lockfile per tool and that the MCP convenience is only
-available from the following session onward — acceptable because `just` covers the
+available from the following session onward, acceptable because `just` covers the
 current run.

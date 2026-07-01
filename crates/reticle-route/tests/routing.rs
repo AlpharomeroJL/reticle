@@ -193,7 +193,7 @@ fn multi_layer_via_route_connects_across_a_wall() {
     // Enclose the right terminal on layer 0 (METAL1) so no in-plane route can
     // reach it. With a second routing layer available and clear, the router can
     // via up out of the pocket, cross over the enclosure on the upper plane, and
-    // via back down at the start — so the net still completes.
+    // via back down at the start, so the net still completes.
     enclose_right_terminal(&mut doc, METAL1);
     let request = single_net(vec![Point::new(0, 0), Point::new(100, 0)]);
 

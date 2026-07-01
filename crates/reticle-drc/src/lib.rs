@@ -97,7 +97,7 @@ impl DrcEngine {
     /// (or dirtied) rectangle and only nearby geometry is examined, so re-check
     /// cost scales with the edit's neighbourhood rather than the whole cell. The
     /// returned violations are a subset of what [`RuleSet::check_cell`] would
-    /// report — identical rule logic, filtered to `region`.
+    /// report, identical rule logic, filtered to `region`.
     ///
     /// Returns an empty vector if `doc` has no cell named `cell`.
     #[must_use]
@@ -200,7 +200,7 @@ impl CellContext {
             RuleKind::Density => self.check_density(rule, region, out),
             RuleKind::Angle => self.check_angle(rule, region, out),
             // `RuleKind` is `#[non_exhaustive]`; every kind that exists today is
-            // handled above. A future kind added upstream is not silently passed —
+            // handled above. A future kind added upstream is not silently passed -
             // it reaches here unrecognized and is simply not evaluated until this
             // engine gains support for it.
             _ => {}

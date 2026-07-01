@@ -104,6 +104,6 @@ fn import_contains_gds21_zero_length_string_panic() {
         0x00, 0x04, 0x02, 0x06, // len=4, LIBNAME-ish record, Str datatype, empty string
     ];
     let result = Gds.import(&bytes);
-    // We don't care whether it's Ok or Err — only that it returned at all.
+    // We don't care whether it's Ok or Err, only that it returned at all.
     let _ = result;
 }

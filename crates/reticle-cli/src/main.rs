@@ -1,7 +1,7 @@
 //! The Reticle headless command-line pipeline.
 //!
-//! Wave 3 implements a batch pipeline — import, DRC, route, extract, export, and
-//! render-to-image — for validation without any CI service. The binary is named
+//! Wave 3 implements a batch pipeline, import, DRC, route, extract, export, and
+//! render-to-image, for validation without any CI service. The binary is named
 //! `reticle`.
 //!
 //! `main` is a thin [`clap`] dispatcher: it parses subcommands and arguments and

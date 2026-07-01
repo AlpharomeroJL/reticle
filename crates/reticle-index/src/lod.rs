@@ -209,7 +209,7 @@ impl LodPyramid {
     }
 
     /// Chooses the coarsest level whose tiles are no larger than `target_tile_dbu`
-    /// along either axis — i.e. the least detail that still resolves features of
+    /// along either axis, i.e. the least detail that still resolves features of
     /// that size in the given `viewport`. Clamped to the available level range.
     ///
     /// A renderer typically passes `target_tile_dbu` = viewport extent divided by

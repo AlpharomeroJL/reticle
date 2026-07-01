@@ -1,4 +1,4 @@
-//! Comparing an extracted netlist against an expected one — the geometric half of
+//! Comparing an extracted netlist against an expected one, the geometric half of
 //! an LVS (layout-versus-schematic) check.
 //!
 //! The two netlists are compared purely by *which shapes share a net*, not by net
@@ -6,8 +6,8 @@
 //! the key). Concretely, for every unordered pair of shapes we ask: does the
 //! extracted netlist put them on the same net, and does the expected one? A
 //! disagreement is reported as either a [`missing connection`](NetlistDiff::missing)
-//! (expected together, extracted apart — an *open*) or an
-//! [`extra connection`](NetlistDiff::extra) (extracted together, expected apart —
+//! (expected together, extracted apart, an *open*) or an
+//! [`extra connection`](NetlistDiff::extra) (extracted together, expected apart -
 //! a *short*).
 //!
 //! Pairs are summarised as [`ShapePair`]s (always stored with `a < b`). Reporting
@@ -48,10 +48,10 @@ impl ShapePair {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NetlistDiff {
     /// Pairs that should be connected (same net in `expected`) but are *not* in the
-    /// extracted netlist — opens.
+    /// extracted netlist, opens.
     pub missing: Vec<ShapePair>,
     /// Pairs that are connected in the extracted netlist but should *not* be
-    /// (different nets in `expected`) — shorts.
+    /// (different nets in `expected`), shorts.
     pub extra: Vec<ShapePair>,
 }
 

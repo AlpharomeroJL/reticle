@@ -2,7 +2,7 @@
 //!
 //! The subset covers rectangles and polygons on `(layer, datatype)` across
 //! multiple named cells with preserved top cells. Paths, instances, and arrays
-//! are reported as unsupported rather than silently dropped — those cases are
+//! are reported as unsupported rather than silently dropped, those cases are
 //! asserted here too, to keep the documented coverage honest.
 
 use reticle_geometry::{LayerId, Point, Polygon, Rect, Transform};

@@ -1,4 +1,4 @@
-# 0012 — Rust edition 2024
+# 0012, Rust edition 2024
 
 ## Context
 

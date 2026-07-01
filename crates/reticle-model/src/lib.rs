@@ -1,7 +1,7 @@
 //! The hierarchical layout document model for Reticle.
 //!
-//! This crate owns the native document types — [`Document`], [`Cell`],
-//! [`Instance`], [`ArrayInstance`], [`DrawShape`] — and the cross-crate trait
+//! This crate owns the native document types, [`Document`], [`Cell`],
+//! [`Instance`], [`ArrayInstance`], [`DrawShape`], and the cross-crate trait
 //! surface ([`DocumentStore`], [`RuleSet`], [`Router`], [`Importer`], [`Exporter`],
 //! [`Renderer`]) that Wave 2+ crates implement. It builds on `reticle-geometry`
 //! and, like it, contains no GPU, async, or UI code.

@@ -1,4 +1,4 @@
-# 0007 — `yrs` for the collaborative CRDT
+# 0007, `yrs` for the collaborative CRDT
 
 ## Context
 

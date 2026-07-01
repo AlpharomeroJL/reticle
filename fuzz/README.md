@@ -6,9 +6,9 @@ produces a result or returns an error.
 
 ## Targets
 
-- `gds_import` — the GDSII importer (`reticle_io::Gds`).
-- `oasis_import` — the OASIS importer (`reticle_io::Oasis`).
-- `geometry_boolean` — the polygon boolean engine (`reticle_geometry::polygon_boolean`).
+- `gds_import`, the GDSII importer (`reticle_io::Gds`).
+- `oasis_import`, the OASIS importer (`reticle_io::Oasis`).
+- `geometry_boolean`, the polygon boolean engine (`reticle_geometry::polygon_boolean`).
 
 ## Running
 

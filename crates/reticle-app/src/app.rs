@@ -54,7 +54,7 @@ pub struct App {
     /// Collaboration mirror of the document (Wave 0 contract; presence overlay).
     document: SyncDocument,
 
-    /// The editable document with undo/redo — the layout the user edits.
+    /// The editable document with undo/redo, the layout the user edits.
     history: History,
     /// The world<->screen camera.
     camera: ViewCamera,
@@ -462,7 +462,7 @@ impl App {
     }
 
     /// Appends a rectangle to the top cell through the undo history, then rebuilds
-    /// the scene — a concrete edit so undo/redo and the history panel are exercised
+    /// the scene, a concrete edit so undo/redo and the history panel are exercised
     /// from the UI.
     fn add_demo_rectangle(&mut self) {
         // Place it near the current view center so it is visible.

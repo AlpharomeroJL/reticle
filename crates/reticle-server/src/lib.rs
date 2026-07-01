@@ -99,7 +99,7 @@ impl Persist for NoPersist {
 ///
 /// Carrying the originating connection id lets each peer's forwarding task
 /// suppress the echo of its own messages, since a `tokio::sync::broadcast`
-/// receiver otherwise observes *every* message published after it subscribed —
+/// receiver otherwise observes *every* message published after it subscribed -
 /// including those the same connection sent.
 #[derive(Clone)]
 struct RoomMessage {

@@ -12,8 +12,8 @@
 //! carries the geometry Reticle most needs to round-trip today: rectangles and
 //! polygons, tagged by `(layer, datatype)`, grouped into named cells, for a
 //! document with any number of cells (its top cells are preserved). It borrows
-//! OASIS's spirit — a magic string, a `START`/`END` frame, and `CELL` /
-//! `RECTANGLE` / `POLYGON` records with explicit layer and datatype — without
+//! OASIS's spirit, a magic string, a `START`/`END` frame, and `CELL` /
+//! `RECTANGLE` / `POLYGON` records with explicit layer and datatype, without
 //! claiming its wire format.
 //!
 //! The reader and writer are exact inverses, so

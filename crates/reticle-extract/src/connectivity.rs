@@ -6,7 +6,7 @@
 //! - **Same layer.** Two shapes on the same layer are connected when their
 //!   footprints touch or overlap. For axis-aligned rectangles this is decided
 //!   exactly by [`rects_touch`] (a *closed*-box intersection, so shapes that share
-//!   only an edge or a corner still count — layout wires abutting end-to-end are
+//!   only an edge or a corner still count, layout wires abutting end-to-end are
 //!   electrically one). Shapes involving polygons or paths use their bounding box
 //!   as a candidate filter and confirm a positive-area overlap with an exact
 //!   integer polygon boolean.
@@ -32,8 +32,8 @@ use crate::union_find::DisjointSet;
 /// Returns `true` if two axis-aligned rectangles touch or overlap, treating them
 /// as *closed* boxes `[min, max]`.
 ///
-/// Unlike [`Rect::intersects`](reticle_geometry::Rect::intersects) — which
-/// requires positive-area overlap — this returns `true` when the rectangles share
+/// Unlike [`Rect::intersects`](reticle_geometry::Rect::intersects), which
+/// requires positive-area overlap, this returns `true` when the rectangles share
 /// only an edge or a single corner. That is the correct rule for connectivity:
 /// two wire segments that abut end-to-end are electrically one net.
 #[must_use]
@@ -90,7 +90,7 @@ pub fn shapes_touch(a: &DrawShape, b: &DrawShape) -> bool {
 /// Returns `true` if `point` lies within the closed bounding box of `shape`.
 ///
 /// Edges and corners are included. This is exact for rectangles and rectilinear
-/// layout, and a safe over-approximation for arbitrary polygons/paths — exact
+/// layout, and a safe over-approximation for arbitrary polygons/paths, exact
 /// point-in-polygon is unnecessary for the label-seeding use-case. Used to attach
 /// a [`NetLabel`](crate::NetLabel) to the net covering its point.
 #[must_use]
@@ -157,8 +157,8 @@ fn connect_same_layer(shapes: &[DrawShape], index: &RTreeIndex<usize>, dsu: &mut
 
 /// For each via shape, unions the bottom- and top-layer shapes it overlaps.
 ///
-/// A via connects a pair only if it overlaps *both* conductors, so a lone via — or
-/// one missing either landing pad — leaves the nets separate.
+/// A via connects a pair only if it overlaps *both* conductors, so a lone via, or
+/// one missing either landing pad, leaves the nets separate.
 fn connect_vias(
     shapes: &[DrawShape],
     index: &RTreeIndex<usize>,

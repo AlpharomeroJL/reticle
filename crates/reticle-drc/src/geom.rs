@@ -43,7 +43,7 @@ pub fn overlaps(a: &Rect, b: &Rect) -> bool {
 /// The distance is computed from the per-axis gaps: when the projections overlap
 /// on one axis the separation is purely along the other axis (an exact integer);
 /// only the diagonal (corner-to-corner) case needs a square root, and rounding
-/// down keeps the check conservative — a pair reported as `gap` is never closer
+/// down keeps the check conservative, a pair reported as `gap` is never closer
 /// than `gap`.
 #[must_use]
 pub fn rect_gap(a: &Rect, b: &Rect) -> i64 {

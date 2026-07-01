@@ -15,7 +15,7 @@
 //!
 //! 1. Build a bulk-loaded R-tree over every shape's bounding box.
 //! 2. Union same-layer touching/overlapping shapes and, per
-//!    [`ConnectionRule`], the conductors each via shape bridges — all in a
+//!    [`ConnectionRule`], the conductors each via shape bridges, all in a
 //!    disjoint set (union-find). Candidate pairs come from spatial-index queries,
 //!    not an `O(n²)` scan.
 //! 3. Emit one [`Net`] per connected component, named from a matching
@@ -161,7 +161,7 @@ impl Extractor {
     }
 
     /// Compares an `extracted` netlist against an `expected` one, returning the
-    /// shape pairs they disagree on (opens and shorts) — the geometric half of an
+    /// shape pairs they disagree on (opens and shorts), the geometric half of an
     /// LVS check. See [`compare_netlists`].
     #[must_use]
     pub fn compare(&self, extracted: &Netlist, expected: &Netlist) -> NetlistDiff {

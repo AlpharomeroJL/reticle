@@ -10,11 +10,11 @@
 //!
 //! # Indices
 //!
-//! - [`LinearIndex`] — brute-force scan; the oracle.
-//! - [`RTreeIndex`] — bulk-loaded R-tree (`rstar`); the general-purpose index.
-//! - [`UniformGrid`] — bucket-per-cell grid; strong for evenly distributed shapes.
-//! - [`LodPyramid`] — tile/level-of-detail pyramid for out-of-core browsing.
-//! - [`streaming`] — `rkyv` zero-copy (de)serialization of an index payload for
+//! - [`LinearIndex`], brute-force scan; the oracle.
+//! - [`RTreeIndex`], bulk-loaded R-tree (`rstar`); the general-purpose index.
+//! - [`UniformGrid`], bucket-per-cell grid; strong for evenly distributed shapes.
+//! - [`LodPyramid`], tile/level-of-detail pyramid for out-of-core browsing.
+//! - [`streaming`], `rkyv` zero-copy (de)serialization of an index payload for
 //!   memory-mapped, out-of-core layouts.
 
 mod grid;

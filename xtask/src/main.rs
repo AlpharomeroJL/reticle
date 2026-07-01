@@ -1,10 +1,10 @@
 //! Reticle build automation (`xtask`).
 //!
 //! Subcommands:
-//! - `gen-layout` — write a deterministic chip-like layout as GDSII (by shape
+//! - `gen-layout`, write a deterministic chip-like layout as GDSII (by shape
 //!   count, layer count, and hierarchy depth).
-//! - `capture-media` — regenerate the hero image and demo GIFs (Wave 5).
-//! - `perf-check` — compare benchmarks against the committed history (Wave 5).
+//! - `capture-media`, regenerate the hero image and demo GIFs (Wave 5).
+//! - `perf-check`, compare benchmarks against the committed history (Wave 5).
 
 mod generator;
 mod media;

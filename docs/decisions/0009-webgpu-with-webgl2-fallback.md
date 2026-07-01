@@ -1,4 +1,4 @@
-# 0009 — WebGPU primary with WebGL2 fallback
+# 0009, WebGPU primary with WebGL2 fallback
 
 ## Context
 

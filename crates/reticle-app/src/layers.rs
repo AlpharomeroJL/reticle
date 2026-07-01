@@ -2,7 +2,7 @@
 //!
 //! [`LayerState`] mirrors the document's technology layer table with a per-layer
 //! visibility flag the user can toggle, plus a text filter that narrows which
-//! layers the panel shows. Visibility here is what the canvas honors when culling —
+//! layers the panel shows. Visibility here is what the canvas honors when culling -
 //! a hidden layer's shapes are skipped entirely. Keeping it separate from the
 //! document means toggling a layer is a cheap view-only operation that never
 //! mutates (or undoes into) the model.

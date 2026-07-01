@@ -1,5 +1,5 @@
 //! Convex-decomposition tests: exact unit cases plus a property test that checks
-//! the ear-clipping decomposition against independent invariants — area
+//! the ear-clipping decomposition against independent invariants, area
 //! conservation (the brute-force oracle), per-piece convexity, and, for fixtures of
 //! known size, the `n - 2` triangle count.
 

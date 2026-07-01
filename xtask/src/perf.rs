@@ -118,15 +118,15 @@ pub(crate) fn perf_check() -> ExitCode {
     }
 
     if missing {
-        eprintln!("\nperf-check: FAIL — one or more benchmarks have no fresh Criterion estimate.");
+        eprintln!("\nperf-check: FAIL, one or more benchmarks have no fresh Criterion estimate.");
         eprintln!("Run `cargo bench --workspace` first, then `just perf-check`.");
         return ExitCode::FAILURE;
     }
     if regressed {
-        eprintln!("\nperf-check: FAIL — a benchmark regressed by more than +{tolerance:.0}%.");
+        eprintln!("\nperf-check: FAIL, a benchmark regressed by more than +{tolerance:.0}%.");
         return ExitCode::FAILURE;
     }
-    println!("\nperf-check: PASS — no benchmark regressed beyond +{tolerance:.0}%.");
+    println!("\nperf-check: PASS, no benchmark regressed beyond +{tolerance:.0}%.");
     ExitCode::SUCCESS
 }
 
@@ -142,7 +142,7 @@ fn criterion_root() -> PathBuf {
 }
 
 /// Reads Criterion's typical estimate, in nanoseconds: the regression slope when
-/// present (linear-sampled benches), otherwise the mean — the same figure Criterion
+/// present (linear-sampled benches), otherwise the mean, the same figure Criterion
 /// prints on its `time:` line. Returns `None` if the file is absent or malformed.
 fn read_estimate_ns(path: &Path) -> Option<f64> {
     let text = std::fs::read_to_string(path).ok()?;

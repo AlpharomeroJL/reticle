@@ -1,4 +1,4 @@
-# 0001 — Keep the working name "Reticle"
+# 0001, Keep the working name "Reticle"
 
 ## Context
 
