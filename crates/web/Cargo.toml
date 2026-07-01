@@ -1,0 +1,18 @@
+[package]
+name = "web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The Reticle WebAssembly harness: WebGPU capability check with WebGL2 fallback."
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Wave 4 wires `reticle-app`, `wasm-bindgen`, `web-sys`, and `console_error_panic_hook`
+# under a `cfg(target_arch = "wasm32")` target table so native `cargo build`
+# stays green (ADR 0009).

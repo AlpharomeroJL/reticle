@@ -1,0 +1,26 @@
+[package]
+name = "reticle-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The interactive Reticle application: egui UI, tools, and the editing suite. Native and WASM."
+keywords = ["egui", "cad", "editor", "eda", "layout"]
+categories = ["gui", "graphics"]
+
+[lib]
+name = "reticle_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "reticle-app"
+path = "src/main.rs"
+
+[dependencies]
+reticle-geometry = { workspace = true }
+reticle-model = { workspace = true }
+reticle-render = { workspace = true }
+reticle-sync = { workspace = true }
+# Wave 4 wires `egui`, `eframe`/`winit`, config, and the full tool state machine.

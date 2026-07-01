@@ -1,0 +1,8 @@
+# Pin the toolchain so every contributor and the local CI gate build identically.
+# Normal builds use stable. Fuzzing and miri are invoked explicitly with
+# `cargo +nightly ...` (see the justfile recipes `fuzz` and `miri`).
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy", "rust-src", "llvm-tools-preview"]
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"

@@ -1,0 +1,14 @@
+# Normalize line endings to LF in the repository and working tree, so the
+# `newline_style = "Unix"` rustfmt setting and the CI gate behave identically on
+# every platform.
+* text=auto eol=lf
+
+# Treat known binary assets as binary (no EOL conversion, no diff).
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.gds binary
+*.oas binary
+*.rgds binary
+*.wasm binary

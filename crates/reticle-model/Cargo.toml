@@ -1,0 +1,21 @@
+[package]
+name = "reticle-model"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The hierarchical layout document model for Reticle: cells, instances, arrays, and the shared trait surface."
+keywords = ["eda", "layout", "hierarchy", "document", "cad"]
+categories = ["data-structures", "science"]
+
+[lints]
+workspace = true
+
+[dependencies]
+reticle-geometry = { workspace = true }
+# Wave 2 adds the transactional history internals; the contract surface is std-only.
+
+[dev-dependencies]
+# Wave 2 wires `proptest` for edit/undo invariants.

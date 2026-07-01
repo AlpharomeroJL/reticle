@@ -1,0 +1,205 @@
+// Reticle wire and document schema.
+//
+// This is a frozen Wave 0 contract (spec Section 6). Coordinates are exact integer
+// database units (DBU); see ADR 0002. Bump `SchemaVersion` on any breaking change
+// and add a corresponding migration in `reticle-proto` (the `migrate` module).
+//
+// Field numbers are stable and must never be reused. New fields are appended.
+
+syntax = "proto3";
+
+package reticle.v1;
+
+// -----------------------------------------------------------------------------
+// Versioning
+// -----------------------------------------------------------------------------
+
+// On-disk / on-wire schema version. Present on the top-level Document and on the
+// CRDT update envelope so a reader can select the correct migration path.
+enum SchemaVersion {
+  SCHEMA_VERSION_UNSPECIFIED = 0;
+  SCHEMA_VERSION_V1 = 1;
+}
+
+// -----------------------------------------------------------------------------
+// Geometry (integer database units)
+// -----------------------------------------------------------------------------
+
+message Point {
+  sint32 x = 1;
+  sint32 y = 2;
+}
+
+message Rect {
+  Point min = 1;
+  Point max = 2;
+}
+
+message Polygon {
+  repeated Point vertices = 1;
+}
+
+enum Endcap {
+  ENDCAP_FLAT = 0;
+  ENDCAP_SQUARE = 1;
+  ENDCAP_ROUND = 2;
+  ENDCAP_CUSTOM = 3;
+}
+
+message Path {
+  repeated Point points = 1;
+  int32 width = 2;
+  Endcap endcap = 3;
+  // Extension in DBU applied at each end when endcap == ENDCAP_CUSTOM.
+  int32 endcap_extension = 4;
+}
+
+// One of the eight D4 orientations (reflect-about-x then rotate CCW).
+enum Orientation {
+  ORIENTATION_R0 = 0;
+  ORIENTATION_R90 = 1;
+  ORIENTATION_R180 = 2;
+  ORIENTATION_R270 = 3;
+  ORIENTATION_MIRROR_X = 4;
+  ORIENTATION_MIRROR_X90 = 5;
+  ORIENTATION_MIRROR_X180 = 6;
+  ORIENTATION_MIRROR_X270 = 7;
+}
+
+message Transform {
+  Point translation = 1;
+  Orientation orientation = 2;
+  // Rational magnification num/den; 0 in either field is interpreted as 1.
+  uint32 mag_num = 3;
+  uint32 mag_den = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Layers and technology
+// -----------------------------------------------------------------------------
+
+message LayerId {
+  uint32 layer = 1;
+  uint32 datatype = 2;
+}
+
+message Layer {
+  LayerId id = 1;
+  string name = 2;
+  // Packed 0xRRGGBBAA display color.
+  uint32 color_rgba = 3;
+  bool visible = 4;
+  float fill_opacity = 5;
+}
+
+enum RuleKind {
+  RULE_KIND_UNSPECIFIED = 0;
+  RULE_KIND_WIDTH = 1;
+  RULE_KIND_SPACING = 2;
+  RULE_KIND_ENCLOSURE = 3;
+  RULE_KIND_EXTENSION = 4;
+  RULE_KIND_NOTCH = 5;
+  RULE_KIND_AREA = 6;
+  RULE_KIND_DENSITY = 7;
+  RULE_KIND_ANGLE = 8;
+}
+
+message Rule {
+  string name = 1;
+  RuleKind kind = 2;
+  LayerId layer = 3;
+  // Second layer for two-layer rules (spacing/enclosure); unset otherwise.
+  LayerId other_layer = 4;
+  // Threshold in DBU, or DBU^2 for area, or milli-degrees for angle.
+  int64 value = 5;
+}
+
+message Technology {
+  string name = 1;
+  int64 dbu_per_micron = 2;
+  repeated Layer layers = 3;
+  repeated Rule rules = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Shapes and hierarchy
+// -----------------------------------------------------------------------------
+
+message Shape {
+  LayerId layer = 1;
+  oneof kind {
+    Rect rect = 2;
+    Polygon polygon = 3;
+    Path path = 4;
+  }
+}
+
+message Instance {
+  string cell = 1;
+  Transform transform = 2;
+}
+
+message Array {
+  string cell = 1;
+  Transform transform = 2;
+  uint32 columns = 3;
+  uint32 rows = 4;
+  int32 column_pitch = 5;
+  int32 row_pitch = 6;
+}
+
+message Cell {
+  string name = 1;
+  repeated Shape shapes = 2;
+  repeated Instance instances = 3;
+  repeated Array arrays = 4;
+}
+
+message Document {
+  SchemaVersion schema_version = 1;
+  Technology technology = 2;
+  repeated Cell cells = 3;
+  repeated string top_cells = 4;
+}
+
+// -----------------------------------------------------------------------------
+// Collaboration: CRDT envelope, presence, threaded comments
+// -----------------------------------------------------------------------------
+
+message CrdtUpdate {
+  SchemaVersion schema_version = 1;
+  string doc_id = 2;
+  string actor = 3;
+  // Opaque yrs update payload.
+  bytes update = 4;
+}
+
+message Presence {
+  string actor = 1;
+  string display_name = 2;
+  uint32 color_rgba = 3;
+  Point cursor = 4;
+  // Selected shape ids.
+  repeated string selection = 5;
+  Rect viewport = 6;
+}
+
+message Comment {
+  string id = 1;
+  string thread_id = 2;
+  // Reference to the anchored shape or cell.
+  string anchor_ref = 3;
+  string author = 4;
+  string body = 5;
+  int64 created_unix_ms = 6;
+  string in_reply_to = 7;
+}
+
+// Envelope for a single message on a live collaboration session.
+message SyncMessage {
+  oneof payload {
+    CrdtUpdate update = 1;
+    Presence presence = 2;
+    Comment comment = 3;
+  }
+}

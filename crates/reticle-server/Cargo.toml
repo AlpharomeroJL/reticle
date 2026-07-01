@@ -1,0 +1,17 @@
+[package]
+name = "reticle-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The Reticle collaboration relay: axum + tokio, rooms, awareness, and broadcast."
+keywords = ["websocket", "axum", "relay", "collaboration", "eda"]
+categories = ["network-programming", "web-programming"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# Wave 3 wires `axum`, `tokio`, and `reticle-sync` for the relay.

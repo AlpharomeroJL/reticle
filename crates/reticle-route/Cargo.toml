@@ -1,0 +1,20 @@
+[package]
+name = "reticle-route"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A grid and maze router for Reticle: multi-net, rip-up and reroute, cross-layer vias."
+keywords = ["routing", "maze", "eda", "layout", "pathfinding"]
+categories = ["algorithms", "science"]
+
+[lints]
+workspace = true
+
+[dependencies]
+reticle-geometry = { workspace = true }
+reticle-model = { workspace = true }
+reticle-index = { workspace = true }
+# Wave 2 wires `pathfinding` (A*/Dijkstra) for the maze router.

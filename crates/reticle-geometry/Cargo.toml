@@ -1,0 +1,20 @@
+[package]
+name = "reticle-geometry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Exact integer 2D geometry primitives and robust boolean operations for Reticle."
+keywords = ["geometry", "polygon", "boolean", "eda", "layout"]
+categories = ["graphics", "science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# Wave 1 wires `i_overlay` for robust boolean/offset operations (ADR 0003).
+
+[dev-dependencies]
+# Wave 1 wires `proptest` (oracle tests) and `criterion` (benches).

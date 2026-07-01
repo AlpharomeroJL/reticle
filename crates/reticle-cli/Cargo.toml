@@ -1,0 +1,21 @@
+[package]
+name = "reticle-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The Reticle headless pipeline: import, DRC, route, extract, export, and render-to-image."
+keywords = ["cli", "eda", "layout", "batch", "headless"]
+categories = ["command-line-utilities", "science"]
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "reticle"
+path = "src/main.rs"
+
+[dependencies]
+# Wave 3 wires `clap` and the io/drc/route/extract/render crates for the pipeline.
