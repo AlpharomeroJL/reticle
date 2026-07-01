@@ -1,0 +1,45 @@
+# git-cliff configuration. Generates CHANGELOG.md from conventional commits.
+# See docs/decisions and the `release` workflow (spec Section 15).
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to Reticle are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com), and the project uses
+[conventional commits](https://www.conventionalcommits.org).
+"""
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}\
+- {{ commit.message | split(pat="\n") | first | upper_first }}\
+{% endfor %}
+{% endfor %}\n
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+commit_parsers = [
+    { message = "^feat", group = "<!-- 0 -->Features" },
+    { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+    { message = "^perf", group = "<!-- 2 -->Performance" },
+    { message = "^refactor", group = "<!-- 3 -->Refactoring" },
+    { message = "^doc", group = "<!-- 4 -->Documentation" },
+    { message = "^test", group = "<!-- 5 -->Testing" },
+    { message = "^ci|^build", group = "<!-- 6 -->Build and tooling" },
+    { message = "^chore", group = "<!-- 7 -->Chores" },
+    { message = ".*", group = "<!-- 8 -->Other" },
+]
+protect_breaking_commits = false
+filter_commits = false
+tag_pattern = "v[0-9]*"
+sort_commits = "oldest"
