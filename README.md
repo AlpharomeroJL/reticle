@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/hero.png" alt="Reticle rendering a dense chip-like layout of over a million shapes" width="100%" />
+</p>
+
 # Reticle
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
@@ -13,6 +17,10 @@ interactive frame rates.
 On top of the geometry sit CAD-style pan, zoom, select, measure, and annotate
 tools, a design-rule checker, a router, connectivity extraction, GDSII and OASIS
 import and export, embedded scripting, and real-time multi-user collaboration.
+
+<p align="center">
+  <img src="assets/browse.gif" alt="Panning and zooming across a layout of millions of shapes" width="100%" />
+</p>
 
 > Status: under active development. The workspace builds green under the local
 > gate (`just ci`); subsystems are being filled in wave by wave against the
