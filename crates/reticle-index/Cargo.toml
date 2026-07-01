@@ -15,7 +15,15 @@ workspace = true
 
 [dependencies]
 reticle-geometry = { workspace = true }
+rkyv = "0.8.16"
+rstar = "0.13.0"
 # Wave 1 wires `rstar` (bulk-loaded R-tree) and `rkyv` (zero-copy streaming).
 
 [dev-dependencies]
+criterion = "0.8.2"
+proptest = "1.11.0"
 # Wave 1 wires `proptest` (vs the linear oracle here) and `criterion`.
+
+[[bench]]
+name = "index_build"
+harness = false
