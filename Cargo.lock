@@ -5969,6 +5969,7 @@ dependencies = [
  "reticle-io",
  "reticle-model",
  "reticle-render",
+ "serde_json",
 ]
 
 [[package]]

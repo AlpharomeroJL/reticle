@@ -2,11 +2,12 @@
   "host": "NVIDIA GeForce RTX 4060 Ti 16GB, Windows 11",
   "toolchain": "rustc 1.94.1 stable, release profile",
   "date": "2026-07-01",
-  "note": "Criterion medians (100 samples after warmup). xtask perf-check compares fresh runs against these and flags regressions beyond a threshold.",
+  "tolerance_pct": 25.0,
+  "note": "Each value is Criterion's typical estimate (the regression slope for linear-sampled benches, otherwise the mean) over 100 samples after warmup, matching Criterion's own `time:` line. `xtask perf-check` reads the fresh estimates under $CARGO_TARGET_DIR/criterion/<criterion>/new/estimates.json and fails if any benchmark exceeds its baseline by more than tolerance_pct. Run `cargo bench --workspace` first.",
   "benchmarks": {
-    "rtree_bulk_load_1m": { "median": 232.17, "unit": "ms" },
-    "rtree_nearest_point_query": { "median": 888.02, "unit": "ns" },
-    "boolean_self_union_256_squares": { "median": 277.36, "unit": "us" },
-    "boolean_self_union_1024_squares": { "median": 1493.2, "unit": "us" }
+    "rtree_bulk_load_1m":              { "value": 232.17, "unit": "ms", "criterion": "rtree_bulk_load_1m" },
+    "rtree_nearest_point_query":       { "value": 888.02, "unit": "ns", "criterion": "rtree_nearest_point_query" },
+    "boolean_self_union_256_squares":  { "value": 277.36, "unit": "us", "criterion": "boolean/self_union_256_squares" },
+    "boolean_self_union_1024_squares": { "value": 1493.2, "unit": "us", "criterion": "boolean/self_union_1024_squares" }
   }
 }
