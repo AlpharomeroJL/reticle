@@ -67,6 +67,22 @@ user's cursor and edits appear live.
   multi-viewport, layer manager, selection filters, measurement suite, autosave,
   and an undo-history panel. Native and in the browser.
 
+## Performance
+
+Measured on an RTX 4060 Ti; see [PERF.md](PERF.md) for the methodology and the full
+table.
+
+| Operation | Measured |
+|---|---:|
+| Bulk-load an R-tree over 1,000,000 shapes | 232 ms |
+| Nearest-shape query over 1,000,000 shapes | 888 ns |
+| Polygon union of 1,024 overlapping squares | 1.49 ms |
+
+The renderer draws the generated design of roughly 1.88 million leaf shapes
+offscreen at 2560x1440 (the hero image above). Hierarchy is never flattened for
+browsing, so cell culling and a compute-shader cull stage keep the on-screen cost
+proportional to what is visible rather than to the size of the design.
+
 ## Architecture
 
 Reticle is a Cargo workspace. The core geometry, indexing, and model crates are
