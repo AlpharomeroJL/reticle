@@ -17,10 +17,10 @@ body = """
 {% endif %}\
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | striptags | trim | upper_first }}
-{% for commit in commits %}\
-- {{ commit.message | split(pat="\n") | first | upper_first }}\
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | upper_first }}
+{%- endfor %}
 {% endfor %}
-{% endfor %}\n
 """
 trim = true
 
