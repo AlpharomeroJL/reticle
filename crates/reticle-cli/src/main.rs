@@ -12,8 +12,8 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use reticle_cli::{
-    CliError, Format, RenderOutcome, load_document, pick_top_cell, resolve_rules, run_drc,
-    run_export, run_extract, run_render, run_route, summarize, synth_route_request,
+    CliError, Format, RenderOutcome, flatten_top_cell, load_document, pick_top_cell, resolve_rules,
+    run_drc, run_export, run_extract, run_render, run_route, summarize, synth_route_request,
 };
 
 /// The Reticle headless layout pipeline.
@@ -141,6 +141,9 @@ fn cmd_import(file: &Path) -> Result<ExitCode, CliError> {
 fn cmd_drc(file: &Path, tech: Option<&Path>) -> Result<ExitCode, CliError> {
     let doc = load_document(file)?;
     let top = pick_top_cell(&doc)?;
+    // Check the whole design: flatten the hierarchy so an arrayed top cell is checked
+    // as its real geometry, not just its (often empty) own shapes.
+    let doc = flatten_top_cell(&doc, &top);
     let rules = resolve_rules(&doc, tech)?;
     let rule_count = rules.len();
     let violations = run_drc(&doc, &top, rules)?;
@@ -167,8 +170,11 @@ fn cmd_drc(file: &Path, tech: Option<&Path>) -> Result<ExitCode, CliError> {
 
 /// Handles `reticle route`: route synthesized nets into the top cell and report.
 fn cmd_route(file: &Path) -> Result<ExitCode, CliError> {
-    let mut doc = load_document(file)?;
+    let doc = load_document(file)?;
     let top = pick_top_cell(&doc)?;
+    // Route against the flattened design so synthesized nets have real geometry to
+    // navigate around, even when the top cell is a pure array of sub-cells.
+    let mut doc = flatten_top_cell(&doc, &top);
     let request = synth_route_request(&doc, &top);
     let net_count = request.nets.len();
     let report = run_route(&mut doc, &request);
@@ -184,6 +190,8 @@ fn cmd_route(file: &Path) -> Result<ExitCode, CliError> {
 fn cmd_extract(file: &Path) -> Result<ExitCode, CliError> {
     let doc = load_document(file)?;
     let top = pick_top_cell(&doc)?;
+    // Extract connectivity over the whole design, not just the top cell's own shapes.
+    let doc = flatten_top_cell(&doc, &top);
     let (net_count, sizes) = run_extract(&doc, &top)?;
     println!("cell: {top}");
     println!("nets: {net_count}");
