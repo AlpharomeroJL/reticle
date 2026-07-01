@@ -13,5 +13,7 @@ publish = false
 workspace = true
 
 [dependencies]
-# Wave 4 wires the model/io/render crates plus `clap`; media capture shells out to
-# the installed `gifski` CLI.
+reticle-geometry = { workspace = true }
+reticle-model = { workspace = true }
+reticle-io = { workspace = true }
+# Media capture shells out to the installed `gifski` CLI.

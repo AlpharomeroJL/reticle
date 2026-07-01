@@ -96,7 +96,7 @@ book-serve:
 # ---------------------------------------------------------------------------
 # Headless pipeline helpers (layout generation, DRC, routing, media)
 # ---------------------------------------------------------------------------
-gen-layout shapes="1000000" layers="8" depth="3" out="scratch/gen.rgds":
+gen-layout shapes="1000000" layers="8" depth="3" out="scratch/gen.gds":
     cargo run -p xtask --release -- gen-layout --shapes {{shapes}} --layers {{layers}} --depth {{depth}} --out {{out}}
 
 drc-run file:
