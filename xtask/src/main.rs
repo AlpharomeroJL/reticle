@@ -1,19 +1,22 @@
 //! Reticle build automation (`xtask`).
 //!
-//! Wave 4/5 implement the deterministic parameterized layout generator
-//! (`gen-layout`, by shape count, layer count, and hierarchy depth), the offscreen
-//! media-capture command (`capture-media`), and `perf-check` (compare against the
-//! committed benchmark history and fail on regression).
+//! Subcommands:
+//! - `gen-layout` — write a deterministic chip-like layout as GDSII (by shape
+//!   count, layer count, and hierarchy depth).
+//! - `capture-media` — regenerate the hero image and demo GIFs (Wave 5).
+//! - `perf-check` — compare benchmarks against the committed history (Wave 5).
 
+mod generator;
+
+use reticle_io::Gds;
+use reticle_model::Exporter;
+use std::path::Path;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let cmd = std::env::args().nth(1).unwrap_or_default();
-    match cmd.as_str() {
-        "gen-layout" => {
-            println!("xtask gen-layout (Wave 4 stub)");
-            ExitCode::SUCCESS
-        }
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map_or("", String::as_str) {
+        "gen-layout" => gen_layout(&args[1..]),
         "capture-media" => {
             println!("xtask capture-media (Wave 5 stub)");
             ExitCode::SUCCESS
@@ -31,4 +34,57 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Generates a deterministic hierarchical layout and writes it as GDSII (which,
+/// unlike the OASIS subset, preserves the array hierarchy compactly).
+fn gen_layout(args: &[String]) -> ExitCode {
+    let shapes = flag(args, "--shapes")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1_000_000);
+    let layers = flag(args, "--layers")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(8);
+    let depth = flag(args, "--depth")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(3);
+    let out = flag(args, "--out").unwrap_or_else(|| "scratch/gen.gds".to_owned());
+
+    let doc = generator::generate_layout(shapes, layers, depth);
+    let bytes = match Gds.export(&doc) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            eprintln!("GDSII export failed: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if let Some(parent) = Path::new(&out).parent()
+        && !parent.as_os_str().is_empty()
+        && let Err(err) = std::fs::create_dir_all(parent)
+    {
+        eprintln!("could not create {}: {err}", parent.display());
+        return ExitCode::FAILURE;
+    }
+    if let Err(err) = std::fs::write(&out, &bytes) {
+        eprintln!("write failed: {err}");
+        return ExitCode::FAILURE;
+    }
+
+    println!(
+        "wrote {out}: {} cells, {} bytes on disk, ~{} flattened leaf shapes, top {:?}",
+        doc.cell_count(),
+        bytes.len(),
+        generator::approximate_shape_count(shapes, depth),
+        doc.top_cells(),
+    );
+    ExitCode::SUCCESS
+}
+
+/// Returns the value following `name` in `args`, if present.
+fn flag(args: &[String], name: &str) -> Option<String> {
+    args.iter()
+        .position(|arg| arg.as_str() == name)
+        .and_then(|i| args.get(i + 1))
+        .cloned()
 }
