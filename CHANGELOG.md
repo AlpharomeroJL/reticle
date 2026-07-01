@@ -3,7 +3,7 @@
 All notable changes to Reticle are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com), and the project uses
 [conventional commits](https://www.conventionalcommits.org).
-## [Unreleased]
+## [3.0.0] - 2026-07-01
 
 ### Features
 
@@ -22,10 +22,16 @@ All notable changes to Reticle are documented here. The format follows
 - Rhai scripting API over the model
 - Headless import, DRC, route, extract, export, render pipeline
 - Trunk harness with WebGPU capability check and WebGL2 fallback
+- Interactive egui editor, native and WASM
+- Offscreen media capture for the hero image and browse GIF
+- Mount the egui app in the browser via eframe
 
 ### Documentation
 
 - Add the mdbook book, changelog config, and gate exclusions
+- Hero media in the README, requirements table, and changelog
+- Record measured performance results
+- Document targets, corpora, and the Windows sanitizer caveat
 
 ### Chores
 
