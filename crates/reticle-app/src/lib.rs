@@ -1,43 +1,41 @@
 //! The interactive Reticle application.
 //!
-//! Wave 4 builds the full editing suite on `egui`: the tool state machine, command
-//! palette, rebindable keybinds, a config file, multi-viewport split, a layer
-//! manager with search, selection filters and a query bar, rulers, grid, snap,
-//! guides, a measurement suite, session save/restore, autosave and crash recovery,
-//! and an undo-history panel. It runs both native and in the browser (WASM).
+//! This crate is the `egui`/`eframe` editor for large hierarchical 2D IC-layout
+//! scenes. It runs both natively (via [`eframe::run_native`] in the binary) and in
+//! the browser (WASM), where the separate `web` crate mounts [`App`].
 //!
-//! The Wave 0 contract is [`App`], which already wires the render + model + sync
-//! subsystems together so the integration surface compiles.
+//! # Architecture
+//!
+//! The app is split into small, window-free logic modules plus a thin egui glue
+//! layer, so the interesting behavior is unit-tested without a GPU or a window:
+//!
+//! * [`camera`] — the world<->screen pan/zoom transform (zoom-to-cursor, fit).
+//! * [`culling`] — viewport culling over a spatial index, plus level-of-detail.
+//! * [`tool`] — the Select/Pan/Measure tool state machine.
+//! * [`measure`] — distance measurement in DBU and microns.
+//! * [`layers`] — the layer table, visibility, and name filter.
+//! * [`selection`] — the shape-selection model and layer query.
+//! * [`grid`] — grid spacing, snapping, and ruler ticks.
+//! * [`history`] — the [`reticle_model::EditableDocument`] undo/redo wrapper.
+//! * [`command`] — the command-palette catalog and fuzzy filter.
+//! * [`session`] — view/UI session save/restore (native file IO).
+//! * [`demo`] — the built-in hierarchical demo document.
+//! * [`app`] — the [`eframe::App`] implementation that draws it all.
+//!
+//! The public [`App`] type is the frozen Wave 0 contract; it is now a real
+//! `eframe::App` built on the modules above.
 
-use reticle_render::WgpuRenderer;
-use reticle_sync::SyncDocument;
+pub mod app;
+pub mod camera;
+pub mod command;
+pub mod culling;
+pub mod demo;
+pub mod grid;
+pub mod history;
+pub mod layers;
+pub mod measure;
+pub mod selection;
+pub mod session;
+pub mod tool;
 
-/// The top-level application state: the collaborative document and the renderer.
-#[derive(Debug, Default)]
-pub struct App {
-    renderer: WgpuRenderer,
-    document: SyncDocument,
-}
-
-impl App {
-    /// Creates a new application with an empty document.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            renderer: WgpuRenderer::new(),
-            document: SyncDocument::new("local"),
-        }
-    }
-
-    /// The renderer.
-    #[must_use]
-    pub fn renderer(&self) -> &WgpuRenderer {
-        &self.renderer
-    }
-
-    /// The collaborative document.
-    #[must_use]
-    pub fn document(&self) -> &SyncDocument {
-        &self.document
-    }
-}
+pub use app::App;
