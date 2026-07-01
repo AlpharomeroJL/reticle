@@ -17,4 +17,13 @@ workspace = true
 reticle-geometry = { workspace = true }
 reticle-model = { workspace = true }
 reticle-index = { workspace = true }
-# Wave 2 wires `wgpu`, `lyon`, `glyphon`, `glam`, `bytemuck`.
+wgpu = "29.0.3"
+lyon = "1.0.19"
+pollster = "0.4.0"
+glam = { version = "0.33.2", features = ["bytemuck"] }
+bytemuck = { version = "1.25.0", features = ["derive"] }
+
+# `image` is PNG-only: golden tests need no other codecs, and this avoids the
+# heavy AVIF encoder chain (rav1e) and its unmaintained transitive `paste`.
+[dev-dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png"] }
