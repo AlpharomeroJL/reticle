@@ -1,8 +1,8 @@
 //! Transactional edit operations and the undo/redo history.
 //!
-//! The [`Edit`] enum is the frozen vocabulary of document mutations. The Wave 2
-//! `reticle-model` lane implements the transactional application and inverse
-//! computation that drive [`History`]; the types here are the contract.
+//! The [`Edit`] enum is the frozen vocabulary of document mutations. Their
+//! transactional application and inverse computation live in
+//! [`EditableDocument`](crate::EditableDocument); the enum here is the contract.
 
 use crate::{ArrayInstance, Cell, DrawShape, Instance};
 
@@ -50,38 +50,4 @@ pub enum Edit {
     },
 }
 
-/// An undo/redo history of applied edits.
-///
-/// Wave 2 fills in the transactional application and inverse-edit computation;
-/// this holds the frozen shape of the stacks.
-#[derive(Debug, Default)]
-pub struct History {
-    undo: Vec<Edit>,
-    redo: Vec<Edit>,
-}
-
-impl History {
-    /// Creates an empty history.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Number of edits that can be undone.
-    #[must_use]
-    pub fn undo_depth(&self) -> usize {
-        self.undo.len()
-    }
-
-    /// Number of edits that can be redone.
-    #[must_use]
-    pub fn redo_depth(&self) -> usize {
-        self.redo.len()
-    }
-
-    /// Records an applied edit, clearing the redo stack.
-    pub fn record(&mut self, edit: Edit) {
-        self.undo.push(edit);
-        self.redo.clear();
-    }
-}
+// The transactional application of these edits lives in `editable::EditableDocument`.

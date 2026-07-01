@@ -18,4 +18,5 @@ reticle-geometry = { workspace = true }
 # Wave 2 adds the transactional history internals; the contract surface is std-only.
 
 [dev-dependencies]
+proptest = "1.11.0"
 # Wave 2 wires `proptest` for edit/undo invariants.
