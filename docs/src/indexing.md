@@ -24,7 +24,7 @@ the oracle the fast indices are property-tested against.
 ## Zero-copy archive (the building block for out-of-core)
 
 An index payload serializes to a zero-copy `rkyv` archive laid out exactly as its
-in-memory form, so a caller can read shape rectangles — and index a single entry —
+in-memory form, so a caller can read shape rectangles, and index a single entry -
 straight from the bytes with no parsing or allocation, validated by `rkyv`'s
 `bytecheck`. This is the primitive a memory-mapped, larger-than-RAM layout would sit
 on. The disk/mmap paging layer and its renderer integration are **not yet wired up**

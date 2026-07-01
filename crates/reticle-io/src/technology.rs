@@ -88,8 +88,8 @@ pub fn parse_technology(source: &str) -> Result<Technology> {
 ///
 /// A `#` starts a comment when it begins the (trimmed) line, or when it is
 /// preceded by whitespace **and** followed by whitespace or the line end. This
-/// lets `#` double as the optional prefix of an `#RRGGBBAA` color token — there a
-/// `#` is glued to hex digits, so it is not treated as a comment — while a
+/// lets `#` double as the optional prefix of an `#RRGGBBAA` color token, there a
+/// `#` is glued to hex digits, so it is not treated as a comment, while a
 /// free-standing `# ...` still comments the rest of the line.
 fn strip_comment(line: &str) -> &str {
     let bytes = line.as_bytes();

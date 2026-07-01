@@ -1,22 +1,22 @@
-# Reticle — honest status report
+# Reticle, honest status report
 
 This document is the result of a deliberate, skeptical audit of the whole workspace:
 what is genuinely implemented and tested, what is partial, and what is claimed but
-not yet built. It is written to be checked, not believed — every claim below has a
+not yet built. It is written to be checked, not believed, every claim below has a
 command you can run yourself (see [How to verify each claim](#how-to-verify-each-claim-yourself)).
 
 - **Date of audit:** 2026-07-01
 - **Machine:** NVIDIA GeForce RTX 4060 Ti 16 GB, Windows 11, Rust 1.94.1 stable
-- **Gate:** `just ci` — fmt, clippy (`-D warnings`, pedantic), nextest, doctests, doc
+- **Gate:** `just ci`, fmt, clippy (`-D warnings`, pedantic), nextest, doctests, doc
   build (`-D warnings`), wasm build, `cargo-deny`, `typos`. Green.
 - **Tests:** 291 `#[test]`/`#[tokio::test]` functions across 45 files, plus proptest
   cases; nextest reports **291 passed, 1 skipped** (the one skip is a corpus-
-  regeneration utility, not a hidden failure — see below).
+  regeneration utility, not a hidden failure, see below).
 
 ## Headline
 
 Reticle is **real**. Every subsystem's core algorithm genuinely computes from its
-inputs — verified by reading the code and, where it matters most (geometry booleans,
+inputs, verified by reading the code and, where it matters most (geometry booleans,
 spatial index, DRC, routing, extraction, CRDT convergence), by independent
 reference-oracle property tests that a faked implementation could not pass. There are
 **no** `todo!`/`unimplemented!`/`unreachable!` bodies, **no** feature-gated stubs,
@@ -25,16 +25,16 @@ reference-oracle property tests that a faked implementation could not pass. Ther
 Three things are **claimed more broadly than they are built**, and were corrected in
 the docs during this pass (details in [Known limitations](#known-limitations)):
 
-1. **Out-of-core streaming** — a real zero-copy archived-index primitive exists, but
+1. **Out-of-core streaming**, a real zero-copy archived-index primitive exists, but
    it is not wired to a file/mmap, so "browse a bigger-than-RAM layout from disk" is
    not a shipped capability. Documented, with [ADR 0013](decisions/0013-out-of-core-streaming-scope.md).
-2. **Per-cell bbox caching** — bounding boxes are computed correctly but **not**
+2. **Per-cell bbox caching**, bounding boxes are computed correctly but **not**
    memoized; the README's "caching" wording was corrected to "computed".
-3. **GPU-driven culling** — the compute shader genuinely runs on the GPU and computes
+3. **GPU-driven culling**, the compute shader genuinely runs on the GPU and computes
    per-cell visibility, but it produces a visibility-flag buffer, not yet a compacted
    indirect-draw list. Honestly scoped in the crate docs; called out here.
 
-## Section 16 (definition of done) — item by item
+## Section 16 (definition of done), item by item
 
 | # | Item | Status | Evidence |
 |---|------|--------|----------|
@@ -47,8 +47,8 @@ the docs during this pass (details in [Known limitations](#known-limitations)):
 | 3e | IO functions w/ tests | **DONE (subset)** | GDSII via `gds21`; in-house OASIS subset read+write round-trips (`oasis_roundtrip.rs`). OASIS covers rect+polygon; paths/instances/arrays return `Unsupported` (honest error, not silent drop) |
 | 3f | Scripting functions w/ tests | **DONE** | `reticle-script` rhai API (`scripting.rs`, `plugins.rs`) |
 | 3g | Collaboration functions w/ tests | **DONE** | `reticle-sync` yrs CRDT; `convergence.rs` asserts order-independent identical state across independently-mutated docs |
-| 4 | Performance measured + recorded | **PARTIAL** | 3 targets measured on this machine (index build 227 ms, nearest query 926 ns, union 271 µs — see PERF.md). Render fps / WASM load / collab echo **not measured** (reasons in PERF.md) |
-| 5 | Property/golden/CRDT tests pass; fuzz targets exist | **PARTIAL** | Property, golden-image (`render/tests/golden.rs`), and CRDT convergence tests all pass. Fuzz **targets exist** but the libFuzzer engine does not link on Windows/MSVC (no compiler-rt) — documented in `fuzz/README.md` |
+| 4 | Performance measured + recorded | **PARTIAL** | 3 targets measured on this machine (index build 227 ms, nearest query 926 ns, union 271 µs, see PERF.md). Render fps / WASM load / collab echo **not measured** (reasons in PERF.md) |
+| 5 | Property/golden/CRDT tests pass; fuzz targets exist | **PARTIAL** | Property, golden-image (`render/tests/golden.rs`), and CRDT convergence tests all pass. Fuzz **targets exist** but the libFuzzer engine does not link on Windows/MSVC (no compiler-rt), documented in `fuzz/README.md` |
 | 6 | Book + rustdoc build + deployed | **DONE** | `mdbook build docs` exits 0 (16 chapters, no placeholders); `RUSTDOCFLAGS=-D warnings cargo doc` green; book returns HTTP 200 |
 | 7 | Hero + browse GIF in README | **DONE**; DRC/route/collab GIFs **MISSING** | `assets/hero.png` (2560×1440, non-blank) and `assets/browse.gif` (48 real frames) generated by `xtask capture-media`. The 3 overlay GIFs are a documented follow-up (need DRC/net/cursor overlay render passes) |
 | 8 | Tagged v3.0.0 release w/ binaries + notes | **DONE** | `gh release view v3.0.0`: not draft, 3 uploaded `.exe` assets with sha256, real notes |
@@ -59,34 +59,34 @@ the docs during this pass (details in [Known limitations](#known-limitations)):
 
 | Crate | Status | What's real | Caveats |
 |-------|--------|-------------|---------|
-| `reticle-geometry` | **DONE** | Exact-integer primitives; `i_overlay` booleans/offset; winding; convex decomposition (ear-clipping). Booleans checked vs an independent winding-number oracle | — |
-| `reticle-proto` | **DONE** | prost types, schema version + migration hook; round-trip tests | — |
+| `reticle-geometry` | **DONE** | Exact-integer primitives; `i_overlay` booleans/offset; winding; convex decomposition (ear-clipping). Booleans checked vs an independent winding-number oracle | None |
+| `reticle-proto` | **DONE** | prost types, schema version + migration hook; round-trip tests | None |
 | `reticle-index` | **DONE** (queries); **PARTIAL** (streaming) | R-tree (`rstar` STR bulk-load), uniform grid, tile/LOD pyramid; point/rect/nearest/k-NN vs `LinearIndex` oracle | `streaming.rs` is a zero-copy **in-memory** primitive; not wired to disk/mmap. See ADR 0013 |
 | `reticle-io` | **DONE** (subset) | GDSII read/write (`gds21`); OASIS subset read/write; tech-file parser; robustness proptests | OASIS: rect+polygon only; paths/instances/arrays error as `Unsupported` |
-| `reticle-model` | **DONE** | Cells/instances/arrays, nested transforms, transactional undo/redo, `flatten` | No per-cell bbox **cache** — `cell_bbox` recomputes (correct, uncached) |
+| `reticle-model` | **DONE** | Cells/instances/arrays, nested transforms, transactional undo/redo, `flatten` | No per-cell bbox **cache**, `cell_bbox` recomputes (correct, uncached) |
 | `reticle-render` | **DONE** | Offscreen render (golden test asserts exact pixels); instanced pipelines; GPU compute cull shader | Cull writes a visibility-flag buffer, not yet a compacted indirect-draw list; surface-present path is a frame tick (offscreen is the real path) |
-| `reticle-drc` | **DONE** | 8 rule kinds, spatial-index accelerated, incremental `check_region`; oracle property test | Operates on bounding boxes (exact for rects; conservative for polygons/paths — documented) |
+| `reticle-drc` | **DONE** | 8 rule kinds, spatial-index accelerated, incremental `check_region`; oracle property test | Operates on bounding boxes (exact for rects; conservative for polygons/paths, documented) |
 | `reticle-route` | **DONE** | Grid + maze A* (`pathfinding`), rip-up/reroute, cross-layer vias; oracle test | Synthetic CLI demo nets can be long on very large flattened designs |
 | `reticle-extract` | **DONE** | Union-find connectivity over touching geometry + via bridging; netlist compare (opens/shorts); oracle test | Path shapes use bbox adjacency (conservative; rect/rect exact) |
-| `reticle-sync` | **DONE** | yrs CRDT mirror, encode/decode, presence + comments, offline reconcile; order-independent convergence tests | — |
-| `reticle-server` | **DONE** | axum + tokio relay, rooms, broadcast; relay tests | — |
-| `reticle-script` | **DONE** | rhai API (create/query/transform/DRC/export), plugin folder, examples | — |
+| `reticle-sync` | **DONE** | yrs CRDT mirror, encode/decode, presence + comments, offline reconcile; order-independent convergence tests | None |
+| `reticle-server` | **DONE** | axum + tokio relay, rooms, broadcast; relay tests | None |
+| `reticle-script` | **DONE** | rhai API (create/query/transform/DRC/export), plugin folder, examples | None |
 | `reticle-app` | **DONE** | egui editor: tools, palette, layers, measure, selection, session, undo panel; ~80 tests; native + wasm | Live 60-fps interaction is not captured by an automated fps benchmark |
-| `reticle-cli` | **DONE** | Headless import/DRC/route/extract/export/render; now **flattens** the top cell so hierarchical designs are checked as real geometry; 14 tests | — |
-| `web` | **DONE** | Trunk harness, WebGPU + WebGL2 fallback; compiles to `wasm32` in the gate | — |
+| `reticle-cli` | **DONE** | Headless import/DRC/route/extract/export/render; now **flattens** the top cell so hierarchical designs are checked as real geometry; 14 tests | None |
+| `web` | **DONE** | Trunk harness, WebGPU + WebGL2 fallback; compiles to `wasm32` in the gate | None |
 | `xtask` | **DONE** | Deterministic layout generator; offscreen media capture; **real** `perf-check` (parses Criterion vs the committed baseline, fails on regression) | `perf-check` was a stub before this pass; now implemented |
-| `benches` (workspace crate) | **PARTIAL** | The actual Criterion benches live **in-crate** (`reticle-index/benches`, `reticle-geometry/benches`) and run under `cargo bench --workspace`; a committed baseline lives in `benches/history/` | The `benches` crate's own `lib.rs` doc says it hosts the `[[bench]]` targets — it does not; that comment is inaccurate |
+| `benches` (workspace crate) | **PARTIAL** | The actual Criterion benches live **in-crate** (`reticle-index/benches`, `reticle-geometry/benches`) and run under `cargo bench --workspace`; a committed baseline lives in `benches/history/` | The `benches` crate's own `lib.rs` doc says it hosts the `[[bench]]` targets, it does not; that comment is inaccurate |
 
-## Step 1 inventory — what the greps found
+## Step 1 inventory, what the greps found
 
 Run over the whole workspace:
 
 - `todo!(` / `unimplemented!(` / `unreachable!(` : **zero** occurrences.
 - `panic!(` outside `#[cfg(test)]` : only defensive `# Panics` bounds-checks in
-  `reticle-index` (`grid.rs`, `lod.rs`) and `union_find.rs` — documented invariants,
+  `reticle-index` (`grid.rs`, `lod.rs`) and `union_find.rs`, documented invariants,
   not stubs.
 - `#[ignore]` : **one**, `reticle-io/tests/gds_corpus.rs:38`
-  `regenerate_corpus` — an explicit `#[ignore = "run explicitly to regenerate
+  `regenerate_corpus`, an explicit `#[ignore = "run explicitly to regenerate
   tests/corpus/basic.gds"]` fixture-regeneration utility. Not a hidden failure.
 - `#[cfg(feature …)]` gate : **zero** feature-gated code paths in the crates.
 - `unsafe` : **zero** in the entire workspace (so `miri` has no unsafe to check).
@@ -95,10 +95,10 @@ Run over the whole workspace:
 - "stub"/"for now"/"in a real"/"placeholder" comments : all are either legitimate
   domain terms (routing "via stub" = a physical via-stub `Path`) or honest
   scope disclosures (render cull "compaction is left as a follow-up"). The one true
-  code stub found — `xtask perf-check` ("Wave 5 stub") — was **implemented** during
+  code stub found, `xtask perf-check` ("Wave 5 stub"), was **implemented** during
   this pass.
 
-### "Functions returning a hardcoded value while pretending to compute" — searched hard, found none
+### "Functions returning a hardcoded value while pretending to compute", searched hard, found none
 
 The DRC, router, and extractor were audited specifically for this. All three genuinely
 compute, and each is pinned by an **independent reference oracle**:
@@ -148,7 +148,7 @@ These are the honest gaps. None is hidden behind a passing test.
    *offscreen* rendering (instanced rectangles, `lyon`-tessellated polygons/paths,
    per-layer styling, GPU compute culling). Window/surface presentation is a frame-tick
    stub, and **glyph-atlas text labels, a minimap, DRC/net overlays, anti-aliased
-   (MSAA) edges, and a 3D layer-stack cross-section are not implemented** — `glyphon`
+   (MSAA) edges, and a 3D layer-stack cross-section are not implemented**, `glyphon`
    is not even a dependency and there is no multisample state. The README feature list
    originally presented these as shipped; it was corrected during this pass to claim
    only what exists and to list the rest as follow-ups. The render crate's own module
@@ -216,7 +216,7 @@ git log --format='%B' | Select-String -Pattern 'Co-Authored-By|Claude|Anthropic'
   (`render/shaders/cull.wgsl`) is the first stage of a GPU-driven draw list.
 - **Spatial acceleration everywhere.** One `rstar` R-tree underpins index queries, DRC
   candidate pruning (`drc` expands each shape's bbox by the rule threshold), and
-  extraction adjacency — turning O(n²) sweeps into ~O(n log n).
+  extraction adjacency, turning O(n²) sweeps into ~O(n log n).
 - **Incremental DRC.** `DrcEngine::check_region` re-checks only geometry touching an
   edited rectangle, bounded by one index query (`drc/src/lib.rs:104`).
 - **Negotiated-congestion routing.** `MazeRouter` rips up conflicting nets and reorders

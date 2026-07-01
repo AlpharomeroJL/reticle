@@ -15,7 +15,7 @@
 //!
 //! Structural mutations (cells, shapes, instances, arrays) are expressed as
 //! [`Edit`]s and applied through [`EditableDocument`] so undo history stays
-//! consistent. Two document properties — the top-cell list and the technology —
+//! consistent. Two document properties, the top-cell list and the technology -
 //! have no [`Edit`] variant and `EditableDocument` exposes its document only
 //! immutably, so a script sets them into dedicated host fields. The engine folds
 //! them back into the [`Document`] it snapshots after evaluation (see

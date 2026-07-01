@@ -1,4 +1,4 @@
-# 0011 — Incremental per-wave dependency resolution
+# 0011, Incremental per-wave dependency resolution
 
 ## Context
 

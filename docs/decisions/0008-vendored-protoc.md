@@ -1,11 +1,11 @@
-# 0008 — `protoc-bin-vendored`, no system protoc
+# 0008, `protoc-bin-vendored`, no system protoc
 
 ## Context
 
 `reticle-proto` generates Rust types from a `.proto` schema with `prost-build`,
 which needs the `protoc` compiler at build time. Requiring a system `protoc`
 install makes the build environment-dependent and can stall an unattended run on a
-machine without it (as here — `protoc` is not installed).
+machine without it (as here, `protoc` is not installed).
 
 ## Decision
 

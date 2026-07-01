@@ -3,7 +3,7 @@
 //!
 //! Because equal-distance ties are broken differently by each index, nearest and
 //! k-nearest are compared by the *distances* they return, and rectangle queries
-//! by the *set* of matched items — never by object identity.
+//! by the *set* of matched items, never by object identity.
 
 use std::collections::BTreeSet;
 
@@ -13,8 +13,8 @@ use reticle_index::{LinearIndex, RTreeIndex, UniformGrid};
 
 /// Coordinate bound for generated shapes. Moderate so that random small queries
 /// meaningfully overlap the generated shapes (making the comparisons exercise
-/// non-empty results). Wide-coordinate correctness — where an `i32`-scalar tree
-/// would overflow — is covered separately by [`wide_coordinates_do_not_overflow`].
+/// non-empty results). Wide-coordinate correctness, where an `i32`-scalar tree
+/// would overflow, is covered separately by [`wide_coordinates_do_not_overflow`].
 const BOUND: i32 = 2_000;
 
 /// Squared distance from a point to the closed rectangle, in DBU² (the oracle's

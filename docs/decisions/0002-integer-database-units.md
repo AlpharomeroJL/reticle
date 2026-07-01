@@ -1,4 +1,4 @@
-# 0002 — Integer database units; `Dbu = i32`, widened math
+# 0002, Integer database units; `Dbu = i32`, widened math
 
 ## Context
 

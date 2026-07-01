@@ -19,3 +19,4 @@ superseded decision is marked and linked to its replacement.
 | [0011](0011-incremental-dependency-resolution.md) | Incremental per-wave dependency resolution |
 | [0012](0012-rust-edition-2024.md) | Rust edition 2024 |
 | [0013](0013-out-of-core-streaming-scope.md) | Out-of-core streaming: zero-copy primitive now, mmap paging deferred |
+| [0014](0014-no-em-dash-voice-rule.md) | Voice rule: no em-dashes, enforced by check-style |

@@ -1,4 +1,4 @@
-# 0010 — `puffin` + `criterion` for profiling and benchmarks
+# 0010, `puffin` + `criterion` for profiling and benchmarks
 
 ## Context
 

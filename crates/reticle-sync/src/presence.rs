@@ -6,7 +6,7 @@ use reticle_proto::v1;
 use std::collections::HashMap;
 
 /// A single collaborator's live presence: cursor position, current selection, and
-/// visible viewport. This is deliberately *not* stored in the CRDT — it is
+/// visible viewport. This is deliberately *not* stored in the CRDT, it is
 /// transient session state exchanged out of band (ADR 0007).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Presence {

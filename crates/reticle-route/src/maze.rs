@@ -8,7 +8,7 @@
 //!
 //! Costs are integer DBU: an in-plane step costs one `pitch`, a via costs
 //! [`MazeSearch::via_cost`]. The heuristic is the Manhattan distance to the goal
-//! scaled by the pitch — admissible because every unit of Manhattan distance needs
+//! scaled by the pitch, admissible because every unit of Manhattan distance needs
 //! at least one in-plane step, and vias only add cost the heuristic never claims.
 
 use crate::grid::{GridNode, RoutingGrid};

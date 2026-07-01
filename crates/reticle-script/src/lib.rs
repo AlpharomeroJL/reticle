@@ -1,7 +1,7 @@
 //! Embedded scripting for Reticle.
 //!
-//! Wave 3 exposes the model to an embedded [`rhai`] engine — create, query,
-//! transform, run DRC, and export — plus a plugin folder convention and worked
+//! Wave 3 exposes the model to an embedded [`rhai`] engine, create, query,
+//! transform, run DRC, and export, plus a plugin folder convention and worked
 //! example scripts.
 //!
 //! # Quick start
@@ -54,7 +54,7 @@
 //! a `rhai` evaluation failure, a rejected model edit, and a plugin-directory I/O
 //! error, each with a message. This is a deliberate, contract-sanctioned refinement
 //! of the Wave 0 placeholder signature (which returned `reticle_model::Result<()>`):
-//! a script failure carries `rhai`'s diagnostic — including source position — which
+//! a script failure carries `rhai`'s diagnostic, including source position, which
 //! the model's error enum cannot represent, so the richer [`ScriptError`] is
 //! returned instead.
 

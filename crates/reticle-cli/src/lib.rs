@@ -328,7 +328,7 @@ pub fn default_rules(doc: &Document) -> Vec<Rule> {
 /// Flattens the hierarchy under `top` into a single-cell [`Document`] for checking.
 ///
 /// The returned document has exactly one cell, named `top`, whose shapes are the
-/// fully expanded geometry of `top` in `doc` — every instance and array resolved with
+/// fully expanded geometry of `top` in `doc`, every instance and array resolved with
 /// its composed transform (see [`Document::flatten`]). The `drc`, `route`, and
 /// `extract` stages run against this so a hierarchical design is checked as the flat
 /// geometry it actually represents; a top cell that is a pure array of sub-cells (as

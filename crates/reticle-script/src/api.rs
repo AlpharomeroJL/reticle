@@ -4,15 +4,15 @@
 //! over a clone of the [`SharedHost`]. The functions fall into five groups that
 //! mirror the modelling workflow:
 //!
-//! * **Create / edit** — `create_cell`, `add_rect`, `add_polygon`, `add_path`,
+//! * **Create / edit**, `create_cell`, `add_rect`, `add_polygon`, `add_path`,
 //!   `add_instance`, `add_array`, `set_top_cells`.
-//! * **Query** — `cell_count`, `has_cell`, `shape_count`, `instance_count`,
+//! * **Query**, `cell_count`, `has_cell`, `shape_count`, `instance_count`,
 //!   `array_count`, `cell_bbox`, `shapes_bbox`, `flatten_count`.
-//! * **Transform** — `flatten_into` (materialize a hierarchy into a flat cell).
-//! * **DRC** — `load_technology`, `add_width_rule`, `add_spacing_rule`,
+//! * **Transform**, `flatten_into` (materialize a hierarchy into a flat cell).
+//! * **DRC**, `load_technology`, `add_width_rule`, `add_spacing_rule`,
 //!   `add_area_rule`, `add_enclosure_rule`, `rule_count`, `run_drc`,
 //!   `drc_messages`.
-//! * **Export** — `export_gds`, `export_oasis` (both return a `rhai` blob).
+//! * **Export**, `export_gds`, `export_oasis` (both return a `rhai` blob).
 //!
 //! # Value conventions
 //!

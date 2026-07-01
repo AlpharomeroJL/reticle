@@ -1,4 +1,4 @@
-# 0004 — `gds21` for GDSII; in-house OASIS subset
+# 0004, `gds21` for GDSII; in-house OASIS subset
 
 ## Context
 
@@ -30,7 +30,7 @@ subsystem where hand-rolling is unavoidable because no suitable crate exists.
 
 As actually implemented, the in-house OASIS subset round-trips **rectangles and
 polygons on layer/datatype**. Paths, placements (instances), and arrays are **not**
-encoded — `Oasis::export` returns `ModelError::Unsupported` for them rather than
+encoded, `Oasis::export` returns `ModelError::Unsupported` for them rather than
 dropping data silently, and `Oasis::import` is the exact inverse. The record set
 listed under Decision above (PLACEMENT, PATH, repetition, full modal-state) is the
 aspirational target, not the current coverage. GDSII (via `gds21`) preserves the full

@@ -3,7 +3,7 @@
 //! Each test builds a small [`Document`] in process, exports it to a temporary
 //! GDSII file, then drives the public pipeline functions on the reloaded document:
 //! import summary, DRC (with a rule that flags a thin shape), routing, extraction,
-//! export round-trips, and — guarded on a GPU being present — an offscreen render.
+//! export round-trips, and, guarded on a GPU being present, an offscreen render.
 //! Temporary files live under [`std::env::temp_dir`] and are removed on the way
 //! out.
 

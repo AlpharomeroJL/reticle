@@ -15,8 +15,8 @@ than papered over. See `docs/src/performance.md` for the methodology and
 
 ## Measured
 
-Each figure is Criterion's typical estimate — the regression slope for linear-sampled
-benches, otherwise the mean — over 100 samples after warmup (`cargo bench --workspace`).
+Each figure is Criterion's typical estimate, the regression slope for linear-sampled
+benches, otherwise the mean, over 100 samples after warmup (`cargo bench --workspace`).
 The **committed** column is the source-controlled baseline in
 `benches/history/baseline.json`; the **re-run** column is a fresh run on 2026-07-01 that
 `xtask perf-check` confirmed is within the 25% regression tolerance (PASS on all four).
@@ -41,7 +41,7 @@ not yet instrumented and say so, with the reason.
 | Bulk index build of 1M shapes under 500 ms | **Met (measured):** 227 ms. |
 | Point / rubber-band picking over 1M shapes under 1 ms | **Met (measured):** 926 ns for a nearest-point query. |
 | Polygon booleans fast enough for interactive DRC merges | **Measured:** 272 µs / 1.45 ms for 256 / 1024-square self-unions. |
-| 1M flat shapes at a sustained 60 fps | **Not measured (no fps harness).** The offscreen renderer draws the generated ~1.88M-leaf-shape design at 2560×1440 (`assets/hero.png`, confirmed non-blank); a per-frame fps benchmark on the surface-present path is a follow-up (surface presentation is not yet wired — see `docs/STATUS.md`). |
+| 1M flat shapes at a sustained 60 fps | **Not measured (no fps harness).** The offscreen renderer draws the generated ~1.88M-leaf-shape design at 2560×1440 (`assets/hero.png`, confirmed non-blank); a per-frame fps benchmark on the surface-present path is a follow-up (surface presentation is not yet wired, see `docs/STATUS.md`). |
 | 10M flat shapes interactive at 30 fps or better | **Not measured.** Rests on GPU-driven culling (implemented; compute shader validated against a CPU oracle) and an LOD pyramid; a 10M formal benchmark is a follow-up. |
 | Billions of leaf shapes via cell culling and LOD | **Architecturally supported, not fps-benchmarked.** Hierarchy is never flattened for browsing; cell culling and a compute-shader cull stage are implemented and tested. |
 | Incremental DRC on a local edit under 100 ms | **Not measured (no latency benchmark).** `reticle-drc::check_region` re-checks only geometry touching the edit, bounded by one index query, and is correctness-tested against a full-cell pass; a formal incremental-edit latency benchmark is a follow-up. |

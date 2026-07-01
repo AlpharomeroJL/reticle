@@ -1,4 +1,4 @@
-//! Grid spacing, snapping, and ruler tick selection — all pure DBU arithmetic.
+//! Grid spacing, snapping, and ruler tick selection, all pure DBU arithmetic.
 //!
 //! The canvas draws a background grid, rulers along the top and left edges, and
 //! optionally snaps the cursor to grid intersections. Choosing a readable grid step

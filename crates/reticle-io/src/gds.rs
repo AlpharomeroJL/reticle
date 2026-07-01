@@ -7,9 +7,9 @@
 //! |----------------------|--------------------------------------------------|
 //! | [`GdsLibrary`]       | [`Document`] (one library per document)          |
 //! | [`GdsStruct`]        | [`Cell`] (keyed by struct name)                  |
-//! | [`GdsBoundary`]      | [`DrawShape`] — [`ShapeKind::Rect`] when the ring |
+//! | [`GdsBoundary`]      | [`DrawShape`], [`ShapeKind::Rect`] when the ring |
 //! |                      | is an axis-aligned box, else [`ShapeKind::Polygon`] |
-//! | [`GdsPath`]          | [`DrawShape`] — [`ShapeKind::Path`]              |
+//! | [`GdsPath`]          | [`DrawShape`], [`ShapeKind::Path`]              |
 //! | [`GdsStructRef`]     | [`Instance`]                                     |
 //! | [`GdsArrayRef`]      | [`ArrayInstance`]                               |
 //! | `layer` / `datatype` | [`LayerId`]                                     |
@@ -287,7 +287,7 @@ fn strans_to_transform(strans: Option<&GdsStrans>, translation: Point) -> Transf
 /// Maps a GDSII reflect flag + rotation angle to the nearest [`Orientation`].
 ///
 /// GDSII applies reflection about the x-axis first, then a counter-clockwise
-/// rotation — exactly Reticle's [`Orientation`] convention. Angles are snapped to
+/// rotation, exactly Reticle's [`Orientation`] convention. Angles are snapped to
 /// the nearest 90°; non-Manhattan placement angles are not represented by the
 /// eight-element orientation group and collapse to the closest quadrant.
 fn orientation_from_strans(s: &GdsStrans) -> Orientation {

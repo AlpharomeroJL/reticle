@@ -3,15 +3,15 @@
 //! # Layout on the `yrs` document
 //!
 //! A [`SyncDocument`](crate::SyncDocument) keeps a single [`yrs::Doc`] with a flat
-//! set of **root** shared maps — one per kind of record. Every map is keyed by a
+//! set of **root** shared maps, one per kind of record. Every map is keyed by a
 //! globally-unique element id (`actor:counter`), never by a value a second peer
 //! might also write:
 //!
-//! * `cells` — element id → cell name. A cell's existence.
-//! * `shapes` — element id → shape record.
-//! * `instances` — element id → instance record.
-//! * `arrays` — element id → array record.
-//! * `top_cells` — element id → top-cell name.
+//! * `cells`, element id → cell name. A cell's existence.
+//! * `shapes`, element id → shape record.
+//! * `instances`, element id → instance record.
+//! * `arrays`, element id → array record.
+//! * `top_cells`, element id → top-cell name.
 //!
 //! Each record's value is a compact [`Any::Array`] whose **first element is the
 //! owning cell name**, followed by the geometry/placement fields (the `cells` and
@@ -25,7 +25,7 @@
 //! nested-map creation" hazard (two peers each creating a per-cell `shapes` map
 //! would race, and a last-write-wins merge would discard one peer's shapes).
 //!
-//! Keying by a unique id — rather than by cell name — avoids the *other* hazard:
+//! Keying by a unique id, rather than by cell name, avoids the *other* hazard:
 //! two peers writing the **same map key** (`"cell0" → true`) creates competing
 //! items that `yrs` resolves by tombstoning the loser, which does not always
 //! survive a full-state (`encode_state_as_update`) round-trip cleanly. With unique
@@ -195,8 +195,8 @@ fn gcd(mut a: u32, mut b: u32) -> u32 {
 /// Extracts a magnification's `(num, den)`, normalizing unity to `(1, 1)`.
 ///
 /// [`Magnification`] keeps its numerator and denominator private, exposing only
-/// unity detection and [`Magnification::scale`]. Unity — the case for essentially
-/// all placements — is recovered exactly. A non-unity ratio is reconstructed by
+/// unity detection and [`Magnification::scale`]. Unity, the case for essentially
+/// all placements, is recovered exactly. A non-unity ratio is reconstructed by
 /// scaling a high-precision reference (`2^20`) and reducing the resulting
 /// fraction; the encoding is deterministic and idempotent (re-encoding a decoded
 /// value yields the same pair), so it never perturbs convergence, at the cost of
@@ -537,7 +537,7 @@ pub(crate) fn set_top_cell(
 ///
 /// Records are grouped by their embedded cell name and each group is sorted by
 /// element id, so the output is deterministic and independent of insertion or
-/// merge order — this is what lets two converged peers produce equal
+/// merge order, this is what lets two converged peers produce equal
 /// [`Document`]s.
 ///
 /// # Errors

@@ -7,7 +7,7 @@
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Runs in the browser via WebGPU and WASM](https://img.shields.io/badge/web-WebGPU%20%2B%20WASM-orange.svg)](https://alpharomerojl.github.io/reticle/)
 
-**[Try the live demo](https://alpharomerojl.github.io/reticle/)** — it runs entirely in your browser via WebGPU and WebAssembly (use a current version of Chrome or Edge).
+**[Try the live demo](https://alpharomerojl.github.io/reticle/)**, it runs entirely in your browser via WebGPU and WebAssembly (use a current version of Chrome or Edge).
 
 Reticle is a browser-native, GPU-accelerated editor for very large hierarchical 2D
 layout scenes, written in Rust and compiled to both native and WebAssembly. It
@@ -24,7 +24,7 @@ import and export, embedded scripting, and real-time multi-user collaboration.
   <img src="assets/browse.gif" alt="Panning and zooming across a layout of millions of shapes" width="100%" />
 </p>
 
-> Status: v3.0.0 is released — try the live demo above and read the
+> Status: v3.0.0 is released, try the live demo above and read the
 > [release notes](https://github.com/AlpharomeroJL/reticle/releases/tag/v3.0.0). The
 > workspace is green under the local gate (`just ci`). For a skeptical, audited
 > account of exactly what is fully implemented, what is partial, and how to verify

@@ -1,4 +1,4 @@
-# 0003 — `i_overlay` for polygon booleans and offsetting
+# 0003, `i_overlay` for polygon booleans and offsetting
 
 ## Context
 

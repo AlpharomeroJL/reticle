@@ -2,9 +2,9 @@
 //!
 //! The canvas works in three coordinate spaces:
 //!
-//! * **World / DBU space** — integer database units ([`reticle_geometry::Dbu`]),
+//! * **World / DBU space**, integer database units ([`reticle_geometry::Dbu`]),
 //!   `+y` pointing up, matching the document and the GPU renderer.
-//! * **Screen space** — `f32` pixels inside the canvas rectangle, `+y` pointing
+//! * **Screen space**, `f32` pixels inside the canvas rectangle, `+y` pointing
 //!   *down*, matching egui.
 //!
 //! [`ViewCamera`] owns the center (in world space) and the zoom (screen pixels per

@@ -79,7 +79,7 @@ fn same_layer_only_connects_within_layer() {
 
 #[test]
 fn transitive_chain_is_one_net() {
-    // A—B—C touch pairwise in a chain; all three land on one net via union-find.
+    // A-B-C touch pairwise in a chain; all three land on one net via union-find.
     let doc = doc_with(vec![
         rect(M1, 0, 0, 10, 10),
         rect(M1, 9, 0, 19, 10),
@@ -148,7 +148,7 @@ fn via_touching_only_bottom_does_not_bridge() {
 #[test]
 fn via_layer_shapes_do_not_self_connect_across_gaps() {
     // Two separate via squares over two independent conductor stacks must yield two
-    // nets, not one — vias only connect the conductors they physically overlap.
+    // nets, not one, vias only connect the conductors they physically overlap.
     let doc = doc_with(vec![
         rect(M1, 0, 0, 10, 10),    // stack A bottom
         rect(M2, 0, 0, 10, 10),    // stack A top
@@ -275,7 +275,7 @@ fn compare_end_to_end_against_extraction() {
         rect(M1, 100, 0, 110, 10),
     ]);
     let extracted = Extractor::new().extract(&doc, "top");
-    // Intended: {0,1} and {2} — matches extraction.
+    // Intended: {0,1} and {2}, matches extraction.
     let expected = Netlist::new(vec![Net::new("sig", vec![0, 1]), Net::new("iso", vec![2])]);
     let diff = Extractor::new().compare(&extracted, &expected);
     assert!(

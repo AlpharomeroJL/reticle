@@ -4,8 +4,8 @@
 //! indices [`crate::culling::SceneIndex`] returns). The model here is pure set
 //! bookkeeping plus two selection *builders* that the canvas and query bar drive:
 //!
-//! * [`shapes_in_rect`] — the shapes fully enclosed by a rubber-band rectangle.
-//! * [`shapes_on_layer`] — every shape on a given layer, for the "select by layer"
+//! * [`shapes_in_rect`], the shapes fully enclosed by a rubber-band rectangle.
+//! * [`shapes_on_layer`], every shape on a given layer, for the "select by layer"
 //!   query bar.
 //!
 //! Keeping this window-free means selection behavior is unit-testable and the egui
@@ -93,7 +93,7 @@ impl Selection {
 }
 
 /// Returns the indices of every shape whose bounding box is fully contained in
-/// `rect` — the shapes captured by a rubber-band selection.
+/// `rect`, the shapes captured by a rubber-band selection.
 ///
 /// Full containment (rather than mere intersection) matches the usual layout-editor
 /// convention that a rubber band grabs only shapes it completely encloses.
@@ -107,7 +107,7 @@ pub fn shapes_in_rect(shapes: &[DrawShape], rect: Rect) -> Vec<usize> {
         .collect()
 }
 
-/// Returns the indices of every shape drawn on `layer` — the "select by layer"
+/// Returns the indices of every shape drawn on `layer`, the "select by layer"
 /// query.
 #[must_use]
 pub fn shapes_on_layer(shapes: &[DrawShape], layer: LayerId) -> Vec<usize> {

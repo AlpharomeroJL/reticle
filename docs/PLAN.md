@@ -76,7 +76,7 @@ graph TD
 
 | Wave | Type | Lanes (crates) | Depends on |
 |---|---|---|---|
-| 0 | serial | contracts (proto schema + shared traits), workspace skeleton, licenses, justfile, skills, MCP servers, docs, `git init`, `cargo fetch`/`build` | — |
+| 0 | serial | contracts (proto schema + shared traits), workspace skeleton, licenses, justfile, skills, MCP servers, docs, `git init`, `cargo fetch`/`build` | None |
 | 1 | parallel | `reticle-geometry`, `reticle-proto`, `reticle-index`, `reticle-io` | Wave 0 |
 | 2 | parallel | `reticle-model`, `reticle-render`, `reticle-drc`, `reticle-route`, `reticle-extract` | Wave 1 |
 | 3 | parallel | `reticle-sync`, `reticle-server`, `reticle-script`, `reticle-cli` | Wave 2 |
@@ -93,8 +93,8 @@ at the W2 boundary.
 ## Development model
 
 The build proceeds in waves. Within a wave, each crate is an independent
-workstream ("lane") taken to completion — code, unit and property tests, fuzz
-targets where relevant, benchmarks, rustdoc, and its book chapter — against the
+workstream ("lane") taken to completion, code, unit and property tests, fuzz
+targets where relevant, benchmarks, rustdoc, and its book chapter, against the
 interfaces frozen in Wave 0. Lanes are developed in isolated git worktrees and
 integrated at each wave boundary, where the full `just ci` gate must pass and the
 requirements-mapping table is brought up to date before the next wave begins.
