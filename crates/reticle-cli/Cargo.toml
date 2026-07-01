@@ -18,4 +18,12 @@ name = "reticle"
 path = "src/main.rs"
 
 [dependencies]
-# Wave 3 wires `clap` and the io/drc/route/extract/render crates for the pipeline.
+reticle-geometry = { workspace = true }
+reticle-model = { workspace = true }
+reticle-io = { workspace = true }
+reticle-drc = { workspace = true }
+reticle-route = { workspace = true }
+reticle-extract = { workspace = true }
+reticle-render = { workspace = true }
+clap = { version = "4.6.1", features = ["derive"] }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
