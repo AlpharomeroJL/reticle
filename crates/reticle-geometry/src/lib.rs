@@ -21,14 +21,23 @@
 //! Robust polygon booleans and offsetting are delegated to the `i_overlay` crate
 //! (ADR 0003), wrapped behind [`polygon_boolean`] and [`offset`] so the dependency
 //! stays swappable and is property-tested against a brute-force oracle.
+//!
+//! # Convex decomposition
+//!
+//! [`convex_decompose`] cuts a simple polygon into convex triangles by exact
+//! integer ear clipping, validated against a brute-force area oracle. Because every
+//! triangle is convex, the triangulation is a valid convex decomposition that
+//! exactly tiles the input.
 #![forbid(unsafe_code)]
 
 mod boolean;
+mod decompose;
 mod primitives;
 mod shapes;
 mod traits;
 
 pub use boolean::{BooleanOp, offset, polygon_boolean};
+pub use decompose::convex_decompose;
 pub use primitives::{Magnification, Orientation, Point, Rect, Transform};
 pub use shapes::{Endcap, Path, Polygon, Winding};
 pub use traits::{GeometryError, LayerId, Shape, SpatialIndex};
