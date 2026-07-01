@@ -1,10 +1,20 @@
-//! The Reticle collaboration relay.
+//! The Reticle collaboration relay binary.
 //!
-//! Wave 3 implements an `axum` + `tokio` WebSocket relay: rooms, awareness,
-//! update broadcast, initial-state sync, and a persistence hook. It carries no
-//! business logic beyond relaying CRDT and presence messages.
+//! This is a thin entry point: it resolves the bind address, constructs a
+//! default [`RelayState`], and serves the WebSocket relay. All relay logic lives
+//! in the [`reticle_server`] library crate so it can be unit- and
+//! integration-tested without a live socket.
 
-fn main() {
-    // Wave 3: bind the axum router and serve the WebSocket relay.
-    println!("reticle-server: collaboration relay (Wave 3 stub)");
+use reticle_server::{RelayState, bind_address, serve};
+
+/// Binds the relay's listener and serves it on a multi-threaded runtime.
+///
+/// The address comes from the `RETICLE_SERVER_ADDR` environment variable and
+/// defaults to `127.0.0.1:3030`.
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    let addr = bind_address();
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    println!("reticle-server: collaboration relay listening on ws://{addr}/ws/{{room}}");
+    serve(listener, RelayState::new()).await
 }

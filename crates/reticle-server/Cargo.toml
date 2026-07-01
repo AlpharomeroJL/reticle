@@ -14,4 +14,11 @@ categories = ["network-programming", "web-programming"]
 workspace = true
 
 [dependencies]
+reticle-proto = { workspace = true }
+axum = { version = "0.8.9", features = ["ws"] }
+futures-util = "0.3.32"
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "net", "time"] }
+
+[dev-dependencies]
+tokio-tungstenite = "0.29.0"
 # Wave 3 wires `axum`, `tokio`, and `reticle-sync` for the relay.
