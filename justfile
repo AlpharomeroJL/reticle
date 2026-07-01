@@ -81,11 +81,13 @@ perf-check:
 # ---------------------------------------------------------------------------
 # WASM demo (Trunk) and book
 # ---------------------------------------------------------------------------
+# Trunk resolves the crate from its own directory (the workspace root is a virtual
+# manifest), so these run from crates/web.
 web-build:
-    trunk build --release crates/web/index.html
+    cd crates/web; trunk build --release index.html
 
 web-serve:
-    trunk serve crates/web/index.html
+    cd crates/web; trunk serve index.html
 
 book:
     mdbook build docs

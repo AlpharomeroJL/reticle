@@ -6,13 +6,18 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "The Reticle WebAssembly harness: WebGPU capability check with WebGL2 fallback."
+description = "The Reticle WebAssembly harness: mounts the egui app in the browser."
 publish = false
 
 [lints]
 workspace = true
 
-[dependencies]
-# Wave 4 wires `reticle-app`, `wasm-bindgen`, `web-sys`, and `console_error_panic_hook`
-# under a `cfg(target_arch = "wasm32")` target table so native `cargo build`
-# stays green (ADR 0009).
+# The harness is only meaningfully built for wasm (via Trunk). Its native build is
+# a no-op `main`, so `cargo build --workspace` stays green on the host without
+# pulling any of the wasm-only dependencies.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+reticle-app = { workspace = true }
+eframe = "0.35.0"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement"] }
+console_error_panic_hook = "0.1"
