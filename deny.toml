@@ -3,9 +3,14 @@
 
 [advisories]
 version = 2
-# Fail on security vulnerabilities; downgrade unmaintained/notice to warnings so a
-# transitive advisory does not block an unattended build. Vulnerabilities still fail.
-ignore = []
+# Fail on security vulnerabilities. A small number of "unmaintained" advisories on
+# transitive dependencies we do not control are ignored with a documented reason;
+# vulnerabilities are never ignored.
+ignore = [
+    # `yaml-rust` is unmaintained (not vulnerable), reached only transitively via
+    # gds21 -> layout21utils -> serde_yaml. No safe upgrade is available upstream.
+    "RUSTSEC-2024-0320",
+]
 
 [licenses]
 version = 2
