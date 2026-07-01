@@ -1,7 +1,7 @@
 //! The hierarchical document: cells, instances, arrays, layers, and technology.
 
-use reticle_geometry::{Dbu, LayerId, Path, Polygon, Rect, Shape, Transform};
-use std::collections::HashMap;
+use reticle_geometry::{Dbu, LayerId, Path, Point, Polygon, Rect, Shape, Transform};
+use std::collections::{HashMap, HashSet};
 
 /// A concrete piece of drawn geometry on a layer.
 #[derive(Clone, PartialEq, Debug)]
@@ -95,9 +95,6 @@ pub struct Cell {
     pub instances: Vec<Instance>,
     /// Arrayed placements of other cells.
     pub arrays: Vec<ArrayInstance>,
-    /// Cached bounding box of this cell's own geometry (excluding children),
-    /// filled by the Wave 2 bbox-cache pass. `None` until computed.
-    pub(crate) cached_bbox: Option<Rect>,
 }
 
 impl Cell {
@@ -210,4 +207,159 @@ impl Document {
     pub fn set_technology(&mut self, tech: Technology) {
         self.technology = tech;
     }
+
+    /// Removes and returns the named cell, if present.
+    pub fn remove_cell(&mut self, name: &str) -> Option<Cell> {
+        self.cells.remove(name)
+    }
+
+    /// The full bounding box of a cell in its own coordinate system, including the
+    /// transformed bounding boxes of every instance and array, computed
+    /// recursively. Returns `None` for a missing or empty cell.
+    #[must_use]
+    pub fn cell_bbox(&self, name: &str) -> Option<Rect> {
+        let mut visiting = HashSet::new();
+        self.cell_bbox_visiting(name, &mut visiting)
+    }
+
+    fn cell_bbox_visiting(&self, name: &str, visiting: &mut HashSet<String>) -> Option<Rect> {
+        if !visiting.insert(name.to_owned()) {
+            return None; // cycle guard
+        }
+        let result = self.cell(name).and_then(|cell| {
+            let mut bbox = cell.shapes_bbox();
+            for inst in &cell.instances {
+                if let Some(child) = self.cell_bbox_visiting(&inst.cell, visiting) {
+                    let placed = transform_rect(&inst.transform, child);
+                    bbox = Some(bbox.map_or(placed, |acc| acc.union(&placed)));
+                }
+            }
+            for array in &cell.arrays {
+                if let Some(child) = self.cell_bbox_visiting(&array.cell, visiting) {
+                    let base = transform_rect(&array.transform, child);
+                    let dx = array.column_pitch.saturating_mul(span(array.columns));
+                    let dy = array.row_pitch.saturating_mul(span(array.rows));
+                    let far = Rect::new(base.min.translate(dx, dy), base.max.translate(dx, dy));
+                    let spanned = base.union(&far);
+                    bbox = Some(bbox.map_or(spanned, |acc| acc.union(&spanned)));
+                }
+            }
+            bbox
+        });
+        visiting.remove(name);
+        result
+    }
+
+    /// Flattens `top` into a flat list of shapes in `top`'s coordinate system,
+    /// recursively expanding instances and arrays and applying their transforms.
+    ///
+    /// This materializes every leaf shape, so for a design with large arrays the
+    /// output can be enormous; use it only when a tool genuinely needs the expanded
+    /// geometry.
+    #[must_use]
+    pub fn flatten(&self, top: &str) -> Vec<DrawShape> {
+        let mut visiting = HashSet::new();
+        self.flatten_local(top, &mut visiting)
+    }
+
+    fn flatten_local(&self, name: &str, visiting: &mut HashSet<String>) -> Vec<DrawShape> {
+        if !visiting.insert(name.to_owned()) {
+            return Vec::new(); // cycle guard
+        }
+        let mut out = Vec::new();
+        if let Some(cell) = self.cell(name) {
+            out.extend(cell.shapes.iter().cloned());
+            for inst in &cell.instances {
+                for shape in self.flatten_local(&inst.cell, visiting) {
+                    out.push(transform_shape(&inst.transform, &shape));
+                }
+            }
+            for array in &cell.arrays {
+                let child = self.flatten_local(&array.cell, visiting);
+                for col in 0..array.columns {
+                    for row in 0..array.rows {
+                        let dx = array.column_pitch.saturating_mul(span_from(col));
+                        let dy = array.row_pitch.saturating_mul(span_from(row));
+                        for shape in &child {
+                            let placed = transform_shape(&array.transform, shape);
+                            out.push(translate_shape(&placed, dx, dy));
+                        }
+                    }
+                }
+            }
+        }
+        visiting.remove(name);
+        out
+    }
+}
+
+/// The span multiplier for an array dimension of `count` repetitions: `count - 1`,
+/// clamped into the coordinate range.
+fn span(count: u32) -> Dbu {
+    Dbu::try_from(count.saturating_sub(1)).unwrap_or(Dbu::MAX)
+}
+
+/// The offset multiplier for the `index`-th repetition in an array.
+fn span_from(index: u32) -> Dbu {
+    Dbu::try_from(index).unwrap_or(Dbu::MAX)
+}
+
+/// Transforms an axis-aligned rectangle by `transform` and returns the bounding box
+/// of the result (exact for the dihedral orientations and integer magnifications
+/// used by placements).
+fn transform_rect(transform: &Transform, rect: Rect) -> Rect {
+    let corners = [
+        rect.min,
+        Point::new(rect.max.x, rect.min.y),
+        rect.max,
+        Point::new(rect.min.x, rect.max.y),
+    ];
+    Rect::from_points(corners.into_iter().map(|corner| transform.apply(corner))).unwrap_or_default()
+}
+
+/// Transforms a drawable shape by an orientation/magnification/translation.
+fn transform_shape(transform: &Transform, shape: &DrawShape) -> DrawShape {
+    let kind = match &shape.kind {
+        ShapeKind::Rect(rect) => ShapeKind::Rect(transform_rect(transform, *rect)),
+        ShapeKind::Polygon(poly) => ShapeKind::Polygon(Polygon::new(
+            poly.vertices()
+                .iter()
+                .map(|pt| transform.apply(*pt))
+                .collect(),
+        )),
+        ShapeKind::Path(path) => ShapeKind::Path(Path::new(
+            path.points()
+                .iter()
+                .map(|pt| transform.apply(*pt))
+                .collect(),
+            transform.magnification.scale(path.width()),
+            path.endcap(),
+        )),
+    };
+    DrawShape::new(shape.layer, kind)
+}
+
+/// Translates a drawable shape by `(dx, dy)` DBU.
+fn translate_shape(shape: &DrawShape, dx: Dbu, dy: Dbu) -> DrawShape {
+    let kind = match &shape.kind {
+        ShapeKind::Rect(rect) => ShapeKind::Rect(Rect::new(
+            rect.min.translate(dx, dy),
+            rect.max.translate(dx, dy),
+        )),
+        ShapeKind::Polygon(poly) => ShapeKind::Polygon(Polygon::new(
+            poly.vertices()
+                .iter()
+                .map(|pt| pt.translate(dx, dy))
+                .collect(),
+        )),
+        ShapeKind::Path(path) => ShapeKind::Path(Path::new(
+            path.points()
+                .iter()
+                .map(|pt| pt.translate(dx, dy))
+                .collect(),
+            path.width(),
+            path.endcap(),
+        )),
+    };
+    DrawShape::new(shape.layer, kind)
 }

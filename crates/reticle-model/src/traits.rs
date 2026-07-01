@@ -7,8 +7,8 @@ use reticle_geometry::{LayerId, Point, Rect};
 
 /// Read/write access to a hierarchical document with undo/redo.
 ///
-/// The concrete implementation is the Wave 2 editable document wrapping
-/// [`Document`] with a [`crate::History`].
+/// The concrete implementation is [`EditableDocument`](crate::EditableDocument),
+/// which wraps a [`Document`] with an undo/redo history.
 pub trait DocumentStore {
     /// The names of all cells.
     fn cell_names(&self) -> Vec<String>;

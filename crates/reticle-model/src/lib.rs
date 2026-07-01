@@ -14,13 +14,15 @@ use core::fmt;
 
 mod document;
 mod edit;
+mod editable;
 mod rules;
 mod traits;
 
 pub use document::{
     ArrayInstance, Cell, Document, DrawShape, Instance, LayerInfo, ShapeKind, Technology,
 };
-pub use edit::{Edit, History};
+pub use edit::Edit;
+pub use editable::EditableDocument;
 pub use rules::{Rule, RuleKind, RuleSet, Violation};
 pub use traits::{
     Camera, DocumentStore, Exporter, Importer, NetSpec, Renderer, RouteReport, RouteRequest, Router,
