@@ -7,6 +7,7 @@
 //! - `perf-check` — compare benchmarks against the committed history (Wave 5).
 
 mod generator;
+mod media;
 
 use reticle_io::Gds;
 use reticle_model::Exporter;
@@ -17,10 +18,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map_or("", String::as_str) {
         "gen-layout" => gen_layout(&args[1..]),
-        "capture-media" => {
-            println!("xtask capture-media (Wave 5 stub)");
-            ExitCode::SUCCESS
-        }
+        "capture-media" => cmd_capture_media(),
         "perf-check" => {
             println!("xtask perf-check (Wave 5 stub)");
             ExitCode::SUCCESS
@@ -79,6 +77,24 @@ fn gen_layout(args: &[String]) -> ExitCode {
         doc.top_cells(),
     );
     ExitCode::SUCCESS
+}
+
+/// Handles `capture-media`: render the hero image and browse GIF into `assets/`.
+fn cmd_capture_media() -> ExitCode {
+    match media::capture(Path::new("assets")) {
+        Ok(true) => {
+            println!("media capture complete");
+            ExitCode::SUCCESS
+        }
+        Ok(false) => {
+            println!("media capture skipped (no GPU adapter)");
+            ExitCode::SUCCESS
+        }
+        Err(err) => {
+            eprintln!("media capture failed: {err}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Returns the value following `name` in `args`, if present.
