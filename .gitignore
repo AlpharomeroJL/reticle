@@ -1,0 +1,44 @@
+# Build artifacts. The target dir is relocated to D:\dev\reticle-target via
+# CARGO_TARGET_DIR, but ignore any local target too for safety.
+/target
+**/target
+
+# Media: only the final optimized assets are committed; raw frames are not.
+/assets/frames/
+/assets/raw/
+
+# Optional vendored dependencies (offline builds).
+/vendor/
+
+# WASM / Trunk build output.
+/dist/
+/crates/web/dist/
+
+# Coverage.
+/coverage/
+*.profraw
+lcov.info
+
+# mdbook render output (book is built into gh-pages, not committed to main).
+/docs/book/
+
+# Fuzzing artifacts (corpora are committed; crashes and coverage are not).
+/fuzz/artifacts/
+/fuzz/coverage/
+/fuzz/target/
+
+# OS / editor noise.
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Local environment.
+.env
+
+# Local tooling/config and the internal build specification (not shipped).
+/.claude/
+/.mcp.json
+/tools/
+/reticle-autonomous-build-plan.md
+/scratch/

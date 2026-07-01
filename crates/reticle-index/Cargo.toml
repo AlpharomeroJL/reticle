@@ -1,0 +1,21 @@
+[package]
+name = "reticle-index"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Spatial indices for Reticle: R-tree, uniform grid, and a tile/LOD pyramid for out-of-core browsing."
+keywords = ["spatial", "rtree", "index", "eda", "layout"]
+categories = ["data-structures", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+reticle-geometry = { workspace = true }
+# Wave 1 wires `rstar` (bulk-loaded R-tree) and `rkyv` (zero-copy streaming).
+
+[dev-dependencies]
+# Wave 1 wires `proptest` (vs the linear oracle here) and `criterion`.

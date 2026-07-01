@@ -1,0 +1,23 @@
+# typos-cli configuration. Part of the `just ci` gate.
+
+[files]
+extend-exclude = [
+    "*.gds",
+    "*.oas",
+    "*.rgds",
+    "assets/**",
+    "docs/book/**",
+    "**/corpus/**",
+    "CHANGELOG.md",
+    "Cargo.lock",
+    "reticle-autonomous-build-plan.md",
+]
+
+[default.extend-words]
+# EDA / graphics / domain vocabulary that is not a typo.
+oas = "oas"
+nin = "nin"
+ser = "ser"
+inout = "inout"
+LOD = "LOD"
+lod = "lod"

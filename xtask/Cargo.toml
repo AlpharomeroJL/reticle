@@ -1,0 +1,17 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Reticle build automation: the deterministic layout generator, media capture, and perf-check."
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Wave 4 wires the model/io/render crates plus `clap`; media capture shells out to
+# the installed `gifski` CLI.

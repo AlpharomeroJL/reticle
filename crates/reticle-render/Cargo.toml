@@ -1,0 +1,20 @@
+[package]
+name = "reticle-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The wgpu renderer for Reticle: instanced pipelines, GPU-driven culling, tiles, LOD, and overlays."
+keywords = ["wgpu", "rendering", "gpu", "eda", "layout"]
+categories = ["graphics", "rendering"]
+
+[lints]
+workspace = true
+
+[dependencies]
+reticle-geometry = { workspace = true }
+reticle-model = { workspace = true }
+reticle-index = { workspace = true }
+# Wave 2 wires `wgpu`, `lyon`, `glyphon`, `glam`, `bytemuck`.

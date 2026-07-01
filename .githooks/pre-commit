@@ -1,0 +1,11 @@
+#!/bin/sh
+# Reticle pre-commit hook: run the fast gate (formatting + clippy) before every
+# commit. The full `just ci` gate runs at each wave merge and before release.
+#
+# Enable with: git config core.hooksPath .githooks
+if command -v just >/dev/null 2>&1; then
+    just lint || {
+        echo "pre-commit: 'just lint' failed; fix formatting/clippy before committing." >&2
+        exit 1
+    }
+fi

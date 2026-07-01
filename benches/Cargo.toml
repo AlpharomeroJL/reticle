@@ -1,0 +1,17 @@
+[package]
+name = "reticle-benches"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cross-crate Criterion benchmarks for Reticle, with a committed history."
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Wave 5 wires `criterion` and the crates under benchmark; bench targets are added
+# with explicit `[[bench]]` paths and a committed baseline in history/.

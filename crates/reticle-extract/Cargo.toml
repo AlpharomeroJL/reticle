@@ -1,0 +1,22 @@
+[package]
+name = "reticle-extract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Geometric connectivity extraction for Reticle: per-net nets across contacts and vias."
+keywords = ["extraction", "connectivity", "netlist", "eda", "layout"]
+categories = ["algorithms", "science"]
+
+[lints]
+workspace = true
+
+[dependencies]
+reticle-geometry = { workspace = true }
+reticle-model = { workspace = true }
+reticle-index = { workspace = true }
+
+[dev-dependencies]
+# Wave 2 wires `proptest` against a union-find oracle.
