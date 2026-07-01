@@ -84,7 +84,7 @@ perf-check:
 # Trunk resolves the crate from its own directory (the workspace root is a virtual
 # manifest), so these run from crates/web.
 web-build:
-    cd crates/web; trunk build --release index.html
+    cd crates/web; trunk build index.html --release
 
 web-serve:
     cd crates/web; trunk serve index.html

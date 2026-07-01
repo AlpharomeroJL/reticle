@@ -1,10 +1,18 @@
-//! Zero-copy out-of-core streaming of index payloads with [`rkyv`] 0.8.
+//! Zero-copy access to archived index payloads with [`rkyv`] 0.8 — the building
+//! block for out-of-core streaming.
 //!
-//! A layout too large to hold in memory is stored on disk as an archived
-//! [`IndexPayload`] and memory-mapped. Because the archive is laid out exactly as
-//! the in-memory representation, the renderer reads shape rectangles straight from
-//! the mapped bytes with no parsing or heap allocation — the operating system
-//! pages in only the regions actually touched.
+//! An [`IndexPayload`] serializes to a byte buffer laid out exactly as its in-memory
+//! representation, so a caller reads shape rectangles straight from those bytes with
+//! no parsing or heap allocation, and can index a single archived entry in place. That
+//! is precisely what a memory-mapped, larger-than-RAM layout would sit on: map a file,
+//! hand these bytes in, and the OS pages in only the regions actually touched.
+//!
+//! What is **not** yet wired up: nothing in the workspace memory-maps a file into this
+//! path or streams from disk, and no renderer consumes it — today the API is exercised
+//! over in-memory buffers only. Full out-of-core browsing (mmap plus on-demand tile
+//! paging) is a documented follow-up — see `docs/STATUS.md` and
+//! `docs/decisions/0013-out-of-core-streaming-scope.md`. The zero-copy read primitive
+//! itself is real and validated (below).
 //!
 //! # Safety
 //!

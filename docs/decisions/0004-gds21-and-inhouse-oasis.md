@@ -25,3 +25,15 @@ of the standard; unsupported records produce explicit errors. The OASIS parser i
 fuzzed like the GDSII one. If a complete OASIS implementation is ever needed it can
 grow incrementally behind the same `Importer`/`Exporter` traits. This is the one
 subsystem where hand-rolling is unavoidable because no suitable crate exists.
+
+## Status (2026-07-01 audit)
+
+As actually implemented, the in-house OASIS subset round-trips **rectangles and
+polygons on layer/datatype**. Paths, placements (instances), and arrays are **not**
+encoded — `Oasis::export` returns `ModelError::Unsupported` for them rather than
+dropping data silently, and `Oasis::import` is the exact inverse. The record set
+listed under Decision above (PLACEMENT, PATH, repetition, full modal-state) is the
+aspirational target, not the current coverage. GDSII (via `gds21`) preserves the full
+hierarchy, so hierarchical designs export losslessly to `.gds`. The libFuzzer engine
+does not link under Windows/MSVC, so the OASIS/GDSII fuzz targets run on Linux; on the
+build host, robustness is covered by the `reticle-io` proptests. See `docs/STATUS.md`.

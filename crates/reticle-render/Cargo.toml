@@ -6,7 +6,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "The wgpu renderer for Reticle: instanced pipelines, GPU-driven culling, tiles, LOD, and overlays."
+description = "The wgpu renderer for Reticle: instanced pipelines, lyon tessellation, GPU-driven cell culling, and offscreen rendering."
 keywords = ["wgpu", "rendering", "gpu", "eda", "layout"]
 categories = ["graphics", "rendering"]
 
