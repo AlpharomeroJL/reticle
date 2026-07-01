@@ -39,11 +39,11 @@ graph TD
 | Crate | Responsibility |
 |---|---|
 | `reticle-geometry` | Exact integer primitives and robust polygon booleans, offsetting, winding, and convex decomposition. |
-| `reticle-index` | Bulk-loaded R-tree, uniform grid, and a tile/LOD pyramid for out-of-core browsing. |
-| `reticle-model` | The hierarchical document: cells, instances, arrays, transforms, bbox caching, flattening, and a transactional edit history. |
+| `reticle-index` | Bulk-loaded R-tree, uniform grid, and a tile/LOD pyramid for level-of-detail browsing. |
+| `reticle-model` | The hierarchical document: cells, instances, arrays, transforms, per-cell bbox computation, flattening, and a transactional edit history. |
 | `reticle-proto` | The versioned Protobuf schema and generated types for the document, wire, and collaboration formats. |
 | `reticle-io` | GDSII and OASIS import and export, plus a technology-file parser. |
-| `reticle-render` | The `wgpu` renderer: instanced pipelines, GPU-driven culling, tiles, LOD, overlays. |
+| `reticle-render` | The `wgpu` renderer: instanced pipelines, `lyon` tessellation, GPU-driven cell culling, and offscreen rendering. |
 | `reticle-drc` | A declarative, incremental design-rule checker. |
 | `reticle-route` | A grid and maze router with rip-up and reroute. |
 | `reticle-extract` | Geometric connectivity extraction across contacts and vias. |
