@@ -16,4 +16,7 @@ workspace = true
 [dependencies]
 reticle-geometry = { workspace = true }
 reticle-model = { workspace = true }
+reticle-io = { workspace = true }
+reticle-drc = { workspace = true }
+rhai = "1.25.1"
 # Wave 3 wires `rhai` and the plugin loader.
