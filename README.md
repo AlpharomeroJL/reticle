@@ -24,10 +24,11 @@ import and export, embedded scripting, and real-time multi-user collaboration.
   <img src="assets/browse.gif" alt="Panning and zooming across a layout of millions of shapes" width="100%" />
 </p>
 
-> Status: under active development. The workspace builds green under the local
-> gate (`just ci`); subsystems are being filled in wave by wave against the
-> interfaces frozen in `docs/PLAN.md`. The live demo, performance table, and demo
-> media land with the v3.0.0 release.
+> Status: v3.0.0 is released — try the live demo above and read the
+> [release notes](https://github.com/AlpharomeroJL/reticle/releases/tag/v3.0.0). The
+> workspace is green under the local gate (`just ci`). For a skeptical, audited
+> account of exactly what is fully implemented, what is partial, and how to verify
+> each claim yourself, see [docs/STATUS.md](docs/STATUS.md).
 
 ## Why it is interesting
 
@@ -44,30 +45,33 @@ user's cursor and edits appear live.
 ## Features
 
 - Exact integer (database-unit) geometry with robust polygon booleans, offsetting,
-  and convex decomposition, validated against a brute-force oracle and fuzzed.
+  and convex decomposition, validated against a brute-force winding-number oracle.
 - Hierarchy: cells, instances, and arrays with nested transforms, flattening,
-  per-cell bounding-box caching, and cell-level culling for scale.
-- GPU rendering on `wgpu`: instanced pipelines, GPU-driven culling on a compute
-  shader, a tile and level-of-detail pyramid, anti-aliased edges, glyph-atlas
-  labels, a minimap, and DRC and net overlays.
-- Spatial indexing: a bulk-loaded R-tree, a uniform grid, and a tile/LOD pyramid
-  for out-of-core browsing, with point, rectangle, nearest-edge, and k-nearest
-  queries.
+  per-cell bounding boxes, and cell-level culling for scale.
+- GPU rendering on `wgpu`: instanced rectangle pipelines, `lyon`-tessellated polygons
+  and paths, per-layer styling from the technology table, and a compute shader that
+  culls cell bounding boxes on the GPU. Rendering runs offscreen today (it produces
+  the hero image and drives the golden-image tests); window presentation,
+  indirect-draw compaction, text labels, a minimap, and DRC/net overlays are tracked
+  follow-ups (see [docs/STATUS.md](docs/STATUS.md)).
+- Spatial indexing: a bulk-loaded R-tree, a uniform grid, and a tile/LOD pyramid,
+  with point, rectangle, nearest-edge, and k-nearest queries.
 - Design-rule checking: a declarative engine (width, spacing, enclosure, extension,
-  notch, area, density, angle) with incremental re-check and zoom-to markers.
+  notch, area, density, angle) with incremental re-check, checked against a naive
+  reference oracle.
 - Routing: a grid and maze router with rip-up and reroute, obstacle avoidance, and
-  cross-layer vias.
+  cross-layer vias, checked against a Manhattan-optimality oracle.
 - Connectivity extraction across contacts and vias, with net highlighting and a
-  compare against an expected netlist.
-- IO: GDSII and OASIS read and write with round-trip fidelity, plus a
-  technology-file format.
+  compare against an expected netlist, checked against an independent union-find oracle.
+- IO: GDSII read and write (full hierarchy) plus an in-house OASIS subset that
+  round-trips rectangles and polygons, and a technology-file format.
 - Collaboration: a hierarchical CRDT (`yrs`) with presence, threaded comments, and
-  offline reconcile over a WebSocket relay.
-- Embedded scripting (`rhai`) exposing the full model, with a plugin folder and
-  example scripts.
-- A full editing application (`egui`): command palette, rebindable keys,
-  multi-viewport, layer manager, selection filters, measurement suite, autosave,
-  and an undo-history panel. Native and in the browser.
+  offline reconcile over a WebSocket relay, with order-independent convergence tests.
+- Embedded scripting (`rhai`) exposing the model, with a plugin folder and example
+  scripts.
+- A full editing application (`egui`): command palette, layer manager, selection
+  filters, measurement suite, session save/restore, and an undo-history panel. Native
+  and in the browser.
 
 ## Performance
 
@@ -144,12 +148,13 @@ just gen-layout 1000000 8 3 scratch/gen.rgds
 
 - Spatial index and hierarchy culling: geometry is indexed in a bulk-loaded R-tree
   and a tile/LOD pyramid. Hierarchy is never flattened for browsing; instead each
-  cell caches its bounding box, and rendering culls whole instances and arrays that
+  cell's bounding box is computed and rendering culls whole instances and arrays that
   fall outside the view, so an arrayed cell with billions of effective leaf shapes
   costs only what is on screen.
-- GPU-driven rendering and LOD: a compute shader builds the visible draw list on
-  the GPU, and instanced draws paint each layer with its own style. A level-of-detail
-  pyramid swaps dense geometry for coarser representations as you zoom out.
+- GPU-driven culling: a compute shader flags which cell bounding boxes overlap the
+  viewport on the GPU (the first stage of a GPU-driven draw list), and instanced draws
+  paint each layer with its own style. A tile/level-of-detail pyramid in the index
+  provides coarser representations for zoomed-out browsing.
 - DRC and routing: the design-rule checker evaluates declarative rules against the
   indexed geometry and re-checks incrementally on edit. The router builds a routing
   grid, runs a maze search per net, and rips up and reroutes to resolve congestion.
