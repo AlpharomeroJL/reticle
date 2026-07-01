@@ -11,6 +11,8 @@ extend-exclude = [
     "CHANGELOG.md",
     "Cargo.lock",
     "reticle-autonomous-build-plan.md",
+    "*.min.js",
+    "docs/mermaid-init.js",
 ]
 
 [default.extend-words]
