@@ -31,7 +31,7 @@ use reticle_extract::Extractor;
 use reticle_geometry::{LayerId, Point, Rect};
 use reticle_io::{Gds, Oasis, parse_technology};
 use reticle_model::{
-    Camera, Document, Exporter, Importer, NetSpec, RouteReport, RouteRequest, Router, Rule,
+    Camera, Cell, Document, Exporter, Importer, NetSpec, RouteReport, RouteRequest, Router, Rule,
     RuleKind, RuleSet, Technology, Violation,
 };
 use reticle_render::{WgpuContext, WgpuRenderer};
@@ -325,9 +325,30 @@ pub fn default_rules(doc: &Document) -> Vec<Rule> {
         .collect()
 }
 
+/// Flattens the hierarchy under `top` into a single-cell [`Document`] for checking.
+///
+/// The returned document has exactly one cell, named `top`, whose shapes are the
+/// fully expanded geometry of `top` in `doc` — every instance and array resolved with
+/// its composed transform (see [`Document::flatten`]). The `drc`, `route`, and
+/// `extract` stages run against this so a hierarchical design is checked as the flat
+/// geometry it actually represents; a top cell that is a pure array of sub-cells (as
+/// `xtask gen-layout` produces) would otherwise expose no own geometry to check. The
+/// document's technology is carried over so tech-derived DRC rules still resolve.
+#[must_use]
+pub fn flatten_top_cell(doc: &Document, top: &str) -> Document {
+    let mut cell = Cell::new(top);
+    cell.shapes = doc.flatten(top);
+    let mut flat = Document::new();
+    flat.set_technology(doc.technology().clone());
+    flat.insert_cell(cell);
+    flat.set_top_cells(vec![top.to_owned()]);
+    flat
+}
+
 /// Runs DRC over `cell` of `doc` with `rules`, returning every [`Violation`].
 ///
-/// The check uses the cell's own geometry (hierarchy is not flattened); see the
+/// The check uses the cell's own geometry (hierarchy is not flattened); callers that
+/// want the whole design checked pass a [`flatten_top_cell`] document. See the
 /// `reticle-drc` crate docs for the semantics of each rule kind.
 ///
 /// # Errors
@@ -571,4 +592,47 @@ fn center_of(rect: &Rect) -> Point {
     let cx = i64::midpoint(i64::from(rect.min.x), i64::from(rect.max.x));
     let cy = i64::midpoint(i64::from(rect.min.y), i64::from(rect.max.y));
     Point::new(cx as i32, cy as i32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reticle_geometry::{Rect, Transform};
+    use reticle_model::{ArrayInstance, DrawShape, ShapeKind};
+
+    /// A pure-array top cell owns no geometry, so the un-flattened cell extracts to
+    /// zero nets; [`flatten_top_cell`] expands the array so the same design extracts
+    /// to the real per-element nets.
+    #[test]
+    fn flatten_top_cell_expands_array_hierarchy() {
+        let layer = LayerId::new(1, 0);
+        let mut leaf = Cell::new("leaf");
+        leaf.shapes.push(DrawShape::new(
+            layer,
+            ShapeKind::Rect(Rect::new(Point::new(0, 0), Point::new(10, 10))),
+        ));
+        let mut top = Cell::new("top");
+        top.arrays.push(ArrayInstance {
+            cell: "leaf".to_owned(),
+            transform: Transform::IDENTITY,
+            columns: 2,
+            rows: 1,
+            column_pitch: 100,
+            row_pitch: 100,
+        });
+        let mut doc = Document::new();
+        doc.insert_cell(leaf);
+        doc.insert_cell(top);
+        doc.set_top_cells(vec!["top".to_owned()]);
+
+        // The un-flattened top cell owns no shapes.
+        assert_eq!(run_extract(&doc, "top").expect("extract top").0, 0);
+
+        // Flattening resolves the 2x1 array into two disjoint placed rects.
+        let flat = flatten_top_cell(&doc, "top");
+        assert_eq!(flat.cell_count(), 1);
+        let (nets, sizes) = run_extract(&flat, "top").expect("extract flat");
+        assert_eq!(nets, 2, "two disjoint rects are two nets");
+        assert_eq!(sizes, vec![1, 1]);
+    }
 }
