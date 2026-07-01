@@ -10,6 +10,9 @@ ignore = [
     # `yaml-rust` is unmaintained (not vulnerable), reached only transitively via
     # gds21 -> layout21utils -> serde_yaml. No safe upgrade is available upstream.
     "RUSTSEC-2024-0320",
+    # `ttf-parser` is unmaintained (not vulnerable), reached only transitively via
+    # eframe -> egui-winit -> winit font handling. No safe upgrade is available.
+    "RUSTSEC-2026-0192",
 ]
 
 [licenses]
@@ -30,6 +33,9 @@ allow = [
     "CC0-1.0",
     "BSL-1.0",
     "OpenSSL",
+    # Font licenses for the fonts egui bundles (Ubuntu and emoji fonts).
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
 ]
 
 [bans]

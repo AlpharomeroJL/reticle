@@ -18,9 +18,13 @@ path = "src/lib.rs"
 name = "reticle-app"
 path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
+eframe = "0.35.0"
 reticle-geometry = { workspace = true }
 reticle-model = { workspace = true }
+reticle-index = { workspace = true }
 reticle-render = { workspace = true }
 reticle-sync = { workspace = true }
-# Wave 4 wires `egui`, `eframe`/`winit`, config, and the full tool state machine.
