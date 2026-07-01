@@ -8,6 +8,7 @@
 
 mod generator;
 mod media;
+mod perf;
 
 use reticle_io::Gds;
 use reticle_model::Exporter;
@@ -19,10 +20,7 @@ fn main() -> ExitCode {
     match args.first().map_or("", String::as_str) {
         "gen-layout" => gen_layout(&args[1..]),
         "capture-media" => cmd_capture_media(),
-        "perf-check" => {
-            println!("xtask perf-check (Wave 5 stub)");
-            ExitCode::SUCCESS
-        }
+        "perf-check" => perf::perf_check(),
         "" => {
             eprintln!("usage: xtask <gen-layout|capture-media|perf-check> [options]");
             ExitCode::FAILURE
