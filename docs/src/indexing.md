@@ -12,19 +12,24 @@ which tiles to stream at the current zoom.
 - **Uniform grid.** For uniformly distributed geometry, a uniform grid buckets
   shapes by cell and answers rectangle queries by scanning the covered cells. It is
   cheap to build and update.
-- **Tile and LOD pyramid.** For out-of-core browsing, shapes are bucketed into
-  tiles at several levels of detail. A renderer requests only the tiles inside the
-  view at the level appropriate to the zoom, so memory and draw work scale with what
-  is on screen rather than with the size of the design.
+- **Tile and LOD pyramid.** Shapes are bucketed into tiles at several levels of
+  detail. A renderer requests only the tiles inside the view at the level appropriate
+  to the zoom, so memory and draw work scale with what is on screen rather than with
+  the size of the design.
 
 All indices implement the shared `SpatialIndex` trait, so callers are generic over
 the structure. A brute-force `LinearIndex` implements the same trait and serves as
 the oracle the fast indices are property-tested against.
 
-## Out-of-core streaming
+## Zero-copy archive (the building block for out-of-core)
 
-Large layouts are stored in a zero-copy archive (`rkyv`) so they can be
-memory-mapped and streamed tile by tile without deserializing the whole design.
+An index payload serializes to a zero-copy `rkyv` archive laid out exactly as its
+in-memory form, so a caller can read shape rectangles — and index a single entry —
+straight from the bytes with no parsing or allocation, validated by `rkyv`'s
+`bytecheck`. This is the primitive a memory-mapped, larger-than-RAM layout would sit
+on. The disk/mmap paging layer and its renderer integration are **not yet wired up**
+today (the API is exercised over in-memory buffers); the out-of-core streaming ADR and
+`STATUS.md` record this precisely.
 
 ## Targets
 

@@ -5,27 +5,29 @@ Vulkan, Metal, or DX12 natively, with a WebGL2 fallback for reach (ADR 0009).
 
 ## GPU-driven culling
 
-The central trick for scale is to keep the hierarchy on the GPU. Rather than the
-CPU walking billions of leaf shapes, a compute shader builds the visible draw list
-from cell bounding boxes and the current view, and an indirect draw renders it.
-The CPU work per frame is proportional to the number of visible cells, not the size
-of the design. On the WebGL2 path, which has no compute, the draw list is built on
-the CPU instead.
+The central trick for scale is to keep the hierarchy on the GPU. Rather than the CPU
+walking billions of leaf shapes, a compute shader tests each cell's bounding box
+against the current view and flags the visible ones — the first stage of a GPU-driven
+draw list (compacting the survivors into an indirect draw is a follow-up). The work is
+proportional to the number of cells considered, not the flattened shape count. The
+interactive egui canvas currently culls on the CPU with the same R-tree, and the GPU
+compute cull is validated against that CPU result in a golden test.
 
-## Instanced draws, tiles, and LOD
+## Instanced draws and tessellation
 
-Geometry is tessellated once into vertex and index buffers (`lyon`) and drawn with
-per-layer style through instanced draws. A tile and level-of-detail pyramid swaps
-dense geometry for coarser representations as the camera zooms out, so a full-chip
-view costs no more than a zoomed-in one. Edges are anti-aliased, and labels are
-drawn from a glyph atlas (`glyphon`).
+Axis-aligned rectangles are drawn as instanced quads; polygons and paths are
+tessellated once into vertex and index buffers (`lyon`) and drawn with per-layer style.
+Colors come from the technology layer table with a fallback palette. A tile and
+level-of-detail pyramid in the index provides coarser representations for zoomed-out
+browsing.
 
-## Overlays and views
+## Offscreen rendering
 
-On top of the base layers the renderer draws a minimap, design-rule violation
-markers, highlighted nets, and an optional 3D cross-section of the layer stack. It
-renders either to a window surface or to an offscreen texture; the offscreen path
-drives both the golden-image tests and the media capture.
+The renderer renders to an offscreen texture today — the path that drives both the
+golden-image tests and the media capture (the hero image and browse GIF). Window and
+surface presentation, and overlays (a minimap, design-rule violation markers,
+highlighted nets, and a 3D layer-stack cross-section), are tracked follow-ups noted in
+`STATUS.md`; the render crate's module docs frame them the same way.
 
 ## Targets
 
