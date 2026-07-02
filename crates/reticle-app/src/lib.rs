@@ -13,6 +13,7 @@
 //! * [`culling`], viewport culling over a spatial index, plus level-of-detail.
 //! * [`tool`], the Select/Pan/Measure tool state machine.
 //! * [`measure`], distance measurement in DBU and microns.
+//! * [`minimap`], the overview panel's world-to-panel mapping and viewport rect.
 //! * [`layers`], the layer table, visibility, and name filter.
 //! * [`selection`], the shape-selection model and layer query.
 //! * [`grid`], grid spacing, snapping, and ruler ticks.
@@ -44,6 +45,7 @@ pub mod inspector;
 pub mod labels;
 pub mod layers;
 pub mod measure;
+pub mod minimap;
 pub mod netlight;
 pub mod selection;
 pub mod session;

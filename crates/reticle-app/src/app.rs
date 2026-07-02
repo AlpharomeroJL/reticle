@@ -31,6 +31,7 @@ use crate::history::History;
 use crate::inspector::{self, Inspection};
 use crate::labels;
 use crate::layers::{self, LayerState};
+use crate::minimap::MinimapLayout;
 use crate::netlight::{Generation, Netlight};
 use crate::selection::{self, Selection};
 use crate::tool::{Tool, ToolState};
@@ -84,6 +85,8 @@ pub struct App {
     /// Whether the canvas text-label overlay (cell names, selection captions, live
     /// dimensions) is drawn.
     labels_visible: bool,
+    /// Whether the minimap overview panel is drawn (and steals clicks inside it).
+    minimap_visible: bool,
     /// The name of the top cell being viewed.
     top_cell: String,
 
@@ -164,6 +167,7 @@ impl App {
             selection: Selection::new(),
             grid: GridSettings::default(),
             labels_visible: true,
+            minimap_visible: true,
             top_cell: demo::TOP_CELL.to_owned(),
             scene,
             doc_generation: 0,
@@ -467,6 +471,7 @@ impl App {
             ui.checkbox(&mut self.grid.visible, "Grid");
             ui.checkbox(&mut self.grid.snap_enabled, "Snap");
             ui.checkbox(&mut self.labels_visible, "Labels");
+            ui.checkbox(&mut self.minimap_visible, "Minimap");
             ui.separator();
             if ui.button("Palette (Ctrl+P)").clicked() {
                 self.palette_open = !self.palette_open;
@@ -842,6 +847,9 @@ impl App {
         if self.labels_visible {
             self.draw_labels(&painter, &screen);
         }
+        if self.minimap_visible {
+            self.draw_minimap(&painter, &screen);
+        }
         self.draw_presence(&painter, &screen);
 
         screen
@@ -860,6 +868,20 @@ impl App {
             self.cursor_world = Some(self.grid.snap(raw));
         } else {
             self.cursor_world = None;
+        }
+
+        // Minimap navigation: a click or drag inside the panel recenters the view
+        // there and consumes the input so no tool acts on it.
+        if self.minimap_visible
+            && (response.clicked() || response.dragged())
+            && let (Some(bounds), Some(pos)) =
+                (self.scene.bounds(), response.interact_pointer_pos())
+            && let Some(layout) = MinimapLayout::compute(screen, bounds)
+            && layout.contains(pos.x, pos.y)
+        {
+            let center = layout.panel_to_world(pos.x, pos.y);
+            self.camera = ViewCamera::new(center, self.camera.pixels_per_dbu());
+            return;
         }
 
         // Zoom to cursor on scroll, regardless of tool.
@@ -1383,6 +1405,66 @@ impl App {
                 Color32::from_rgb(255, 210, 90),
             );
         }
+    }
+
+    /// Draws the minimap overlay: document overview, placements, and the viewport.
+    ///
+    /// All geometry comes from [`MinimapLayout`]; this method only paints the
+    /// rectangles it computes. The click/drag recentering lives at the top of
+    /// [`App::process_canvas_input`] using the same layout, so what is drawn and
+    /// what is clickable can never disagree.
+    fn draw_minimap(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        let Some(bounds) = self.scene.bounds() else {
+            return;
+        };
+        let Some(layout) = MinimapLayout::compute(screen, bounds) else {
+            return;
+        };
+        let panel = EguiRect::from_min_size(
+            Pos2::new(layout.panel.left, layout.panel.top),
+            Vec2::new(layout.panel.width, layout.panel.height),
+        );
+        painter.rect_filled(panel, 3.0, Color32::from_rgba_unmultiplied(20, 23, 28, 230));
+        painter.rect_stroke(
+            panel,
+            3.0,
+            Stroke::new(1.0, Color32::from_rgb(70, 76, 90)),
+            StrokeKind::Middle,
+        );
+
+        // Document bounds outline.
+        let (bx, by, bw, bh) = layout.world_rect_to_panel(bounds);
+        let doc_rect = EguiRect::from_min_size(Pos2::new(bx, by), Vec2::new(bw, bh));
+        painter.rect_stroke(
+            doc_rect,
+            0.0,
+            Stroke::new(1.0, Color32::from_rgb(90, 100, 120)),
+            StrokeKind::Middle,
+        );
+
+        // Placement boxes give the overview its silhouette; cap the count so a
+        // huge document cannot make the minimap the most expensive draw call.
+        let fill = Color32::from_rgba_unmultiplied(90, 120, 170, 90);
+        for cb in culling::visible_cell_boxes(self.history.document(), &self.top_cell, bounds)
+            .into_iter()
+            .take(256)
+        {
+            let (x, y, w, h) = layout.world_rect_to_panel(cb.bbox);
+            painter.rect_filled(
+                EguiRect::from_min_size(Pos2::new(x, y), Vec2::new(w, h)),
+                0.0,
+                fill,
+            );
+        }
+
+        // The camera's visible world rectangle, clamped to the panel.
+        let (vx, vy, vw, vh) = layout.world_rect_to_panel(self.camera.visible_world_rect(screen));
+        painter.rect_stroke(
+            EguiRect::from_min_size(Pos2::new(vx, vy), Vec2::new(vw, vh)),
+            0.0,
+            Stroke::new(1.5, Color32::from_rgb(255, 210, 90)),
+            StrokeKind::Middle,
+        );
     }
 
     /// Draws remote collaborators' cursors from the sync presence map (stretch:
@@ -1914,6 +1996,26 @@ mod tests {
     fn label_overlay_defaults_on() {
         let app = App::new();
         assert!(app.labels_visible, "labels should be on out of the box");
+    }
+
+    #[test]
+    fn minimap_defaults_on_and_maps_the_demo_bounds() {
+        let app = App::new();
+        assert!(app.minimap_visible, "minimap should be on out of the box");
+        // The demo scene must produce a usable layout on a typical canvas, and a
+        // click at the mapped center must recenter to (nearly) that world point.
+        let screen = ScreenRect::new(0.0, 0.0, 800.0, 600.0);
+        let bounds = app.scene.bounds().expect("demo has bounds");
+        let layout = MinimapLayout::compute(&screen, bounds).expect("layout fits");
+        let world_center = Point::new(
+            i32::midpoint(bounds.min.x, bounds.max.x),
+            i32::midpoint(bounds.min.y, bounds.max.y),
+        );
+        let (px, py) = layout.world_to_panel(world_center);
+        assert!(layout.contains(px, py));
+        let back = layout.panel_to_world(px, py);
+        assert!((i64::from(back.x) - i64::from(world_center.x)).abs() < 100);
+        assert!((i64::from(back.y) - i64::from(world_center.y)).abs() < 100);
     }
 
     #[test]
