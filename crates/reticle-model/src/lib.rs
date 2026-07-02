@@ -15,6 +15,8 @@ use core::fmt;
 mod document;
 mod edit;
 mod editable;
+mod hash;
+mod pins;
 mod rules;
 mod traits;
 
@@ -24,6 +26,8 @@ pub use document::{
 };
 pub use edit::Edit;
 pub use editable::EditableDocument;
+pub use hash::document_hash;
+pub use pins::{Anchor, Label, Pin, PinDirection};
 pub use rules::{Rule, RuleKind, RuleSet, Violation};
 pub use traits::{
     Camera, DocumentStore, Exporter, Importer, NetSpec, Renderer, RouteReport, RouteRequest, Router,

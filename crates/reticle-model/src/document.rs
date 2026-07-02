@@ -95,6 +95,10 @@ pub struct Cell {
     pub instances: Vec<Instance>,
     /// Arrayed placements of other cells.
     pub arrays: Vec<ArrayInstance>,
+    /// Text labels owned by this cell (GDSII TEXT records).
+    pub labels: Vec<crate::Label>,
+    /// Named terminals (pins) this cell exposes.
+    pub pins: Vec<crate::Pin>,
 }
 
 impl Cell {
