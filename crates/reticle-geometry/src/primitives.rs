@@ -4,7 +4,9 @@
 use crate::Dbu;
 
 /// A point on the integer database-unit (DBU) grid.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, Hash, Debug, Default, serde::Serialize, serde::Deserialize,
+)]
 pub struct Point {
     /// X coordinate in DBU.
     pub x: Dbu,
@@ -44,7 +46,9 @@ impl Point {
 ///
 /// Invariant: `min.x <= max.x` and `min.y <= max.y`. Construct via [`Rect::new`]
 /// (which normalizes) or [`Rect::from_points`].
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, Hash, Debug, Default, serde::Serialize, serde::Deserialize,
+)]
 pub struct Rect {
     /// Lower-left corner (minimum x and y).
     pub min: Point,

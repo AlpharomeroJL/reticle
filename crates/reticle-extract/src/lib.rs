@@ -41,12 +41,14 @@
 
 mod compare;
 mod connectivity;
+mod intent;
 mod netlist;
 mod rules;
 mod union_find;
 
 pub use compare::{NetlistDiff, ShapePair, compare_netlists};
 pub use connectivity::{build_components, rects_touch, shape_covers_point, shapes_touch};
+pub use intent::{ForbiddenPair, IntentNet, IntentReport, IntentSpec, Open, Short, Terminal};
 pub use netlist::{Net, NetLabel, Netlist};
 pub use rules::{ConnectionRule, ConnectionRules};
 pub use union_find::DisjointSet;

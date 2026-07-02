@@ -52,7 +52,9 @@ produce v5.0.0.
 
 ### Frozen-surface manifest (read-only to Wave 1+ lanes; only the integration agent amends, at a wave boundary, with an ADR)
 
-- reticle-agent-api: AgentCommand, AgentResponse, AgentError/ErrorCode, ElementId, Revision, CommandResult; args::{PointArg,RectArg,LayerArg,EndcapArg,OrientationArg,TransformArg}; CommandRecord/Transcript/Outcome; IntentSpec/IntentNet/Terminal/ForbiddenPair/IntentReport/Open/Short; AgentStatus/AGENT_ACTOR.
+- reticle-agent-api: AgentCommand, AgentResponse, AgentError/ErrorCode, ElementId, Revision, CommandResult; args::{PointArg,RectArg,LayerArg,EndcapArg,OrientationArg,TransformArg}; CommandRecord/Transcript/Outcome; AgentStatus/AGENT_ACTOR. Re-exports the intent types from reticle-extract.
+- reticle-extract: IntentSpec/IntentNet/Terminal/ForbiddenPair/IntentReport/Open/Short (ADR 0021; the checker lands in Lane 1B here).
+- reticle-geometry: serde derives on Point, Rect, LayerId (ADR 0021).
 - reticle-model: Label/Pin/Anchor/PinDirection; Edit::AddLabel/RemoveLabel; Cell.labels/pins; Violation structured fields (kind/layer/other_layer/measured/required) + Violation::new; document_hash; StackEntry + Technology.stack (from Wave R).
 - reticle-bench: BenchTask/Tier/SuiteManifest/ResultRecord; Checker trait + CheckResult/CheckFailure.
 - reticle-demo: SubmitRequest/SubmitResponse/StatusResponse/CancelRequest/SessionState; LimitConfig.

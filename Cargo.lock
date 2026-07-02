@@ -4020,6 +4020,7 @@ dependencies = [
  "reticle-geometry",
  "reticle-index",
  "reticle-model",
+ "serde",
 ]
 
 [[package]]
@@ -4029,6 +4030,7 @@ dependencies = [
  "criterion",
  "i_overlay",
  "proptest",
+ "serde",
 ]
 
 [[package]]
