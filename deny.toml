@@ -15,13 +15,16 @@ ignore = [
     # `ttf-parser` is unmaintained (not vulnerable), reached only transitively via
     # eframe -> egui-winit -> winit font handling. No safe upgrade is available.
     "RUSTSEC-2026-0192",
-    # `quick-xml` 0.39 allows unbounded namespace-declaration allocation in NsReader
-    # (a memory-exhaustion DoS on untrusted XML). Reached only through the Linux
-    # accessibility stack (eframe -> winit -> smithay-client-toolkit -> wayland-scanner,
-    # plus zbus_xml), which is not compiled on our Windows or wasm targets, and Reticle
-    # never feeds untrusted XML through it. The fix is quick-xml >= 0.41, but
+    # `quick-xml` 0.39 has two companion advisories, both denial-of-service bugs on
+    # untrusted XML and both fixed only in >= 0.41: RUSTSEC-2026-0194 (quadratic time
+    # checking a start tag for duplicate attribute names) and RUSTSEC-2026-0195
+    # (unbounded namespace-declaration allocation in NsReader). quick-xml is reached
+    # only through the Linux accessibility stack (eframe -> winit ->
+    # smithay-client-toolkit -> wayland-scanner, plus zbus_xml), which is not compiled
+    # on our Windows or wasm targets, and Reticle never feeds untrusted XML through it.
     # wayland-scanner 0.31 pins `^0.39`, so no upgrade is reachable without forking the
     # eframe 0.35 winit chain. Revisit when eframe updates its winit/smithay chain.
+    "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
 ]
 
