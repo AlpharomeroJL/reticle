@@ -3,9 +3,9 @@
 //!
 //! A [`Session`] is the stateful target of [`AgentCommand`](crate::AgentCommand)s.
 //! It owns an [`EditableDocument`], a monotonic [`revision`](Session::revision), a
-//! [`Vec`] of [`CommandRecord`]s, and an [`Allocator`] that maps each stable
-//! [`ElementId`] to the element it addresses. The apply loop lives in
-//! [`apply`](crate::apply); this module owns the state and the id bookkeeping.
+//! [`Vec`] of [`CommandRecord`](crate::CommandRecord)s, and an [`Allocator`] that
+//! maps each stable [`ElementId`] to the element it addresses. The apply loop lives
+//! in the `apply` module; this module owns the state and the id bookkeeping.
 //!
 //! # Stable ids across removals
 //!
@@ -152,8 +152,7 @@ impl Allocator {
 ///
 /// Owns the editable document, a monotonic revision that advances on every applied
 /// mutation, the stable-id allocator, and the command transcript. Commands are
-/// dispatched through [`Session::apply`](crate::apply) (implemented in the
-/// [`apply`](crate::apply) module).
+/// dispatched through [`Session::apply`].
 #[derive(Debug, Default)]
 pub struct Session {
     /// The editable document the commands mutate.
@@ -213,9 +212,10 @@ impl Session {
     /// A serializable snapshot of the session: its command transcript.
     ///
     /// The document and the id allocator are both reproducible from the recorded
-    /// commands, so persisting the transcript is sufficient; [`from_snapshot_str`]
-    /// rebuilds an equivalent session by re-applying them. The snapshot carries the
-    /// `document_hash` of the current document so a load can be verified.
+    /// commands, so persisting the transcript is sufficient;
+    /// [`Self::from_snapshot_str`] rebuilds an equivalent session by re-applying
+    /// them. The snapshot carries the `document_hash` of the current document so a
+    /// load can be verified.
     pub(crate) fn snapshot_json(&self) -> serde_json::Value {
         let transcript = crate::Transcript {
             records: self.transcript.clone(),

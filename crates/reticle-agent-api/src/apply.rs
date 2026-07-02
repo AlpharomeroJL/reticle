@@ -1,20 +1,19 @@
 //! Applying an [`AgentCommand`] to a [`Session`].
 //!
 //! [`Session::apply`] is the single dispatch point over the engine: it converts the
-//! serde argument types to engine types, performs the operation against the
-//! [`EditableDocument`](reticle_model::EditableDocument) (or the read-only engines
-//! for queries), records a [`CommandRecord`], and returns a [`CommandResult`]. It
-//! never panics: every engine failure is mapped to an [`AgentError`] with a fitting
-//! [`ErrorCode`].
+//! serde argument types to engine types, performs the operation against the editable
+//! document (or the read-only engines for queries), records a [`CommandRecord`], and
+//! returns a [`CommandResult`]. It never panics: every engine failure is mapped to
+//! an [`AgentError`] with a fitting [`ErrorCode`].
 //!
 //! # Mutations and stable ids
 //!
-//! Mutating commands go through the [`Edit`](reticle_model::Edit) vocabulary so the
-//! document's undo history and revision stay correct, and they update the session's
-//! [`Allocator`](crate::session) so returned [`ElementId`]s keep addressing the
-//! elements they created. Because the edit vocabulary can only *append* shapes,
-//! [`AgentCommand::TransformShapes`] is modelled as a remove-then-append that
-//! rebinds the same id to the shape's new slot.
+//! Mutating commands go through the [`Edit`] vocabulary so the document's undo
+//! history and revision stay correct, and they update the session's stable-id
+//! allocator so returned [`ElementId`]s keep addressing the elements they created.
+//! Because the edit vocabulary can only *append* shapes, `TransformShapes` is
+//! modelled as a remove-then-append that rebinds the same id to the shape's new
+//! slot.
 
 use reticle_geometry::{
     Endcap, LayerId, Magnification, Orientation, Path, Point, Polygon, Rect, Transform,
