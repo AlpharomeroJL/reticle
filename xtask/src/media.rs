@@ -11,9 +11,11 @@ use reticle_app::minimap::MinimapLayout;
 use reticle_drc::DrcEngine;
 use reticle_geometry::{LayerId, Point, Rect};
 use reticle_model::{
-    Camera, Cell, Document, DrawShape, Rule, RuleKind, RuleSet, ShapeKind, StackEntry,
+    Camera, Cell, Document, DrawShape, LayerInfo, NetSpec, RouteRequest, Router, Rule, RuleKind,
+    RuleSet, ShapeKind, StackEntry,
 };
 use reticle_render::{OrbitCamera, WgpuContext, WgpuRenderer, render_stack_offscreen};
+use reticle_route::{MazeRouter, RouteConfig};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -23,6 +25,8 @@ const ACTIVE: LayerId = LayerId::new(2, 0);
 const POLY: LayerId = LayerId::new(3, 0);
 /// The demo technology's first metal layer.
 const METAL1: LayerId = LayerId::new(4, 0);
+/// The demo technology's second metal layer.
+const METAL2: LayerId = LayerId::new(5, 0);
 
 const HERO: (u32, u32) = (2560, 1440);
 const GIF: (u32, u32) = (960, 540);
@@ -58,7 +62,118 @@ pub fn capture(out_dir: &Path, only: Option<&str>) -> std::io::Result<bool> {
     if wants("minimap") {
         capture_minimap(&ctx, &mut renderer, out_dir)?;
     }
+    if wants("route") {
+        capture_route(&ctx, &mut renderer, out_dir)?;
+    }
     Ok(true)
+}
+
+/// Runs the real maze router over a small obstacle course and renders the routed
+/// paths with terminal markers to `route.png`.
+fn capture_route(
+    ctx: &WgpuContext,
+    renderer: &mut WgpuRenderer,
+    out_dir: &Path,
+) -> std::io::Result<()> {
+    const CELL: &str = "ROUTE_DEMO";
+    /// Per-net terminal marker colors.
+    const TERMINAL_COLORS: [[u8; 4]; 5] = [
+        [90, 200, 250, 255],
+        [255, 159, 10, 255],
+        [255, 45, 133, 255],
+        [88, 214, 141, 255],
+        [191, 90, 242, 255],
+    ];
+    let mut doc = route_demo_doc(CELL);
+    let request = route_demo_request(CELL);
+    let mut router = MazeRouter::with_config(
+        RouteConfig::new()
+            .with_pitch(200)
+            .with_spacing(100)
+            .with_wire_width(120)
+            .with_layers(2)
+            .with_via_cost(60),
+    );
+    let report = router.route(&mut doc, &request);
+    eprintln!(
+        "route demo: {} routed, {} failed, {} DBU of wire",
+        report.routed, report.failed, report.total_length_dbu
+    );
+
+    let bbox = document_bounds(&doc, CELL);
+    let camera = frame_camera(bbox, STILL, 0.94);
+    let mut rgba = renderer.render_document_offscreen(ctx, &doc, CELL, &camera, STILL);
+    let map = WorldMap::new(&camera, STILL);
+    let mut canvas = Canvas::new(&mut rgba, STILL);
+    for (index, net) in request.nets.iter().enumerate() {
+        let color = TERMINAL_COLORS[index % TERMINAL_COLORS.len()];
+        for terminal in &net.terminals {
+            let (x, y) = map.to_px(*terminal);
+            canvas.fill_rect(x - 6.0, y - 6.0, x + 6.0, y + 6.0, color);
+            canvas.stroke_rect(
+                x - 6.0,
+                y - 6.0,
+                x + 6.0,
+                y + 6.0,
+                1.0,
+                [255, 255, 255, 230],
+            );
+        }
+    }
+    save_png(&out_dir.join("route.png"), &rgba, STILL)?;
+    eprintln!("wrote {}", out_dir.join("route.png").display());
+    Ok(())
+}
+
+/// A routing obstacle course on the demo technology: metal-2 blocks in the middle
+/// of an otherwise empty cell. The technology gains a display entry for
+/// `(METAL1, 1)`, the upper routing plane the router addresses by datatype.
+fn route_demo_doc(cell_name: &str) -> Document {
+    let mut cell = Cell::new(cell_name);
+    cell.shapes.push(rect_shape(METAL2, 4000, 2000, 5200, 6000));
+    cell.shapes.push(rect_shape(METAL2, 6000, 1000, 7200, 4400));
+    cell.shapes.push(rect_shape(METAL2, 8000, 3600, 9200, 7000));
+
+    let mut tech = reticle_app::demo::demo_technology();
+    tech.layers.push(LayerInfo {
+        id: LayerId::new(4, 1),
+        name: "METAL1.UP".to_owned(),
+        color_rgba: 0x7F_B3_E8_FF,
+        visible: true,
+    });
+
+    let mut doc = Document::new();
+    doc.set_technology(tech);
+    doc.insert_cell(cell);
+    doc.set_top_cells(vec![cell_name.to_owned()]);
+    doc
+}
+
+/// The nets for the routing still: four left-to-right nets that must clear the
+/// obstacle field, plus one three-terminal vertical net that crosses them all.
+fn route_demo_request(cell_name: &str) -> RouteRequest {
+    let net = |name: &str, terminals: Vec<Point>| NetSpec {
+        name: name.to_owned(),
+        terminals,
+        layer: METAL1,
+    };
+    RouteRequest {
+        cell: cell_name.to_owned(),
+        nets: vec![
+            net("n1", vec![Point::new(1000, 1600), Point::new(11000, 2000)]),
+            net("n2", vec![Point::new(1000, 3200), Point::new(11000, 3600)]),
+            net("n3", vec![Point::new(1000, 4800), Point::new(11000, 5200)]),
+            net("n4", vec![Point::new(1000, 6400), Point::new(11000, 6800)]),
+            net(
+                "n5",
+                vec![
+                    Point::new(2600, 800),
+                    Point::new(2600, 7200),
+                    Point::new(1600, 7200),
+                ],
+            ),
+        ],
+    }
 }
 
 /// Renders a zoomed-in view of a generated layout with the app's minimap in the
