@@ -1,5 +1,9 @@
 # 0013, Out-of-core streaming: zero-copy primitive now, mmap paging deferred
 
+**Superseded by [ADR 0016](0016-memmap2-out-of-core-streaming.md)**: the mmap paging
+layer described below as deferred is now implemented, with exactly one documented
+`unsafe` block.
+
 ## Context
 
 The spec calls for browsing layouts too large to hold in RAM by streaming tiles/LOD

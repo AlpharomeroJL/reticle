@@ -15,9 +15,12 @@ workspace = true
 
 [dependencies]
 reticle-geometry = { workspace = true }
+memmap2 = "0.9.11"
 rkyv = "0.8.16"
 rstar = "0.13.0"
 # Wave 1 wires `rstar` (bulk-loaded R-tree) and `rkyv` (zero-copy streaming).
+# `memmap2` backs the out-of-core `StreamingIndex`: it maps a tiled archive so a
+# viewport query faults in only the pages it touches.
 
 [dev-dependencies]
 criterion = "0.8.2"
@@ -27,3 +30,6 @@ proptest = "1.11.0"
 [[bench]]
 name = "index_build"
 harness = false
+
+[[example]]
+name = "stream_demo"
