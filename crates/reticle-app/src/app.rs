@@ -29,6 +29,7 @@ use crate::fps::FrameMeter;
 use crate::grid::{self, GridSettings};
 use crate::history::History;
 use crate::inspector::{self, Inspection};
+use crate::keymap::{self, Keymap};
 use crate::labels;
 use crate::layers::{self, LayerState};
 use crate::minimap::MinimapLayout;
@@ -123,6 +124,13 @@ pub struct App {
     /// The net-highlight state: cached connectivity plus the highlighted net.
     netlight: Netlight,
 
+    /// The rebindable shortcut map every key press resolves through.
+    keymap: Keymap,
+    /// Whether the shortcuts editor window is open.
+    keymap_open: bool,
+    /// The action awaiting a new chord, when the editor is capturing one.
+    rebinding: Option<keymap::Action>,
+
     /// Whether the command palette window is open.
     palette_open: bool,
     /// The command-palette search query.
@@ -182,6 +190,9 @@ impl App {
             drc: DrcResults::new(),
             zoom_to_selected_violation: false,
             netlight: Netlight::new(),
+            keymap: load_keymap(),
+            keymap_open: false,
+            rebinding: None,
             palette_open: false,
             palette_query: String::new(),
             layer_query: String::new(),
@@ -381,10 +392,13 @@ impl App {
         self.status.set("PNG export is native-only");
     }
 
-    /// Handles global keyboard shortcuts (palette, tools, undo/redo, fit).
+    /// Handles global keyboard shortcuts by resolving every key press through the
+    /// rebindable [`Keymap`] (chords match modifiers exactly).
     ///
     /// Shortcuts are ignored while a text field has focus so typing in the palette
-    /// or query bar does not trigger them.
+    /// or query bar does not trigger them. While the shortcuts editor is capturing
+    /// a chord, the next key press rebinds the pending action instead of running
+    /// anything (Escape cancels the capture); Escape otherwise closes the palette.
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         // Suppress shortcuts while a text field owns keyboard focus so typing in the
         // palette or query bar does not trigger tool changes.
@@ -395,52 +409,79 @@ impl App {
             }
             return;
         }
-        let (ctrl, key_p, key_z, key_y, key_f, key_g, esc, key_s, key_m, key_v) = ctx.input(|i| {
-            let m = i.modifiers.command || i.modifiers.ctrl;
-            (
-                m,
-                i.key_pressed(egui::Key::P),
-                i.key_pressed(egui::Key::Z),
-                i.key_pressed(egui::Key::Y),
-                i.key_pressed(egui::Key::F),
-                i.key_pressed(egui::Key::G),
-                i.key_pressed(egui::Key::Escape),
-                i.key_pressed(egui::Key::S),
-                i.key_pressed(egui::Key::M),
-                i.key_pressed(egui::Key::V),
-            )
-        });
-        if ctrl && key_p {
-            self.palette_open = !self.palette_open;
-            self.palette_query.clear();
+        let chords = pressed_chords(ctx);
+
+        // Chord capture for the shortcuts editor: the next press rebinds.
+        if let Some(action) = self.rebinding {
+            if let Some(new_chord) = chords.into_iter().next() {
+                self.rebinding = None;
+                if new_chord.key == "Escape" {
+                    self.status.set("Rebind canceled");
+                } else {
+                    let shown = new_chord.to_string();
+                    let stolen = self.keymap.bind(action, Some(new_chord));
+                    match stolen.first() {
+                        Some(loser) => self.status.set(format!(
+                            "{} bound to {shown}; {} is now unbound",
+                            action.label(),
+                            loser.label()
+                        )),
+                        None => self
+                            .status
+                            .set(format!("{} bound to {shown}", action.label())),
+                    }
+                }
+            }
+            return;
         }
-        if esc {
+
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.palette_open = false;
         }
-        if ctrl && key_z {
-            self.run_command(Command::Undo, None);
-        }
-        if ctrl && key_y {
-            self.run_command(Command::Redo, None);
-        }
-        if ctrl && key_g {
-            self.run_command(Command::ToggleGrid, None);
-        }
-        if key_f && !ctrl {
-            self.run_command(Command::ZoomToFit, None);
-        }
-        // Single-key tool shortcuts (no modifier).
-        if !ctrl {
-            if key_v {
-                self.run_command(Command::SetTool(Tool::Select), None);
-            }
-            if key_s {
-                self.run_command(Command::SetTool(Tool::Pan), None);
-            }
-            if key_m {
-                self.run_command(Command::SetTool(Tool::Measure), None);
+        for chord in chords {
+            if let Some(action) = self.keymap.action_for(&chord) {
+                self.run_action(action);
             }
         }
+    }
+
+    /// Runs a rebindable [`keymap::Action`], funneling through
+    /// [`App::run_command`] wherever a palette command exists so shortcuts, the
+    /// toolbar, and the palette share one set of effects.
+    fn run_action(&mut self, action: keymap::Action) {
+        match action {
+            keymap::Action::OpenPalette => {
+                self.palette_open = !self.palette_open;
+                self.palette_query.clear();
+            }
+            keymap::Action::Undo => self.run_command(Command::Undo, None),
+            keymap::Action::Redo => self.run_command(Command::Redo, None),
+            keymap::Action::ZoomToFit => self.run_command(Command::ZoomToFit, None),
+            keymap::Action::ToggleGrid => self.run_command(Command::ToggleGrid, None),
+            keymap::Action::ToggleSnap => self.run_command(Command::ToggleSnap, None),
+            keymap::Action::ToolSelect => self.run_command(Command::SetTool(Tool::Select), None),
+            keymap::Action::ToolPan => self.run_command(Command::SetTool(Tool::Pan), None),
+            keymap::Action::ToolMeasure => self.run_command(Command::SetTool(Tool::Measure), None),
+            keymap::Action::ToggleLabels => {
+                self.labels_visible = !self.labels_visible;
+                self.status
+                    .set(format!("Labels {}", on_off(self.labels_visible)));
+            }
+            keymap::Action::ToggleMinimap => {
+                self.minimap_visible = !self.minimap_visible;
+                self.status
+                    .set(format!("Minimap {}", on_off(self.minimap_visible)));
+            }
+            keymap::Action::SplitSingle => self.set_split(Split::Single),
+            keymap::Action::SplitHorizontal => self.set_split(Split::Horizontal),
+            keymap::Action::SplitVertical => self.set_split(Split::Vertical),
+        }
+    }
+
+    /// Applies a pane split and reports it in the status bar.
+    fn set_split(&mut self, split: Split) {
+        self.viewports.set_split(split, &self.camera);
+        self.status.set(format!("View: {}", split.label()));
     }
 
     /// Draws the top toolbar: tool buttons, view actions, and the palette hint.
@@ -480,13 +521,20 @@ impl App {
             for split in Split::all() {
                 let selected = self.viewports.split() == split;
                 if ui.selectable_label(selected, split.label()).clicked() {
-                    self.viewports.set_split(split, &self.camera);
+                    self.set_split(split);
                 }
             }
             ui.separator();
-            if ui.button("Palette (Ctrl+P)").clicked() {
+            let palette_label = self
+                .keymap
+                .chord_for(keymap::Action::OpenPalette)
+                .map_or_else(|| "Palette".to_owned(), |c| format!("Palette ({c})"));
+            if ui.button(palette_label).clicked() {
                 self.palette_open = !self.palette_open;
                 self.palette_query.clear();
+            }
+            if ui.button("Shortcuts").clicked() {
+                self.keymap_open = !self.keymap_open;
             }
         });
     }
@@ -784,6 +832,75 @@ impl App {
         if let Some(cmd) = chosen {
             self.run_command(cmd, screen);
             self.palette_open = false;
+        }
+    }
+
+    /// Draws the shortcuts editor window: every action with its current chord,
+    /// rebind and clear controls, plus reset and (native) save.
+    ///
+    /// The chord capture itself happens in [`App::handle_shortcuts`]; this window
+    /// only arms it, so what the editor shows and what the keyboard does can
+    /// never disagree. Takeovers (binding a chord another action holds) are
+    /// reported through the status bar by the capture path.
+    fn keymap_window(&mut self, ctx: &egui::Context) {
+        if !self.keymap_open {
+            return;
+        }
+        let mut open = self.keymap_open;
+        egui::Window::new("Keyboard shortcuts")
+            .open(&mut open)
+            .resizable(true)
+            .default_pos(Pos2::new(260.0, 140.0))
+            .show(ctx, |ui| {
+                ui.label("Click Rebind, then press the new chord (Escape cancels).");
+                ui.label("Binding a chord another action holds unbinds that action.");
+                ui.separator();
+                egui::Grid::new("keymap_grid")
+                    .num_columns(3)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for action in keymap::Action::all() {
+                            ui.label(action.label());
+                            let chord_text = self
+                                .keymap
+                                .chord_for(action)
+                                .map_or_else(|| "(unbound)".to_owned(), ToString::to_string);
+                            ui.monospace(chord_text);
+                            ui.horizontal(|ui| {
+                                if self.rebinding == Some(action) {
+                                    ui.label("press keys...");
+                                } else if ui.small_button("Rebind").clicked() {
+                                    self.rebinding = Some(action);
+                                }
+                                if ui.small_button("Clear").clicked() {
+                                    self.keymap.bind(action, None);
+                                    if self.rebinding == Some(action) {
+                                        self.rebinding = None;
+                                    }
+                                }
+                            });
+                            ui.end_row();
+                        }
+                    });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Reset defaults").clicked() {
+                        self.keymap = Keymap::defaults();
+                        self.rebinding = None;
+                        self.status.set("Keymap reset to defaults");
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if ui.button("Save").clicked() {
+                        match keymap::save(&self.keymap) {
+                            Ok(()) => self.status.set("Keymap saved"),
+                            Err(e) => self.status.set(format!("Keymap save failed: {e}")),
+                        }
+                    }
+                });
+            });
+        self.keymap_open = open;
+        if !self.keymap_open {
+            self.rebinding = None;
         }
     }
 
@@ -1669,6 +1786,7 @@ impl eframe::App for App {
         });
 
         self.palette_window(&ctx, canvas_screen);
+        self.keymap_window(&ctx);
 
         // Keep animating while dragging/measuring so interaction feels live.
         ctx.request_repaint();
@@ -1693,6 +1811,9 @@ impl eframe::App for App {
                 &hidden,
             );
             let _ = crate::session::save(&state);
+            // The keymap persists alongside the session so rebinds survive exit
+            // even when the user never pressed Save in the editor.
+            let _ = keymap::save(&self.keymap);
         }
     }
 }
@@ -1790,6 +1911,42 @@ impl eframe::egui_wgpu::CallbackTrait for SceneCallback {
             renderer.paint(render_pass);
         }
     }
+}
+
+/// The chords pressed this frame, in event order, using egui's canonical key
+/// names so each one can be looked up in the [`Keymap`] with a string compare.
+fn pressed_chords(ctx: &egui::Context) -> Vec<keymap::Chord> {
+    ctx.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } => Some(keymap::Chord {
+                    ctrl: modifiers.command || modifiers.ctrl,
+                    shift: modifiers.shift,
+                    alt: modifiers.alt,
+                    key: key.name().to_owned(),
+                }),
+                _ => None,
+            })
+            .collect()
+    })
+}
+
+/// The keymap to start with: the saved file on native (defaults if absent).
+#[cfg(not(target_arch = "wasm32"))]
+fn load_keymap() -> Keymap {
+    keymap::load().map_or_else(Keymap::default, |(map, _warnings)| map)
+}
+
+/// The keymap to start with: always the defaults on the web (no filesystem).
+#[cfg(target_arch = "wasm32")]
+fn load_keymap() -> Keymap {
+    Keymap::default()
 }
 
 /// Converts a canvas [`ScreenRect`] to an egui rectangle.
@@ -2130,6 +2287,40 @@ mod tests {
         let back = layout.panel_to_world(px, py);
         assert!((i64::from(back.x) - i64::from(world_center.x)).abs() < 100);
         assert!((i64::from(back.y) - i64::from(world_center.y)).abs() < 100);
+    }
+
+    #[test]
+    fn run_action_routes_keymap_actions_to_their_effects() {
+        let mut app = App::new();
+        app.run_action(keymap::Action::ToolMeasure);
+        assert_eq!(app.tools.active(), Tool::Measure);
+        let labels_before = app.labels_visible;
+        app.run_action(keymap::Action::ToggleLabels);
+        assert_ne!(app.labels_visible, labels_before);
+        let minimap_before = app.minimap_visible;
+        app.run_action(keymap::Action::ToggleMinimap);
+        assert_ne!(app.minimap_visible, minimap_before);
+        app.run_action(keymap::Action::SplitHorizontal);
+        assert_eq!(app.viewports.pane_count(), 2);
+        app.run_action(keymap::Action::SplitSingle);
+        assert_eq!(app.viewports.pane_count(), 1);
+        app.run_action(keymap::Action::OpenPalette);
+        assert!(app.palette_open);
+    }
+
+    #[test]
+    fn rebinding_through_the_map_redirects_the_action() {
+        let mut app = App::new();
+        // Force a known map so the test does not depend on any user keymap file.
+        app.keymap = Keymap::defaults();
+        let chord = keymap::Chord::parse("Ctrl+Shift+Q").expect("valid chord");
+        assert_eq!(app.keymap.action_for(&chord), None);
+        let stolen = app.keymap.bind(keymap::Action::Redo, Some(chord.clone()));
+        assert!(stolen.is_empty());
+        assert_eq!(app.keymap.action_for(&chord), Some(keymap::Action::Redo));
+        // The old default no longer fires.
+        let old = keymap::Chord::parse("Ctrl+Y").expect("valid chord");
+        assert_eq!(app.keymap.action_for(&old), None);
     }
 
     #[test]

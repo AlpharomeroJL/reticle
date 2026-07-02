@@ -21,6 +21,7 @@
 //!   selection captions, live dimensions).
 //! * [`history`], the [`reticle_model::EditableDocument`] undo/redo wrapper.
 //! * [`command`], the command-palette catalog and fuzzy filter.
+//! * [`keymap`], rebindable keyboard shortcuts: TOML load/save and conflicts.
 //! * [`drc_panel`], running the DRC engine and formatting its violations.
 //! * [`netlight`], cached connectivity extraction for net highlighting.
 //! * [`inspector`], the read-only properties summary of the selection.
@@ -43,6 +44,7 @@ pub mod fps;
 pub mod grid;
 pub mod history;
 pub mod inspector;
+pub mod keymap;
 pub mod labels;
 pub mod layers;
 pub mod measure;
