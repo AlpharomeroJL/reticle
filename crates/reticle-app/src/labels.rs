@@ -64,7 +64,7 @@ pub fn estimated_text_width(text: &str, font_px: f32) -> f32 {
 
 /// Whether `text` fits comfortably inside a `width x height` pixel box.
 ///
-/// The text may fill at most [`MAX_FILL`] of the width, and the box must be at
+/// The text may fill at most `MAX_FILL` of the width, and the box must be at
 /// least one line tall, so labels never spill outside the outline they annotate.
 #[must_use]
 pub fn fits(text: &str, width: f32, height: f32, font_px: f32) -> bool {
