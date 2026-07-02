@@ -792,6 +792,20 @@ impl App {
                 }
             }
             Tool::Select => self.handle_select_input(ctx, response, screen),
+            Tool::CutLine => {
+                if response.clicked()
+                    && let Some(pos) = response.interact_pointer_pos()
+                {
+                    let raw = self.camera.screen_to_world(screen, pos.x, pos.y);
+                    let world = self.grid.snap(raw);
+                    if let Some((a, b)) = self.tools.cutline_click(world) {
+                        self.status
+                            .set(format!("Cut ({}, {}) -> ({}, {})", a.x, a.y, b.x, b.y));
+                    } else {
+                        self.status.set("Cut line: pick the second point");
+                    }
+                }
+            }
         }
     }
 
@@ -1254,6 +1268,13 @@ impl eframe::App for App {
             frame,
             self.history.document(),
             &self.top_cell,
+            &self.layer_state,
+        );
+        crate::xsection::window(
+            &ctx,
+            self.tools.cut_line(),
+            self.scene.shapes(),
+            self.history.document().technology(),
             &self.layer_state,
         );
 
