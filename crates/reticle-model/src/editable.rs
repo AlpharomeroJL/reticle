@@ -25,6 +25,10 @@ enum Reverse {
     PopInstance(String),
     /// Undo an appended array by popping it.
     PopArray(String),
+    /// Undo an appended label by popping it.
+    PopLabel(String),
+    /// Undo a removed label by re-inserting it at its original index.
+    InsertLabel(String, usize, Box<crate::Label>),
 }
 
 /// A [`Document`] paired with a transactional undo/redo history.
@@ -174,6 +178,23 @@ impl EditableDocument {
                 target.arrays.push(array.clone());
                 Ok(Reverse::PopArray(cell.clone()))
             }
+            Edit::AddLabel { cell, label } => {
+                let target = doc
+                    .cell_mut(cell)
+                    .ok_or_else(|| ModelError::CellNotFound(cell.clone()))?;
+                target.labels.push(label.clone());
+                Ok(Reverse::PopLabel(cell.clone()))
+            }
+            Edit::RemoveLabel { cell, index } => {
+                let target = doc
+                    .cell_mut(cell)
+                    .ok_or_else(|| ModelError::CellNotFound(cell.clone()))?;
+                if *index >= target.labels.len() {
+                    return Err(ModelError::IndexOutOfBounds(*index));
+                }
+                let label = target.labels.remove(*index);
+                Ok(Reverse::InsertLabel(cell.clone(), *index, Box::new(label)))
+            }
         }
     }
 
@@ -204,6 +225,16 @@ impl EditableDocument {
             Reverse::PopArray(cell) => {
                 if let Some(target) = doc.cell_mut(&cell) {
                     target.arrays.pop();
+                }
+            }
+            Reverse::PopLabel(cell) => {
+                if let Some(target) = doc.cell_mut(&cell) {
+                    target.labels.pop();
+                }
+            }
+            Reverse::InsertLabel(cell, index, label) => {
+                if let Some(target) = doc.cell_mut(&cell) {
+                    target.labels.insert(index, *label);
                 }
             }
         }

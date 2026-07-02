@@ -4,7 +4,7 @@
 //! transactional application and inverse computation live in
 //! [`EditableDocument`](crate::EditableDocument); the enum here is the contract.
 
-use crate::{ArrayInstance, Cell, DrawShape, Instance};
+use crate::{ArrayInstance, Cell, DrawShape, Instance, Label};
 
 /// A single, reversible mutation of a document.
 #[derive(Clone, Debug)]
@@ -47,6 +47,20 @@ pub enum Edit {
         cell: String,
         /// The array to add.
         array: ArrayInstance,
+    },
+    /// Append a label to a cell.
+    AddLabel {
+        /// Target cell name.
+        cell: String,
+        /// The label to add.
+        label: Label,
+    },
+    /// Remove the label at `index` from a cell.
+    RemoveLabel {
+        /// Target cell name.
+        cell: String,
+        /// Index of the label to remove.
+        index: usize,
     },
 }
 

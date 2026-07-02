@@ -132,6 +132,7 @@ fn cell() -> impl Strategy<Value = Cell> {
             shapes,
             instances,
             arrays,
+            ..Cell::default()
         })
 }
 
