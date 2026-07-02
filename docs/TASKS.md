@@ -65,7 +65,7 @@ produce v5.0.0.
 
 - [~] Lane A: reticle-agent-api implementation, property tests, transcript logger/replayer. in-progress @ lane/1a-agent-api
 - [x] Lane B: intent checker in reticle-extract, oracle tests both directions. done-gate-green, merged. check_intent(doc,cell,spec)->IntentReport + sky130_connection_rules; 10 tests incl. two-direction perturbation proptests (break->open, bridge->short). TODO: wire agent-api CheckIntent (Lane A stub) to this.
-- [~] Lane C: pins and labels through model and io, GDS TEXT round-trip. in-progress @ lane/1c-pins-io
+- [x] Lane C: pins and labels through model and io, GDS TEXT round-trip. done-gate-green, merged. GDSII TEXT<->Label import/export + OASIS label subset (v3); 8 tests; anchors collapse to Center through GDS (gds21 presentation fields private), preserved in OASIS.
 - [x] Lane D: SKY130 DRC subset over reticle-drc, coverage table, per-rule fixtures. done-gate-green, merged. sky130_drc_rules() loads 26 cited rules from the toml; 24 tests (9 both-direction); coverage page in the book. toml pinned =1.1.2.
 - [ ] Lane E: sky130_fd_sc_hd cell import, corpus samples, DRC-clean gate. not-started
 - [ ] Lane F: benchmark infrastructure, mock model, `just bench-agent`. not-started
