@@ -9,6 +9,7 @@
 
 mod generator;
 mod media;
+mod overlay;
 mod perf;
 
 use reticle_io::Gds;

@@ -5976,6 +5976,7 @@ version = "3.0.0"
 dependencies = [
  "image",
  "reticle-app",
+ "reticle-drc",
  "reticle-geometry",
  "reticle-io",
  "reticle-model",

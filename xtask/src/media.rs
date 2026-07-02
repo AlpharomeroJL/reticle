@@ -4,12 +4,23 @@
 //! paths, writes PNG frames with the `image` crate, and assembles GIFs with the
 //! installed `gifski` CLI. Skips gracefully when no GPU adapter is available.
 
+use crate::overlay::{Canvas, WorldMap};
 use image::{ImageBuffer, Rgba};
+use reticle_drc::DrcEngine;
 use reticle_geometry::{LayerId, Point, Rect};
-use reticle_model::{Camera, Document, StackEntry};
+use reticle_model::{
+    Camera, Cell, Document, DrawShape, Rule, RuleKind, RuleSet, ShapeKind, StackEntry,
+};
 use reticle_render::{OrbitCamera, WgpuContext, WgpuRenderer, render_stack_offscreen};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// The demo technology's diffusion layer.
+const ACTIVE: LayerId = LayerId::new(2, 0);
+/// The demo technology's polysilicon layer.
+const POLY: LayerId = LayerId::new(3, 0);
+/// The demo technology's first metal layer.
+const METAL1: LayerId = LayerId::new(4, 0);
 
 const HERO: (u32, u32) = (2560, 1440);
 const GIF: (u32, u32) = (960, 540);
@@ -39,7 +50,101 @@ pub fn capture(out_dir: &Path, only: Option<&str>) -> std::io::Result<bool> {
     if wants("stack3d") {
         capture_stack3d(&ctx, out_dir)?;
     }
+    if wants("drc") {
+        capture_drc(&ctx, &mut renderer, out_dir)?;
+    }
     Ok(true)
+}
+
+/// Runs real DRC on a small deliberately broken layout and renders the geometry
+/// with a marker over every violation to `drc.png`.
+fn capture_drc(
+    ctx: &WgpuContext,
+    renderer: &mut WgpuRenderer,
+    out_dir: &Path,
+) -> std::io::Result<()> {
+    const CELL: &str = "DRC_DEMO";
+    /// The marker stroke color.
+    const MARKER: [u8; 4] = [255, 45, 85, 255];
+    let (doc, rules) = drc_demo_doc(CELL);
+    let engine = DrcEngine::new(rules);
+    let violations = engine.check_cell(&doc, CELL);
+    eprintln!("drc demo: {} violations", violations.len());
+
+    let bbox = document_bounds(&doc, CELL);
+    let camera = frame_camera(bbox, STILL, 0.94);
+    let mut rgba = renderer.render_document_offscreen(ctx, &doc, CELL, &camera, STILL);
+
+    let map = WorldMap::new(&camera, STILL);
+    let mut canvas = Canvas::new(&mut rgba, STILL);
+    for violation in &violations {
+        let (x0, y0, x1, y1) = map.rect_to_px(violation.location);
+        canvas.fill_rect(x0, y0, x1, y1, [255, 45, 85, 56]);
+        canvas.stroke_rect(x0 - 3.0, y0 - 3.0, x1 + 3.0, y1 + 3.0, 3.0, MARKER);
+        canvas.stroke_rect(x0, y0, x1, y1, 1.0, [255, 255, 255, 220]);
+    }
+    save_png(&out_dir.join("drc.png"), &rgba, STILL)?;
+    eprintln!("wrote {}", out_dir.join("drc.png").display());
+    Ok(())
+}
+
+/// A small flat layout on the demo technology that deliberately breaks three
+/// rules: two metal-1 pairs sit 160 DBU apart (spacing >= 300), one poly line is
+/// 140 DBU wide (width >= 200), and one diffusion pad is under the minimum area.
+fn drc_demo_doc(cell_name: &str) -> (Document, Vec<Rule>) {
+    let mut cell = Cell::new(cell_name);
+    let shapes = &mut cell.shapes;
+    // Metal-1 buses and stubs at legal spacing.
+    shapes.push(rect_shape(METAL1, 800, 1000, 11200, 1400));
+    shapes.push(rect_shape(METAL1, 800, 2000, 11200, 2400));
+    shapes.push(rect_shape(METAL1, 800, 3000, 11200, 3400));
+    shapes.push(rect_shape(METAL1, 1000, 4200, 1400, 6800));
+    shapes.push(rect_shape(METAL1, 1800, 4200, 2200, 6800));
+    // Two metal-1 pairs with a 160 DBU gap: spacing violations.
+    shapes.push(rect_shape(METAL1, 2600, 4200, 4200, 4600));
+    shapes.push(rect_shape(METAL1, 4360, 4200, 5800, 4600));
+    shapes.push(rect_shape(METAL1, 7000, 4600, 7400, 6800));
+    shapes.push(rect_shape(METAL1, 7560, 4600, 7960, 6800));
+    // Poly lines at legal width, plus one 140 DBU sliver: width violation.
+    shapes.push(rect_shape(POLY, 8600, 4600, 8900, 7200));
+    shapes.push(rect_shape(POLY, 9300, 4600, 9600, 7200));
+    shapes.push(rect_shape(POLY, 10000, 4600, 10300, 7200));
+    shapes.push(rect_shape(POLY, 10700, 4600, 10840, 7200));
+    // Diffusion pads, plus one tiny pad under the minimum area.
+    shapes.push(rect_shape(ACTIVE, 2800, 5000, 4800, 6400));
+    shapes.push(rect_shape(ACTIVE, 6800, 1200, 8300, 2300));
+    shapes.push(rect_shape(ACTIVE, 3400, 6800, 3900, 7200));
+
+    let mut doc = Document::new();
+    doc.set_technology(reticle_app::demo::demo_technology());
+    doc.insert_cell(cell);
+    doc.set_top_cells(vec![cell_name.to_owned()]);
+
+    let rules = vec![
+        rule("M1.S1 spacing >= 0.30um", RuleKind::Spacing, METAL1, 300),
+        rule("PO.W1 width >= 0.20um", RuleKind::Width, POLY, 200),
+        rule("AA.A1 area >= 1.0um^2", RuleKind::Area, ACTIVE, 1_000_000),
+    ];
+    (doc, rules)
+}
+
+/// A rectangle shape on `layer` from corner coordinates.
+fn rect_shape(layer: LayerId, x0: i32, y0: i32, x1: i32, y1: i32) -> DrawShape {
+    DrawShape::new(
+        layer,
+        ShapeKind::Rect(Rect::new(Point::new(x0, y0), Point::new(x1, y1))),
+    )
+}
+
+/// A single-layer rule with the given threshold.
+fn rule(name: &str, kind: RuleKind, layer: LayerId, value: i64) -> Rule {
+    Rule {
+        name: name.to_owned(),
+        kind,
+        layer,
+        other_layer: None,
+        value,
+    }
 }
 
 /// Renders the dense generated layout as the hero image and the browse zoom GIF.
