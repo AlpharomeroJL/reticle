@@ -578,21 +578,52 @@ fn export_oasis_produces_bytes() {
     assert!(!bytes.is_empty());
 }
 
-// ===== intent stub ==========================================================
+// ===== intent checking ======================================================
 
 #[test]
-fn check_intent_is_stubbed_with_engine_error() {
+fn check_intent_runs_the_checker() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    // A met1 rectangle the terminal lands on.
+    s.apply(AgentCommand::AddRect {
+        cell: "top".into(),
+        layer: layer(68, 20),
+        rect: RectArg {
+            min: PointArg { x: 0, y: 0 },
+            max: PointArg { x: 100, y: 100 },
+        },
+    })
+    .unwrap();
+    // One net with one terminal over the rectangle: trivially connected.
+    let intent = r#"{"nets":[{"name":"n1","terminals":[{"name":"n1","layer":{"layer":68,"datatype":20},"region":{"min":{"x":10,"y":10},"max":{"x":20,"y":20}}}]}],"forbidden":[]}"#;
+    let resp = s
+        .apply(AgentCommand::CheckIntent {
+            cell: "top".into(),
+            intent: intent.into(),
+        })
+        .expect("check_intent runs against the extract checker");
+    match resp {
+        AgentResponse::Data { value, .. } => {
+            assert!(value.get("opens").is_some(), "report has an opens field");
+            assert!(value.get("shorts").is_some(), "report has a shorts field");
+        }
+        other => panic!("expected structured data, got {other:?}"),
+    }
+}
+
+#[test]
+fn check_intent_rejects_a_malformed_spec() {
     let mut s = Session::new();
     s.apply(AgentCommand::CreateCell { name: "top".into() })
         .unwrap();
     let err = s
         .apply(AgentCommand::CheckIntent {
             cell: "top".into(),
-            intent: "{}".into(),
+            intent: "not valid json".into(),
         })
-        .expect_err("intent is stubbed");
-    assert_eq!(err.code, ErrorCode::EngineError);
-    assert!(err.message.contains("intent"));
+        .expect_err("a malformed intent spec is rejected");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
 }
 
 // ===== session persistence ==================================================
