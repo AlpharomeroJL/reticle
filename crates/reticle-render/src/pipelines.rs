@@ -32,6 +32,10 @@ pub struct Pipelines {
     retained_rect_pipeline: RenderPipeline,
     /// The color format these pipelines were built for.
     format: TextureFormat,
+    /// The multisample count the pipelines were built at. The offscreen path
+    /// ([`Pipelines::new`]) uses [`crate::OFFSCREEN_SAMPLE_COUNT`] when the device
+    /// supports it; the surface path ([`Pipelines::for_format`]) is always 1.
+    sample_count: u32,
 }
 
 impl core::fmt::Debug for Pipelines {
@@ -42,20 +46,41 @@ impl core::fmt::Debug for Pipelines {
 
 impl Pipelines {
     /// Compiles the shader and builds the render pipelines on `ctx`'s device for the
-    /// offscreen [`TARGET_FORMAT`].
+    /// offscreen [`TARGET_FORMAT`], multisampled at [`crate::OFFSCREEN_SAMPLE_COUNT`]
+    /// when the device supports it.
+    ///
+    /// The sample count is negotiated against the adapter's texture-format features so
+    /// a device without 4x MSAA falls back to single-sampled pipelines. Pair the
+    /// result with an [`OffscreenTarget`] built on the same `ctx`, which negotiates the
+    /// identical count.
     #[must_use]
     pub fn new(ctx: &WgpuContext) -> Self {
-        Self::for_format(ctx.device(), TARGET_FORMAT)
+        let sample_count = if crate::target::supports_4x_msaa(ctx) {
+            crate::target::OFFSCREEN_SAMPLE_COUNT
+        } else {
+            1
+        };
+        Self::build(ctx.device(), TARGET_FORMAT, sample_count)
+    }
+
+    /// Compiles the shader and builds single-sampled render pipelines on `device` for
+    /// the given color `format`.
+    ///
+    /// This is the format-parameterized entry the windowed (surface) path uses with
+    /// eframe's shared device and its surface `target_format`; the offscreen path goes
+    /// through [`Pipelines::new`] with [`TARGET_FORMAT`] and MSAA. The surface path
+    /// composites into egui's own single-sample pass, so these pipelines stay at
+    /// sample count 1.
+    #[must_use]
+    pub fn for_format(device: &Device, format: TextureFormat) -> Self {
+        Self::build(device, format, 1)
     }
 
     /// Compiles the shader and builds the render pipelines on `device` for the given
-    /// color `format`.
-    ///
-    /// This is the format-parameterized entry the windowed (surface) path uses with
-    /// eframe's shared device and its surface `target_format`; the offscreen path
-    /// goes through [`Pipelines::new`] with [`TARGET_FORMAT`].
+    /// color `format` at `sample_count` samples per pixel.
     #[must_use]
-    pub fn for_format(device: &Device, format: TextureFormat) -> Self {
+    fn build(device: &Device, format: TextureFormat, sample_count: u32) -> Self {
+        let sample_count = sample_count.max(1);
         let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/shapes.wgsl"));
 
         let uniform_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -131,7 +156,10 @@ impl Pipelines {
                     ..PrimitiveState::default()
                 },
                 depth_stencil: None,
-                multisample: MultisampleState::default(),
+                multisample: MultisampleState {
+                    count: sample_count,
+                    ..MultisampleState::default()
+                },
                 fragment: Some(FragmentState {
                     module: &shader,
                     entry_point: Some("fs_solid"),
@@ -163,7 +191,14 @@ impl Pipelines {
             mesh_pipeline,
             retained_rect_pipeline,
             format,
+            sample_count,
         }
+    }
+
+    /// The multisample count these pipelines were built at.
+    #[must_use]
+    pub fn sample_count(&self) -> u32 {
+        self.sample_count
     }
 
     /// The uniform bind group layout (binding 0: the view matrix), shared by every
@@ -246,6 +281,14 @@ impl Pipelines {
             b: f64::from(clear.components[2]),
             a: f64::from(clear.components[3]),
         };
+        // When the target is multisampled, draw into its MSAA color texture and
+        // resolve into the single-sample texture readback reads; otherwise draw
+        // straight into that texture. Either way `target.view()` holds the final
+        // (resolved) image.
+        let (attachment_view, resolve_target) = match target.msaa_view() {
+            Some(msaa) => (msaa, Some(target.view())),
+            None => (target.view(), None),
+        };
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("reticle-render encoder"),
         });
@@ -253,9 +296,9 @@ impl Pipelines {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("reticle-render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target.view(),
+                    view: attachment_view,
                     depth_slice: None,
-                    resolve_target: None,
+                    resolve_target,
                     ops: Operations {
                         load: LoadOp::Clear(clear_color),
                         store: StoreOp::Store,

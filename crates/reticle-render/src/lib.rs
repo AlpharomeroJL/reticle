@@ -45,7 +45,7 @@ pub use retained::{
     CellChunk, ExpandedScene, InstanceEntry, InstanceTransform, RectInstanceT, RetainedScene,
 };
 pub use surface::RetainedRenderer;
-pub use target::{OffscreenTarget, TARGET_FORMAT};
+pub use target::{OFFSCREEN_SAMPLE_COUNT, OffscreenTarget, TARGET_FORMAT};
 pub use view::ViewUniform;
 
 use reticle_model::{Camera, Document, Renderer};
