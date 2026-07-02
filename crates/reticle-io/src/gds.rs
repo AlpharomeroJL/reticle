@@ -10,6 +10,7 @@
 //! | [`GdsBoundary`]      | [`DrawShape`], [`ShapeKind::Rect`] when the ring |
 //! |                      | is an axis-aligned box, else [`ShapeKind::Polygon`] |
 //! | [`GdsPath`]          | [`DrawShape`], [`ShapeKind::Path`]              |
+//! | [`GdsTextElem`]      | [`Label`] (`layer`/`texttype` as [`LayerId`])   |
 //! | [`GdsStructRef`]     | [`Instance`]                                     |
 //! | [`GdsArrayRef`]      | [`ArrayInstance`]                               |
 //! | `layer` / `datatype` | [`LayerId`]                                     |
@@ -23,24 +24,35 @@
 //! `units.1` metres and `units.0` user units (microns), so
 //! `dbu_per_micron = round(1e-6 / units.1)`. Export writes the reciprocal.
 //!
+//! # Labels
+//!
+//! GDSII TEXT elements carry net and port names. Import surfaces each one as a
+//! [`Label`] on [`Cell::labels`]: the TEXT `layer`/`texttype` pair becomes the
+//! label's [`LayerId`] and the insertion point its position. `gds21` does not
+//! expose the PRESENTATION justification bits (its `GdsPresentation` fields are
+//! private), so every imported label is anchored [`Anchor::Center`], the model
+//! default; export likewise writes no PRESENTATION record, letting readers apply
+//! their own default. A non-`Center` anchor therefore does not survive a GDSII
+//! round-trip; text, position, and layer always do.
+//!
 //! # Round-trip fidelity
 //!
-//! Because layer/datatype, integer coordinates, cell names, instances and arrays
-//! all have direct GDSII equivalents, an export/import cycle preserves geometry
-//! exactly. Rectangles are recovered from axis-aligned boundaries so a `Rect`
-//! survives as a `Rect`.
+//! Because layer/datatype, integer coordinates, cell names, instances, arrays,
+//! and text labels all have direct GDSII equivalents, an export/import cycle
+//! preserves geometry exactly. Rectangles are recovered from axis-aligned
+//! boundaries so a `Rect` survives as a `Rect`.
 
 use crate::IoError;
 use gds21::{
     GdsArrayRef, GdsBoundary, GdsElement, GdsLibrary, GdsPath, GdsPoint, GdsStrans, GdsStruct,
-    GdsStructRef, GdsUnits,
+    GdsStructRef, GdsTextElem, GdsUnits,
 };
 use reticle_geometry::{
     Dbu, LayerId, Magnification, Orientation, Path, Point, Polygon, Rect, Transform,
 };
 use reticle_model::{
-    ArrayInstance, Cell, Document, DrawShape, Exporter, Importer, Instance, Result, ShapeKind,
-    Technology,
+    Anchor, ArrayInstance, Cell, Document, DrawShape, Exporter, Importer, Instance, Label, Result,
+    ShapeKind, Technology,
 };
 
 /// GDSII import/export (Wave 1: `gds21`).
@@ -111,13 +123,19 @@ fn library_to_document(lib: &GdsLibrary) -> Document {
         doc.insert_cell(cell);
     }
 
-    // Collect the layer/datatype pairs actually used, so downstream tooling sees
-    // a layer table even when importing from a bare GDS with no technology file.
+    // Collect the layer/datatype pairs actually used (by shapes and labels), so
+    // downstream tooling sees a layer table even when importing from a bare GDS
+    // with no technology file.
     let mut layers: Vec<LayerId> = Vec::new();
     for cell in doc.cells() {
-        for shape in &cell.shapes {
-            if !layers.contains(&shape.layer) {
-                layers.push(shape.layer);
+        for layer in cell
+            .shapes
+            .iter()
+            .map(|s| s.layer)
+            .chain(cell.labels.iter().map(|l| l.layer))
+        {
+            if !layers.contains(&layer) {
+                layers.push(layer);
             }
         }
     }
@@ -161,12 +179,29 @@ fn struct_to_cell(strukt: &GdsStruct, referenced: &mut std::collections::HashSet
                 referenced.insert(aref.name.clone());
                 cell.arrays.push(array_ref_to_array(aref));
             }
-            // Text, Node, and Box carry no drawn fill geometry we model in Wave 1.
-            // They are skipped rather than erroring so real-world GDS still imports.
-            GdsElement::GdsTextElem(_) | GdsElement::GdsNode(_) | GdsElement::GdsBox(_) => {}
+            GdsElement::GdsTextElem(text) => cell.labels.push(text_elem_to_label(text)),
+            // Node and Box carry no drawn fill geometry we model in Wave 1. They
+            // are skipped rather than erroring so real-world GDS still imports.
+            GdsElement::GdsNode(_) | GdsElement::GdsBox(_) => {}
         }
     }
     cell
+}
+
+/// Maps a GDSII TEXT element to a [`Label`].
+///
+/// The TEXT `layer`/`texttype` pair plays the same role datatype plays for
+/// boundaries, so it becomes the label's [`LayerId`] (bit-preserving, like
+/// [`layer_id`]). The insertion point becomes [`Label::position`]. PRESENTATION
+/// justification is not exposed by `gds21`, so the anchor is always
+/// [`Anchor::Center`] (see the [module docs](self)).
+fn text_elem_to_label(text: &GdsTextElem) -> Label {
+    Label {
+        text: text.string.clone(),
+        position: gds_point_to_point(&text.xy),
+        layer: layer_id(text.layer, text.texttype),
+        anchor: Anchor::Center,
+    }
 }
 
 /// Maps a GDSII boundary to a rectangle when its ring is an axis-aligned box,
