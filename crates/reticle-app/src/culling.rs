@@ -62,9 +62,9 @@ const LOD_MIN_PROJECTED_PIXELS: f64 = 1.0;
 ///
 /// A chunk is drawn as its bounding-box quad ([`DetailLevel::CellBoxes`]) when either
 /// the global zoom is already in the cell-box regime ([`lod_for_zoom`]) or this cell's
-/// own projected extent is at or below [`LOD_MIN_PROJECTED_PIXELS`]; otherwise its
-/// tessellated shapes are drawn ([`DetailLevel::Shapes`]). Keying on the cell's own
-/// extent means a tiny cell drops to a box before a large one does at the same zoom.
+/// own projected extent is at or below one pixel; otherwise its tessellated shapes are
+/// drawn ([`DetailLevel::Shapes`]). Keying on the cell's own extent means a tiny cell
+/// drops to a box before a large one does at the same zoom.
 ///
 /// The projected extent is the larger of the box's width and height scaled by
 /// `pixels_per_dbu`. A degenerate (empty or non-positive-area) box or a non-positive
