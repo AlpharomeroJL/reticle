@@ -22,3 +22,4 @@ superseded decision is marked and linked to its replacement.
 | [0014](0014-no-em-dash-voice-rule.md) | Voice rule: no em-dashes, enforced by check-style |
 | [0015](0015-oasis-subset-extended.md) | OASIS subset extended to paths, instances, and arrays |
 | [0016](0016-memmap2-out-of-core-streaming.md) | Out-of-core streaming via memmap2: the one unsafe block |
+| [0017](0017-quick-xml-transitive-advisory.md) | Ignore RUSTSEC-2026-0195 (quick-xml): unreachable, upstream-pinned |
