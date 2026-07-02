@@ -5982,6 +5982,7 @@ dependencies = [
  "reticle-model",
  "reticle-render",
  "reticle-route",
+ "reticle-sync",
  "serde_json",
 ]
 
