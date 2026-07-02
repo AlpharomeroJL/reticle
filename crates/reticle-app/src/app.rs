@@ -13,9 +13,12 @@ use egui::{
 };
 
 use reticle_geometry::{LayerId, Point, Rect, Shape as _};
-use reticle_model::{DrawShape, ShapeKind};
-use reticle_render::WgpuRenderer;
+use reticle_model::{DrawShape, LayerInfo, ShapeKind, Technology};
+use reticle_render::{
+    ExpandedScene, Palette, RetainedRenderer, RetainedScene, ViewUniform, WgpuRenderer,
+};
 use reticle_sync::SyncDocument;
+use std::sync::Arc;
 
 use crate::camera::{ScreenRect, ViewCamera};
 use crate::command::{self, Command};
@@ -82,6 +85,21 @@ pub struct App {
     /// net-extraction cache after edits and undo/redo.
     doc_generation: Generation,
 
+    /// The retained GPU scene cache (per-cell tessellation + expanded instances),
+    /// rebuilt only when the document or layer visibility changes.
+    retained: RetainedScene,
+    /// The revision the retained scene reflects: the document revision combined with
+    /// the layer-visibility signature. When it changes, the GPU renderer re-uploads.
+    render_revision: u64,
+    /// A hash of the current layer-visibility bits, recomputed each frame. A change
+    /// (from a toggle, checkbox, or show/hide-all) triggers a retained rebuild since
+    /// the tessellation bakes visibility in.
+    visibility_sig: u64,
+    /// The most recently expanded GPU geometry, shared into the paint callback. An
+    /// `Arc` so handing it to the callback each frame is a refcount bump, not a copy;
+    /// it is refreshed only when [`App::sync_retained`] rebuilds.
+    expanded: Arc<ExpandedScene>,
+
     /// The DRC panel state: the last run's violations and the highlighted one.
     drc: DrcResults,
     /// Whether the camera should frame the selected violation on the next frame
@@ -119,6 +137,11 @@ impl App {
         let layer_state = LayerState::from_technology(doc.technology());
         let scene = SceneIndex::build(&doc, demo::TOP_CELL);
         let document = SyncDocument::from_document("local", &doc);
+        // Build the retained scene from the demo document with a visibility-aware
+        // palette, so the GPU canvas has geometry from the first frame.
+        let palette = palette_from_layers(&layer_state);
+        let retained = RetainedScene::new(&doc, demo::TOP_CELL, &palette);
+        let expanded = Arc::new(retained.expand());
         Self {
             renderer: WgpuRenderer::new(),
             document,
@@ -132,6 +155,10 @@ impl App {
             top_cell: demo::TOP_CELL.to_owned(),
             scene,
             doc_generation: 0,
+            retained,
+            render_revision: 0,
+            visibility_sig: 0,
+            expanded,
             drc: DrcResults::new(),
             zoom_to_selected_violation: false,
             netlight: Netlight::new(),
@@ -171,6 +198,54 @@ impl App {
     /// The technology database-units-per-micron for the current document.
     fn dbu_per_micron(&self) -> i64 {
         self.history.document().technology().dbu_per_micron
+    }
+
+    /// A stable hash of the current per-layer visibility bits.
+    fn compute_visibility_sig(&self) -> u64 {
+        // FNV-1a over each row's (id bits, visible) so any toggle changes the hash.
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        for row in self.layer_state.rows() {
+            let bit = u64::from(u32::from(row.id.layer) << 8 | u32::from(row.id.datatype)) << 1
+                | u64::from(row.visible);
+            hash = (hash ^ bit).wrapping_mul(0x0000_0100_0000_01B3);
+        }
+        hash
+    }
+
+    /// The token the retained GPU scene is keyed on: the document revision folded
+    /// with the layer-visibility signature. Changes on any edit, undo/redo, or layer
+    /// toggle, and only then does the renderer retessellate and re-upload.
+    fn current_render_revision(&self) -> u64 {
+        self.history.revision().rotate_left(1) ^ self.visibility_sig
+    }
+
+    /// Rebuilds the retained scene from the current document and visibility if
+    /// anything the GPU depends on changed since the last rebuild. Retessellates
+    /// every cell with the visibility-aware palette (invisible layers dropped) and
+    /// re-expands the instance list, then records the new revision.
+    ///
+    /// This runs at most once per real change; a plain camera move leaves the
+    /// revision untouched, so it is a no-op and the GPU buffers are reused.
+    fn sync_retained(&mut self) {
+        self.visibility_sig = self.compute_visibility_sig();
+        let revision = self.current_render_revision();
+        if revision == self.render_revision && self.retained.top_cell() == self.top_cell {
+            return; // nothing the GPU cares about changed
+        }
+        let palette = palette_from_layers(&self.layer_state);
+        let names: Vec<String> = self
+            .history
+            .document()
+            .cells()
+            .map(|c| c.name.clone())
+            .collect();
+        self.retained.set_top_cell(&self.top_cell);
+        for name in &names {
+            self.retained.mark_dirty(name);
+        }
+        self.retained.rebuild(self.history.document(), &palette);
+        self.expanded = Arc::new(self.retained.expand());
+        self.render_revision = revision;
     }
 
     /// Runs a command-palette [`Command`], mutating the relevant app state.
@@ -684,7 +759,15 @@ impl App {
     ///
     /// Returns the canvas [`ScreenRect`] so the caller can hand it to actions (PNG
     /// export, deferred zoom-to-fit) that need the real pixel size.
-    fn canvas(&mut self, ui: &mut egui::Ui) -> ScreenRect {
+    ///
+    /// When `gpu_format` is `Some`, the layout geometry is drawn on the GPU through a
+    /// retained paint callback (eframe's shared device); egui overlays still paint on
+    /// top. When it is `None`, the geometry falls back to egui painting.
+    fn canvas(
+        &mut self,
+        ui: &mut egui::Ui,
+        gpu_format: Option<eframe::egui_wgpu::wgpu::TextureFormat>,
+    ) -> ScreenRect {
         let size = ui.available_size();
         let (response, painter) = ui.allocate_painter(size, Sense::click_and_drag());
         let rect = response.rect;
@@ -724,7 +807,13 @@ impl App {
         // Draw the scene (shapes or, at low zoom, cell boxes).
         let viewport = self.camera.visible_world_rect(&screen);
         match culling::lod_for_zoom(self.camera.pixels_per_dbu()) {
-            DetailLevel::Shapes => self.draw_shapes(&painter, &screen, viewport),
+            DetailLevel::Shapes => match gpu_format {
+                // GPU path: render the retained scene through eframe's device. The
+                // callback composites under the egui overlays queued below.
+                Some(format) => self.draw_shapes_gpu(&painter, &screen, rect, format),
+                // Fallback: paint the geometry with egui.
+                None => self.draw_shapes(&painter, &screen, viewport),
+            },
             DetailLevel::CellBoxes => self.draw_cell_boxes(&painter, &screen, viewport),
         }
 
@@ -920,6 +1009,38 @@ impl App {
             let selected = self.selection.contains(idx);
             self.draw_one_shape(painter, screen, shape, fill, selected);
         }
+    }
+
+    /// Renders the layout geometry on the GPU through a retained paint callback.
+    ///
+    /// Refreshes the retained scene (a no-op unless the document or layer visibility
+    /// changed), builds the camera projection for the canvas, and queues an
+    /// [`egui_wgpu::Callback`] whose [`SceneCallback`] uploads and draws the scene on
+    /// eframe's device. egui overlays queued after this composite on top.
+    fn draw_shapes_gpu(
+        &mut self,
+        painter: &egui::Painter,
+        screen: &ScreenRect,
+        rect: EguiRect,
+        format: eframe::egui_wgpu::wgpu::TextureFormat,
+    ) {
+        self.sync_retained();
+        let camera = self.camera.to_model_camera(screen);
+        // The projection uses the canvas size in points; egui sets the physical-pixel
+        // viewport for the pass from the callback rect.
+        let width = screen.width.max(1.0) as u32;
+        let height = screen.height.max(1.0) as u32;
+        let view = ViewUniform::from_camera(&camera, width, height);
+
+        let callback = SceneCallback {
+            view,
+            revision: self.render_revision,
+            expanded: Arc::clone(&self.expanded),
+            format,
+        };
+        painter.add(eframe::egui_wgpu::Callback::new_paint_callback(
+            rect, callback,
+        ));
     }
 
     /// Draws a single [`DrawShape`] in the given fill color.
@@ -1208,9 +1329,13 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_shortcuts(&ctx);
+
+        // The surface color format when eframe is on its wgpu backend; drives the
+        // retained GPU canvas. `None` (e.g. a glow build) falls back to egui painting.
+        let gpu_format = frame.wgpu_render_state().map(|state| state.target_format);
 
         // Cache the canvas rect across panels so the palette/export can use it.
         let mut canvas_screen: Option<ScreenRect> = None;
@@ -1242,7 +1367,7 @@ impl eframe::App for App {
                     });
             });
         egui::CentralPanel::default().show(ui, |ui| {
-            canvas_screen = Some(self.canvas(ui));
+            canvas_screen = Some(self.canvas(ui, gpu_format));
         });
 
         self.palette_window(&ctx, canvas_screen);
@@ -1277,6 +1402,96 @@ impl eframe::App for App {
 /// Formats a boolean as `on`/`off` for status messages.
 fn on_off(v: bool) -> &'static str {
     if v { "on" } else { "off" }
+}
+
+/// Builds a render [`Palette`] that reflects the app's current layer visibility.
+///
+/// The retained tessellation skips invisible layers via the palette, so folding
+/// `LayerState`'s per-row visibility into a synthetic [`Technology`] here is what
+/// makes a layer toggle hide geometry on the GPU canvas.
+fn palette_from_layers(layers: &LayerState) -> Palette {
+    let tech = Technology {
+        name: String::new(),
+        dbu_per_micron: 1,
+        layers: layers
+            .rows()
+            .iter()
+            .map(|r| LayerInfo {
+                id: r.id,
+                name: r.name.clone(),
+                color_rgba: r.color_rgba,
+                visible: r.visible,
+            })
+            .collect(),
+        rules: Vec::new(),
+    };
+    Palette::from_technology(&tech)
+}
+
+/// The egui-wgpu paint callback that renders the retained scene on eframe's device.
+///
+/// It carries the camera projection, the current render revision, the expanded GPU
+/// geometry (shared by `Arc`), and the surface color format. The heavy GPU state
+/// (pipelines, buffers) lives in egui-wgpu's `callback_resources`, created lazily on
+/// the first paint and reused afterwards, so a plain camera move only rewrites the
+/// view uniform.
+struct SceneCallback {
+    /// The world -> clip projection for this frame.
+    view: ViewUniform,
+    /// The revision the `expanded` geometry reflects; the renderer re-uploads only
+    /// when this changes.
+    revision: u64,
+    /// The expanded GPU geometry (rects with transforms + baked mesh), shared in.
+    expanded: Arc<ExpandedScene>,
+    /// The surface color format the renderer must target.
+    format: eframe::egui_wgpu::wgpu::TextureFormat,
+}
+
+impl eframe::egui_wgpu::CallbackTrait for SceneCallback {
+    fn prepare(
+        &self,
+        device: &eframe::egui_wgpu::wgpu::Device,
+        queue: &eframe::egui_wgpu::wgpu::Queue,
+        _screen_descriptor: &eframe::egui_wgpu::ScreenDescriptor,
+        _egui_encoder: &mut eframe::egui_wgpu::wgpu::CommandEncoder,
+        resources: &mut eframe::egui_wgpu::CallbackResources,
+    ) -> Vec<eframe::egui_wgpu::wgpu::CommandBuffer> {
+        // Lazily create (or recreate on a format change) the GPU renderer stored in
+        // egui-wgpu's per-renderer resource map.
+        let needs_new = resources
+            .get::<RetainedRenderer>()
+            .is_none_or(|r| r.format() != self.format);
+        if needs_new {
+            resources.insert(RetainedRenderer::new(device, self.format));
+        }
+        if let Some(renderer) = resources.get_mut::<RetainedRenderer>() {
+            renderer.sync_expanded(device, queue, &self.expanded, self.revision);
+            renderer.set_camera(queue, &self.view);
+        }
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        info: egui::PaintCallbackInfo,
+        render_pass: &mut eframe::egui_wgpu::wgpu::RenderPass<'static>,
+        resources: &eframe::egui_wgpu::CallbackResources,
+    ) {
+        if let Some(renderer) = resources.get::<RetainedRenderer>() {
+            // Constrain the draw to the canvas viewport so world geometry does not
+            // spill over the side panels.
+            let vp = info.viewport_in_pixels();
+            render_pass.set_viewport(
+                vp.left_px as f32,
+                vp.top_px as f32,
+                vp.width_px.max(1) as f32,
+                vp.height_px.max(1) as f32,
+                0.0,
+                1.0,
+            );
+            renderer.paint(render_pass);
+        }
+    }
 }
 
 /// The display name of the layer row at `index`, or an empty string.

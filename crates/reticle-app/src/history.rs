@@ -40,6 +40,15 @@ impl History {
         self.doc.document()
     }
 
+    /// The document revision: a monotonic counter bumped on every apply/undo/redo.
+    ///
+    /// The retained GPU renderer keys its cache invalidation on this, so it re-uploads
+    /// geometry only when the document actually changed, not on every frame.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.doc.revision()
+    }
+
     /// Applies `edit`, pushing it onto the undo stack.
     ///
     /// # Errors
