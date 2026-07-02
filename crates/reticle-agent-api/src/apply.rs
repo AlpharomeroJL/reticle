@@ -124,7 +124,7 @@ impl Session {
                 terminals,
             } => self.route_net(&cell, net, layer, &terminals),
             AgentCommand::RunExtract { cell } => self.run_extract(&cell),
-            AgentCommand::CheckIntent { cell, intent } => Self::check_intent(&cell, &intent),
+            AgentCommand::CheckIntent { cell, intent } => self.check_intent(&cell, &intent),
             AgentCommand::NetlistCompare { cell, expected } => {
                 self.netlist_compare(&cell, &expected)
             }
@@ -577,18 +577,28 @@ impl Session {
         Ok(self.data(netlist_json(&netlist)))
     }
 
-    /// The intent-check stub.
+    /// Checks the cell against a connectivity intent spec.
     ///
-    /// TODO(intent): the connectivity-intent checker is being built in parallel in
-    /// `reticle-extract` (it consumes [`IntentSpec`](crate::IntentSpec) and produces
-    /// [`IntentReport`](crate::IntentReport)). Wire it in once it lands; until then
-    /// this returns a structured error rather than silently succeeding, so a caller
-    /// is not misled into thinking intent was verified.
-    fn check_intent(_cell: &str, _intent: &str) -> CommandResult {
-        Err(AgentError::new(
-            ErrorCode::EngineError,
-            "intent checking lands with the intent engine",
-        ))
+    /// Parses `intent` as a JSON [`IntentSpec`](crate::IntentSpec), runs
+    /// `reticle_extract::check_intent` over the current document, and returns the
+    /// [`IntentReport`](crate::IntentReport) (opens and shorts) as structured data.
+    /// A malformed spec is an `InvalidArgument` error.
+    fn check_intent(&self, cell: &str, intent: &str) -> CommandResult {
+        self.require_cell(cell)?;
+        let spec: reticle_extract::IntentSpec = serde_json::from_str(intent).map_err(|e| {
+            AgentError::new(
+                ErrorCode::InvalidArgument,
+                format!("invalid intent spec JSON: {e}"),
+            )
+        })?;
+        let report = reticle_extract::check_intent(self.document(), cell, &spec);
+        let value = serde_json::to_value(&report).map_err(|e| {
+            AgentError::new(
+                ErrorCode::EngineError,
+                format!("serialize intent report: {e}"),
+            )
+        })?;
+        Ok(self.data(value))
     }
 
     fn netlist_compare(&self, cell: &str, expected: &str) -> CommandResult {
