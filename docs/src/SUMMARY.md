@@ -11,6 +11,7 @@
 - [File formats](io.md)
 - [Rendering and scale](rendering.md)
 - [Design-rule checking](drc.md)
+  - [SKY130 rule coverage](sky130-drc-coverage.md)
 - [Routing](routing.md)
 - [Connectivity extraction](extraction.md)
 - [Collaboration](collaboration.md)
