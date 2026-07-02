@@ -1,14 +1,15 @@
 //! Round-trip tests for the in-house OASIS-inspired subset ([`Oasis`]).
 //!
 //! The subset covers rectangles, polygons, and paths on `(layer, datatype)`,
-//! plus cell instances (placements) and arrays, across multiple named cells with
-//! preserved top cells. Each of those is exercised here so the documented
-//! coverage stays honest.
+//! text labels (with their anchor), plus cell instances (placements) and
+//! arrays, across multiple named cells with preserved top cells. Each of those
+//! is exercised here so the documented coverage stays honest.
 
 use reticle_geometry::{Endcap, LayerId, Orientation, Path, Point, Polygon, Rect, Transform};
 use reticle_io::Oasis;
 use reticle_model::{
-    ArrayInstance, Cell, Document, DrawShape, Exporter, Importer, Instance, ShapeKind, Technology,
+    Anchor, ArrayInstance, Cell, Document, DrawShape, Exporter, Importer, Instance, Label,
+    ShapeKind, Technology,
 };
 
 const METAL1: LayerId = LayerId::new(1, 0);
@@ -58,6 +59,16 @@ fn sample_document() -> Document {
         rows: 4,
         column_pitch: 120,
         row_pitch: 90,
+    });
+    // Two labels: the default Center anchor plus a corner anchor, which this
+    // container preserves (GDSII cannot).
+    a.labels
+        .push(Label::new("VDD", Point::new(250, 150), METAL1));
+    a.labels.push(Label {
+        text: "clk".to_string(),
+        position: Point::new(-10, 45),
+        layer: METAL2,
+        anchor: Anchor::SouthWest,
     });
     doc.insert_cell(a);
 
@@ -146,6 +157,19 @@ fn oasis_roundtrip_preserves_rectangles_and_polygons() {
     assert_eq!(arr.rows, 4);
     assert_eq!(arr.column_pitch, 120);
     assert_eq!(arr.row_pitch, 90);
+
+    // Labels round-trip field for field, non-Center anchor included.
+    assert_eq!(a.labels.len(), 2);
+    assert_eq!(a.labels[0], Label::new("VDD", Point::new(250, 150), METAL1));
+    assert_eq!(
+        a.labels[1],
+        Label {
+            text: "clk".to_string(),
+            position: Point::new(-10, 45),
+            layer: METAL2,
+            anchor: Anchor::SouthWest,
+        }
+    );
 
     let b = imported.cell("cell_b").expect("cell_b present");
     assert_eq!(b.shapes.len(), 1);
@@ -236,12 +260,48 @@ fn oasis_roundtrips_instances() {
 }
 
 #[test]
+fn oasis_roundtrips_labels_with_each_anchor() {
+    // Every anchor variant survives a round-trip byte-exactly.
+    for (i, anchor) in [
+        Anchor::Center,
+        Anchor::SouthWest,
+        Anchor::SouthEast,
+        Anchor::NorthWest,
+        Anchor::NorthEast,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut doc = Document::new();
+        let mut cell = Cell::new("labeled");
+        cell.labels.push(Label {
+            text: format!("net_{i}"),
+            position: Point::new(i as i32 * 10, 7),
+            layer: METAL1,
+            anchor,
+        });
+        doc.insert_cell(cell);
+
+        let bytes = Oasis.export(&doc).expect("export should succeed");
+        let imported = Oasis.import(&bytes).expect("import should succeed");
+        let cell = imported.cell("labeled").expect("labeled present");
+        assert_eq!(cell.labels.len(), 1);
+        assert_eq!(cell.labels[0].anchor, anchor);
+        assert_eq!(cell.labels[0].text, format!("net_{i}"));
+    }
+}
+
+#[test]
 fn oasis_rejects_garbage_and_truncation() {
     // Not our container.
     assert!(Oasis.import(b"not oasis at all").is_err());
     // Correct magic but truncated before the START payload.
     let mut short = b"RETICLE-OASIS\0".to_vec();
-    short.push(2); // version
+    short.push(3); // version
     short.push(0x01); // START tag, but no payload follows
     assert!(Oasis.import(&short).is_err());
+    // A previous container version is refused rather than misread.
+    let mut old = b"RETICLE-OASIS\0".to_vec();
+    old.push(2); // version 2 predates TEXT records
+    assert!(Oasis.import(&old).is_err());
 }
