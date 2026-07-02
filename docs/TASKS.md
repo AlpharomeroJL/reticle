@@ -38,8 +38,8 @@ produce v5.0.0.
 
 ## Wave 0: contract freeze (serial)
 
-- [~] Crate skeletons: reticle-agent-api, reticle-mcp, reticle-agent, reticle-bench, reticle-demo scaffolded and registered in the workspace, compiling green. agent-api has the frozen ElementId and AgentError/ErrorCode foundation; the command/response surface and the other crates' types are the next freeze increments. in-progress
-- [ ] Command and response enums, Session with revision, structured AgentError. not-started
+- [x] Crate skeletons: reticle-agent-api, reticle-mcp, reticle-agent, reticle-bench, reticle-demo scaffolded, registered, compiling green (commit e94db02, ci green).
+- [~] Command and response enums (done: AgentCommand/AgentResponse tagged serde enums + round-trip tests + structured AgentError/ErrorCode, ElementId; commit dda4342). REMAINING: Session owning EditableDocument + revision, and the element-id allocator.
 - [ ] Transcript JSONL schema plus document_hash replay contract. not-started
 - [ ] Intent spec types and open/short report types. not-started
 - [ ] Pin/Label model types plus Edit variants; structured Violation upgrade workspace-wide. not-started
@@ -47,8 +47,8 @@ produce v5.0.0.
 - [ ] MCP tool JSON schemas and descriptions. not-started
 - [ ] Agent status channel types over sync awareness. not-started
 - [ ] Demo server API types and limit config. not-started
-- [ ] tech/sky130.tech with citations; tech/sky130-drc-subset.toml. not-started
-- [ ] Dependency pins; ADRs 0017+; frozen-surface manifest recorded here. not-started
+- [~] tech/sky130.tech with citations committed and parse-guarded (commit f6573c6). REMAINING: tech/sky130-drc-subset.toml.
+- [ ] Dependency pins; ADRs 0017+ (0017 done in Wave R); frozen-surface manifest recorded here. not-started
 
 ## Wave 1: foundations (batch 1 then batch 2)
 
