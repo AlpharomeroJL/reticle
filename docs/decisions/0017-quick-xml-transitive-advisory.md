@@ -1,12 +1,13 @@
-# 0017, Ignore RUSTSEC-2026-0195 (quick-xml) as an unreachable, upstream-pinned advisory
+# 0017, Ignore the quick-xml 0.39 advisories (RUSTSEC-2026-0194/0195) as unreachable, upstream-pinned
 
 ## Context
 
-RUSTSEC-2026-0195 reports a memory-exhaustion denial of service in `quick-xml` before
-0.41: `NsReader` calls `NamespaceResolver::push` for every start tag before yielding the
-event, appending a binding per `xmlns` declaration with no upper bound, so an attacker
-supplying untrusted XML can force large heap allocations. The `just ci` advisory gate
-(`cargo deny check`) began failing on it once the advisory was published.
+Two companion advisories were published against `quick-xml` before 0.41, both
+denial-of-service bugs on untrusted XML: RUSTSEC-2026-0195 (a memory-exhaustion DoS,
+where `NsReader` calls `NamespaceResolver::push` for every start tag and appends a
+binding per `xmlns` declaration with no upper bound) and RUSTSEC-2026-0194 (quadratic
+run time when checking a start tag for duplicate attribute names). The `just ci`
+advisory gate (`cargo deny check`) began failing on both once they were published.
 
 The vulnerable crate is `quick-xml 0.39.4`, and it enters the tree only transitively
 through the Linux desktop accessibility stack: `eframe 0.35 -> winit 0.30.13 ->
@@ -24,13 +25,14 @@ is not compatible with the pinned `eframe 0.35` the application is built on.
 
 ## Decision
 
-Add `RUSTSEC-2026-0195` to the `deny.toml` advisory ignore list with a specific reason
-and a revisit trigger, and tighten the surrounding policy comment. The policy is no
-longer "vulnerabilities are never ignored"; it is that an advisory is ignored only when
-we cannot act on it (the crate is pinned by a transitive dependency we do not control)
-and either it is an "unmaintained" notice or its vulnerable code path is not reachable on
-any target we build or ship. RUSTSEC-2026-0195 qualifies on the second branch: not
-reachable on Windows or wasm, and no untrusted-XML path through it in Reticle.
+Add both `RUSTSEC-2026-0194` and `RUSTSEC-2026-0195` to the `deny.toml` advisory ignore
+list with a shared reason and a revisit trigger, and tighten the surrounding policy
+comment. The policy is no longer "vulnerabilities are never ignored"; it is that an
+advisory is ignored only when we cannot act on it (the crate is pinned by a transitive
+dependency we do not control) and either it is an "unmaintained" notice or its vulnerable
+code path is not reachable on any target we build or ship. Both quick-xml advisories
+qualify on the second branch: not reachable on Windows or wasm, and no untrusted-XML path
+through them in Reticle.
 
 The revisit trigger is an `eframe` update that moves its `winit` and
 `smithay-client-toolkit` chain onto `quick-xml >= 0.41`; at that point the ignore is

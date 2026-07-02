@@ -23,3 +23,5 @@ ser = "ser"
 inout = "inout"
 LOD = "LOD"
 lod = "lod"
+# Paired integer pixel coordinates (ix, iy) in render tests.
+iy = "iy"
