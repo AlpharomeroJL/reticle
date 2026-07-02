@@ -29,6 +29,7 @@ mod cull;
 mod geometry;
 mod palette;
 mod pipelines;
+mod retained;
 mod target;
 mod view;
 
@@ -37,6 +38,7 @@ pub use cull::{CellCuller, CullAabb};
 pub use geometry::{MeshVertex, RectInstance, SceneGeometry};
 pub use palette::{Palette, Rgba};
 pub use pipelines::Pipelines;
+pub use retained::{CellChunk, InstanceEntry, InstanceTransform, RetainedScene};
 pub use target::{OffscreenTarget, TARGET_FORMAT};
 pub use view::ViewUniform;
 
