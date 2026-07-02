@@ -27,7 +27,10 @@ lint: fmt-check clippy
 # The gate (replaces GitHub Actions): fmt, clippy(-D warnings), tests, doc,
 # wasm build, license/advisory check, spelling.
 # ---------------------------------------------------------------------------
-ci: fmt-check clippy test doctest doc-build wasm-build deny typos check-style
+# Fail-fast order: the cheapest checks run first (style grep, fmt), then clippy,
+# then tests, then the slow tail (docs, wasm, deny, typos), so a broken lane
+# learns in seconds rather than minutes.
+ci: check-style fmt-check clippy test doctest doc-build wasm-build deny typos
     Write-Output "ci: GREEN"
 
 # ---- Formatting ----

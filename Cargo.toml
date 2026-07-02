@@ -86,6 +86,12 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 
-# Optimize dependencies even in dev builds; graphics stacks are unusably slow otherwise.
+# Light optimization for workspace code keeps dev iteration fast while tests
+# stay quick enough to gate on.
+[profile.dev]
+opt-level = 1
+
+# Optimize dependencies fully in dev builds; the wgpu and yrs chains compile
+# once and stay cached while workspace code iterates.
 [profile.dev.package."*"]
-opt-level = 2
+opt-level = 3
