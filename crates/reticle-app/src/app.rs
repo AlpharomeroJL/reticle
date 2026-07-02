@@ -29,10 +29,14 @@ use crate::fps::FrameMeter;
 use crate::grid::{self, GridSettings};
 use crate::history::History;
 use crate::inspector::{self, Inspection};
+use crate::keymap::{self, Keymap};
+use crate::labels;
 use crate::layers::{self, LayerState};
+use crate::minimap::MinimapLayout;
 use crate::netlight::{Generation, Netlight};
 use crate::selection::{self, Selection};
 use crate::tool::{Tool, ToolState};
+use crate::viewports::{self, Split, Viewports};
 
 /// A transient status message shown in the bottom bar.
 #[derive(Clone, Debug, Default)]
@@ -54,6 +58,10 @@ impl Status {
 /// frozen Wave 0 contract. Beyond them the struct now carries the full editor state:
 /// the editable document with undo history, the view camera, the tool machine, the
 /// layer/selection/grid models, and the command-palette UI state.
+// The app root aggregates many independent one-bit UI facts (deferred-fit flag,
+// window-open flags, overlay toggles); folding them into enums or sub-structs
+// would only add indirection to the glue layer.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug)]
 pub struct App {
     /// GPU renderer handle (used by the native PNG-export action).
@@ -76,6 +84,13 @@ pub struct App {
     selection: Selection,
     /// Grid, snapping, and ruler settings.
     grid: GridSettings,
+    /// Whether the canvas text-label overlay (cell names, selection captions, live
+    /// dimensions) is drawn.
+    labels_visible: bool,
+    /// Whether the minimap overview panel is drawn (and steals clicks inside it).
+    minimap_visible: bool,
+    /// The canvas pane layout: split mode, focused pane, and per-pane cameras.
+    viewports: Viewports,
     /// The name of the top cell being viewed.
     top_cell: String,
 
@@ -110,6 +125,13 @@ pub struct App {
     netlight: Netlight,
     /// The 3D layer-stack window's orbit-camera state.
     view3d: crate::view3d::View3d,
+
+    /// The rebindable shortcut map every key press resolves through.
+    keymap: Keymap,
+    /// Whether the shortcuts editor window is open.
+    keymap_open: bool,
+    /// The action awaiting a new chord, when the editor is capturing one.
+    rebinding: Option<keymap::Action>,
 
     /// Whether the command palette window is open.
     palette_open: bool,
@@ -157,6 +179,9 @@ impl App {
             layer_state,
             selection: Selection::new(),
             grid: GridSettings::default(),
+            labels_visible: true,
+            minimap_visible: true,
+            viewports: Viewports::new(),
             top_cell: demo::TOP_CELL.to_owned(),
             scene,
             doc_generation: 0,
@@ -168,6 +193,9 @@ impl App {
             zoom_to_selected_violation: false,
             netlight: Netlight::new(),
             view3d: crate::view3d::View3d::new(),
+            keymap: load_keymap(),
+            keymap_open: false,
+            rebinding: None,
             palette_open: false,
             palette_query: String::new(),
             layer_query: String::new(),
@@ -367,10 +395,13 @@ impl App {
         self.status.set("PNG export is native-only");
     }
 
-    /// Handles global keyboard shortcuts (palette, tools, undo/redo, fit).
+    /// Handles global keyboard shortcuts by resolving every key press through the
+    /// rebindable [`Keymap`] (chords match modifiers exactly).
     ///
     /// Shortcuts are ignored while a text field has focus so typing in the palette
-    /// or query bar does not trigger them.
+    /// or query bar does not trigger them. While the shortcuts editor is capturing
+    /// a chord, the next key press rebinds the pending action instead of running
+    /// anything (Escape cancels the capture); Escape otherwise closes the palette.
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         // Suppress shortcuts while a text field owns keyboard focus so typing in the
         // palette or query bar does not trigger tool changes.
@@ -381,52 +412,79 @@ impl App {
             }
             return;
         }
-        let (ctrl, key_p, key_z, key_y, key_f, key_g, esc, key_s, key_m, key_v) = ctx.input(|i| {
-            let m = i.modifiers.command || i.modifiers.ctrl;
-            (
-                m,
-                i.key_pressed(egui::Key::P),
-                i.key_pressed(egui::Key::Z),
-                i.key_pressed(egui::Key::Y),
-                i.key_pressed(egui::Key::F),
-                i.key_pressed(egui::Key::G),
-                i.key_pressed(egui::Key::Escape),
-                i.key_pressed(egui::Key::S),
-                i.key_pressed(egui::Key::M),
-                i.key_pressed(egui::Key::V),
-            )
-        });
-        if ctrl && key_p {
-            self.palette_open = !self.palette_open;
-            self.palette_query.clear();
+        let chords = pressed_chords(ctx);
+
+        // Chord capture for the shortcuts editor: the next press rebinds.
+        if let Some(action) = self.rebinding {
+            if let Some(new_chord) = chords.into_iter().next() {
+                self.rebinding = None;
+                if new_chord.key == "Escape" {
+                    self.status.set("Rebind canceled");
+                } else {
+                    let shown = new_chord.to_string();
+                    let stolen = self.keymap.bind(action, Some(new_chord));
+                    match stolen.first() {
+                        Some(loser) => self.status.set(format!(
+                            "{} bound to {shown}; {} is now unbound",
+                            action.label(),
+                            loser.label()
+                        )),
+                        None => self
+                            .status
+                            .set(format!("{} bound to {shown}", action.label())),
+                    }
+                }
+            }
+            return;
         }
-        if esc {
+
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.palette_open = false;
         }
-        if ctrl && key_z {
-            self.run_command(Command::Undo, None);
-        }
-        if ctrl && key_y {
-            self.run_command(Command::Redo, None);
-        }
-        if ctrl && key_g {
-            self.run_command(Command::ToggleGrid, None);
-        }
-        if key_f && !ctrl {
-            self.run_command(Command::ZoomToFit, None);
-        }
-        // Single-key tool shortcuts (no modifier).
-        if !ctrl {
-            if key_v {
-                self.run_command(Command::SetTool(Tool::Select), None);
-            }
-            if key_s {
-                self.run_command(Command::SetTool(Tool::Pan), None);
-            }
-            if key_m {
-                self.run_command(Command::SetTool(Tool::Measure), None);
+        for chord in chords {
+            if let Some(action) = self.keymap.action_for(&chord) {
+                self.run_action(action);
             }
         }
+    }
+
+    /// Runs a rebindable [`keymap::Action`], funneling through
+    /// [`App::run_command`] wherever a palette command exists so shortcuts, the
+    /// toolbar, and the palette share one set of effects.
+    fn run_action(&mut self, action: keymap::Action) {
+        match action {
+            keymap::Action::OpenPalette => {
+                self.palette_open = !self.palette_open;
+                self.palette_query.clear();
+            }
+            keymap::Action::Undo => self.run_command(Command::Undo, None),
+            keymap::Action::Redo => self.run_command(Command::Redo, None),
+            keymap::Action::ZoomToFit => self.run_command(Command::ZoomToFit, None),
+            keymap::Action::ToggleGrid => self.run_command(Command::ToggleGrid, None),
+            keymap::Action::ToggleSnap => self.run_command(Command::ToggleSnap, None),
+            keymap::Action::ToolSelect => self.run_command(Command::SetTool(Tool::Select), None),
+            keymap::Action::ToolPan => self.run_command(Command::SetTool(Tool::Pan), None),
+            keymap::Action::ToolMeasure => self.run_command(Command::SetTool(Tool::Measure), None),
+            keymap::Action::ToggleLabels => {
+                self.labels_visible = !self.labels_visible;
+                self.status
+                    .set(format!("Labels {}", on_off(self.labels_visible)));
+            }
+            keymap::Action::ToggleMinimap => {
+                self.minimap_visible = !self.minimap_visible;
+                self.status
+                    .set(format!("Minimap {}", on_off(self.minimap_visible)));
+            }
+            keymap::Action::SplitSingle => self.set_split(Split::Single),
+            keymap::Action::SplitHorizontal => self.set_split(Split::Horizontal),
+            keymap::Action::SplitVertical => self.set_split(Split::Vertical),
+        }
+    }
+
+    /// Applies a pane split and reports it in the status bar.
+    fn set_split(&mut self, split: Split) {
+        self.viewports.set_split(split, &self.camera);
+        self.status.set(format!("View: {}", split.label()));
     }
 
     /// Draws the top toolbar: tool buttons, view actions, and the palette hint.
@@ -460,10 +518,26 @@ impl App {
             ui.separator();
             ui.checkbox(&mut self.grid.visible, "Grid");
             ui.checkbox(&mut self.grid.snap_enabled, "Snap");
+            ui.checkbox(&mut self.labels_visible, "Labels");
+            ui.checkbox(&mut self.minimap_visible, "Minimap");
             ui.separator();
-            if ui.button("Palette (Ctrl+P)").clicked() {
+            for split in Split::all() {
+                let selected = self.viewports.split() == split;
+                if ui.selectable_label(selected, split.label()).clicked() {
+                    self.set_split(split);
+                }
+            }
+            ui.separator();
+            let palette_label = self
+                .keymap
+                .chord_for(keymap::Action::OpenPalette)
+                .map_or_else(|| "Palette".to_owned(), |c| format!("Palette ({c})"));
+            if ui.button(palette_label).clicked() {
                 self.palette_open = !self.palette_open;
                 self.palette_query.clear();
+            }
+            if ui.button("Shortcuts").clicked() {
+                self.keymap_open = !self.keymap_open;
             }
         });
     }
@@ -764,6 +838,75 @@ impl App {
         }
     }
 
+    /// Draws the shortcuts editor window: every action with its current chord,
+    /// rebind and clear controls, plus reset and (native) save.
+    ///
+    /// The chord capture itself happens in [`App::handle_shortcuts`]; this window
+    /// only arms it, so what the editor shows and what the keyboard does can
+    /// never disagree. Takeovers (binding a chord another action holds) are
+    /// reported through the status bar by the capture path.
+    fn keymap_window(&mut self, ctx: &egui::Context) {
+        if !self.keymap_open {
+            return;
+        }
+        let mut open = self.keymap_open;
+        egui::Window::new("Keyboard shortcuts")
+            .open(&mut open)
+            .resizable(true)
+            .default_pos(Pos2::new(260.0, 140.0))
+            .show(ctx, |ui| {
+                ui.label("Click Rebind, then press the new chord (Escape cancels).");
+                ui.label("Binding a chord another action holds unbinds that action.");
+                ui.separator();
+                egui::Grid::new("keymap_grid")
+                    .num_columns(3)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for action in keymap::Action::all() {
+                            ui.label(action.label());
+                            let chord_text = self
+                                .keymap
+                                .chord_for(action)
+                                .map_or_else(|| "(unbound)".to_owned(), ToString::to_string);
+                            ui.monospace(chord_text);
+                            ui.horizontal(|ui| {
+                                if self.rebinding == Some(action) {
+                                    ui.label("press keys...");
+                                } else if ui.small_button("Rebind").clicked() {
+                                    self.rebinding = Some(action);
+                                }
+                                if ui.small_button("Clear").clicked() {
+                                    self.keymap.bind(action, None);
+                                    if self.rebinding == Some(action) {
+                                        self.rebinding = None;
+                                    }
+                                }
+                            });
+                            ui.end_row();
+                        }
+                    });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Reset defaults").clicked() {
+                        self.keymap = Keymap::defaults();
+                        self.rebinding = None;
+                        self.status.set("Keymap reset to defaults");
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if ui.button("Save").clicked() {
+                        match keymap::save(&self.keymap) {
+                            Ok(()) => self.status.set("Keymap saved"),
+                            Err(e) => self.status.set(format!("Keymap save failed: {e}")),
+                        }
+                    }
+                });
+            });
+        self.keymap_open = open;
+        if !self.keymap_open {
+            self.rebinding = None;
+        }
+    }
+
     /// Draws the layout canvas and processes pointer interaction on it.
     ///
     /// Returns the canvas [`ScreenRect`] so the caller can hand it to actions (PNG
@@ -778,12 +921,30 @@ impl App {
         gpu_format: Option<eframe::egui_wgpu::wgpu::TextureFormat>,
     ) -> ScreenRect {
         let size = ui.available_size();
-        let (response, painter) = ui.allocate_painter(size, Sense::click_and_drag());
+        let (response, base_painter) = ui.allocate_painter(size, Sense::click_and_drag());
         let rect = response.rect;
-        let screen = ScreenRect::new(rect.min.x, rect.min.y, rect.width(), rect.height());
 
-        // Background.
-        painter.rect_filled(rect, 0.0, Color32::from_rgb(16, 18, 22));
+        // Background (covers every pane and the divider).
+        base_painter.rect_filled(rect, 0.0, Color32::from_rgb(16, 18, 22));
+
+        // Pane layout over the shared document. The rest of this method edits and
+        // draws the *focused* pane, so `screen` is that pane's rectangle (the whole
+        // canvas when unsplit); unfocused panes render read-only previews.
+        let full = ScreenRect::new(rect.min.x, rect.min.y, rect.width(), rect.height());
+        let panes = self.viewports.rects(&full);
+        let split = panes.len() > 1;
+        let focus_changed = split && self.route_pane_focus(&response, &panes);
+        let screen = panes.get(self.viewports.focused()).copied().unwrap_or(full);
+        if split {
+            self.draw_unfocused_panes(&base_painter, &panes);
+        }
+        // Clip focused-pane drawing so egui-painted geometry and overlays cannot
+        // bleed across the divider; unsplit, the clip is the whole canvas.
+        let painter = if split {
+            base_painter.with_clip_rect(egui_rect_of(&screen))
+        } else {
+            base_painter.clone()
+        };
 
         // Deferred fit now that we know the canvas size.
         if self.fit_requested {
@@ -806,7 +967,16 @@ impl App {
             self.zoom_to_selected_violation = false;
         }
 
-        self.process_canvas_input(ui.ctx(), &response, &screen);
+        // Input routes to the focused pane only; the click that switched focus is
+        // consumed, and pointer positions over other panes never reach the tools.
+        let pointer_in_pane = response
+            .hover_pos()
+            .is_none_or(|p| viewports::contains(&screen, p.x, p.y));
+        if !focus_changed && pointer_in_pane {
+            self.process_canvas_input(ui.ctx(), &response, &screen);
+        } else {
+            self.cursor_world = None;
+        }
 
         // Draw grid + rulers under the geometry.
         if self.grid.visible {
@@ -819,7 +989,9 @@ impl App {
             DetailLevel::Shapes => match gpu_format {
                 // GPU path: render the retained scene through eframe's device. The
                 // callback composites under the egui overlays queued below.
-                Some(format) => self.draw_shapes_gpu(&painter, &screen, rect, format),
+                Some(format) => {
+                    self.draw_shapes_gpu(&painter, &screen, egui_rect_of(&screen), format);
+                }
                 // Fallback: paint the geometry with egui.
                 None => self.draw_shapes(&painter, &screen, viewport),
             },
@@ -832,9 +1004,81 @@ impl App {
 
         self.draw_rulers(&painter, &screen);
         self.draw_measure(&painter, &screen);
+        if self.labels_visible {
+            self.draw_labels(&painter, &screen);
+        }
+        if self.minimap_visible {
+            self.draw_minimap(&painter, &screen);
+        }
         self.draw_presence(&painter, &screen);
 
+        // Mark the focused pane when split (drawn unclipped so the full border
+        // stroke shows).
+        if split {
+            base_painter.rect_stroke(
+                egui_rect_of(&screen),
+                0.0,
+                Stroke::new(1.5, Color32::from_rgb(110, 160, 255)),
+                StrokeKind::Middle,
+            );
+        }
+
         screen
+    }
+
+    /// Focuses the pane under a click or a fresh drag, swapping cameras through
+    /// [`Viewports::focus`].
+    ///
+    /// Returns whether the event moved focus; such an event is consumed, so the
+    /// same click can never also select or measure in the newly focused pane.
+    fn route_pane_focus(&mut self, response: &egui::Response, panes: &[ScreenRect]) -> bool {
+        if !(response.clicked() || response.drag_started()) {
+            return false;
+        }
+        let Some(pos) = response.interact_pointer_pos() else {
+            return false;
+        };
+        let Some(hit) = viewports::hit_pane(panes, pos.x, pos.y) else {
+            return false;
+        };
+        if hit == self.viewports.focused() {
+            return false;
+        }
+        self.viewports.focus(hit, &mut self.camera);
+        self.status.set(format!("Pane {} focused", hit + 1));
+        true
+    }
+
+    /// Draws read-only previews of the unfocused panes.
+    ///
+    /// Each pane renders the shared document through its own stored camera using
+    /// the egui fallback path: the retained GPU callback binds a single camera per
+    /// frame and its paint path is owned by the render lane, so secondary panes
+    /// deliberately stay on the CPU painter. Tools, overlays, and edits apply only
+    /// to the focused pane; a click here focuses the pane first.
+    fn draw_unfocused_panes(&mut self, painter: &egui::Painter, panes: &[ScreenRect]) {
+        let border = Stroke::new(1.0, Color32::from_rgb(70, 76, 90));
+        for (i, pane) in panes.iter().enumerate() {
+            if i == self.viewports.focused() {
+                continue;
+            }
+            let Some(cam) = self.viewports.camera(i).copied() else {
+                continue;
+            };
+            let pane_rect = egui_rect_of(pane);
+            let clipped = painter.with_clip_rect(pane_rect);
+            // Temporarily adopt the pane camera so the existing draw helpers
+            // (which read `self.camera`) render this pane's view, then restore.
+            let saved = self.camera;
+            self.camera = cam;
+            let viewport = self.camera.visible_world_rect(pane);
+            match culling::lod_for_zoom(self.camera.pixels_per_dbu()) {
+                DetailLevel::Shapes => self.draw_shapes(&clipped, pane, viewport),
+                DetailLevel::CellBoxes => self.draw_cell_boxes(&clipped, pane, viewport),
+            }
+            self.camera = saved;
+            painter.rect_stroke(pane_rect, 0.0, border, StrokeKind::Middle);
+        }
     }
 
     /// Routes pointer input on the canvas through the active tool.
@@ -850,6 +1094,20 @@ impl App {
             self.cursor_world = Some(self.grid.snap(raw));
         } else {
             self.cursor_world = None;
+        }
+
+        // Minimap navigation: a click or drag inside the panel recenters the view
+        // there and consumes the input so no tool acts on it.
+        if self.minimap_visible
+            && (response.clicked() || response.dragged())
+            && let (Some(bounds), Some(pos)) =
+                (self.scene.bounds(), response.interact_pointer_pos())
+            && let Some(layout) = MinimapLayout::compute(screen, bounds)
+            && layout.contains(pos.x, pos.y)
+        {
+            let center = layout.panel_to_world(pos.x, pos.y);
+            self.camera = ViewCamera::new(center, self.camera.pixels_per_dbu());
+            return;
         }
 
         // Zoom to cursor on scroll, regardless of tool.
@@ -1304,6 +1562,151 @@ impl App {
         }
     }
 
+    /// Draws the canvas text-label overlay: cell names, the selection caption, and
+    /// the live measurement readout.
+    ///
+    /// egui composites painter text after the GPU paint callback, so this text
+    /// always reads on top of the geometry (no extra text-rendering dependency).
+    /// Every layout and formatting decision lives in [`crate::labels`]; this method
+    /// only converts world rectangles to screen space and issues the text calls.
+    fn draw_labels(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        let font = FontId::monospace(labels::LABEL_FONT_PX);
+
+        // Cell names, centered in each placement outline, at the cell-box LOD.
+        if culling::lod_for_zoom(self.camera.pixels_per_dbu()) == DetailLevel::CellBoxes {
+            let viewport = self.camera.visible_world_rect(screen);
+            let boxes: Vec<labels::LabelBox> =
+                culling::visible_cell_boxes(self.history.document(), &self.top_cell, viewport)
+                    .into_iter()
+                    .map(|cb| {
+                        let e = self.world_rect_to_screen(screen, cb.bbox);
+                        labels::LabelBox {
+                            text: cb.cell,
+                            left: e.min.x,
+                            top: e.min.y,
+                            width: e.width(),
+                            height: e.height(),
+                        }
+                    })
+                    .collect();
+            let name_color = Color32::from_rgb(200, 210, 230);
+            for label in labels::place_box_labels(&boxes, labels::LABEL_FONT_PX) {
+                painter.text(
+                    Pos2::new(label.x, label.y),
+                    Align2::CENTER_CENTER,
+                    label.text,
+                    font.clone(),
+                    name_color,
+                );
+            }
+        }
+
+        // The selection caption: layer text plus live dimensions at the bounds.
+        let indices: Vec<usize> = self.selection.iter().collect();
+        let dpm = self.dbu_per_micron();
+        let caption = match inspector::inspect(self.scene.shapes(), &indices, &self.layer_state) {
+            Inspection::Empty => None,
+            Inspection::Single(info) => Some((
+                info.bounds,
+                labels::selection_caption(&info.layer_label(), &info.bounds, dpm),
+            )),
+            Inspection::Multiple { count, bounds } => {
+                Some((bounds, labels::multi_selection_caption(count, &bounds, dpm)))
+            }
+        };
+        if let Some((bounds, text)) = caption {
+            let e = self.world_rect_to_screen(screen, bounds);
+            let (x, y) = labels::caption_anchor(
+                e.min.x,
+                e.max.x,
+                e.min.y,
+                screen.top,
+                labels::LABEL_FONT_PX,
+            );
+            painter.text(
+                Pos2::new(x, y),
+                Align2::CENTER_CENTER,
+                text,
+                font.clone(),
+                Color32::from_rgb(255, 240, 120),
+            );
+        }
+
+        // Live dimension readout at the cursor while the second measure point is
+        // pending; the completed measurement is drawn by `draw_measure`.
+        if let (Some(start), Some(cursor)) = (self.tools.measure_start(), self.cursor_world) {
+            let text = labels::live_measure_caption(start, cursor, self.dbu_per_micron());
+            let p = self.world_pos_to_screen(screen, cursor);
+            painter.text(
+                Pos2::new(p.x + 12.0, p.y - 12.0),
+                Align2::LEFT_BOTTOM,
+                text,
+                font,
+                Color32::from_rgb(255, 210, 90),
+            );
+        }
+    }
+
+    /// Draws the minimap overlay: document overview, placements, and the viewport.
+    ///
+    /// All geometry comes from [`MinimapLayout`]; this method only paints the
+    /// rectangles it computes. The click/drag recentering lives at the top of
+    /// [`App::process_canvas_input`] using the same layout, so what is drawn and
+    /// what is clickable can never disagree.
+    fn draw_minimap(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        let Some(bounds) = self.scene.bounds() else {
+            return;
+        };
+        let Some(layout) = MinimapLayout::compute(screen, bounds) else {
+            return;
+        };
+        let panel = EguiRect::from_min_size(
+            Pos2::new(layout.panel.left, layout.panel.top),
+            Vec2::new(layout.panel.width, layout.panel.height),
+        );
+        painter.rect_filled(panel, 3.0, Color32::from_rgba_unmultiplied(20, 23, 28, 230));
+        painter.rect_stroke(
+            panel,
+            3.0,
+            Stroke::new(1.0, Color32::from_rgb(70, 76, 90)),
+            StrokeKind::Middle,
+        );
+
+        // Document bounds outline.
+        let (bx, by, bw, bh) = layout.world_rect_to_panel(bounds);
+        let doc_rect = EguiRect::from_min_size(Pos2::new(bx, by), Vec2::new(bw, bh));
+        painter.rect_stroke(
+            doc_rect,
+            0.0,
+            Stroke::new(1.0, Color32::from_rgb(90, 100, 120)),
+            StrokeKind::Middle,
+        );
+
+        // Placement boxes give the overview its silhouette; cap the count so a
+        // huge document cannot make the minimap the most expensive draw call.
+        let fill = Color32::from_rgba_unmultiplied(90, 120, 170, 90);
+        for cb in culling::visible_cell_boxes(self.history.document(), &self.top_cell, bounds)
+            .into_iter()
+            .take(256)
+        {
+            let (x, y, w, h) = layout.world_rect_to_panel(cb.bbox);
+            painter.rect_filled(
+                EguiRect::from_min_size(Pos2::new(x, y), Vec2::new(w, h)),
+                0.0,
+                fill,
+            );
+        }
+
+        // The camera's visible world rectangle, clamped to the panel.
+        let (vx, vy, vw, vh) = layout.world_rect_to_panel(self.camera.visible_world_rect(screen));
+        painter.rect_stroke(
+            EguiRect::from_min_size(Pos2::new(vx, vy), Vec2::new(vw, vh)),
+            0.0,
+            Stroke::new(1.5, Color32::from_rgb(255, 210, 90)),
+            StrokeKind::Middle,
+        );
+    }
+
     /// Draws remote collaborators' cursors from the sync presence map (stretch:
     /// there are no live peers in this build, so this is normally empty).
     fn draw_presence(&self, painter: &egui::Painter, screen: &ScreenRect) {
@@ -1414,6 +1817,7 @@ impl eframe::App for App {
             self.history.document().technology(),
             &self.layer_state,
         );
+        self.keymap_window(&ctx);
 
         // Keep animating while dragging/measuring so interaction feels live.
         ctx.request_repaint();
@@ -1438,6 +1842,9 @@ impl eframe::App for App {
                 &hidden,
             );
             let _ = crate::session::save(&state);
+            // The keymap persists alongside the session so rebinds survive exit
+            // even when the user never pressed Save in the editor.
+            let _ = keymap::save(&self.keymap);
         }
     }
 }
@@ -1536,6 +1943,50 @@ impl eframe::egui_wgpu::CallbackTrait for SceneCallback {
             renderer.paint(render_pass);
         }
     }
+}
+
+/// The chords pressed this frame, in event order, using egui's canonical key
+/// names so each one can be looked up in the [`Keymap`] with a string compare.
+fn pressed_chords(ctx: &egui::Context) -> Vec<keymap::Chord> {
+    ctx.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } => Some(keymap::Chord {
+                    ctrl: modifiers.command || modifiers.ctrl,
+                    shift: modifiers.shift,
+                    alt: modifiers.alt,
+                    key: key.name().to_owned(),
+                }),
+                _ => None,
+            })
+            .collect()
+    })
+}
+
+/// The keymap to start with: the saved file on native (defaults if absent).
+#[cfg(not(target_arch = "wasm32"))]
+fn load_keymap() -> Keymap {
+    keymap::load().map_or_else(Keymap::default, |(map, _warnings)| map)
+}
+
+/// The keymap to start with: always the defaults on the web (no filesystem).
+#[cfg(target_arch = "wasm32")]
+fn load_keymap() -> Keymap {
+    Keymap::default()
+}
+
+/// Converts a canvas [`ScreenRect`] to an egui rectangle.
+fn egui_rect_of(screen: &ScreenRect) -> EguiRect {
+    EguiRect::from_min_size(
+        Pos2::new(screen.left, screen.top),
+        Vec2::new(screen.width, screen.height),
+    )
 }
 
 /// The display name of the layer row at `index`, or an empty string.
@@ -1842,6 +2293,87 @@ mod tests {
         app.add_demo_rectangle();
         assert!(app.netlight.is_empty(), "edit must clear the highlight");
         assert_ne!(app.doc_generation, gen_before, "generation must advance");
+    }
+
+    #[test]
+    fn label_overlay_defaults_on() {
+        let app = App::new();
+        assert!(app.labels_visible, "labels should be on out of the box");
+    }
+
+    #[test]
+    fn minimap_defaults_on_and_maps_the_demo_bounds() {
+        let app = App::new();
+        assert!(app.minimap_visible, "minimap should be on out of the box");
+        // The demo scene must produce a usable layout on a typical canvas, and a
+        // click at the mapped center must recenter to (nearly) that world point.
+        let screen = ScreenRect::new(0.0, 0.0, 800.0, 600.0);
+        let bounds = app.scene.bounds().expect("demo has bounds");
+        let layout = MinimapLayout::compute(&screen, bounds).expect("layout fits");
+        let world_center = Point::new(
+            i32::midpoint(bounds.min.x, bounds.max.x),
+            i32::midpoint(bounds.min.y, bounds.max.y),
+        );
+        let (px, py) = layout.world_to_panel(world_center);
+        assert!(layout.contains(px, py));
+        let back = layout.panel_to_world(px, py);
+        assert!((i64::from(back.x) - i64::from(world_center.x)).abs() < 100);
+        assert!((i64::from(back.y) - i64::from(world_center.y)).abs() < 100);
+    }
+
+    #[test]
+    fn run_action_routes_keymap_actions_to_their_effects() {
+        let mut app = App::new();
+        app.run_action(keymap::Action::ToolMeasure);
+        assert_eq!(app.tools.active(), Tool::Measure);
+        let labels_before = app.labels_visible;
+        app.run_action(keymap::Action::ToggleLabels);
+        assert_ne!(app.labels_visible, labels_before);
+        let minimap_before = app.minimap_visible;
+        app.run_action(keymap::Action::ToggleMinimap);
+        assert_ne!(app.minimap_visible, minimap_before);
+        app.run_action(keymap::Action::SplitHorizontal);
+        assert_eq!(app.viewports.pane_count(), 2);
+        app.run_action(keymap::Action::SplitSingle);
+        assert_eq!(app.viewports.pane_count(), 1);
+        app.run_action(keymap::Action::OpenPalette);
+        assert!(app.palette_open);
+    }
+
+    #[test]
+    fn rebinding_through_the_map_redirects_the_action() {
+        let mut app = App::new();
+        // Force a known map so the test does not depend on any user keymap file.
+        app.keymap = Keymap::defaults();
+        let chord = keymap::Chord::parse("Ctrl+Shift+Q").expect("valid chord");
+        assert_eq!(app.keymap.action_for(&chord), None);
+        let stolen = app.keymap.bind(keymap::Action::Redo, Some(chord.clone()));
+        assert!(stolen.is_empty());
+        assert_eq!(app.keymap.action_for(&chord), Some(keymap::Action::Redo));
+        // The old default no longer fires.
+        let old = keymap::Chord::parse("Ctrl+Y").expect("valid chord");
+        assert_eq!(app.keymap.action_for(&old), None);
+    }
+
+    #[test]
+    fn split_view_shares_the_document_across_pane_cameras() {
+        let mut app = App::new();
+        assert_eq!(app.viewports.pane_count(), 1);
+        app.viewports.set_split(Split::Horizontal, &app.camera);
+        assert_eq!(app.viewports.pane_count(), 2);
+        // The new pane starts on the live view.
+        assert_eq!(app.viewports.camera(1), Some(&app.camera));
+        // Focus pane 1, move its view, and confirm pane 0's camera was banked.
+        let pane0_before = app.camera;
+        app.viewports.focus(1, &mut app.camera);
+        app.camera = ViewCamera::new(Point::new(7777, -3333), 0.5);
+        assert_eq!(app.viewports.camera(0), Some(&pane0_before));
+        // Both panes look at the same document: there is exactly one scene.
+        assert!(!app.scene.is_empty());
+        // Collapsing keeps the view the user is on.
+        app.viewports.set_split(Split::Single, &app.camera);
+        assert_eq!(app.viewports.focused(), 0);
+        assert_eq!(app.camera, ViewCamera::new(Point::new(7777, -3333), 0.5));
     }
 
     #[test]

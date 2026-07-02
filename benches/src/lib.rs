@@ -1,9 +1,13 @@
-//! Cross-crate Criterion benchmarks for Reticle.
+//! Shared support for Reticle's benchmark suite.
 //!
-//! Wave 5 adds `[[bench]]` targets here (index build and query, geometry booleans,
-//! DRC, routing, render throughput) plus a committed baseline under `history/`.
-//! `xtask perf-check` compares fresh runs against that baseline and fails on
-//! regression beyond a threshold. This library holds shared benchmark fixtures.
+//! The Criterion `[[bench]]` targets do NOT live in this crate: they are
+//! in-crate, next to the code they measure (`reticle-index/benches`,
+//! `reticle-geometry/benches`, `reticle-drc/benches`, `reticle-model/benches`),
+//! and all run under `cargo bench --workspace`. What this crate carries is the
+//! committed baseline under `history/` and this small library of shared pieces
+//! (currently the version stamp for benchmark records). `xtask perf-check`
+//! compares fresh Criterion estimates against that baseline and fails on
+//! regression beyond a threshold.
 
 /// Returns the crate version, used to stamp benchmark records.
 #[must_use]
