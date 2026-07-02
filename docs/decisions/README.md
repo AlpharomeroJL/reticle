@@ -20,3 +20,5 @@ superseded decision is marked and linked to its replacement.
 | [0012](0012-rust-edition-2024.md) | Rust edition 2024 |
 | [0013](0013-out-of-core-streaming-scope.md) | Out-of-core streaming: zero-copy primitive now, mmap paging deferred |
 | [0014](0014-no-em-dash-voice-rule.md) | Voice rule: no em-dashes, enforced by check-style |
+| [0015](0015-oasis-subset-extended.md) | OASIS subset extended to paths, instances, and arrays |
+| [0016](0016-memmap2-out-of-core-streaming.md) | Out-of-core streaming via memmap2: the one unsafe block |
