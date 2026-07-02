@@ -21,6 +21,7 @@ reticle-render = { workspace = true }
 reticle-app = { workspace = true }
 reticle-drc = { workspace = true }
 reticle-route = { workspace = true }
+reticle-sync = { workspace = true }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 # Media capture renders offscreen with reticle-render, writes PNGs with `image`,
 # and assembles GIFs with the installed `gifski` CLI.

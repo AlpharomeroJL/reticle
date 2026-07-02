@@ -86,6 +86,71 @@ impl<'a> Canvas<'a> {
     }
 }
 
+impl Canvas<'_> {
+    /// Fills the triangle `a`-`b`-`c` (pixel coordinates, any winding).
+    pub fn fill_tri(&mut self, a: (f32, f32), b: (f32, f32), c: (f32, f32), color: [u8; 4]) {
+        let edge = |p: (f32, f32), q: (f32, f32), r: (f32, f32)| {
+            (q.0 - p.0) * (r.1 - p.1) - (q.1 - p.1) * (r.0 - p.0)
+        };
+        let area = edge(a, b, c);
+        if area == 0.0 {
+            return;
+        }
+        let x0 = a.0.min(b.0).min(c.0).floor() as i32;
+        let x1 = a.0.max(b.0).max(c.0).ceil() as i32;
+        let y0 = a.1.min(b.1).min(c.1).floor() as i32;
+        let y1 = a.1.max(b.1).max(c.1).ceil() as i32;
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let p = (x as f32 + 0.5, y as f32 + 0.5);
+                let (w0, w1, w2) = (edge(a, b, p), edge(b, c, p), edge(c, a, p));
+                let inside = if area > 0.0 {
+                    w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0
+                } else {
+                    w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0
+                };
+                if inside {
+                    self.blend(x, y, color);
+                }
+            }
+        }
+    }
+
+    /// Draws a 5x7 bitmap letter with its top-left corner at `(x, y)`, magnified
+    /// by `scale`. Letters without a bitmap are skipped.
+    pub fn draw_glyph(&mut self, letter: char, x: f32, y: f32, scale: i32, color: [u8; 4]) {
+        let Some(rows) = glyph5x7(letter) else {
+            return;
+        };
+        let (ox, oy) = (x.round() as i32, y.round() as i32);
+        for (row, bits) in rows.iter().enumerate() {
+            for col in 0..5i32 {
+                if bits & (0b1_0000 >> col) != 0 {
+                    for dy in 0..scale {
+                        for dx in 0..scale {
+                            self.blend(ox + col * scale + dx, oy + row as i32 * scale + dy, color);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The 5x7 bitmap for one letter (top row first, bit 4 = leftmost column).
+/// Only the letters the presence chips need are defined.
+fn glyph5x7(letter: char) -> Option<[u8; 7]> {
+    match letter {
+        'A' => Some([
+            0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ]),
+        'G' => Some([
+            0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110,
+        ]),
+        _ => None,
+    }
+}
+
 /// Maps world coordinates (DBU, `+y` up) into frame pixels (`+y` down) for a
 /// camera, mirroring the transform the 2D render pass applies.
 pub struct WorldMap {

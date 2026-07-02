@@ -65,7 +65,113 @@ pub fn capture(out_dir: &Path, only: Option<&str>) -> std::io::Result<bool> {
     if wants("route") {
         capture_route(&ctx, &mut renderer, out_dir)?;
     }
+    if wants("collab") {
+        capture_collab(&ctx, &mut renderer, out_dir)?;
+    }
     Ok(true)
+}
+
+/// Renders the demo document with two collaborators' live presence (cursor,
+/// initial chip, and viewport rectangle from `reticle-sync`) to `collab.png`.
+fn capture_collab(
+    ctx: &WgpuContext,
+    renderer: &mut WgpuRenderer,
+    out_dir: &Path,
+) -> std::io::Result<()> {
+    use reticle_sync::{Awareness, Presence};
+
+    let doc = reticle_app::demo::demo_document();
+    let top = reticle_app::demo::TOP_CELL;
+    let bbox = document_bounds(&doc, top);
+    let camera = frame_camera(bbox, STILL, 0.94);
+    let mut rgba = renderer.render_document_offscreen(ctx, &doc, top, &camera, STILL);
+
+    // Two collaborators, exchanged through the real awareness map.
+    let mut awareness = Awareness::new();
+    awareness.set(Presence {
+        actor: "ada".to_owned(),
+        display_name: "Ada".to_owned(),
+        color_rgba: 0x5A_C8_FA_FF,
+        cursor: frac_point(bbox, 0.42, 0.46),
+        selection: Vec::new(),
+        viewport: frac_rect(bbox, 0.16, 0.20, 0.58, 0.72),
+    });
+    awareness.set(Presence {
+        actor: "grace".to_owned(),
+        display_name: "Grace".to_owned(),
+        color_rgba: 0xFF_9F_0A_FF,
+        cursor: frac_point(bbox, 0.68, 0.64),
+        selection: Vec::new(),
+        viewport: frac_rect(bbox, 0.46, 0.34, 0.94, 0.90),
+    });
+    let mut actors: Vec<&Presence> = awareness.iter().map(|(_, presence)| presence).collect();
+    actors.sort_by(|a, b| a.actor.cmp(&b.actor));
+
+    let map = WorldMap::new(&camera, STILL);
+    let mut canvas = Canvas::new(&mut rgba, STILL);
+    for presence in actors {
+        let color = rgba_bytes(presence.color_rgba);
+        // Their visible viewport.
+        let (x0, y0, x1, y1) = map.rect_to_px(presence.viewport);
+        canvas.stroke_rect(x0, y0, x1, y1, 2.0, color);
+        // Cursor arrow with the display-name initial in a chip beside it.
+        let (cx, cy) = map.to_px(presence.cursor);
+        canvas.fill_tri(
+            (cx, cy),
+            (cx + 5.0, cy + 17.0),
+            (cx + 12.0, cy + 11.0),
+            [255, 255, 255, 255],
+        );
+        canvas.fill_tri(
+            (cx + 1.5, cy + 2.5),
+            (cx + 5.0, cy + 14.0),
+            (cx + 9.5, cy + 10.0),
+            color,
+        );
+        let (chip_x, chip_y) = (cx + 14.0, cy + 16.0);
+        canvas.fill_rect(chip_x, chip_y, chip_x + 24.0, chip_y + 24.0, color);
+        canvas.stroke_rect(
+            chip_x,
+            chip_y,
+            chip_x + 24.0,
+            chip_y + 24.0,
+            1.0,
+            [20, 22, 28, 200],
+        );
+        let initial = presence
+            .display_name
+            .chars()
+            .next()
+            .unwrap_or('A')
+            .to_ascii_uppercase();
+        canvas.draw_glyph(initial, chip_x + 7.0, chip_y + 5.0, 2, [16, 18, 24, 255]);
+    }
+    save_png(&out_dir.join("collab.png"), &rgba, STILL)?;
+    eprintln!("wrote {}", out_dir.join("collab.png").display());
+    Ok(())
+}
+
+/// The point at the fractional position `(fx, fy)` of `bbox`.
+fn frac_point(bbox: Rect, fx: f32, fy: f32) -> Point {
+    Point::new(
+        bbox.min.x + (bbox.width() as f32 * fx) as i32,
+        bbox.min.y + (bbox.height() as f32 * fy) as i32,
+    )
+}
+
+/// The sub-rectangle of `bbox` between fractional corners.
+fn frac_rect(bbox: Rect, fx0: f32, fy0: f32, fx1: f32, fy1: f32) -> Rect {
+    Rect::new(frac_point(bbox, fx0, fy0), frac_point(bbox, fx1, fy1))
+}
+
+/// Unpacks a `0xRRGGBBAA` color into RGBA bytes.
+fn rgba_bytes(color: u32) -> [u8; 4] {
+    [
+        (color >> 24) as u8,
+        (color >> 16) as u8,
+        (color >> 8) as u8,
+        color as u8,
+    ]
 }
 
 /// Runs the real maze router over a small obstacle course and renders the routed
