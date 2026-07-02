@@ -292,6 +292,137 @@ fn undo_redo_restore_cached_bbox() {
     assert_eq!(redone, editor.document().cell_bbox("top").unwrap());
 }
 
+/// Applies `edit` to `editor` and asserts the revision advanced by exactly 1.
+fn apply_bumps(editor: &mut EditableDocument, edit: Edit) {
+    let before = editor.revision();
+    editor.apply(edit).unwrap();
+    assert_eq!(
+        editor.revision(),
+        before + 1,
+        "apply must bump revision by 1"
+    );
+}
+
+#[test]
+fn every_edit_variant_bumps_revision() {
+    let mut editor = EditableDocument::new(Document::new());
+    assert_eq!(editor.revision(), 0, "a fresh editor starts at revision 0");
+
+    // One apply per Edit variant, each bumping the revision by exactly 1.
+    apply_bumps(
+        &mut editor,
+        Edit::AddCell {
+            cell: Cell::new("leaf"),
+        },
+    );
+    apply_bumps(
+        &mut editor,
+        Edit::AddCell {
+            cell: Cell::new("top"),
+        },
+    );
+    apply_bumps(
+        &mut editor,
+        Edit::AddShape {
+            cell: "leaf".to_owned(),
+            shape: rect_shape(1, 0, 0, 10, 10),
+        },
+    );
+    apply_bumps(
+        &mut editor,
+        Edit::AddInstance {
+            cell: "top".to_owned(),
+            instance: Instance {
+                cell: "leaf".to_owned(),
+                transform: Transform::translate(5, 5),
+            },
+        },
+    );
+    apply_bumps(
+        &mut editor,
+        Edit::AddArray {
+            cell: "top".to_owned(),
+            array: ArrayInstance {
+                cell: "leaf".to_owned(),
+                transform: Transform::IDENTITY,
+                columns: 2,
+                rows: 2,
+                column_pitch: 20,
+                row_pitch: 20,
+            },
+        },
+    );
+    apply_bumps(
+        &mut editor,
+        Edit::RemoveShape {
+            cell: "leaf".to_owned(),
+            index: 0,
+        },
+    );
+    apply_bumps(
+        &mut editor,
+        Edit::RemoveCell {
+            name: "leaf".to_owned(),
+        },
+    );
+    assert_eq!(editor.revision(), 7);
+}
+
+#[test]
+fn undo_and_redo_bump_revision() {
+    let mut editor = EditableDocument::new(Document::new());
+    editor
+        .apply(Edit::AddCell {
+            cell: Cell::new("c"),
+        })
+        .unwrap();
+    assert_eq!(editor.revision(), 1);
+
+    // Undo applies a mutation (the reverse), so it counts as a revision.
+    assert!(editor.undo());
+    assert_eq!(editor.revision(), 2, "undo must bump revision");
+
+    // Redo re-applies the edit; that is a mutation too.
+    assert!(editor.redo());
+    assert_eq!(editor.revision(), 3, "redo must bump revision");
+}
+
+#[test]
+fn failed_and_noop_operations_leave_revision_unchanged() {
+    let mut editor = EditableDocument::new(Document::new());
+
+    // Nothing to undo or redo: no mutation, no bump.
+    assert!(!editor.undo());
+    assert!(!editor.redo());
+    assert_eq!(editor.revision(), 0);
+
+    // A failing apply (shape into a missing cell) must not bump.
+    assert!(
+        editor
+            .apply(Edit::AddShape {
+                cell: "missing".to_owned(),
+                shape: rect_shape(1, 0, 0, 1, 1),
+            })
+            .is_err()
+    );
+    assert_eq!(editor.revision(), 0);
+
+    // A duplicate-cell apply fails and must not bump either.
+    editor
+        .apply(Edit::AddCell {
+            cell: Cell::new("x"),
+        })
+        .unwrap();
+    assert!(
+        editor
+            .apply(Edit::AddCell {
+                cell: Cell::new("x"),
+            })
+            .is_err()
+    );
+    assert_eq!(editor.revision(), 1);
+}
+
 #[test]
 fn cell_bbox_includes_children() {
     let mut doc = Document::new();

@@ -7,6 +7,7 @@
 //! target's staging buffer.
 
 use crate::geometry::{MeshVertex, RectInstance, SceneGeometry};
+use crate::retained::RectInstanceT;
 use crate::target::{OffscreenTarget, TARGET_FORMAT};
 use crate::view::ViewUniform;
 use crate::{context::WgpuContext, palette::Rgba};
@@ -15,10 +16,10 @@ use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingType, BlendState, BufferBindingType, BufferUsages, Color,
-    ColorTargetState, ColorWrites, CommandEncoderDescriptor, FragmentState, IndexFormat, LoadOp,
-    MultisampleState, Operations, PipelineLayoutDescriptor, PrimitiveState, PrimitiveTopology,
-    RenderPipeline, RenderPipelineDescriptor, ShaderStages, StoreOp, VertexBufferLayout,
-    VertexState, VertexStepMode,
+    ColorTargetState, ColorWrites, CommandEncoderDescriptor, Device, FragmentState, IndexFormat,
+    LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PrimitiveState,
+    PrimitiveTopology, RenderPipeline, RenderPipelineDescriptor, ShaderStages, StoreOp,
+    TextureFormat, VertexBufferLayout, VertexState, VertexStepMode,
 };
 
 /// The compiled pipelines and shared bind group layout for the offscreen renderer.
@@ -26,6 +27,11 @@ pub struct Pipelines {
     uniform_layout: BindGroupLayout,
     rect_pipeline: RenderPipeline,
     mesh_pipeline: RenderPipeline,
+    /// The retained instanced-rect pipeline (per-instance transform applied in the
+    /// vertex shader). Shares the uniform bind group layout with the others.
+    retained_rect_pipeline: RenderPipeline,
+    /// The color format these pipelines were built for.
+    format: TextureFormat,
 }
 
 impl core::fmt::Debug for Pipelines {
@@ -35,10 +41,21 @@ impl core::fmt::Debug for Pipelines {
 }
 
 impl Pipelines {
-    /// Compiles the shader and builds both render pipelines on `ctx`'s device.
+    /// Compiles the shader and builds the render pipelines on `ctx`'s device for the
+    /// offscreen [`TARGET_FORMAT`].
     #[must_use]
     pub fn new(ctx: &WgpuContext) -> Self {
-        let device = ctx.device();
+        Self::for_format(ctx.device(), TARGET_FORMAT)
+    }
+
+    /// Compiles the shader and builds the render pipelines on `device` for the given
+    /// color `format`.
+    ///
+    /// This is the format-parameterized entry the windowed (surface) path uses with
+    /// eframe's shared device and its surface `target_format`; the offscreen path
+    /// goes through [`Pipelines::new`] with [`TARGET_FORMAT`].
+    #[must_use]
+    pub fn for_format(device: &Device, format: TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::include_wgsl!("../shaders/shapes.wgsl"));
 
         let uniform_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -69,6 +86,18 @@ impl Pipelines {
             attributes: &rect_attrs,
         };
 
+        // Retained per-instance rect attributes: the RectInstance fields plus the
+        // placement transform (orientation code loc 3, magnification loc 4,
+        // translate loc 5). Matches `RectInstanceT` in `shapes.wgsl`.
+        let retained_attrs = wgpu::vertex_attr_array![
+            0 => Float32x2, 1 => Float32x2, 2 => Float32x4, 3 => Uint32, 4 => Float32, 5 => Sint32x2
+        ];
+        let retained_layout = VertexBufferLayout {
+            array_stride: std::mem::size_of::<RectInstanceT>() as u64,
+            step_mode: VertexStepMode::Instance,
+            attributes: &retained_attrs,
+        };
+
         // Per-vertex mesh attributes: position (loc 0), color (loc 1).
         let mesh_attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4];
         let mesh_layout = VertexBufferLayout {
@@ -78,66 +107,88 @@ impl Pipelines {
         };
 
         let targets = [Some(ColorTargetState {
-            format: TARGET_FORMAT,
+            format,
             blend: Some(BlendState::ALPHA_BLENDING),
             write_mask: ColorWrites::ALL,
         })];
 
-        let rect_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("reticle-render rect pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &shader,
-                entry_point: Some("vs_rect"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[rect_layout],
-            },
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleStrip,
-                ..PrimitiveState::default()
-            },
-            depth_stencil: None,
-            multisample: MultisampleState::default(),
-            fragment: Some(FragmentState {
-                module: &shader,
-                entry_point: Some("fs_solid"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &targets,
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let make = |label: &str, entry: &str, layout: VertexBufferLayout, strip: bool| {
+            device.create_render_pipeline(&RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: VertexState {
+                    module: &shader,
+                    entry_point: Some(entry),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[layout],
+                },
+                primitive: PrimitiveState {
+                    topology: if strip {
+                        PrimitiveTopology::TriangleStrip
+                    } else {
+                        PrimitiveTopology::TriangleList
+                    },
+                    ..PrimitiveState::default()
+                },
+                depth_stencil: None,
+                multisample: MultisampleState::default(),
+                fragment: Some(FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_solid"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &targets,
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
 
-        let mesh_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-            label: Some("reticle-render mesh pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: VertexState {
-                module: &shader,
-                entry_point: Some("vs_mesh"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[mesh_layout],
-            },
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                ..PrimitiveState::default()
-            },
-            depth_stencil: None,
-            multisample: MultisampleState::default(),
-            fragment: Some(FragmentState {
-                module: &shader,
-                entry_point: Some("fs_solid"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &targets,
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let rect_pipeline = make("reticle-render rect pipeline", "vs_rect", rect_layout, true);
+        let mesh_pipeline = make(
+            "reticle-render mesh pipeline",
+            "vs_mesh",
+            mesh_layout,
+            false,
+        );
+        let retained_rect_pipeline = make(
+            "reticle-render retained rect pipeline",
+            "vs_rect_retained",
+            retained_layout,
+            true,
+        );
 
         Self {
             uniform_layout,
             rect_pipeline,
             mesh_pipeline,
+            retained_rect_pipeline,
+            format,
         }
+    }
+
+    /// The uniform bind group layout (binding 0: the view matrix), shared by every
+    /// pipeline. The retained renderer builds its camera bind group against this.
+    #[must_use]
+    pub fn uniform_layout(&self) -> &BindGroupLayout {
+        &self.uniform_layout
+    }
+
+    /// The retained instanced-rect pipeline.
+    #[must_use]
+    pub fn retained_rect_pipeline(&self) -> &RenderPipeline {
+        &self.retained_rect_pipeline
+    }
+
+    /// The tessellated-mesh pipeline.
+    #[must_use]
+    pub fn mesh_pipeline(&self) -> &RenderPipeline {
+        &self.mesh_pipeline
+    }
+
+    /// The color format these pipelines target.
+    #[must_use]
+    pub fn format(&self) -> TextureFormat {
+        self.format
     }
 
     /// Renders `geometry` into `target` with projection `view`, clearing to `clear`.

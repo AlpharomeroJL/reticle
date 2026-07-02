@@ -199,6 +199,64 @@ impl Orientation {
         };
         Point::new(rx, ry)
     }
+
+    /// The eight orientations, in the order matching [`Orientation::code`].
+    pub const ALL: [Self; 8] = [
+        Self::R0,
+        Self::R90,
+        Self::R180,
+        Self::R270,
+        Self::MirrorX,
+        Self::MirrorX90,
+        Self::MirrorX180,
+        Self::MirrorX270,
+    ];
+
+    /// A stable `0..8` index for this orientation, for compact GPU encoding.
+    ///
+    /// The renderer packs this code into a per-instance transform and reconstructs
+    /// the 2x2 linear map in the vertex shader, so the numbering here is a contract
+    /// with `shapes.wgsl`.
+    #[must_use]
+    pub fn code(self) -> u32 {
+        match self {
+            Self::R0 => 0,
+            Self::R90 => 1,
+            Self::R180 => 2,
+            Self::R270 => 3,
+            Self::MirrorX => 4,
+            Self::MirrorX90 => 5,
+            Self::MirrorX180 => 6,
+            Self::MirrorX270 => 7,
+        }
+    }
+
+    /// The orientation for a `0..8` [`Orientation::code`], wrapping out-of-range
+    /// values modulo 8 so the mapping is total.
+    #[must_use]
+    pub fn from_code(code: u32) -> Self {
+        Self::ALL[(code % 8) as usize]
+    }
+
+    /// Composes two orientations: `self.then(next)` is the orientation that applies
+    /// `self` first and then `next`, so
+    /// `self.then(next).apply(p) == next.apply(self.apply(p))` for every point.
+    ///
+    /// D4 is a group under composition, so the result is always one of the eight
+    /// orientations. This is how instance orientations fold together as the renderer
+    /// flattens a placement hierarchy into a single per-instance transform.
+    #[must_use]
+    pub fn then(self, next: Self) -> Self {
+        // Recover the composed linear map from its action on the basis vectors, then
+        // match it back to one of the eight orientations. Exact integer arithmetic,
+        // no lookup table to get out of sync.
+        let e_x = next.apply(self.apply(Point::new(1, 0)));
+        let e_y = next.apply(self.apply(Point::new(0, 1)));
+        Self::ALL
+            .into_iter()
+            .find(|o| o.apply(Point::new(1, 0)) == e_x && o.apply(Point::new(0, 1)) == e_y)
+            .unwrap_or(Self::R0)
+    }
 }
 
 /// A rational magnification factor, `num / den`. Defaults to unity.
@@ -236,6 +294,39 @@ impl Magnification {
     #[must_use]
     pub fn is_unity(self) -> bool {
         self.num == self.den
+    }
+
+    /// The numerator of the reduced `num / den` ratio.
+    #[must_use]
+    pub fn numerator(self) -> u32 {
+        self.num
+    }
+
+    /// The denominator of the reduced `num / den` ratio.
+    #[must_use]
+    pub fn denominator(self) -> u32 {
+        self.den
+    }
+
+    /// This magnification as a floating-point factor, for GPU upload.
+    #[must_use]
+    pub fn factor(self) -> f32 {
+        self.num as f32 / self.den as f32
+    }
+
+    /// Composes two magnifications by multiplying their factors, saturating each
+    /// term at [`u32::MAX`]. Used when folding a placement hierarchy into one
+    /// per-instance scale.
+    #[must_use]
+    pub fn then(self, next: Self) -> Self {
+        let num = u64::from(self.num) * u64::from(next.num);
+        let den = u64::from(self.den) * u64::from(next.den);
+        let clamp = |v: u64| u32::try_from(v).unwrap_or(u32::MAX);
+        // den is a product of two non-zero u32s, so it is non-zero.
+        Self {
+            num: clamp(num),
+            den: clamp(den).max(1),
+        }
     }
 
     /// Scales a single coordinate by this magnification, rounding to nearest DBU.
@@ -296,5 +387,114 @@ impl Transform {
             self.magnification.scale(oriented.y),
         );
         scaled.translate(self.translation.x, self.translation.y)
+    }
+
+    /// Composes two transforms: `self.then(next)` applies `self` first and then
+    /// `next`, so `self.then(next).apply(p) == next.apply(self.apply(p))` for every
+    /// point (up to the round-to-nearest of non-unit magnification).
+    ///
+    /// The orient/scale/translate placement group is closed under composition, so
+    /// the result is again a [`Transform`]. The renderer uses this to fold a chain
+    /// of nested placements into a single per-instance transform, so it can cache
+    /// each cell's tessellation once and expand it in the vertex shader.
+    #[must_use]
+    pub fn then(&self, next: &Self) -> Self {
+        Self {
+            translation: next.apply(self.translation),
+            orientation: self.orientation.then(next.orientation),
+            magnification: self.magnification.then(next.magnification),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Magnification, Orientation, Point, Transform};
+
+    /// Points probed when checking that composed maps agree pointwise.
+    const PROBES: [Point; 5] = [
+        Point::new(0, 0),
+        Point::new(1, 0),
+        Point::new(0, 1),
+        Point::new(3, -7),
+        Point::new(-11, 5),
+    ];
+
+    #[test]
+    fn orientation_code_round_trips() {
+        for o in Orientation::ALL {
+            assert_eq!(Orientation::from_code(o.code()), o);
+        }
+        // Codes are the array positions, and from_code wraps modulo 8.
+        assert_eq!(Orientation::from_code(8), Orientation::R0);
+        assert_eq!(Orientation::from_code(9), Orientation::R90);
+    }
+
+    #[test]
+    fn orientation_then_matches_sequential_application() {
+        // self.then(next) applies self first, then next.
+        for a in Orientation::ALL {
+            for b in Orientation::ALL {
+                let composed = a.then(b);
+                for p in PROBES {
+                    assert_eq!(
+                        composed.apply(p),
+                        b.apply(a.apply(p)),
+                        "({a:?}).then({b:?}) disagreed at {p:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn orientation_r0_is_identity_under_then() {
+        for o in Orientation::ALL {
+            assert_eq!(Orientation::R0.then(o), o);
+            assert_eq!(o.then(Orientation::R0), o);
+        }
+    }
+
+    #[test]
+    fn magnification_then_multiplies_factors() {
+        let two = Magnification::new(2, 1).unwrap();
+        let half = Magnification::new(1, 2).unwrap();
+        assert!(two.then(half).is_unity());
+        let three_halves = Magnification::new(3, 2).unwrap();
+        let combined = two.then(three_halves);
+        assert!((combined.factor() - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn transform_then_matches_sequential_application() {
+        let inner = Transform {
+            translation: Point::new(5, -2),
+            orientation: Orientation::R90,
+            magnification: Magnification::UNITY,
+        };
+        let outer = Transform {
+            translation: Point::new(-3, 7),
+            orientation: Orientation::MirrorX180,
+            magnification: Magnification::UNITY,
+        };
+        let composed = inner.then(&outer);
+        for p in PROBES {
+            assert_eq!(
+                composed.apply(p),
+                outer.apply(inner.apply(p)),
+                "composed transform disagreed at {p:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn transform_then_identity_is_noop() {
+        let t = Transform {
+            translation: Point::new(9, 4),
+            orientation: Orientation::R270,
+            magnification: Magnification::UNITY,
+        };
+        assert_eq!(t.then(&Transform::IDENTITY), t);
+        assert_eq!(Transform::IDENTITY.then(&t), t);
     }
 }
