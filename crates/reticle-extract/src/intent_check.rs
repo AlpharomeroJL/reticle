@@ -91,7 +91,7 @@ pub fn sky130_connection_rules() -> ConnectionRules {
 /// Flattens the cell to leaf shapes, extracts connected components over the
 /// SKY130 via stack, and reports every net whose terminals are not all on one
 /// component ([`Open`]) and every forbidden pair whose nets share a component
-/// ([`Short`]). See the [module docs](self) for the full rule.
+/// ([`Short`]). The `reticle_extract` module documentation states the full rule.
 ///
 /// An unknown `cell` flattens to no shapes, so every terminal is unmatched and
 /// every multi-terminal net opens.
