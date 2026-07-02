@@ -35,7 +35,7 @@ members = [
 exclude = ["tools/reticle-dev-mcp", "tools/crate-docs-mcp", "fuzz"]
 
 [workspace.package]
-version = "3.0.0"
+version = "4.0.0"
 edition = "2024"
 rust-version = "1.94"
 authors = ["Josef Long <Josefdean@protonmail.com>"]
@@ -48,19 +48,19 @@ categories = ["graphics", "rendering", "science"]
 
 [workspace.dependencies]
 # Internal crates. Path-based for local builds; version set enables later publish.
-reticle-geometry = { path = "crates/reticle-geometry", version = "3.0.0" }
-reticle-proto = { path = "crates/reticle-proto", version = "3.0.0" }
-reticle-index = { path = "crates/reticle-index", version = "3.0.0" }
-reticle-io = { path = "crates/reticle-io", version = "3.0.0" }
-reticle-model = { path = "crates/reticle-model", version = "3.0.0" }
-reticle-render = { path = "crates/reticle-render", version = "3.0.0" }
-reticle-drc = { path = "crates/reticle-drc", version = "3.0.0" }
-reticle-route = { path = "crates/reticle-route", version = "3.0.0" }
-reticle-extract = { path = "crates/reticle-extract", version = "3.0.0" }
-reticle-sync = { path = "crates/reticle-sync", version = "3.0.0" }
-reticle-server = { path = "crates/reticle-server", version = "3.0.0" }
-reticle-script = { path = "crates/reticle-script", version = "3.0.0" }
-reticle-app = { path = "crates/reticle-app", version = "3.0.0" }
+reticle-geometry = { path = "crates/reticle-geometry", version = "4.0.0" }
+reticle-proto = { path = "crates/reticle-proto", version = "4.0.0" }
+reticle-index = { path = "crates/reticle-index", version = "4.0.0" }
+reticle-io = { path = "crates/reticle-io", version = "4.0.0" }
+reticle-model = { path = "crates/reticle-model", version = "4.0.0" }
+reticle-render = { path = "crates/reticle-render", version = "4.0.0" }
+reticle-drc = { path = "crates/reticle-drc", version = "4.0.0" }
+reticle-route = { path = "crates/reticle-route", version = "4.0.0" }
+reticle-extract = { path = "crates/reticle-extract", version = "4.0.0" }
+reticle-sync = { path = "crates/reticle-sync", version = "4.0.0" }
+reticle-server = { path = "crates/reticle-server", version = "4.0.0" }
+reticle-script = { path = "crates/reticle-script", version = "4.0.0" }
+reticle-app = { path = "crates/reticle-app", version = "4.0.0" }
 
 [workspace.lints.rust]
 unsafe_code = "warn"
