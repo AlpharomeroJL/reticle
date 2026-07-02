@@ -175,6 +175,7 @@ fn tool_tag(tool: Tool) -> &'static str {
         Tool::Select => "select",
         Tool::Pan => "pan",
         Tool::Measure => "measure",
+        Tool::CutLine => "cutline",
     }
 }
 
@@ -183,6 +184,7 @@ fn tool_from_tag(tag: &str) -> Tool {
     match tag {
         "pan" => Tool::Pan,
         "measure" => Tool::Measure,
+        "cutline" => Tool::CutLine,
         _ => Tool::Select,
     }
 }

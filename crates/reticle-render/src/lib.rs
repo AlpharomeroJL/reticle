@@ -30,6 +30,7 @@ mod geometry;
 mod indirect;
 mod pages;
 mod palette;
+mod pipeline3d;
 mod pipelines;
 mod retained;
 mod surface;
@@ -42,6 +43,10 @@ pub use geometry::{MeshVertex, RectInstance, SceneGeometry};
 pub use indirect::{IndirectRects, MultiDraw, upload_instances};
 pub use pages::{Allocation, BufferPages, DEFAULT_PAGE_SIZE, PageAllocator};
 pub use palette::{Palette, Rgba};
+pub use pipeline3d::{
+    BlitPipeline, DEPTH_FORMAT, LIGHT_DIR, LayerSpan, Mesh3d, OrbitCamera, RenderTarget3d,
+    StackRenderer, StackUniform, StackView, Vertex3d, layer_spans, render_stack_offscreen,
+};
 pub use pipelines::Pipelines;
 pub use retained::{
     CellChunk, ExpandedScene, InstanceEntry, InstanceTransform, RectInstanceT, RetainedScene,

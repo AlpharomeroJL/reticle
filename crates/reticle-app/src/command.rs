@@ -76,6 +76,7 @@ pub fn catalog(layer_names: &[String]) -> Vec<CommandEntry> {
         CommandEntry::new("Tool: Select", Command::SetTool(Tool::Select)),
         CommandEntry::new("Tool: Pan", Command::SetTool(Tool::Pan)),
         CommandEntry::new("Tool: Measure", Command::SetTool(Tool::Measure)),
+        CommandEntry::new("Tool: Cut line", Command::SetTool(Tool::CutLine)),
         CommandEntry::new("Edit: Undo", Command::Undo),
         CommandEntry::new("Edit: Redo", Command::Redo),
         CommandEntry::new("View: Zoom to fit", Command::ZoomToFit),
