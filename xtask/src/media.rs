@@ -9,7 +9,7 @@ use image::{ImageBuffer, Rgba};
 use reticle_app::camera::ScreenRect;
 use reticle_app::minimap::MinimapLayout;
 use reticle_drc::DrcEngine;
-use reticle_geometry::{LayerId, Point, Rect};
+use reticle_geometry::{LayerId, Point, Rect, Shape};
 use reticle_model::{
     Camera, Cell, Document, DrawShape, LayerInfo, NetSpec, RouteRequest, Router, Rule, RuleKind,
     RuleSet, ShapeKind, StackEntry,
@@ -205,6 +205,21 @@ fn capture_route(
         "route demo: {} routed, {} failed, {} DBU of wire",
         report.routed, report.failed, report.total_length_dbu
     );
+    // The router emits wires in its internal set-iteration order; sort the cell's
+    // shapes into a canonical order so the still renders identically every run.
+    if let Some(cell) = doc.cell_mut(CELL) {
+        cell.shapes.sort_by_key(|shape| {
+            let b = shape.bounding_box();
+            (
+                shape.layer.layer,
+                shape.layer.datatype,
+                b.min.x,
+                b.min.y,
+                b.max.x,
+                b.max.y,
+            )
+        });
+    }
 
     let bbox = document_bounds(&doc, CELL);
     let camera = frame_camera(bbox, STILL, 0.94);
