@@ -27,6 +27,7 @@
 mod context;
 mod cull;
 mod geometry;
+mod indirect;
 mod pages;
 mod palette;
 mod pipelines;
@@ -36,8 +37,9 @@ mod target;
 mod view;
 
 pub use context::WgpuContext;
-pub use cull::{CellCuller, CullAabb};
+pub use cull::{CellCompactor, CellCuller, CompactionOutput, CullAabb, QUAD_INDEX_COUNT};
 pub use geometry::{MeshVertex, RectInstance, SceneGeometry};
+pub use indirect::{IndirectRects, MultiDraw, upload_instances};
 pub use pages::{Allocation, BufferPages, DEFAULT_PAGE_SIZE, PageAllocator};
 pub use palette::{Palette, Rgba};
 pub use pipelines::Pipelines;
@@ -45,7 +47,7 @@ pub use retained::{
     CellChunk, ExpandedScene, InstanceEntry, InstanceTransform, RectInstanceT, RetainedScene,
 };
 pub use surface::RetainedRenderer;
-pub use target::{OffscreenTarget, TARGET_FORMAT};
+pub use target::{OFFSCREEN_SAMPLE_COUNT, OffscreenTarget, TARGET_FORMAT};
 pub use view::ViewUniform;
 
 use reticle_model::{Camera, Document, Renderer};
