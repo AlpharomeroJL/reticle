@@ -17,6 +17,8 @@ reticle-geometry = { workspace = true }
 reticle-model = { workspace = true }
 reticle-io = { workspace = true }
 reticle-render = { workspace = true }
+# Feature stills reuse the app's demo document and minimap math.
+reticle-app = { workspace = true }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 # Media capture renders offscreen with reticle-render, writes PNGs with `image`,
 # and assembles GIFs with the installed `gifski` CLI.

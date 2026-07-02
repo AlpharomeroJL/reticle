@@ -1,63 +1,140 @@
-//! Offscreen media capture: the hero image and a browse GIF.
+//! Offscreen media capture: the hero image, demo GIFs, and feature stills.
 //!
-//! Renders a generated layout through the offscreen `reticle-render` path, writes
-//! PNG frames with the `image` crate, and assembles GIFs with the installed
-//! `gifski` CLI. Skips gracefully when no GPU adapter is available.
+//! Renders generated and demo layouts through the offscreen `reticle-render`
+//! paths, writes PNG frames with the `image` crate, and assembles GIFs with the
+//! installed `gifski` CLI. Skips gracefully when no GPU adapter is available.
 
 use image::{ImageBuffer, Rgba};
-use reticle_geometry::{Point, Rect};
-use reticle_model::{Camera, Document};
-use reticle_render::{WgpuContext, WgpuRenderer};
+use reticle_geometry::{LayerId, Point, Rect};
+use reticle_model::{Camera, Document, StackEntry};
+use reticle_render::{OrbitCamera, WgpuContext, WgpuRenderer, render_stack_offscreen};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const HERO: (u32, u32) = (2560, 1440);
 const GIF: (u32, u32) = (960, 540);
 const GIF_FRAMES: u32 = 48;
+/// Render size for the single-frame feature stills.
+const STILL: (u32, u32) = (1600, 1000);
 
-/// Renders the hero image and a browse GIF into `out_dir`. Returns `Ok(false)`
-/// (skipped) if no GPU adapter is available.
+/// Renders the media set into `out_dir`: the hero image, the browse GIF, and the
+/// feature stills. `only` restricts the run to one named asset (`hero`, `browse`,
+/// `stack3d`, ...). Returns `Ok(false)` (skipped) if no GPU adapter is available.
 ///
 /// # Errors
 ///
 /// Propagates filesystem errors from creating the output directory or writing files.
-pub fn capture(out_dir: &Path) -> std::io::Result<bool> {
-    let doc = crate::generator::generate_layout(200_000, 8, 3);
-    let Some(top) = doc.top_cells().first().cloned() else {
-        eprintln!("generated document has no top cell");
-        return Ok(false);
-    };
+pub fn capture(out_dir: &Path, only: Option<&str>) -> std::io::Result<bool> {
+    let wants = |name: &str| only.is_none_or(|o| o == name);
     let Some(ctx) = WgpuContext::new_blocking() else {
         eprintln!("no GPU adapter available; skipping media capture");
         return Ok(false);
     };
     let mut renderer = WgpuRenderer::new();
-    let bbox = document_bounds(&doc, &top);
-
     std::fs::create_dir_all(out_dir)?;
 
-    // Hero: the whole design at high resolution.
-    let hero_cam = frame_camera(bbox, HERO, 0.92);
-    let rgba = renderer.render_document_offscreen(&ctx, &doc, &top, &hero_cam, HERO);
-    save_png(&out_dir.join("hero.png"), &rgba, HERO)?;
-    eprintln!("wrote {}", out_dir.join("hero.png").display());
-
-    // Browse GIF: ease-in zoom from the full view toward the center.
-    let frames_dir = out_dir.join("frames");
-    std::fs::create_dir_all(&frames_dir)?;
-    let mut frames = Vec::with_capacity(GIF_FRAMES as usize);
-    for index in 0..GIF_FRAMES {
-        let t = index as f32 / GIF_FRAMES as f32;
-        let zoom = 0.92 * (1.0 + 3.0 * smoothstep(t));
-        let cam = frame_camera(bbox, GIF, zoom);
-        let rgba = renderer.render_document_offscreen(&ctx, &doc, &top, &cam, GIF);
-        let path = frames_dir.join(format!("frame_{index:04}.png"));
-        save_png(&path, &rgba, GIF)?;
-        frames.push(path);
+    if wants("hero") || wants("browse") {
+        capture_hero_and_browse(&ctx, &mut renderer, out_dir, &wants)?;
     }
-    assemble_gif(&frames, &out_dir.join("browse.gif"));
-    eprintln!("wrote {}", out_dir.join("browse.gif").display());
+    if wants("stack3d") {
+        capture_stack3d(&ctx, out_dir)?;
+    }
     Ok(true)
+}
+
+/// Renders the dense generated layout as the hero image and the browse zoom GIF.
+fn capture_hero_and_browse(
+    ctx: &WgpuContext,
+    renderer: &mut WgpuRenderer,
+    out_dir: &Path,
+    wants: &dyn Fn(&str) -> bool,
+) -> std::io::Result<()> {
+    let doc = crate::generator::generate_layout(200_000, 8, 3);
+    let Some(top) = doc.top_cells().first().cloned() else {
+        eprintln!("generated document has no top cell");
+        return Ok(());
+    };
+    let bbox = document_bounds(&doc, &top);
+
+    if wants("hero") {
+        // Hero: the whole design at high resolution.
+        let hero_cam = frame_camera(bbox, HERO, 0.92);
+        let rgba = renderer.render_document_offscreen(ctx, &doc, &top, &hero_cam, HERO);
+        save_png(&out_dir.join("hero.png"), &rgba, HERO)?;
+        eprintln!("wrote {}", out_dir.join("hero.png").display());
+    }
+
+    if wants("browse") {
+        // Browse GIF: ease-in zoom from the full view toward the center.
+        let frames_dir = out_dir.join("frames");
+        std::fs::create_dir_all(&frames_dir)?;
+        let mut frames = Vec::with_capacity(GIF_FRAMES as usize);
+        for index in 0..GIF_FRAMES {
+            let t = index as f32 / GIF_FRAMES as f32;
+            let zoom = 0.92 * (1.0 + 3.0 * smoothstep(t));
+            let cam = frame_camera(bbox, GIF, zoom);
+            let rgba = renderer.render_document_offscreen(ctx, &doc, &top, &cam, GIF);
+            let path = frames_dir.join(format!("frame_{index:04}.png"));
+            save_png(&path, &rgba, GIF)?;
+            frames.push(path);
+        }
+        assemble_gif(&frames, &out_dir.join("browse.gif"));
+        eprintln!("wrote {}", out_dir.join("browse.gif").display());
+    }
+    Ok(())
+}
+
+/// Renders the extruded 3D layer stack of the demo document to `stack3d.png`.
+fn capture_stack3d(ctx: &WgpuContext, out_dir: &Path) -> std::io::Result<()> {
+    let doc = demo_doc_with_stack();
+    let top = reticle_app::demo::TOP_CELL;
+    let bbox = document_bounds(&doc, top);
+    let stack = &doc.technology().stack;
+    let z_min = stack.iter().map(|e| e.z_bottom_nm).min().unwrap_or(0);
+    let z_max = stack.iter().map(StackEntry::z_top_nm).max().unwrap_or(1);
+    // The demo technology has 1000 DBU per micron, so 1 nm of stack height is
+    // exactly 1 world unit and xy DBU need no conversion.
+    let bounds = (
+        [bbox.min.x as f32, bbox.min.y as f32, z_min as f32],
+        [bbox.max.x as f32, bbox.max.y as f32, z_max as f32],
+    );
+    let mut camera = OrbitCamera::framing(bounds);
+    camera.orbit(0.25, 0.05);
+    camera.zoom(0.62);
+    let rgba = render_stack_offscreen(ctx, &doc, top, &camera, STILL);
+    save_png(&out_dir.join("stack3d.png"), &rgba, STILL)?;
+    eprintln!("wrote {}", out_dir.join("stack3d.png").display());
+    Ok(())
+}
+
+/// The app's demo document with physical `stack` directives added, so the 3D view
+/// extrudes real slabs (well below the surface, metals above) instead of the
+/// synthetic uniform fallback.
+fn demo_doc_with_stack() -> Document {
+    let mut doc = reticle_app::demo::demo_document();
+    let mut tech = doc.technology().clone();
+    tech.stack = vec![
+        stack_entry(1, -400, 400), // NWELL: buried, its top at the substrate surface.
+        stack_entry(2, 0, 450),    // ACTIVE
+        stack_entry(3, 550, 500),  // POLY
+        stack_entry(4, 1350, 600), // METAL1
+        stack_entry(5, 2350, 700), // METAL2
+    ];
+    doc.set_technology(tech);
+    // Drop the TEXT label: a flat label extruded into a slab reads as noise in 3D.
+    if let Some(cell) = doc.cell_mut(reticle_app::demo::TOP_CELL) {
+        cell.shapes.retain(|s| s.layer != LayerId::new(6, 0));
+    }
+    doc
+}
+
+/// A stack directive for demo layer `(layer, 0)`, in nanometers.
+fn stack_entry(layer: u16, z_bottom_nm: i64, thickness_nm: i64) -> StackEntry {
+    StackEntry {
+        layer: LayerId::new(layer, 0),
+        z_bottom_nm,
+        thickness_nm,
+    }
 }
 
 /// The bounding box of the top cell, with a sane fallback for an empty design.
