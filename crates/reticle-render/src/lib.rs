@@ -36,7 +36,7 @@ mod target;
 mod view;
 
 pub use context::WgpuContext;
-pub use cull::{CellCuller, CullAabb};
+pub use cull::{CellCompactor, CellCuller, CompactionOutput, CullAabb, QUAD_INDEX_COUNT};
 pub use geometry::{MeshVertex, RectInstance, SceneGeometry};
 pub use pages::{Allocation, BufferPages, DEFAULT_PAGE_SIZE, PageAllocator};
 pub use palette::{Palette, Rgba};
