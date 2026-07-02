@@ -3,9 +3,11 @@
 
 [advisories]
 version = 2
-# Fail on security vulnerabilities. A small number of "unmaintained" advisories on
-# transitive dependencies we do not control are ignored with a documented reason;
-# vulnerabilities are never ignored.
+# Fail on security advisories by default. An advisory is ignored only with a specific
+# reason and a revisit trigger, and only when we cannot act on it: the crate is pinned
+# by a transitive dependency we do not control, and either the advisory is
+# "unmaintained" (not a vulnerability) or the vulnerable code path is not reachable on
+# any target Reticle builds or ships. See docs/decisions/0017.
 ignore = [
     # `yaml-rust` is unmaintained (not vulnerable), reached only transitively via
     # gds21 -> layout21utils -> serde_yaml. No safe upgrade is available upstream.
@@ -13,6 +15,14 @@ ignore = [
     # `ttf-parser` is unmaintained (not vulnerable), reached only transitively via
     # eframe -> egui-winit -> winit font handling. No safe upgrade is available.
     "RUSTSEC-2026-0192",
+    # `quick-xml` 0.39 allows unbounded namespace-declaration allocation in NsReader
+    # (a memory-exhaustion DoS on untrusted XML). Reached only through the Linux
+    # accessibility stack (eframe -> winit -> smithay-client-toolkit -> wayland-scanner,
+    # plus zbus_xml), which is not compiled on our Windows or wasm targets, and Reticle
+    # never feeds untrusted XML through it. The fix is quick-xml >= 0.41, but
+    # wayland-scanner 0.31 pins `^0.39`, so no upgrade is reachable without forking the
+    # eframe 0.35 winit chain. Revisit when eframe updates its winit/smithay chain.
+    "RUSTSEC-2026-0195",
 ]
 
 [licenses]
