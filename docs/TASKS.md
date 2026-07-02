@@ -39,16 +39,25 @@ produce v5.0.0.
 ## Wave 0: contract freeze (serial)
 
 - [x] Crate skeletons: reticle-agent-api, reticle-mcp, reticle-agent, reticle-bench, reticle-demo scaffolded, registered, compiling green (commit e94db02, ci green).
-- [~] Command and response enums (done: AgentCommand/AgentResponse tagged serde enums + round-trip tests + structured AgentError/ErrorCode, ElementId; commit dda4342). REMAINING: Session owning EditableDocument + revision, and the element-id allocator.
-- [ ] Transcript JSONL schema plus document_hash replay contract. not-started
-- [ ] Intent spec types and open/short report types. not-started
-- [ ] Pin/Label model types plus Edit variants; structured Violation upgrade workspace-wide. not-started
-- [ ] Benchmark task/checker/manifest/results schemas (reticle-bench). not-started
-- [ ] MCP tool JSON schemas and descriptions. not-started
-- [ ] Agent status channel types over sync awareness. not-started
-- [ ] Demo server API types and limit config. not-started
-- [~] tech/sky130.tech with citations committed and parse-guarded (commit f6573c6). REMAINING: tech/sky130-drc-subset.toml.
-- [ ] Dependency pins; ADRs 0017+ (0017 done in Wave R); frozen-surface manifest recorded here. not-started
+- [x] Command and response enums: AgentCommand/AgentResponse tagged serde enums + round-trip tests + structured AgentError/ErrorCode + ElementId (dda4342). Session owning EditableDocument + the element-id allocator is Wave 1 Lane A implementation against these frozen types (ADR 0018).
+- [x] Transcript JSONL schema (CommandRecord/Transcript/Outcome) plus document_hash replay contract in reticle-model (277833a, d08aa4f).
+- [x] Intent spec types (IntentSpec/IntentNet/Terminal/ForbiddenPair) and open/short report types (277833a).
+- [x] Pin/Label model types + Edit AddLabel/RemoveLabel + structured Violation upgrade workspace-wide + document_hash (86a5be3, d08aa4f; ADR 0019).
+- [x] Benchmark task/checker/manifest/results schemas in reticle-bench (81a7dcb).
+- [~] MCP tools derive from the frozen AgentCommand set; JSON schema generation and model-facing descriptions are Wave 2 Lane A. Contract (command types) frozen.
+- [x] Agent status channel types (AgentStatus, AGENT_ACTOR) in reticle-agent-api (277833a).
+- [x] Demo server API types (submit/status/cancel) and LimitConfig in reticle-demo (81a7dcb).
+- [x] tech/sky130.tech (f6573c6) and tech/sky130-drc-subset.toml with cited values, parse-guarded.
+- [x] ADRs 0018 (agent-api layering), 0019 (structured Violation), 0020 (product crates in workspace). Deps: serde/serde_json pinned in workspace.dependencies. Frozen-surface manifest below.
+
+### Frozen-surface manifest (read-only to Wave 1+ lanes; only the integration agent amends, at a wave boundary, with an ADR)
+
+- reticle-agent-api: AgentCommand, AgentResponse, AgentError/ErrorCode, ElementId, Revision, CommandResult; args::{PointArg,RectArg,LayerArg,EndcapArg,OrientationArg,TransformArg}; CommandRecord/Transcript/Outcome; IntentSpec/IntentNet/Terminal/ForbiddenPair/IntentReport/Open/Short; AgentStatus/AGENT_ACTOR.
+- reticle-model: Label/Pin/Anchor/PinDirection; Edit::AddLabel/RemoveLabel; Cell.labels/pins; Violation structured fields (kind/layer/other_layer/measured/required) + Violation::new; document_hash; StackEntry + Technology.stack (from Wave R).
+- reticle-bench: BenchTask/Tier/SuiteManifest/ResultRecord; Checker trait + CheckResult/CheckFailure.
+- reticle-demo: SubmitRequest/SubmitResponse/StatusResponse/CancelRequest/SessionState; LimitConfig.
+- Data: tech/sky130.tech (layers, pins, labels, stack); tech/sky130-drc-subset.toml (cited rule subset).
+- Benchmark task file format: TOML deserializing to BenchTask; suite manifest is SuiteManifest.
 
 ## Wave 1: foundations (batch 1 then batch 2)
 
