@@ -27,10 +27,10 @@ produce v5.0.0.
 ## Wave R: finish and release v4.0.0
 
 - [x] Setup: profiles (`dev` opt-level 1, deps 3), fail-fast `just ci` order, run tracker, `scratch/logs/`. done-gate-green
-- [ ] Lane R1: windowed GPU surface, persistent scene, fps readout, 10M re-measure. not-started
+- [ ] Lane R1: windowed GPU surface, persistent scene, fps readout, 10M re-measure. in-progress @ lane/r1-windowed-surface
 - [ ] Lane R2: compaction to indirect draw, MSAA, LOD switching, flags-vs-compacted bench. not-started
 - [ ] Lane R3: canvas text labels, minimap, split viewports, rebindable keys, benches doc fix. not-started
-- [ ] Lane R4: `stack` tech directive, 3D layer view, cut-line cross-section. not-started
+- [ ] Lane R4: `stack` tech directive, 3D layer view, cut-line cross-section. in-progress @ lane/r4-3d-view
 - [ ] Close-out: WASM cold-load and collab echo measured into PERF.md. not-started
 - [ ] Close-out: DRC/route/collab GIFs plus minimap and 3D media. not-started
 - [ ] Close-out: README refresh, skeptical STATUS update. not-started
