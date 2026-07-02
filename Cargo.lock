@@ -3996,6 +3996,7 @@ name = "reticle-index"
 version = "3.0.0"
 dependencies = [
  "criterion",
+ "memmap2",
  "proptest",
  "reticle-geometry",
  "rkyv",
