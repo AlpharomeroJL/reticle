@@ -48,10 +48,19 @@
 //! [`DrcEngine::check_region`] re-checks only the geometry touching an edited
 //! rectangle, bounded by a single index query, so a local edit re-validates in time
 //! proportional to the shapes near the edit rather than the whole cell.
+//!
+//! # Built-in SKY130 subset
+//!
+//! [`sky130_drc_rules`] loads the committed SKY130 rule table (a cited subset of
+//! the SKY130 periphery rules) ready for [`DrcEngine::new`]. It is a subset:
+//! passing it is not tape-out clean. See the coverage table in the book.
 
 #![forbid(unsafe_code)]
 
 mod geom;
+mod sky130;
+
+pub use sky130::sky130_drc_rules;
 
 use geom::{contains_rect, enclosure_margin, overlaps, rect_gap};
 use reticle_geometry::{LayerId, Rect, SpatialIndex};
