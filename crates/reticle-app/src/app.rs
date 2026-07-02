@@ -1021,7 +1021,7 @@ impl App {
     ///
     /// Refreshes the retained scene (a no-op unless the document or layer visibility
     /// changed), builds the camera projection for the canvas, and queues an
-    /// [`egui_wgpu::Callback`] whose [`SceneCallback`] uploads and draws the scene on
+    /// [`eframe::egui_wgpu::Callback`] whose [`SceneCallback`] uploads and draws the scene on
     /// eframe's device. egui overlays queued after this composite on top.
     fn draw_shapes_gpu(
         &mut self,
