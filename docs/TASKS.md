@@ -63,10 +63,10 @@ produce v5.0.0.
 
 ## Wave 1: foundations (batch 1 then batch 2)
 
-- [ ] Lane A: reticle-agent-api implementation, property tests, transcript logger/replayer. not-started
-- [ ] Lane B: intent checker in reticle-extract, oracle tests both directions. not-started
-- [ ] Lane C: pins and labels through model and io, GDS TEXT round-trip. not-started
-- [ ] Lane D: SKY130 DRC subset over reticle-drc, coverage table, per-rule fixtures. not-started
+- [~] Lane A: reticle-agent-api implementation, property tests, transcript logger/replayer. in-progress @ lane/1a-agent-api
+- [~] Lane B: intent checker in reticle-extract, oracle tests both directions. in-progress @ lane/1b-intent
+- [~] Lane C: pins and labels through model and io, GDS TEXT round-trip. in-progress @ lane/1c-pins-io
+- [~] Lane D: SKY130 DRC subset over reticle-drc, coverage table, per-rule fixtures. in-progress @ lane/1d-drc-subset
 - [ ] Lane E: sky130_fd_sc_hd cell import, corpus samples, DRC-clean gate. not-started
 - [ ] Lane F: benchmark infrastructure, mock model, `just bench-agent`. not-started
 - [ ] Lane G: demo server with enforced limits, abuse tests. not-started
