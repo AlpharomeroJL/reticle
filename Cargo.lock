@@ -5975,10 +5975,14 @@ name = "xtask"
 version = "3.0.0"
 dependencies = [
  "image",
+ "reticle-app",
+ "reticle-drc",
  "reticle-geometry",
  "reticle-io",
  "reticle-model",
  "reticle-render",
+ "reticle-route",
+ "reticle-sync",
  "serde_json",
 ]
 
