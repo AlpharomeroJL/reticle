@@ -20,5 +20,8 @@ reticle-model = { workspace = true }
 # Wave 1 wires `gds21` (GDSII) and, later, VLSIR/layout21 interop (ADR 0004).
 
 [dev-dependencies]
+# `gds21` again so integration tests can hand-build foreign GDSII byte streams
+# (TEXT elements with strans and so on) that our own exporter never produces.
+gds21 = "0.2.0"
 proptest = "1.11.0"
 # Wave 1 wires `proptest` and round-trip corpus fixtures.
