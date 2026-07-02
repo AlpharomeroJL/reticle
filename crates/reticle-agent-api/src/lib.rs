@@ -15,12 +15,18 @@ pub mod args;
 mod command;
 mod error;
 mod ids;
+mod intent;
 mod response;
+mod status;
+mod transcript;
 
 pub use command::AgentCommand;
 pub use error::{AgentError, ErrorCode};
 pub use ids::ElementId;
+pub use intent::{ForbiddenPair, IntentNet, IntentReport, IntentSpec, Open, Short, Terminal};
 pub use response::{AgentResponse, Revision};
+pub use status::{AGENT_ACTOR, AgentStatus};
+pub use transcript::{CommandRecord, Outcome, Transcript};
 
 /// The result of applying a command: a response or a structured error.
 pub type CommandResult = Result<AgentResponse, AgentError>;
@@ -88,5 +94,69 @@ mod tests {
         let json = serde_json::to_string(&r).expect("serialize");
         let back: AgentResponse = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(r, back);
+    }
+
+    /// The transcript record, intent spec, and status all round-trip through JSON.
+    #[test]
+    fn frozen_types_round_trip() {
+        use super::args::{LayerArg, RectArg};
+        use super::{
+            AgentStatus, CommandRecord, IntentNet, IntentReport, IntentSpec, Outcome, Terminal,
+            Transcript,
+        };
+
+        let record = CommandRecord {
+            seq: 0,
+            command: AgentCommand::ListLayers,
+            revision_before: 3,
+            revision_after: 3,
+            outcome: Outcome::Ok(AgentResponse::Data {
+                revision: 3,
+                value: serde_json::json!({"layers": []}),
+            }),
+            ts_start_ms: 10,
+            ts_end_ms: 12,
+            tokens_in: Some(40),
+            tokens_out: None,
+        };
+        let transcript = Transcript {
+            records: vec![record],
+            final_hash: 0xDEAD_BEEF,
+        };
+        let json = serde_json::to_string(&transcript).expect("serialize");
+        let back: Transcript = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(transcript, back);
+
+        let intent = IntentSpec {
+            nets: vec![IntentNet {
+                name: "vdd".into(),
+                terminals: vec![Terminal {
+                    name: "vdd".into(),
+                    layer: LayerArg {
+                        layer: 68,
+                        datatype: 20,
+                    },
+                    region: RectArg {
+                        min: super::args::PointArg { x: 0, y: 0 },
+                        max: super::args::PointArg { x: 10, y: 10 },
+                    },
+                }],
+            }],
+            forbidden: vec![],
+        };
+        let back: IntentSpec =
+            serde_json::from_str(&serde_json::to_string(&intent).unwrap()).unwrap();
+        assert_eq!(intent, back);
+        assert!(IntentReport::default().is_satisfied());
+
+        let status = AgentStatus {
+            iteration: 2,
+            step: "verifying".into(),
+            violations: 1,
+            running: true,
+        };
+        let back: AgentStatus =
+            serde_json::from_str(&serde_json::to_string(&status).unwrap()).unwrap();
+        assert_eq!(status, back);
     }
 }
