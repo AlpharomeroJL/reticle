@@ -64,7 +64,7 @@ pub fn contains(rect: &ScreenRect, x: f32, y: f32) -> bool {
 
 /// Splits `screen` into the pane rectangles for `split`, in pane order.
 ///
-/// Panes share the canvas evenly with a [`DIVIDER_PX`] gap between them; the
+/// Panes share the canvas evenly with a `DIVIDER_PX` gap between them; the
 /// divider belongs to neither pane, so [`hit_pane`] treats it as dead space.
 #[must_use]
 pub fn pane_rects(screen: &ScreenRect, split: Split) -> Vec<ScreenRect> {
