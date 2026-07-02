@@ -30,6 +30,7 @@ pub fn generate_layout(target_shapes: usize, layers: usize, depth: usize) -> Doc
         dbu_per_micron: 1000,
         layers: Vec::with_capacity(layers),
         rules: Vec::new(),
+        stack: Vec::new(),
     };
     for layer_idx in 0..layers {
         tech.layers.push(LayerInfo {

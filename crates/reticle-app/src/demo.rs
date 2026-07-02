@@ -68,6 +68,7 @@ pub fn demo_technology() -> Technology {
             },
         ],
         rules: Vec::new(),
+        stack: Vec::new(),
     }
 }
 

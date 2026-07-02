@@ -19,7 +19,8 @@ mod rules;
 mod traits;
 
 pub use document::{
-    ArrayInstance, Cell, Document, DrawShape, Instance, LayerInfo, ShapeKind, Technology,
+    ArrayInstance, Cell, Document, DrawShape, Instance, LayerInfo, ShapeKind, StackEntry,
+    Technology,
 };
 pub use edit::Edit;
 pub use editable::EditableDocument;
