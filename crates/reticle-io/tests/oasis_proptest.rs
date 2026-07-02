@@ -1,9 +1,9 @@
 //! Property tests for the in-house OASIS-inspired subset ([`Oasis`]).
 //!
-//! Generates random documents containing rectangles, polygons, paths, single
-//! placements (instances), and arrays, then asserts that `import(export(doc))`
-//! reproduces the document's cells exactly. This complements the fixed-example
-//! round-trip tests in `oasis_roundtrip.rs`.
+//! Generates random documents containing rectangles, polygons, paths, text
+//! labels, single placements (instances), and arrays, then asserts that
+//! `import(export(doc))` reproduces the document's cells exactly. This
+//! complements the fixed-example round-trip tests in `oasis_roundtrip.rs`.
 //!
 //! # Magnification and the reader's canonical form
 //!
@@ -19,7 +19,8 @@ use reticle_geometry::Transform;
 use reticle_geometry::{Endcap, LayerId, Magnification, Orientation, Path, Point, Polygon, Rect};
 use reticle_io::Oasis;
 use reticle_model::{
-    ArrayInstance, Cell, Document, DrawShape, Exporter, Importer, Instance, ShapeKind,
+    Anchor, ArrayInstance, Cell, Document, DrawShape, Exporter, Importer, Instance, Label,
+    ShapeKind,
 };
 
 /// Coordinates are kept well inside `i32` so array/path arithmetic never saturates
@@ -100,6 +101,30 @@ fn shape() -> impl Strategy<Value = DrawShape> {
     prop_oneof![rect, polygon, path]
 }
 
+/// A strategy for an [`Anchor`], covering all five variants.
+fn anchor() -> impl Strategy<Value = Anchor> {
+    prop_oneof![
+        Just(Anchor::Center),
+        Just(Anchor::SouthWest),
+        Just(Anchor::SouthEast),
+        Just(Anchor::NorthWest),
+        Just(Anchor::NorthEast),
+    ]
+}
+
+/// A strategy for a text label: arbitrary (possibly empty) text on any layer,
+/// at any position, with any anchor.
+fn label() -> impl Strategy<Value = Label> {
+    ("[a-zA-Z0-9_/\\[\\]]{0,16}", point(), layer_id(), anchor()).prop_map(
+        |(text, position, layer, anchor)| Label {
+            text,
+            position,
+            layer,
+            anchor,
+        },
+    )
+}
+
 /// A strategy for a single placement of a child cell.
 fn instance() -> impl Strategy<Value = Instance> {
     ("[a-z]{1,8}", transform()).prop_map(|(cell, transform)| Instance { cell, transform })
@@ -119,19 +144,22 @@ fn array() -> impl Strategy<Value = ArrayInstance> {
     )
 }
 
-/// A strategy for a whole cell: a name plus random shapes, instances, and arrays.
+/// A strategy for a whole cell: a name plus random shapes, labels, instances,
+/// and arrays.
 fn cell() -> impl Strategy<Value = Cell> {
     (
         "[a-z][a-z0-9_]{0,10}",
         prop::collection::vec(shape(), 0..6),
         prop::collection::vec(instance(), 0..4),
         prop::collection::vec(array(), 0..4),
+        prop::collection::vec(label(), 0..4),
     )
-        .prop_map(|(name, shapes, instances, arrays)| Cell {
+        .prop_map(|(name, shapes, instances, arrays, labels)| Cell {
             name,
             shapes,
             instances,
             arrays,
+            labels,
             ..Cell::default()
         })
 }
@@ -159,7 +187,8 @@ fn document() -> impl Strategy<Value = Document> {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
-    /// Export then import reproduces every cell (shapes, instances, arrays) exactly.
+    /// Export then import reproduces every cell (shapes, labels, instances,
+    /// arrays) exactly.
     #[test]
     fn oasis_roundtrips_random_documents(doc in document()) {
         let bytes = Oasis.export(&doc).expect("export should succeed");
@@ -171,6 +200,7 @@ proptest! {
                 .cell(&original.name)
                 .expect("every cell should survive the round-trip");
             prop_assert_eq!(&round.shapes, &original.shapes);
+            prop_assert_eq!(&round.labels, &original.labels);
             prop_assert_eq!(&round.instances, &original.instances);
             prop_assert_eq!(&round.arrays, &original.arrays);
         }
