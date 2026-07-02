@@ -3965,6 +3965,7 @@ dependencies = [
 name = "reticle-drc"
 version = "3.0.0"
 dependencies = [
+ "criterion",
  "proptest",
  "reticle-geometry",
  "reticle-index",
@@ -4015,6 +4016,7 @@ dependencies = [
 name = "reticle-model"
 version = "3.0.0"
 dependencies = [
+ "criterion",
  "proptest",
  "reticle-geometry",
 ]
