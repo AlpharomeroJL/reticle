@@ -3935,6 +3935,7 @@ name = "reticle-app"
 version = "3.0.0"
 dependencies = [
  "eframe",
+ "egui-wgpu",
  "reticle-drc",
  "reticle-extract",
  "reticle-geometry",

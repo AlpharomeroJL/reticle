@@ -89,6 +89,8 @@ pub struct App {
     zoom_to_selected_violation: bool,
     /// The net-highlight state: cached connectivity plus the highlighted net.
     netlight: Netlight,
+    /// The 3D layer-stack window's orbit-camera state.
+    view3d: crate::view3d::View3d,
 
     /// Whether the command palette window is open.
     palette_open: bool,
@@ -135,6 +137,7 @@ impl App {
             drc: DrcResults::new(),
             zoom_to_selected_violation: false,
             netlight: Netlight::new(),
+            view3d: crate::view3d::View3d::new(),
             palette_open: false,
             palette_query: String::new(),
             layer_query: String::new(),
@@ -1208,7 +1211,7 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_shortcuts(&ctx);
 
@@ -1246,6 +1249,13 @@ impl eframe::App for App {
         });
 
         self.palette_window(&ctx, canvas_screen);
+        self.view3d.show(
+            &ctx,
+            frame,
+            self.history.document(),
+            &self.top_cell,
+            &self.layer_state,
+        );
 
         // Keep animating while dragging/measuring so interaction feels live.
         ctx.request_repaint();
