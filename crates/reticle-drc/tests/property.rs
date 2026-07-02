@@ -142,6 +142,20 @@ fn shape_strategy() -> impl Strategy<Value = (LayerId, Rect)> {
         })
 }
 
+/// A small axis-aligned query region within the layout bounds, the sort of
+/// rectangle a single local edit dirties.
+fn region_strategy() -> impl Strategy<Value = Rect> {
+    (-BOUND..BOUND, -BOUND..BOUND, 1..=60i32, 1..=60i32)
+        .prop_map(|(x, y, w, h)| Rect::new(Point::new(x, y), Point::new(x + w, y + h)))
+}
+
+/// The engine's region filter, replicated as the oracle predicate: a violation is
+/// reported for `region` exactly when its location's edge-to-edge gap to `region`
+/// is zero (overlapping or merely touching), matching `CellContext::in_region`.
+fn touches(location: &Rect, region: &Rect) -> bool {
+    gap(location, region) == 0
+}
+
 /// Builds a one-cell document from `(layer, rect)` pairs.
 fn build_doc(shapes: &[(LayerId, Rect)]) -> Document {
     let mut cell = Cell::new("top");
@@ -255,6 +269,55 @@ proptest! {
                 located(&full, name),
                 "rule {} under covering region",
                 name
+            );
+        }
+    }
+
+    /// The prepared incremental path over a random small region equals, per rule,
+    /// the full-cell pass filtered to violations whose location touches that region.
+    ///
+    /// This pins the local optimization (query the prepared index around the region,
+    /// grown by the max threshold; check only local candidates; dedup pairs within
+    /// the local set) against the naive full pass as the oracle, across every rule
+    /// kind at once, including the same-layer pairwise dedup and cross-region
+    /// partners that the region expansion is designed to catch.
+    #[test]
+    fn prepared_region_equals_filtered_full(
+        shapes in prop::collection::vec(shape_strategy(), 0..40),
+        region in region_strategy(),
+    ) {
+        let doc = build_doc(&shapes);
+        // A rule set spanning single-shape, same-layer pairwise, cross-layer, and
+        // two-layer rules so every code path is under test at once. Thresholds are
+        // varied so the max-threshold region expansion is genuinely exercised.
+        let engine = DrcEngine::new(vec![
+            Rule { name: "w".into(), kind: RuleKind::Width, layer: METAL1, other_layer: None, value: 12 },
+            Rule { name: "a".into(), kind: RuleKind::Area, layer: METAL1, other_layer: None, value: 200 },
+            Rule { name: "s".into(), kind: RuleKind::Spacing, layer: METAL1, other_layer: None, value: 15 },
+            Rule { name: "n".into(), kind: RuleKind::Notch, layer: METAL2, other_layer: None, value: 20 },
+            Rule { name: "x".into(), kind: RuleKind::Spacing, layer: METAL1, other_layer: Some(METAL2), value: 25 },
+            Rule { name: "enc".into(), kind: RuleKind::Enclosure, layer: METAL1, other_layer: Some(METAL2), value: 8 },
+            Rule { name: "ext".into(), kind: RuleKind::Extension, layer: METAL1, other_layer: Some(METAL2), value: 8 },
+        ]);
+
+        let full = engine.check_cell(&doc, "top");
+        let prepared = engine.prepare(&doc, "top");
+        let local = prepared.check_region(region);
+
+        // The oracle: full-pass violations whose location touches the region, keyed
+        // per rule to keep the failure message specific.
+        for name in ["w", "a", "s", "n", "x", "enc", "ext"] {
+            let expected: BTreeSet<LocKey> = full
+                .iter()
+                .filter(|v| v.rule == name && touches(&v.location, &region))
+                .map(|v| loc_key(&v.location))
+                .collect();
+            prop_assert_eq!(
+                located(&local, name),
+                expected,
+                "rule {} under local region {:?}",
+                name,
+                region
             );
         }
     }
