@@ -27,10 +27,10 @@ produce v5.0.0.
 ## Wave R: finish and release v4.0.0
 
 - [x] Setup: profiles (`dev` opt-level 1, deps 3), fail-fast `just ci` order, run tracker, `scratch/logs/`. done-gate-green
-- [ ] Lane R1: windowed GPU surface, persistent scene, fps readout, 10M re-measure. in-progress @ lane/r1-windowed-surface
+- [~] Lane R1: windowed GPU surface, persistent scene, fps readout, 10M re-measure. in-progress @ lane/r1-windowed-surface (checkpoint 6aa427c). DONE: revision counter on EditableDocument (20 model tests green). REMAINING: RetainedScene with chunked instance pages, egui-wgpu paint callback in app.rs (RenderContext::from_device), fps readout, re-measure 1M/10M into PERF.md.
 - [ ] Lane R2: compaction to indirect draw, MSAA, LOD switching, flags-vs-compacted bench. not-started
 - [ ] Lane R3: canvas text labels, minimap, split viewports, rebindable keys, benches doc fix. not-started
-- [ ] Lane R4: `stack` tech directive, 3D layer view, cut-line cross-section. in-progress @ lane/r4-3d-view
+- [~] Lane R4: `stack` tech directive, 3D layer view, cut-line cross-section. in-progress @ lane/r4-3d-view (checkpoint a37a879). DONE: `stack <layer> <datatype> <z_bottom> <thickness>` directive (StackEntry table on Technology, stack_for/z_top_nm, parser, 42 io/model tests green). REMAINING: pipeline3d.rs + shaders/stack3d.wgsl 3D extrusion view, view3d.rs app panel, xsection.rs cut-line cross-section, tests, wasm build check.
 - [ ] Close-out: WASM cold-load and collab echo measured into PERF.md. not-started
 - [ ] Close-out: DRC/route/collab GIFs plus minimap and 3D media. not-started
 - [ ] Close-out: README refresh, skeptical STATUS update. not-started
