@@ -40,15 +40,47 @@ pub struct Rule {
     pub value: i64,
 }
 
-/// A concrete DRC violation, ready to be shown and zoomed to.
+/// A concrete DRC violation, ready to be shown, zoomed to, and reported
+/// structurally (rule id, layer, and measured versus required value).
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Violation {
     /// Name of the rule that was violated.
     pub rule: String,
+    /// The kind of constraint that was violated.
+    pub kind: RuleKind,
+    /// The primary layer the rule applies to.
+    pub layer: LayerId,
+    /// The second layer for two-layer rules (spacing, enclosure, extension), if any.
+    pub other_layer: Option<LayerId>,
+    /// The measured value at the violation: a width, area, gap, margin, overhang,
+    /// or density in the rule's units. A sentinel of [`i64::MIN`] means the feature
+    /// is absent entirely (for example a shape with no enclosing layer at all).
+    pub measured: i64,
+    /// The threshold the rule required (equal to the rule's `value`).
+    pub required: i64,
     /// Bounding box of the offending geometry, for zoom-to navigation.
     pub location: Rect,
     /// Human-readable description of the violation.
     pub message: String,
+}
+
+impl Violation {
+    /// Builds a violation from the rule it breaks, the measured value, the
+    /// offending location, and a human-readable message, copying the rule's kind,
+    /// layers, and threshold into the structured fields.
+    #[must_use]
+    pub fn new(rule: &Rule, measured: i64, location: Rect, message: String) -> Self {
+        Self {
+            rule: rule.name.clone(),
+            kind: rule.kind,
+            layer: rule.layer,
+            other_layer: rule.other_layer,
+            measured,
+            required: rule.value,
+            location,
+            message,
+        }
+    }
 }
 
 /// A set of design rules that can check a document. Implemented by `reticle-drc`.
