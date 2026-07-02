@@ -34,6 +34,55 @@ the docs during this pass (details in [Known limitations](#known-limitations)):
    per-cell visibility, but it produces a visibility-flag buffer, not yet a compacted
    indirect-draw list. Honestly scoped in the crate docs; called out here.
 
+## v4.0.0 progress (layered on the v3.0.0 audit above)
+
+An in-progress v4.0.0 pass. The gate stays green (`just ci`, now with a `check-style`
+step that forbids em-dashes, ADR 0014). Everything below is committed and measured on
+this machine; nothing here is claimed beyond what the tests and benchmarks show. Of the
+three v3.0.0 gaps above, gap 1 and gap 2 are now closed and gap 3 remains.
+
+Delivered:
+
+- **Voice rule + check-style gate.** Em-dashes removed tree-wide; `just check-style`
+  fails the gate if any reappear (ADR 0014).
+- **Per-cell bbox cache** (closes gap 2). `EditableDocument` memoizes `cell_bbox`,
+  cleared on every edit. Warm reads about 295x faster (6.14 us vs 20.8 ns) on a
+  100k-leaf hierarchy; tests pin it to the uncached recompute and to invalidation.
+- **Out-of-core streaming via mmap** (closes gap 1). `StreamingIndex::open` memory-maps
+  a tile-organized archive so a query faults in only touched tiles. Measured: a 574 MiB,
+  30M-entry archive queries in about 14 us with a 4.25 MiB working set (about 135x below
+  the file). One documented `unsafe` block (the workspace's only one), miri-gated tests,
+  ADR 0016 (supersedes 0013). The archive builder is still RAM-bound (a single archive
+  above about 2 GiB is a follow-up).
+- **OASIS subset extended** to paths, instances, and arrays for read and write; the
+  `Unsupported` errors are gone, a 256-case proptest round-trips every kind (ADR 0015).
+- **Incremental DRC made genuinely sublinear.** `DrcEngine::prepare` builds the index
+  once; `PreparedDrc::check_region` re-checks only the edit neighbourhood: 5.12 us at
+  100k and 37.5 us at 1M shapes, far under the 100 ms target, pinned to the full-pass
+  oracle by a property test.
+- **Offscreen render fps measured** (`fps_bench` example): 1M shapes at 65.7 fps steady
+  state (meets 60fps; the one-shot API that rebuilds the scene each frame runs 23.4 fps),
+  10M at 6.1 fps (misses 30fps), bottlenecked by the per-frame CPU scene build and a
+  256 MiB single instance buffer. See PERF.md.
+- **Deep UI panels** in the egui editor: a DRC panel (run, list, click to zoom, painted
+  markers), net highlighting (click a shape, extract, highlight the connected net), and
+  a properties inspector (layer, bbox, width, height, area). Logic is unit-tested;
+  reticle-app is at 105 tests.
+
+Not yet done in v4.0.0 (honest remaining scope, none claimed as shipped):
+
+- **Windowed GPU surface (Wave A core).** The interactive canvas still paints with the
+  egui painter; rendering it through `reticle-render` via an egui-wgpu callback with an
+  on-screen fps readout is not yet wired. The fps ceiling is measured (above).
+- **GPU-driven draw list (Wave B, gap 3 above).** Prefix-sum stream compaction into a
+  `draw_indirect` buffer, MSAA, and LOD level switching are not done.
+- **Remaining UI (Wave C):** glyphon text labels, a minimap, multi-viewport split, and
+  rebindable keybindings.
+- **3D layer-stack view (Wave E)** and the **v4.0.0 release, media, WASM cold-load and
+  two-client collaboration measurements (Wave F)** are not started.
+
+The v3.0.0 Section 16 audit below remains accurate for the v3.0.0 baseline.
+
 ## Section 16 (definition of done), item by item
 
 | # | Item | Status | Evidence |
