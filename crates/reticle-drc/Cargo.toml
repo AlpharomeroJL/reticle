@@ -17,6 +17,10 @@ workspace = true
 reticle-geometry = { workspace = true }
 reticle-model = { workspace = true }
 reticle-index = { workspace = true }
+serde = { workspace = true }
+# Pinned exactly: the loader for the committed SKY130 rule table is data-plane
+# code and must not drift under a routine `cargo update`.
+toml = "=1.1.2"
 
 [dev-dependencies]
 proptest = "1.11.0"
