@@ -22,6 +22,7 @@
 //! * [`netlight`], cached connectivity extraction for net highlighting.
 //! * [`inspector`], the read-only properties summary of the selection.
 //! * [`session`], view/UI session save/restore (native file IO).
+//! * [`view3d`], the extruded 3D layer-stack window (orbit camera + wgpu glue).
 //! * [`demo`], the built-in hierarchical demo document.
 //! * [`app`], the [`eframe::App`] implementation that draws it all.
 //!
@@ -43,5 +44,6 @@ pub mod netlight;
 pub mod selection;
 pub mod session;
 pub mod tool;
+pub mod view3d;
 
 pub use app::App;
