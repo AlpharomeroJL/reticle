@@ -1,0 +1,16 @@
+[package]
+name = "reticle-agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Propose-verify-correct agent harness for Reticle: drives a model against the command API with DRC and intent as the oracle."
+keywords = ["eda", "layout", "agent", "llm", "automation"]
+categories = ["science", "command-line-utilities"]
+
+[lints]
+workspace = true
+
+[dependencies]

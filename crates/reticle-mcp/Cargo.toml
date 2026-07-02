@@ -1,0 +1,16 @@
+[package]
+name = "reticle-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Model Context Protocol server exposing the Reticle agent command API as tools."
+keywords = ["mcp", "eda", "layout", "agent", "automation"]
+categories = ["api-bindings", "science"]
+
+[lints]
+workspace = true
+
+[dependencies]
