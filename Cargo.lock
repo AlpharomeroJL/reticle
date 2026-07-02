@@ -3938,12 +3938,14 @@ version = "4.0.0"
 name = "reticle-agent-api"
 version = "4.0.0"
 dependencies = [
+ "image",
  "proptest",
  "reticle-drc",
  "reticle-extract",
  "reticle-geometry",
  "reticle-io",
  "reticle-model",
+ "reticle-render",
  "reticle-route",
  "serde",
  "serde_json",

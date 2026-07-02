@@ -20,8 +20,10 @@ reticle-io = { workspace = true }
 reticle-drc = { workspace = true }
 reticle-route = { workspace = true }
 reticle-extract = { workspace = true }
+reticle-render = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 
 [dev-dependencies]
 proptest = "1.11.0"
