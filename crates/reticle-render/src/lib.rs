@@ -28,6 +28,7 @@ mod context;
 mod cull;
 mod geometry;
 mod palette;
+mod pipeline3d;
 mod pipelines;
 mod target;
 mod view;
@@ -36,6 +37,10 @@ pub use context::WgpuContext;
 pub use cull::{CellCuller, CullAabb};
 pub use geometry::{MeshVertex, RectInstance, SceneGeometry};
 pub use palette::{Palette, Rgba};
+pub use pipeline3d::{
+    BlitPipeline, DEPTH_FORMAT, LIGHT_DIR, LayerSpan, Mesh3d, OrbitCamera, RenderTarget3d,
+    StackRenderer, StackUniform, StackView, Vertex3d, layer_spans, render_stack_offscreen,
+};
 pub use pipelines::Pipelines;
 pub use target::{OffscreenTarget, TARGET_FORMAT};
 pub use view::ViewUniform;
