@@ -27,3 +27,6 @@ bytemuck = { version = "1.25.0", features = ["derive"] }
 # heavy AVIF encoder chain (rav1e) and its unmaintained transitive `paste`.
 [dev-dependencies]
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+
+[[example]]
+name = "fps_bench"
