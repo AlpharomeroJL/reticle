@@ -18,6 +18,9 @@
 //! * [`grid`], grid spacing, snapping, and ruler ticks.
 //! * [`history`], the [`reticle_model::EditableDocument`] undo/redo wrapper.
 //! * [`command`], the command-palette catalog and fuzzy filter.
+//! * [`drc_panel`], running the DRC engine and formatting its violations.
+//! * [`netlight`], cached connectivity extraction for net highlighting.
+//! * [`inspector`], the read-only properties summary of the selection.
 //! * [`session`], view/UI session save/restore (native file IO).
 //! * [`demo`], the built-in hierarchical demo document.
 //! * [`app`], the [`eframe::App`] implementation that draws it all.
@@ -30,10 +33,13 @@ pub mod camera;
 pub mod command;
 pub mod culling;
 pub mod demo;
+pub mod drc_panel;
 pub mod grid;
 pub mod history;
+pub mod inspector;
 pub mod layers;
 pub mod measure;
+pub mod netlight;
 pub mod selection;
 pub mod session;
 pub mod tool;

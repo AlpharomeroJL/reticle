@@ -164,6 +164,34 @@ impl ViewCamera {
         }
     }
 
+    /// Centers on `target` and zooms so the rectangle fills `screen` with a margin.
+    ///
+    /// This is the "zoom to a feature" navigation used by the DRC panel to jump to a
+    /// violation: the target is centered and framed so it occupies most of the
+    /// canvas, leaving a `margin` fraction of empty space on each side. `margin` is
+    /// clamped to `[0.0, 0.45)` so the target always stays strictly inside the view.
+    /// A degenerate `target` (zero width or height) keeps the current zoom and only
+    /// recenters, so a point-like location still lands in the middle of the canvas.
+    pub fn zoom_to_rect(&mut self, screen: &ScreenRect, target: Rect, margin: f64) {
+        self.center_x = midpoint(target.min.x, target.max.x);
+        self.center_y = midpoint(target.min.y, target.max.y);
+        // A degenerate target has no extent to frame: recenter but keep the zoom.
+        if target.width() == 0 || target.height() == 0 {
+            return;
+        }
+        let m = margin.clamp(0.0, 0.45);
+        // Fraction of the viewport the target should span (1.0 means edge to edge).
+        let fill = 1.0 - 2.0 * m;
+        let w = target.width() as f64;
+        let h = target.height() as f64;
+        let zoom_x = f64::from(screen.width) * fill / w;
+        let zoom_y = f64::from(screen.height) * fill / h;
+        let zoom = zoom_x.min(zoom_y);
+        if zoom.is_finite() && zoom > 0.0 {
+            self.pixels_per_dbu = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+        }
+    }
+
     /// Builds the model [`Camera`] for this view at the given pixel size.
     ///
     /// Used by the native offscreen export path so the exported PNG frames exactly
@@ -332,6 +360,43 @@ mod tests {
         let vis = cam.visible_world_rect(&s);
         assert!(vis.min.x <= content.min.x && vis.max.x >= content.max.x);
         assert!(vis.min.y <= content.min.y && vis.max.y >= content.max.y);
+    }
+
+    #[test]
+    fn zoom_to_rect_frames_target_inside_viewport() {
+        let mut cam = ViewCamera::new(Point::ORIGIN, 1.0);
+        let s = screen();
+        let target = Rect::new(Point::new(9000, -4000), Point::new(9600, -3400));
+        cam.zoom_to_rect(&s, target, 0.1);
+        // Centered on the target.
+        let c = cam.center();
+        assert_eq!(c.x, 9300);
+        assert_eq!(c.y, -3700);
+        // The visible rectangle fully contains the target, with room to spare.
+        let vis = cam.visible_world_rect(&s);
+        assert!(
+            vis.min.x <= target.min.x && vis.max.x >= target.max.x,
+            "x not framed: {vis:?} vs {target:?}"
+        );
+        assert!(
+            vis.min.y <= target.min.y && vis.max.y >= target.max.y,
+            "y not framed: {vis:?} vs {target:?}"
+        );
+        // The target must not fill the whole viewport (the margin left a border).
+        assert!(vis.width() > target.width());
+        assert!(vis.height() > target.height());
+    }
+
+    #[test]
+    fn zoom_to_rect_recenters_on_degenerate_target() {
+        let mut cam = ViewCamera::new(Point::new(1, 1), 4.0);
+        let s = screen();
+        let before_zoom = cam.pixels_per_dbu();
+        // A zero-area point location: only the center should move.
+        let point = Rect::new(Point::new(500, 700), Point::new(500, 700));
+        cam.zoom_to_rect(&s, point, 0.1);
+        assert_eq!(cam.center(), Point::new(500, 700));
+        assert!((cam.pixels_per_dbu() - before_zoom).abs() < 1e-9);
     }
 
     #[test]

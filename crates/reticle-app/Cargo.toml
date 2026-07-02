@@ -28,3 +28,5 @@ reticle-model = { workspace = true }
 reticle-index = { workspace = true }
 reticle-render = { workspace = true }
 reticle-sync = { workspace = true }
+reticle-drc = { workspace = true }
+reticle-extract = { workspace = true }

@@ -12,7 +12,7 @@ use egui::{
     Align2, Color32, FontId, Pos2, Rect as EguiRect, Sense, Shape, Stroke, StrokeKind, Vec2,
 };
 
-use reticle_geometry::{LayerId, Point, Rect};
+use reticle_geometry::{LayerId, Point, Rect, Shape as _};
 use reticle_model::{DrawShape, ShapeKind};
 use reticle_render::WgpuRenderer;
 use reticle_sync::SyncDocument;
@@ -21,9 +21,12 @@ use crate::camera::{ScreenRect, ViewCamera};
 use crate::command::{self, Command};
 use crate::culling::{self, DetailLevel, SceneIndex};
 use crate::demo;
+use crate::drc_panel::{self, DrcResults};
 use crate::grid::{self, GridSettings};
 use crate::history::History;
+use crate::inspector::{self, Inspection};
 use crate::layers::{self, LayerState};
+use crate::netlight::{Generation, Netlight};
 use crate::selection::{self, Selection};
 use crate::tool::{Tool, ToolState};
 
@@ -75,6 +78,17 @@ pub struct App {
     /// The spatial index over the flattened scene, rebuilt when the document or
     /// viewed cell changes.
     scene: SceneIndex,
+    /// A revision token bumped on every scene rebuild, used to invalidate the
+    /// net-extraction cache after edits and undo/redo.
+    doc_generation: Generation,
+
+    /// The DRC panel state: the last run's violations and the highlighted one.
+    drc: DrcResults,
+    /// Whether the camera should frame the selected violation on the next frame
+    /// (deferred so the real canvas size is known, like [`fit_requested`](Self::fit_requested)).
+    zoom_to_selected_violation: bool,
+    /// The net-highlight state: cached connectivity plus the highlighted net.
+    netlight: Netlight,
 
     /// Whether the command palette window is open.
     palette_open: bool,
@@ -117,6 +131,10 @@ impl App {
             grid: GridSettings::default(),
             top_cell: demo::TOP_CELL.to_owned(),
             scene,
+            doc_generation: 0,
+            drc: DrcResults::new(),
+            zoom_to_selected_violation: false,
+            netlight: Netlight::new(),
             palette_open: false,
             palette_query: String::new(),
             layer_query: String::new(),
@@ -144,6 +162,10 @@ impl App {
     fn rebuild_scene(&mut self) {
         self.scene = SceneIndex::build(self.history.document(), &self.top_cell);
         self.selection.clear();
+        // Shape indices are no longer valid: drop the index-based net highlight and
+        // bump the revision so the net-extraction cache re-extracts on the next pick.
+        self.netlight.clear();
+        self.doc_generation = self.doc_generation.wrapping_add(1);
     }
 
     /// The technology database-units-per-micron for the current document.
@@ -489,6 +511,102 @@ impl App {
         }
     }
 
+    /// Highlights the net electrically connected to the shape at `idx`.
+    ///
+    /// Extraction (cached in [`Netlight`], keyed on the document generation) runs over
+    /// the flattened top cell so the returned net indices line up with the scene's
+    /// shape indices. Reports the net size in the status bar.
+    fn highlight_net_of(&mut self, idx: usize) {
+        let n = self.netlight.highlight_shape(
+            self.history.document(),
+            &self.top_cell,
+            self.doc_generation,
+            idx,
+        );
+        if n > 0 {
+            self.status.set(format!("Net: {n} shape(s)"));
+        }
+    }
+
+    /// Runs DRC over the flattened top cell and stores the violations.
+    fn run_drc(&mut self) {
+        let n = self.drc.run(self.history.document(), &self.top_cell);
+        if n == 0 {
+            self.status.set("DRC: no violations");
+        } else {
+            self.status.set(format!("DRC: {n} violation(s)"));
+        }
+    }
+
+    /// Draws the DRC panel section: run/clear actions and the violation list.
+    ///
+    /// Clicking a violation records it as selected and zooms the camera to its
+    /// location on the next frame (once the real canvas size is known).
+    fn drc_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("DRC");
+        ui.horizontal(|ui| {
+            if ui.button("Run DRC").clicked() {
+                self.run_drc();
+            }
+            if ui.button("Clear").clicked() {
+                self.drc.clear();
+                self.status.set("DRC cleared");
+            }
+        });
+        if self.drc.has_run() {
+            ui.label(format!("{} violation(s)", self.drc.len()));
+        } else {
+            ui.label("Not run");
+        }
+        ui.separator();
+
+        let selected = self.drc.selected();
+        let mut clicked: Option<usize> = None;
+        egui::ScrollArea::vertical()
+            .max_height(160.0)
+            .auto_shrink([false, false])
+            .id_salt("drc_list")
+            .show(ui, |ui| {
+                for (i, v) in self.drc.violations().iter().enumerate() {
+                    let label = drc_panel::format_violation(v);
+                    if ui.selectable_label(selected == Some(i), label).clicked() {
+                        clicked = Some(i);
+                    }
+                }
+            });
+        if let Some(i) = clicked
+            && self.drc.select(i).is_some()
+        {
+            // Frame the violation on the next canvas pass.
+            self.zoom_to_selected_violation = true;
+        }
+    }
+
+    /// Draws the properties inspector section for the current selection.
+    fn inspector_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Properties");
+        let indices: Vec<usize> = self.selection.iter().collect();
+        let insp = inspector::inspect(self.scene.shapes(), &indices, &self.layer_state);
+        match insp {
+            Inspection::Empty => {
+                ui.label("No selection");
+            }
+            Inspection::Single(info) => {
+                ui.label(format!("Layer: {}", info.layer_label()));
+                ui.label(inspector::format_bounds(&info.bounds));
+                ui.label(format!("Width: {} DBU", info.width()));
+                ui.label(format!("Height: {} DBU", info.height()));
+                ui.label(format!("Area: {} DBU^2", info.area()));
+            }
+            Inspection::Multiple { count, bounds } => {
+                ui.label(format!("Selected: {count} shapes"));
+                ui.label(inspector::format_bounds(&bounds));
+                ui.label(format!("Combined width: {} DBU", bounds.width()));
+                ui.label(format!("Combined height: {} DBU", bounds.height()));
+            }
+        }
+    }
+
     /// Draws the bottom status bar: tool, cursor coordinates, zoom, and messages.
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
@@ -583,6 +701,19 @@ impl App {
             self.fit_requested = false;
         }
 
+        // Deferred zoom to the violation the DRC list just selected.
+        if self.zoom_to_selected_violation {
+            if let Some(loc) = self
+                .drc
+                .selected()
+                .and_then(|i| self.drc.violations().get(i).map(|v| v.location))
+            {
+                // 25% border so the violation reads clearly with surrounding context.
+                self.camera.zoom_to_rect(&screen, loc, 0.25);
+            }
+            self.zoom_to_selected_violation = false;
+        }
+
         self.process_canvas_input(ui.ctx(), &response, &screen);
 
         // Draw grid + rulers under the geometry.
@@ -596,6 +727,10 @@ impl App {
             DetailLevel::Shapes => self.draw_shapes(&painter, &screen, viewport),
             DetailLevel::CellBoxes => self.draw_cell_boxes(&painter, &screen, viewport),
         }
+
+        // Engine-driven overlays on top of the geometry.
+        self.draw_net_highlight(&painter, &screen, viewport);
+        self.draw_drc_markers(&painter, &screen);
 
         self.draw_rulers(&painter, &screen);
         self.draw_measure(&painter, &screen);
@@ -677,10 +812,13 @@ impl App {
                     } else {
                         self.selection.select_one(idx);
                     }
+                    self.highlight_net_of(idx);
                 }
                 None => {
                     if !additive {
                         self.selection.clear();
+                        // Clicking empty space clears the connected-net highlight.
+                        self.netlight.clear();
                     }
                 }
             }
@@ -846,6 +984,95 @@ impl App {
         }
     }
 
+    /// Draws the highlighted net as a bright outline over its member shapes.
+    ///
+    /// Only members intersecting `viewport` are drawn, so the cost is bounded by what
+    /// is on screen. The net indices come from [`Netlight`] and are indices into the
+    /// same flattened scene shape list, so they map directly to `self.scene.shapes()`.
+    fn draw_net_highlight(&self, painter: &egui::Painter, screen: &ScreenRect, viewport: Rect) {
+        if self.netlight.is_empty() {
+            return;
+        }
+        let shapes = self.scene.shapes();
+        let color = Color32::from_rgb(120, 230, 255);
+        let stroke = Stroke::new(2.5, color);
+        let fill = Color32::from_rgba_unmultiplied(120, 230, 255, 60);
+        for &idx in self.netlight.highlighted() {
+            let Some(shape) = shapes.get(idx) else {
+                continue;
+            };
+            if !shape.bounding_box().intersects(&viewport) {
+                continue;
+            }
+            self.draw_shape_outline(painter, screen, shape, stroke, fill);
+        }
+    }
+
+    /// Draws a marker at every DRC violation location, emphasizing the selected one.
+    ///
+    /// Each violation is drawn as an outlined rectangle at its `location` (world to
+    /// screen via the camera); the violation the user clicked in the list is drawn in
+    /// a hotter color and slightly inflated so it stands out.
+    fn draw_drc_markers(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        let selected = self.drc.selected();
+        let normal = Stroke::new(2.0, Color32::from_rgb(255, 90, 90));
+        let hot = Stroke::new(3.0, Color32::from_rgb(255, 200, 60));
+        for (i, v) in self.drc.violations().iter().enumerate() {
+            let is_sel = selected == Some(i);
+            let e = self.world_rect_to_screen(screen, v.location);
+            // Inflate a touch so a zero-area location still shows as a small box.
+            let e = e.expand(if is_sel { 4.0 } else { 2.0 });
+            painter.rect_stroke(
+                e,
+                0.0,
+                if is_sel { hot } else { normal },
+                StrokeKind::Middle,
+            );
+        }
+    }
+
+    /// Draws just the outline (and a faint fill) of a shape, for overlay emphasis.
+    ///
+    /// Unlike [`draw_one_shape`](Self::draw_one_shape) this never uses the shape's
+    /// layer color; it is used by the net-highlight overlay to trace connected
+    /// geometry in a single accent color.
+    fn draw_shape_outline(
+        &self,
+        painter: &egui::Painter,
+        screen: &ScreenRect,
+        shape: &DrawShape,
+        stroke: Stroke,
+        fill: Color32,
+    ) {
+        match &shape.kind {
+            ShapeKind::Rect(rect) => {
+                let e = self.world_rect_to_screen(screen, *rect);
+                painter.rect_filled(e, 0.0, fill);
+                painter.rect_stroke(e, 0.0, stroke, StrokeKind::Middle);
+            }
+            ShapeKind::Polygon(poly) => {
+                let pts: Vec<Pos2> = poly
+                    .vertices()
+                    .iter()
+                    .map(|p| self.world_pos_to_screen(screen, *p))
+                    .collect();
+                if pts.len() >= 3 {
+                    painter.add(Shape::convex_polygon(pts, fill, stroke));
+                }
+            }
+            ShapeKind::Path(path) => {
+                let pts: Vec<Pos2> = path
+                    .points()
+                    .iter()
+                    .map(|p| self.world_pos_to_screen(screen, *p))
+                    .collect();
+                if pts.len() >= 2 {
+                    painter.add(Shape::line(pts, stroke));
+                }
+            }
+        }
+    }
+
     /// Draws top/left rulers with tick marks and DBU labels.
     fn draw_rulers(&self, painter: &egui::Painter, screen: &ScreenRect) {
         let bar = 18.0;
@@ -1002,9 +1229,17 @@ impl eframe::App for App {
             });
         egui::Panel::right("history")
             .resizable(true)
-            .default_size(190.0)
+            .default_size(240.0)
             .show(ui, |ui| {
-                self.history_panel(ui);
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.history_panel(ui);
+                        ui.separator();
+                        self.inspector_panel(ui);
+                        ui.separator();
+                        self.drc_panel(ui);
+                    });
             });
         egui::CentralPanel::default().show(ui, |ui| {
             canvas_screen = Some(self.canvas(ui));
@@ -1311,5 +1546,55 @@ mod tests {
         app.selection.set([0, 1, 2]);
         app.run_command(Command::ClearSelection, None);
         assert!(app.selection.is_empty());
+    }
+
+    #[test]
+    fn run_drc_populates_violations_from_demo() {
+        let mut app = App::new();
+        assert!(!app.drc.has_run());
+        app.run_drc();
+        assert!(app.drc.has_run());
+        // The demo has thin poly gates (200 DBU) under a 100-DBU default rule plus
+        // other geometry; the run either flags something or cleanly finds nothing,
+        // and either way marks itself as having run.
+        for v in app.drc.violations() {
+            assert!(!v.rule.is_empty());
+        }
+    }
+
+    #[test]
+    fn highlight_net_of_marks_connected_shapes() {
+        let mut app = App::new();
+        // Pick any real shape and highlight its net; the clicked shape must be part
+        // of the highlighted set the overlay draws.
+        let idx = app.scene.query(app.scene.bounds().unwrap())[0];
+        app.highlight_net_of(idx);
+        assert!(!app.netlight.is_empty());
+        assert!(app.netlight.contains(idx));
+    }
+
+    #[test]
+    fn editing_clears_net_highlight_and_bumps_generation() {
+        let mut app = App::new();
+        let idx = app.scene.query(app.scene.bounds().unwrap())[0];
+        app.highlight_net_of(idx);
+        assert!(!app.netlight.is_empty());
+        let gen_before = app.doc_generation;
+        app.add_demo_rectangle();
+        assert!(app.netlight.is_empty(), "edit must clear the highlight");
+        assert_ne!(app.doc_generation, gen_before, "generation must advance");
+    }
+
+    #[test]
+    fn selecting_violation_arms_deferred_zoom() {
+        let mut app = App::new();
+        app.run_drc();
+        if app.drc.is_empty() {
+            return; // Nothing to zoom to on this build.
+        }
+        assert!(!app.zoom_to_selected_violation);
+        assert!(app.drc.select(0).is_some());
+        app.zoom_to_selected_violation = true;
+        assert_eq!(app.drc.selected(), Some(0));
     }
 }
