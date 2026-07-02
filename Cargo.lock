@@ -3967,6 +3967,12 @@ dependencies = [
 [[package]]
 name = "reticle-bench"
 version = "4.0.0"
+dependencies = [
+ "reticle-agent-api",
+ "reticle-model",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "reticle-benches"
@@ -3990,6 +3996,10 @@ dependencies = [
 [[package]]
 name = "reticle-demo"
 version = "4.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "reticle-drc"
