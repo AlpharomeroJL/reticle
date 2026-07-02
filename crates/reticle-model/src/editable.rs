@@ -43,6 +43,8 @@ pub struct EditableDocument {
     /// "missing or empty cell" answer, distinct from an absent (uncached) entry.
     /// Cleared wholesale on every edit.
     bbox_cache: RefCell<HashMap<String, Option<Rect>>>,
+    /// Monotonic document revision. See [`EditableDocument::revision`].
+    revision: u64,
 }
 
 impl EditableDocument {
@@ -54,7 +56,23 @@ impl EditableDocument {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             bbox_cache: RefCell::new(HashMap::new()),
+            revision: 0,
         }
+    }
+
+    /// The document revision: a monotonic counter of applied mutations.
+    ///
+    /// Starts at 0 for a fresh editor and increments by exactly 1 every time the
+    /// document actually changes: on each successful [`DocumentStore::apply`], on
+    /// each successful [`DocumentStore::undo`], and on each successful
+    /// [`DocumentStore::redo`] (undo and redo *apply* a mutation, so they count).
+    /// Failed or no-op calls (an `apply` that errors, an `undo`/`redo` with an
+    /// empty stack) leave it unchanged. It never resets or goes backwards, so two
+    /// equal revisions observed on the same editor mean the document is unchanged
+    /// between them; renderers and caches can key invalidation on it.
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Borrows the underlying document.
@@ -206,6 +224,7 @@ impl DocumentStore for EditableDocument {
         // valid. On success the document changed, so drop the memoized boxes.
         let reverse = Self::execute(&mut self.doc, &edit)?;
         self.invalidate_bbox_cache();
+        self.revision += 1;
         self.undo_stack.push((edit, reverse));
         self.redo_stack.clear();
         Ok(())
@@ -215,6 +234,7 @@ impl DocumentStore for EditableDocument {
         if let Some((edit, reverse)) = self.undo_stack.pop() {
             Self::apply_reverse(&mut self.doc, reverse);
             self.invalidate_bbox_cache();
+            self.revision += 1;
             self.redo_stack.push(edit);
             true
         } else {
@@ -228,6 +248,7 @@ impl DocumentStore for EditableDocument {
             match Self::execute(&mut self.doc, &edit) {
                 Ok(reverse) => {
                     self.invalidate_bbox_cache();
+                    self.revision += 1;
                     self.undo_stack.push((edit, reverse));
                     true
                 }
