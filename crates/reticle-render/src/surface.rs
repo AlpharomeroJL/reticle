@@ -15,19 +15,28 @@
 //!
 //! Rects carry their placement transform per instance and are drawn with the
 //! retained pipeline; polygons and paths are a transform-baked triangle mesh. The
-//! geometry buffers are sized to hold the whole expanded scene in a single page each
-//! (the page grows only when the scene grows), so every draw is one contiguous
-//! buffer slice.
+//! rect instances are split across fixed-size GPU pages and drawn one page-sized run
+//! at a time, so a large scene (tens of millions of instances) never needs a single
+//! buffer above the device `max_buffer_size`.
 
 use crate::pages::{Allocation, BufferPages, DEFAULT_PAGE_SIZE};
 use crate::pipelines::Pipelines;
-use crate::retained::{ExpandedScene, RetainedScene};
+use crate::retained::{ExpandedScene, RectInstanceT, RetainedScene};
 use crate::view::ViewUniform;
 use bytemuck::{bytes_of, cast_slice};
 use wgpu::{
     BindGroup, BindGroupDescriptor, BindGroupEntry, Buffer, BufferDescriptor, BufferUsages, Device,
     IndexFormat, Queue, RenderPass, TextureFormat,
 };
+
+/// Page size for the retained rect-instance bank: 64 MiB. Comfortably under the
+/// device `max_buffer_size` (which is typically 256 MiB), while holding ~1.4M rect
+/// instances per page so even a 10M-instance scene is a handful of page-sized draws
+/// rather than a single oversized buffer.
+const RECT_PAGE_SIZE: u64 = 64 * 1024 * 1024;
+
+/// Bytes per retained rect instance ([`RectInstanceT`], 48 bytes).
+const RECT_STRIDE: u64 = std::mem::size_of::<RectInstanceT>() as u64;
 
 /// A GPU-resident retained renderer: pipelines, a persistent camera uniform, and
 /// paged geometry buffers, sized for one surface color format.
@@ -43,10 +52,12 @@ pub struct RetainedRenderer {
     vertex_pages: BufferPages,
     /// Paged storage for mesh indices.
     index_pages: BufferPages,
-    /// Current rect-instance allocation and count, if any geometry is uploaded.
-    rect_alloc: Option<Allocation>,
-    rect_count: u32,
-    /// Current mesh vertex/index allocations and the index count.
+    /// Rect instances split into page-sized chunks: `(allocation, instance count)`.
+    /// One draw is issued per chunk, so the scene never needs a single monolithic
+    /// buffer and can exceed the device `max_buffer_size`.
+    rect_chunks: Vec<(Allocation, u32)>,
+    /// Current mesh vertex/index allocations and the index count. The mesh path is
+    /// comparatively small, so it stays a single allocation.
     vertex_alloc: Option<Allocation>,
     index_alloc: Option<Allocation>,
     index_count: u32,
@@ -59,7 +70,8 @@ impl core::fmt::Debug for RetainedRenderer {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("RetainedRenderer")
             .field("format", &self.pipelines.format())
-            .field("rects", &self.rect_count)
+            .field("rects", &self.rect_count())
+            .field("rect_chunks", &self.rect_chunks.len())
             .field("indices", &self.index_count)
             .field("uploaded_revision", &self.uploaded_revision)
             .finish_non_exhaustive()
@@ -95,7 +107,7 @@ impl RetainedRenderer {
             pipelines,
             view_buffer,
             view_bind_group,
-            rect_pages: BufferPages::new(DEFAULT_PAGE_SIZE, BufferUsages::VERTEX, "retained rects"),
+            rect_pages: BufferPages::new(RECT_PAGE_SIZE, BufferUsages::VERTEX, "retained rects"),
             vertex_pages: BufferPages::new(
                 DEFAULT_PAGE_SIZE,
                 BufferUsages::VERTEX,
@@ -106,8 +118,7 @@ impl RetainedRenderer {
                 BufferUsages::INDEX,
                 "retained indices",
             ),
-            rect_alloc: None,
-            rect_count: 0,
+            rect_chunks: Vec::new(),
             vertex_alloc: None,
             index_alloc: None,
             index_count: 0,
@@ -165,14 +176,21 @@ impl RetainedRenderer {
     /// Uploads expanded geometry into the paged buffers, growing a page only when the
     /// data no longer fits.
     fn upload(&mut self, device: &Device, queue: &Queue, expanded: &ExpandedScene) {
-        // Rects.
-        if expanded.rects.is_empty() {
-            self.rect_count = 0;
-        } else {
-            let bytes: &[u8] = cast_slice(&expanded.rects);
-            self.rect_alloc =
-                Self::reupload(&mut self.rect_pages, device, queue, self.rect_alloc, bytes);
-            self.rect_count = u32::try_from(expanded.rects.len()).unwrap_or(u32::MAX);
+        // Rects: split into page-sized runs so a large scene spans several page
+        // buffers instead of one oversized allocation. Free the previous chunks first
+        // (a full re-expand replaces them wholesale).
+        for (alloc, _) in self.rect_chunks.drain(..) {
+            self.rect_pages.free(alloc);
+        }
+        let per_page = usize::try_from(self.rect_pages.page_size() / RECT_STRIDE)
+            .unwrap_or(1)
+            .max(1);
+        for run in expanded.rects.chunks(per_page) {
+            let bytes: &[u8] = cast_slice(run);
+            if let Some(alloc) = self.rect_pages.upload(device, queue, bytes) {
+                let count = u32::try_from(run.len()).unwrap_or(u32::MAX);
+                self.rect_chunks.push((alloc, count));
+            }
         }
 
         // Mesh vertices + indices.
@@ -248,15 +266,21 @@ impl RetainedRenderer {
     pub fn paint(&self, pass: &mut RenderPass<'_>) {
         pass.set_bind_group(0, &self.view_bind_group, &[]);
 
-        if self.rect_count > 0
-            && let Some(alloc) = self.rect_alloc
-            && let Some(buffer) = self.rect_pages.page_buffer(alloc.page())
-        {
-            let end = alloc.offset() + alloc.len();
+        // Rects: one instanced draw per page-sized chunk.
+        if !self.rect_chunks.is_empty() {
             pass.set_pipeline(self.pipelines.retained_rect_pipeline());
-            pass.set_vertex_buffer(0, buffer.slice(alloc.offset()..end));
-            // Four vertices per instanced unit quad (triangle strip).
-            pass.draw(0..4, 0..self.rect_count);
+            for (alloc, count) in &self.rect_chunks {
+                if *count == 0 {
+                    continue;
+                }
+                let Some(buffer) = self.rect_pages.page_buffer(alloc.page()) else {
+                    continue;
+                };
+                let end = alloc.offset() + alloc.len();
+                pass.set_vertex_buffer(0, buffer.slice(alloc.offset()..end));
+                // Four vertices per instanced unit quad (triangle strip).
+                pass.draw(0..4, 0..*count);
+            }
         }
 
         if self.index_count > 0
@@ -275,10 +299,20 @@ impl RetainedRenderer {
         }
     }
 
-    /// The number of retained rect instances currently uploaded.
+    /// The total number of retained rect instances currently uploaded, summed across
+    /// all page-sized chunks.
     #[must_use]
     pub fn rect_count(&self) -> u32 {
-        self.rect_count
+        self.rect_chunks
+            .iter()
+            .map(|(_, count)| *count)
+            .fold(0u32, u32::saturating_add)
+    }
+
+    /// The number of page-sized rect chunks (draw calls) the scene occupies.
+    #[must_use]
+    pub fn rect_chunk_count(&self) -> usize {
+        self.rect_chunks.len()
     }
 
     /// The number of mesh indices currently uploaded.

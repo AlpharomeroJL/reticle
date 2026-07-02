@@ -11,7 +11,7 @@ than papered over. See `docs/src/performance.md` for the methodology and
 - OS: Windows 11
 - Toolchain: Rust 1.94.1 (stable), release/bench profile (`opt-level = 3`, thin LTO)
 - Inputs: the deterministic layout generator (`xtask gen-layout`), so runs reproduce.
-- Date of this record: 2026-07-01
+- Date of this record: 2026-07-01 (retained render path re-measured 2026-07-02)
 
 ## Measured
 
@@ -50,13 +50,35 @@ archive builder is still bounded by RAM (ADR 0016), so a single archive above ab
 2 GiB is a follow-up; the read path itself is genuinely out-of-core.
 
 Offscreen render fps (`cargo run -p reticle-render --example fps_bench --release`, RTX
-4060 Ti, Vulkan, 1920x1080): at 1,000,000 leaf shapes the steady-state path (geometry
+4060 Ti, Vulkan, 1920x1080): at 1,000,000 leaf shapes the old steady-state path (geometry
 and pipelines built once, then per-frame draw plus CPU readback) runs 65.7 fps, and the
 one-shot API that rebuilds the scene every frame runs 23.4 fps (the difference is the
-per-frame CPU flatten and tessellate). At 10,000,000 the steady-state path runs 6.1 fps
+per-frame CPU flatten and tessellate). At 10,000,000 that old steady-state path runs 6.1 fps
 across two chunks, bottlenecked by the per-frame scene build and the 256 MiB single
 instance buffer. Both numbers include a blocking CPU readback that a surface-presenting
 loop would skip.
+
+### Retained render path (v4.0.0, measured 2026-07-02)
+
+The retained renderer (`RetainedRenderer`, `RetainedScene`) caches per-cell
+tessellation once, expands instances/arrays into a per-instance transform buffer, and
+stores geometry in fixed-size GPU pages uploaded via `queue.write_buffer`. Geometry is
+uploaded once and then only *redrawn*; a camera move rewrites a single uniform, never a
+buffer. Same host, same `fps_bench` harness and inputs, same 1920x1080 and blocking CPU
+readback, so the numbers are directly comparable to the old path above.
+
+| N leaf shapes | Old path (rebuild/reuse) | Retained path | Speedup | 30fps@10M target |
+|---|---:|---:|---:|---|
+| 1,000,000 | 65.7 fps (reuse) / 23.4 fps (one-shot) | **295 fps** (3.4 ms/frame) | ~4.5x | n/a (60fps target met) |
+| 10,000,000 | 6.1 fps (reuse, 2 chunks) | **113 fps** (8.8 ms/frame, 8 page-sized draws) | ~19x | **Met** |
+
+Why the 10M jump: the old reuse path still re-flattened and re-tessellated the whole
+10M-shape scene every frame (about 463 ms of CPU work) and pushed it through a single
+instance buffer capped at 8.39M rects by the device `max_buffer_size` (256 MiB). The
+retained path pays that build once (334 ms on the first frame / on an edit), then each
+frame is only the GPU draw plus readback across eight 64 MiB page buffers, with no
+single monolithic buffer. A surface-presenting loop skips the readback, so the on-screen
+windowed path runs at or above these numbers.
 
 ## Targets (Section 10)
 
@@ -68,8 +90,8 @@ not yet instrumented and say so, with the reason.
 | Bulk index build of 1M shapes under 500 ms | **Met (measured):** 227 ms. |
 | Point / rubber-band picking over 1M shapes under 1 ms | **Met (measured):** 926 ns for a nearest-point query. |
 | Polygon booleans fast enough for interactive DRC merges | **Measured:** 272 µs / 1.45 ms for 256 / 1024-square self-unions. |
-| 1M flat shapes at a sustained 60 fps | **Met (measured, steady state):** 65.7 fps at 1920x1080 on the reuse path (scene and pipelines built once, then per-frame draw plus CPU readback), via `cargo run -p reticle-render --example fps_bench --release`. The one-shot offscreen API that rebuilds the scene every frame runs 23.4 fps; that path's bottleneck is the per-frame CPU scene build (flatten plus tessellate). A surface-presenting loop skips the readback and runs at or above the reuse number. |
-| 10M flat shapes interactive at 30 fps or better | **Not met (measured): 6.1 fps** at 1920x1080. Bottlenecks: the per-frame CPU scene build (431 ms to flatten and tessellate 10M shapes) and a single instance buffer capped at 8.39M rects by the device `max_buffer_size` (256 MiB), which forces chunked draws. Caching the built geometry and batching buffers (the GPU-driven pipeline in Wave B) is the path to the target. |
+| 1M flat shapes at a sustained 60 fps | **Met (measured):** the retained path runs **295 fps** at 1920x1080 (geometry cached and uploaded once, then per-frame draw plus CPU readback), via `cargo run -p reticle-render --example fps_bench --release`. The old reuse path was 65.7 fps; the one-shot API that rebuilt the scene every frame was 23.4 fps. A surface-presenting loop skips the readback and runs at or above the retained number. |
+| 10M flat shapes interactive at 30 fps or better | **Met (measured):** the retained path runs **113 fps** at 1920x1080 (8.8 ms/frame across eight 64 MiB page buffers), up from 6.1 fps on the old reuse path (a ~19x gain). The retained renderer caches tessellation, expands instances into a per-instance transform buffer, uploads once via `queue.write_buffer`, and never builds a single 256 MiB buffer; a camera move is a uniform write only. The one-time scene build (334 ms) is paid on an edit, not per frame. |
 | Billions of leaf shapes via cell culling and LOD | **Architecturally supported, not fps-benchmarked.** Hierarchy is never flattened for browsing; cell culling and a compute-shader cull stage are implemented and tested. |
 | Incremental DRC on a local edit under 100 ms | **Met (measured):** on a prepared context, a local re-check is 5.12 µs at 100k shapes and 37.5 µs at 1M, far under 100 ms. `DrcEngine::prepare` builds the index once (17.5 ms / 225 ms); then `PreparedDrc::check_region` touches only the edit neighbourhood, and a property test pins it to the full-pass oracle. See the `incremental` bench in `reticle-drc`. |
 | WASM cold load to first interactive frame under 3 s | **Not measured (needs in-browser timing).** The demo is deployed and loads (HTTP 200), but cold-load-to-interactive is not instrumented. |
