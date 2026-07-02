@@ -36,4 +36,4 @@ keeps the id scheme contained and independent of the CRDT's own element ids in
   cost is a small conversion layer in `reticle-agent-api`, paid once per command kind.
 - The session must maintain the id map correctly across removals; that logic is the
   agent-api implementation lane's responsibility and is property-tested there (random
-  command sequences never panic and never mis-address an element).
+  command sequences never panic and never address the wrong element).
