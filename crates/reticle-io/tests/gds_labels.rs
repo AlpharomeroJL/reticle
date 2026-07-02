@@ -11,7 +11,9 @@ use gds21::{
 };
 use reticle_geometry::{LayerId, Point, Rect};
 use reticle_io::Gds;
-use reticle_model::{Anchor, Importer, Label, ShapeKind};
+use reticle_model::{
+    Anchor, Cell, Document, DrawShape, Exporter, Importer, Label, ShapeKind, Technology,
+};
 
 /// met1 drawing (SKY130 convention).
 const MET1: LayerId = LayerId::new(68, 20);
@@ -98,4 +100,78 @@ fn import_reads_text_elements_as_labels() {
     assert!(layers.contains(&MET1));
     assert!(layers.contains(&MET1_LABEL));
     assert!(layers.contains(&LI1_LABEL));
+}
+
+/// Builds a document whose top cell carries a met1 rectangle plus power labels,
+/// and a labeled child cell, so per-cell label attribution is exercised.
+fn labeled_document() -> Document {
+    let mut doc = Document::new();
+
+    let mut top = Cell::new("top");
+    top.shapes.push(DrawShape::new(
+        MET1,
+        ShapeKind::Rect(Rect::new(Point::new(0, 0), Point::new(2000, 400))),
+    ));
+    top.labels
+        .push(Label::new("VDD", Point::new(500, 1000), MET1_LABEL));
+    top.labels
+        .push(Label::new("GND", Point::new(-250, -75), LI1_LABEL));
+    doc.insert_cell(top);
+
+    let mut leaf = Cell::new("leaf");
+    leaf.shapes.push(DrawShape::new(
+        MET1,
+        ShapeKind::Rect(Rect::new(Point::new(0, 0), Point::new(90, 90))),
+    ));
+    leaf.labels
+        .push(Label::new("A", Point::new(45, 45), MET1_LABEL));
+    doc.insert_cell(leaf);
+
+    doc.set_top_cells(vec!["top".to_string(), "leaf".to_string()]);
+    doc.set_technology(Technology {
+        name: "labels".to_string(),
+        dbu_per_micron: 1000,
+        ..Technology::default()
+    });
+    doc
+}
+
+#[test]
+fn export_writes_labels_as_text_elements() {
+    let doc = labeled_document();
+    let bytes = Gds.export(&doc).expect("export should succeed");
+
+    // Parse the stream with gds21 directly: the labels must exist as TEXT
+    // elements with the right string, layer, texttype, and insertion point.
+    let lib = GdsLibrary::from_bytes(bytes).expect("gds21 should parse our export");
+    let top = lib
+        .structs
+        .iter()
+        .find(|s| s.name == "top")
+        .expect("top struct present");
+    let texts: Vec<&GdsTextElem> = top
+        .elems
+        .iter()
+        .filter_map(|e| match e {
+            GdsElement::GdsTextElem(t) => Some(t),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts.len(), 2);
+    assert_eq!(texts[0].string, "VDD");
+    assert_eq!(texts[0].layer, 68);
+    assert_eq!(texts[0].texttype, 5);
+    assert_eq!(texts[0].xy, GdsPoint::new(500, 1000));
+    assert_eq!(texts[1].string, "GND");
+    assert_eq!(texts[1].layer, 67);
+    assert_eq!(texts[1].texttype, 5);
+    assert_eq!(texts[1].xy, GdsPoint::new(-250, -75));
+
+    // Shapes still export alongside the labels.
+    assert!(
+        top.elems
+            .iter()
+            .any(|e| matches!(e, GdsElement::GdsBoundary(_))),
+        "the met1 rectangle must still be exported"
+    );
 }

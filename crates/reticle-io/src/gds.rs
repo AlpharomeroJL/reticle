@@ -404,10 +404,17 @@ fn document_to_library(doc: &Document) -> GdsLibrary {
 }
 
 /// Converts a [`Cell`] into a [`GdsStruct`].
+///
+/// Elements are emitted in a fixed order (shapes, labels, instances, arrays) so
+/// exports stay deterministic and a re-imported document exports to identical
+/// bytes.
 fn cell_to_struct(cell: &Cell) -> GdsStruct {
     let mut strukt = GdsStruct::new(cell.name.clone());
     for shape in &cell.shapes {
         strukt.elems.push(shape_to_element(shape));
+    }
+    for label in &cell.labels {
+        strukt.elems.push(label_to_element(label));
     }
     for inst in &cell.instances {
         strukt.elems.push(instance_to_element(inst));
@@ -416,6 +423,23 @@ fn cell_to_struct(cell: &Cell) -> GdsStruct {
         strukt.elems.push(array_to_element(arr));
     }
     strukt
+}
+
+/// Converts a [`Label`] into a GDSII TEXT element on the label's layer/texttype.
+///
+/// The label's anchor is not encoded: `gds21` offers no public constructor for
+/// its PRESENTATION type, so the record is omitted and readers fall back to
+/// their default justification. Import mirrors this by anchoring every label
+/// [`Anchor::Center`] (see the [module docs](self)).
+fn label_to_element(label: &Label) -> GdsElement {
+    let (layer, texttype) = layer_parts(label.layer);
+    GdsElement::GdsTextElem(GdsTextElem {
+        string: label.text.clone(),
+        layer,
+        texttype,
+        xy: point_to_gds_point(label.position),
+        ..GdsTextElem::default()
+    })
 }
 
 /// Converts a [`DrawShape`] into the matching [`GdsElement`].
