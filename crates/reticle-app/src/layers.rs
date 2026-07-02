@@ -139,6 +139,12 @@ impl LayerState {
     }
 }
 
+impl crate::inspector::LayerNamer for LayerState {
+    fn layer_name(&self, layer: LayerId) -> Option<String> {
+        self.by_id.get(&layer).map(|&i| self.rows[i].name.clone())
+    }
+}
+
 /// Splits a packed `0xRRGGBBAA` color into its `(r, g, b, a)` byte components.
 #[must_use]
 pub fn rgba_components(color_rgba: u32) -> (u8, u8, u8, u8) {
