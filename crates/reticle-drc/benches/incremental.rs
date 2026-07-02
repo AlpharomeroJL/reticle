@@ -1,12 +1,14 @@
 //! Criterion benchmarks for design-rule checking latency.
 //!
-//! The headline number is the incremental edit-to-recheck path: after a local
-//! edit an interactive layout editor re-runs DRC only over the touched region via
-//! [`DrcEngine::check_region`], and that must return well inside the 100ms budget
-//! that keeps checking feeling instantaneous while typing geometry. For contrast
-//! the full-cell pass ([`RuleSet::check_cell`]) over the same layout is measured
-//! too, so the speedup of the incremental path over a from-scratch check is
-//! visible. Numbers are produced by Criterion at run time
+//! The headline number is the incremental edit-to-recheck path on a *prepared*
+//! context: an interactive editor calls [`DrcEngine::prepare`] once to build the
+//! spatial index for a cell, then re-runs DRC only over the touched region via
+//! [`PreparedDrc::check_region`] on every edit. That per-edit call must return well
+//! inside the 100ms budget that keeps checking feeling instantaneous while typing
+//! geometry, and because it examines only shapes near the edit it should stay flat
+//! as the cell grows. For contrast the full-cell pass ([`RuleSet::check_cell`]) and
+//! the one-time [`prepare`](DrcEngine::prepare) cost over the same layout are
+//! measured too. Numbers are produced by Criterion at run time
 //! (`cargo bench -p reticle-drc --bench incremental`); nothing here is hard-coded.
 
 use criterion::{Criterion, criterion_group, criterion_main};
@@ -98,40 +100,47 @@ fn rules() -> Vec<Rule> {
     ]
 }
 
-/// Benchmarks the full pass and the incremental region re-check at one cell size.
+/// Benchmarks the full pass, the one-time prepare, and the incremental region
+/// re-check on a prepared context at one cell size.
 ///
 /// `label` distinguishes the sizes in the report (for example `100k` / `1m`).
 fn bench_size(c: &mut Criterion, label: &str, count: usize) {
     let doc = build_cell(count);
     let engine = DrcEngine::new(rules());
 
-    // (a) Full-cell pass: what an editor pays if it re-checks everything on each edit.
-    c.bench_function(&format!("drc_full_cell_{label}"), |b| {
-        b.iter(|| std::hint::black_box(engine.check_cell(std::hint::black_box(&doc), "top")));
-    });
-
-    // (b) Incremental re-check over a small edited rectangle near the middle of the
-    // layout: the region an interactive edit dirties. This is the headline latency.
+    // A small edited rectangle near the middle of the layout: the region an
+    // interactive edit dirties.
     let edit = Rect::new(
         Point::new(EXTENT / 2, EXTENT / 2),
         Point::new(EXTENT / 2 + 500, EXTENT / 2 + 500),
     );
-    c.bench_function(&format!("drc_incremental_region_{label}"), |b| {
-        b.iter(|| {
-            std::hint::black_box(engine.check_region(
-                std::hint::black_box(&doc),
-                "top",
-                std::hint::black_box(edit),
-            ))
-        });
+
+    // (a) Full-cell pass: the baseline cost of re-checking everything from scratch.
+    c.bench_function(&format!("drc_full_cell_{label}"), |b| {
+        b.iter(|| std::hint::black_box(engine.check_cell(std::hint::black_box(&doc), "top")));
+    });
+
+    // (b) One-time prepare: building the R-tree working set once per editing session.
+    // Paid once, not per edit, so it is a setup cost rather than interactive latency.
+    c.bench_function(&format!("drc_prepare_{label}"), |b| {
+        b.iter(|| std::hint::black_box(engine.prepare(std::hint::black_box(&doc), "top")));
+    });
+
+    // (c) Incremental re-check on an ALREADY prepared context: the true per-edit cost
+    // an editor pays after the index is built once. This is the headline latency
+    // measured against the 100ms interactive target, and should stay flat as the cell
+    // grows because it touches only shapes near the edit.
+    let prepared = engine.prepare(&doc, "top");
+    c.bench_function(&format!("drc_incremental_prepared_{label}"), |b| {
+        b.iter(|| std::hint::black_box(prepared.check_region(std::hint::black_box(edit))));
     });
 }
 
 fn bench_drc(c: &mut Criterion) {
     // ~100k rectangles: a large but routine flat editing region.
     bench_size(c, "100k", 100_000);
-    // ~1M rectangles: a stress size, to show the incremental path stays flat while
-    // the full pass grows with the cell.
+    // ~1M rectangles: a stress size, to show the prepared incremental path stays flat
+    // while the full pass and prepare grow with the cell.
     bench_size(c, "1m", 1_000_000);
 }
 
