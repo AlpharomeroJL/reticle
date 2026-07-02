@@ -6,6 +6,9 @@
 //! replicates.
 
 use crate::{Document, DocumentStore, Edit, ModelError, Result};
+use reticle_geometry::Rect;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 /// Captures the data needed to reverse one applied [`Edit`].
 #[derive(Debug)]
@@ -25,11 +28,21 @@ enum Reverse {
 }
 
 /// A [`Document`] paired with a transactional undo/redo history.
+///
+/// It also memoizes [`Document::cell_bbox`] in a per-cell cache (see
+/// [`EditableDocument::cell_bbox`]). The cache is cleared on every mutation
+/// (`apply`/`undo`/`redo`), so a bounding box read after an edit always reflects
+/// that edit. The cache lives here rather than on [`Document`] to keep `Document`
+/// free of interior mutability.
 #[derive(Debug, Default)]
 pub struct EditableDocument {
     doc: Document,
     undo_stack: Vec<(Edit, Reverse)>,
     redo_stack: Vec<Edit>,
+    /// Memoized `cell_bbox` results, keyed by cell name. `None` is a cached
+    /// "missing or empty cell" answer, distinct from an absent (uncached) entry.
+    /// Cleared wholesale on every edit.
+    bbox_cache: RefCell<HashMap<String, Option<Rect>>>,
 }
 
 impl EditableDocument {
@@ -40,6 +53,7 @@ impl EditableDocument {
             doc,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            bbox_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -53,6 +67,31 @@ impl EditableDocument {
     #[must_use]
     pub fn into_document(self) -> Document {
         self.doc
+    }
+
+    /// The full recursive bounding box of a cell, memoized.
+    ///
+    /// On a cache hit this returns the stored answer; on a miss it calls
+    /// [`Document::cell_bbox`] (the uncached source of truth) exactly once and
+    /// stores the result. The value is byte-for-byte identical to calling
+    /// `self.document().cell_bbox(name)` directly. The cache is cleared by every
+    /// edit, so the returned box always reflects the current document state.
+    #[must_use]
+    pub fn cell_bbox(&self, name: &str) -> Option<Rect> {
+        if let Some(cached) = self.bbox_cache.borrow().get(name) {
+            return *cached;
+        }
+        let computed = self.doc.cell_bbox(name);
+        self.bbox_cache
+            .borrow_mut()
+            .insert(name.to_owned(), computed);
+        computed
+    }
+
+    /// Drops every memoized bounding box. Called after any mutation so the next
+    /// [`EditableDocument::cell_bbox`] recomputes against the edited document.
+    fn invalidate_bbox_cache(&mut self) {
+        self.bbox_cache.get_mut().clear();
     }
 
     /// The number of edits that can be undone.
@@ -163,7 +202,10 @@ impl DocumentStore for EditableDocument {
     }
 
     fn apply(&mut self, edit: Edit) -> Result<()> {
+        // Execute first: on error the document is unchanged, so the cache stays
+        // valid. On success the document changed, so drop the memoized boxes.
         let reverse = Self::execute(&mut self.doc, &edit)?;
+        self.invalidate_bbox_cache();
         self.undo_stack.push((edit, reverse));
         self.redo_stack.clear();
         Ok(())
@@ -172,6 +214,7 @@ impl DocumentStore for EditableDocument {
     fn undo(&mut self) -> bool {
         if let Some((edit, reverse)) = self.undo_stack.pop() {
             Self::apply_reverse(&mut self.doc, reverse);
+            self.invalidate_bbox_cache();
             self.redo_stack.push(edit);
             true
         } else {
@@ -184,6 +227,7 @@ impl DocumentStore for EditableDocument {
             // Re-applying from the restored pre-edit state reproduces the edit.
             match Self::execute(&mut self.doc, &edit) {
                 Ok(reverse) => {
+                    self.invalidate_bbox_cache();
                     self.undo_stack.push((edit, reverse));
                     true
                 }

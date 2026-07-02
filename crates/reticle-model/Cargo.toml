@@ -20,3 +20,9 @@ reticle-geometry = { workspace = true }
 [dev-dependencies]
 proptest = "1.11.0"
 # Wave 2 wires `proptest` for edit/undo invariants.
+# `criterion` drives the `cell_bbox` memoization benchmark.
+criterion = "0.8.2"
+
+[[bench]]
+name = "bbox"
+harness = false
