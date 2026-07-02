@@ -35,6 +35,7 @@ use crate::minimap::MinimapLayout;
 use crate::netlight::{Generation, Netlight};
 use crate::selection::{self, Selection};
 use crate::tool::{Tool, ToolState};
+use crate::viewports::{self, Split, Viewports};
 
 /// A transient status message shown in the bottom bar.
 #[derive(Clone, Debug, Default)]
@@ -87,6 +88,8 @@ pub struct App {
     labels_visible: bool,
     /// Whether the minimap overview panel is drawn (and steals clicks inside it).
     minimap_visible: bool,
+    /// The canvas pane layout: split mode, focused pane, and per-pane cameras.
+    viewports: Viewports,
     /// The name of the top cell being viewed.
     top_cell: String,
 
@@ -168,6 +171,7 @@ impl App {
             grid: GridSettings::default(),
             labels_visible: true,
             minimap_visible: true,
+            viewports: Viewports::new(),
             top_cell: demo::TOP_CELL.to_owned(),
             scene,
             doc_generation: 0,
@@ -472,6 +476,13 @@ impl App {
             ui.checkbox(&mut self.grid.snap_enabled, "Snap");
             ui.checkbox(&mut self.labels_visible, "Labels");
             ui.checkbox(&mut self.minimap_visible, "Minimap");
+            ui.separator();
+            for split in Split::all() {
+                let selected = self.viewports.split() == split;
+                if ui.selectable_label(selected, split.label()).clicked() {
+                    self.viewports.set_split(split, &self.camera);
+                }
+            }
             ui.separator();
             if ui.button("Palette (Ctrl+P)").clicked() {
                 self.palette_open = !self.palette_open;
@@ -790,12 +801,30 @@ impl App {
         gpu_format: Option<eframe::egui_wgpu::wgpu::TextureFormat>,
     ) -> ScreenRect {
         let size = ui.available_size();
-        let (response, painter) = ui.allocate_painter(size, Sense::click_and_drag());
+        let (response, base_painter) = ui.allocate_painter(size, Sense::click_and_drag());
         let rect = response.rect;
-        let screen = ScreenRect::new(rect.min.x, rect.min.y, rect.width(), rect.height());
 
-        // Background.
-        painter.rect_filled(rect, 0.0, Color32::from_rgb(16, 18, 22));
+        // Background (covers every pane and the divider).
+        base_painter.rect_filled(rect, 0.0, Color32::from_rgb(16, 18, 22));
+
+        // Pane layout over the shared document. The rest of this method edits and
+        // draws the *focused* pane, so `screen` is that pane's rectangle (the whole
+        // canvas when unsplit); unfocused panes render read-only previews.
+        let full = ScreenRect::new(rect.min.x, rect.min.y, rect.width(), rect.height());
+        let panes = self.viewports.rects(&full);
+        let split = panes.len() > 1;
+        let focus_changed = split && self.route_pane_focus(&response, &panes);
+        let screen = panes.get(self.viewports.focused()).copied().unwrap_or(full);
+        if split {
+            self.draw_unfocused_panes(&base_painter, &panes);
+        }
+        // Clip focused-pane drawing so egui-painted geometry and overlays cannot
+        // bleed across the divider; unsplit, the clip is the whole canvas.
+        let painter = if split {
+            base_painter.with_clip_rect(egui_rect_of(&screen))
+        } else {
+            base_painter.clone()
+        };
 
         // Deferred fit now that we know the canvas size.
         if self.fit_requested {
@@ -818,7 +847,16 @@ impl App {
             self.zoom_to_selected_violation = false;
         }
 
-        self.process_canvas_input(ui.ctx(), &response, &screen);
+        // Input routes to the focused pane only; the click that switched focus is
+        // consumed, and pointer positions over other panes never reach the tools.
+        let pointer_in_pane = response
+            .hover_pos()
+            .is_none_or(|p| viewports::contains(&screen, p.x, p.y));
+        if !focus_changed && pointer_in_pane {
+            self.process_canvas_input(ui.ctx(), &response, &screen);
+        } else {
+            self.cursor_world = None;
+        }
 
         // Draw grid + rulers under the geometry.
         if self.grid.visible {
@@ -831,7 +869,9 @@ impl App {
             DetailLevel::Shapes => match gpu_format {
                 // GPU path: render the retained scene through eframe's device. The
                 // callback composites under the egui overlays queued below.
-                Some(format) => self.draw_shapes_gpu(&painter, &screen, rect, format),
+                Some(format) => {
+                    self.draw_shapes_gpu(&painter, &screen, egui_rect_of(&screen), format);
+                }
                 // Fallback: paint the geometry with egui.
                 None => self.draw_shapes(&painter, &screen, viewport),
             },
@@ -852,7 +892,73 @@ impl App {
         }
         self.draw_presence(&painter, &screen);
 
+        // Mark the focused pane when split (drawn unclipped so the full border
+        // stroke shows).
+        if split {
+            base_painter.rect_stroke(
+                egui_rect_of(&screen),
+                0.0,
+                Stroke::new(1.5, Color32::from_rgb(110, 160, 255)),
+                StrokeKind::Middle,
+            );
+        }
+
         screen
+    }
+
+    /// Focuses the pane under a click or a fresh drag, swapping cameras through
+    /// [`Viewports::focus`].
+    ///
+    /// Returns whether the event moved focus; such an event is consumed, so the
+    /// same click can never also select or measure in the newly focused pane.
+    fn route_pane_focus(&mut self, response: &egui::Response, panes: &[ScreenRect]) -> bool {
+        if !(response.clicked() || response.drag_started()) {
+            return false;
+        }
+        let Some(pos) = response.interact_pointer_pos() else {
+            return false;
+        };
+        let Some(hit) = viewports::hit_pane(panes, pos.x, pos.y) else {
+            return false;
+        };
+        if hit == self.viewports.focused() {
+            return false;
+        }
+        self.viewports.focus(hit, &mut self.camera);
+        self.status.set(format!("Pane {} focused", hit + 1));
+        true
+    }
+
+    /// Draws read-only previews of the unfocused panes.
+    ///
+    /// Each pane renders the shared document through its own stored camera using
+    /// the egui fallback path: the retained GPU callback binds a single camera per
+    /// frame and its paint path is owned by the render lane, so secondary panes
+    /// deliberately stay on the CPU painter. Tools, overlays, and edits apply only
+    /// to the focused pane; a click here focuses the pane first.
+    fn draw_unfocused_panes(&mut self, painter: &egui::Painter, panes: &[ScreenRect]) {
+        let border = Stroke::new(1.0, Color32::from_rgb(70, 76, 90));
+        for (i, pane) in panes.iter().enumerate() {
+            if i == self.viewports.focused() {
+                continue;
+            }
+            let Some(cam) = self.viewports.camera(i).copied() else {
+                continue;
+            };
+            let pane_rect = egui_rect_of(pane);
+            let clipped = painter.with_clip_rect(pane_rect);
+            // Temporarily adopt the pane camera so the existing draw helpers
+            // (which read `self.camera`) render this pane's view, then restore.
+            let saved = self.camera;
+            self.camera = cam;
+            let viewport = self.camera.visible_world_rect(pane);
+            match culling::lod_for_zoom(self.camera.pixels_per_dbu()) {
+                DetailLevel::Shapes => self.draw_shapes(&clipped, pane, viewport),
+                DetailLevel::CellBoxes => self.draw_cell_boxes(&clipped, pane, viewport),
+            }
+            self.camera = saved;
+            painter.rect_stroke(pane_rect, 0.0, border, StrokeKind::Middle);
+        }
     }
 
     /// Routes pointer input on the canvas through the active tool.
@@ -1686,6 +1792,14 @@ impl eframe::egui_wgpu::CallbackTrait for SceneCallback {
     }
 }
 
+/// Converts a canvas [`ScreenRect`] to an egui rectangle.
+fn egui_rect_of(screen: &ScreenRect) -> EguiRect {
+    EguiRect::from_min_size(
+        Pos2::new(screen.left, screen.top),
+        Vec2::new(screen.width, screen.height),
+    )
+}
+
 /// The display name of the layer row at `index`, or an empty string.
 fn row_name(state: &LayerState, index: usize) -> String {
     state
@@ -2016,6 +2130,27 @@ mod tests {
         let back = layout.panel_to_world(px, py);
         assert!((i64::from(back.x) - i64::from(world_center.x)).abs() < 100);
         assert!((i64::from(back.y) - i64::from(world_center.y)).abs() < 100);
+    }
+
+    #[test]
+    fn split_view_shares_the_document_across_pane_cameras() {
+        let mut app = App::new();
+        assert_eq!(app.viewports.pane_count(), 1);
+        app.viewports.set_split(Split::Horizontal, &app.camera);
+        assert_eq!(app.viewports.pane_count(), 2);
+        // The new pane starts on the live view.
+        assert_eq!(app.viewports.camera(1), Some(&app.camera));
+        // Focus pane 1, move its view, and confirm pane 0's camera was banked.
+        let pane0_before = app.camera;
+        app.viewports.focus(1, &mut app.camera);
+        app.camera = ViewCamera::new(Point::new(7777, -3333), 0.5);
+        assert_eq!(app.viewports.camera(0), Some(&pane0_before));
+        // Both panes look at the same document: there is exactly one scene.
+        assert!(!app.scene.is_empty());
+        // Collapsing keeps the view the user is on.
+        app.viewports.set_split(Split::Single, &app.camera);
+        assert_eq!(app.viewports.focused(), 0);
+        assert_eq!(app.camera, ViewCamera::new(Point::new(7777, -3333), 0.5));
     }
 
     #[test]
