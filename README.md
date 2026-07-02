@@ -24,11 +24,12 @@ import and export, embedded scripting, and real-time multi-user collaboration.
   <img src="assets/browse.gif" alt="Panning and zooming across a layout of millions of shapes" width="100%" />
 </p>
 
-> Status: v3.0.0 is released, try the live demo above and read the
-> [release notes](https://github.com/AlpharomeroJL/reticle/releases/tag/v3.0.0). The
-> workspace is green under the local gate (`just ci`). For a skeptical, audited
-> account of exactly what is fully implemented, what is partial, and how to verify
-> each claim yourself, see [docs/STATUS.md](docs/STATUS.md).
+> Status: v4.0.0 brings the interactive GPU canvas on screen (a retained scene that
+> renders 10,000,000 leaf shapes at about 113 fps, up from 6.1), a GPU-driven draw
+> list, canvas text, a minimap, split viewports, rebindable keys, and a 3D
+> layer-stack view. The workspace is green under the local gate (`just ci`). For a
+> skeptical, audited account of exactly what is fully implemented, what is partial,
+> and how to verify each claim yourself, see [docs/STATUS.md](docs/STATUS.md).
 
 ## Why it is interesting
 
@@ -48,12 +49,16 @@ user's cursor and edits appear live.
   and convex decomposition, validated against a brute-force winding-number oracle.
 - Hierarchy: cells, instances, and arrays with nested transforms, flattening,
   per-cell bounding boxes, and cell-level culling for scale.
-- GPU rendering on `wgpu`: instanced rectangle pipelines, `lyon`-tessellated polygons
-  and paths, per-layer styling from the technology table, and a compute shader that
-  culls cell bounding boxes on the GPU. Rendering runs offscreen today (it produces
-  the hero image and drives the golden-image tests); window presentation,
-  indirect-draw compaction, text labels, a minimap, and DRC/net overlays are tracked
-  follow-ups (see [docs/STATUS.md](docs/STATUS.md)).
+- GPU rendering on `wgpu`, on screen and offscreen: the interactive canvas draws
+  through an `egui-wgpu` paint callback on eframe's device, with a retained scene that
+  caches per-cell tessellation once, expands instances into a per-instance transform
+  buffer, and stores geometry in fixed-size GPU pages so a camera move rewrites a single
+  uniform rather than a buffer. A GPU-driven draw list culls cell bounding boxes in a
+  compute shader, compacts the survivors with a workgroup scan, and issues an indirect
+  draw; 4x MSAA and zoom-driven level-of-detail are in the pipeline. On top sit canvas
+  text labels, a minimap, split viewports, rebindable keybindings, live DRC and net
+  overlays, and a 3D layer-stack view with a cut-line cross-section. See
+  [docs/STATUS.md](docs/STATUS.md) for the audited per-feature status.
 - Spatial indexing: a bulk-loaded R-tree, a uniform grid, and a tile/LOD pyramid,
   with point, rectangle, nearest-edge, and k-nearest queries.
 - Design-rule checking: a declarative engine (width, spacing, enclosure, extension,
@@ -70,8 +75,10 @@ user's cursor and edits appear live.
 - Embedded scripting (`rhai`) exposing the model, with a plugin folder and example
   scripts.
 - A full editing application (`egui`): command palette, layer manager, selection
-  filters, measurement suite, session save/restore, and an undo-history panel. Native
-  and in the browser.
+  filters, measurement suite, session save/restore, an undo-history panel, a live DRC
+  panel and net highlighting, a properties inspector, canvas text labels, a minimap,
+  split viewports, rebindable keybindings, an on-screen fps readout, and a 3D
+  layer-stack view with a cut-line cross-section. Native and in the browser.
 
 ## Performance
 
@@ -80,14 +87,19 @@ table.
 
 | Operation | Measured |
 |---|---:|
+| Retained render, 10,000,000 leaf shapes | 113 fps (was 6.1) |
+| Retained render, 1,000,000 leaf shapes | 295 fps |
+| WASM cold load to first interactive frame (WebGPU, loopback) | ~640 ms |
+| Collaboration echo through the localhost relay (median) | 788 µs |
 | Bulk-load an R-tree over 1,000,000 shapes | 232 ms |
 | Nearest-shape query over 1,000,000 shapes | 888 ns |
 | Polygon union of 1,024 overlapping squares | 1.49 ms |
 
-The renderer draws the generated design of roughly 1.88 million leaf shapes
-offscreen at 2560x1440 (the hero image above). Hierarchy is never flattened for
-browsing, so cell culling and a compute-shader cull stage keep the on-screen cost
-proportional to what is visible rather than to the size of the design.
+The retained renderer caches per-cell tessellation once and uploads geometry to
+fixed-size GPU pages, so each frame is only a draw, not a rebuild; that is what lifts
+the 10,000,000-shape scene from 6.1 to about 113 fps. Hierarchy is never flattened for
+browsing, so cell culling and a compute-shader cull-plus-compaction stage keep the
+on-screen cost proportional to what is visible rather than to the size of the design.
 
 ## Architecture
 
@@ -151,10 +163,12 @@ just gen-layout 1000000 8 3 scratch/gen.rgds
   cell's bounding box is computed and rendering culls whole instances and arrays that
   fall outside the view, so an arrayed cell with billions of effective leaf shapes
   costs only what is on screen.
-- GPU-driven culling: a compute shader flags which cell bounding boxes overlap the
-  viewport on the GPU (the first stage of a GPU-driven draw list), and instanced draws
-  paint each layer with its own style. A tile/level-of-detail pyramid in the index
-  provides coarser representations for zoomed-out browsing.
+- GPU-driven draw list: a compute shader flags which cell bounding boxes overlap the
+  viewport, a workgroup-scan compaction pass reserves the survivors and fills an
+  indirect-draw argument buffer, and one indirect draw paints them, so the draw count
+  comes from the GPU and only a small count returns to the CPU. Instanced draws paint
+  each layer with its own style, and a tile/level-of-detail pyramid provides coarser
+  representations for zoomed-out browsing.
 - DRC and routing: the design-rule checker evaluates declarative rules against the
   indexed geometry and re-checks incrementally on edit. The router builds a routing
   grid, runs a maze search per net, and rips up and reroutes to resolve congestion.
@@ -164,9 +178,10 @@ just gen-layout 1000000 8 3 scratch/gen.rgds
 
 ## Tech stack
 
-Rust, `wgpu` (WebGPU / Vulkan / Metal / DX12 with a WebGL2 fallback), `egui`,
-`i_overlay`, `rstar`, `gds21`, `lyon`, `glyphon`, `yrs`, `axum`, `prost`, `rhai`,
-`pathfinding`, `criterion`, `proptest`, and `cargo-fuzz`.
+Rust, `wgpu` (WebGPU / Vulkan / Metal / DX12 with a WebGL2 fallback), `egui` and
+`eframe` (with an `egui-wgpu` paint callback for the canvas), `i_overlay`, `rstar`,
+`gds21`, `lyon`, `yrs`, `axum`, `prost`, `rhai`, `pathfinding`, `criterion`,
+`proptest`, and `cargo-fuzz`.
 
 ## License
 

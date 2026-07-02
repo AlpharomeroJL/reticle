@@ -30,16 +30,18 @@ the docs during this pass (details in [Known limitations](#known-limitations)):
    not a shipped capability. Documented, with [ADR 0013](decisions/0013-out-of-core-streaming-scope.md).
 2. **Per-cell bbox caching**, bounding boxes are computed correctly but **not**
    memoized; the README's "caching" wording was corrected to "computed".
-3. **GPU-driven culling**, the compute shader genuinely runs on the GPU and computes
-   per-cell visibility, but it produces a visibility-flag buffer, not yet a compacted
-   indirect-draw list. Honestly scoped in the crate docs; called out here.
+3. **GPU-driven culling** (this v3.0.0 gap is closed in v4.0.0): the compute shader
+   computes per-cell visibility, and Wave R adds the workgroup-scan compaction into a
+   `DrawIndexedIndirectArgs` plus the indirect draw, so it is now a real GPU-driven
+   draw list, not just a flag buffer.
 
 ## v4.0.0 progress (layered on the v3.0.0 audit above)
 
 An in-progress v4.0.0 pass. The gate stays green (`just ci`, now with a `check-style`
 step that forbids em-dashes, ADR 0014). Everything below is committed and measured on
 this machine; nothing here is claimed beyond what the tests and benchmarks show. Of the
-three v3.0.0 gaps above, gap 1 and gap 2 are now closed and gap 3 remains.
+three v3.0.0 gaps above, all three are now closed (gap 3, the compacted indirect-draw
+list, closed in the Wave R GPU-driven draw list below).
 
 Delivered:
 
@@ -60,26 +62,43 @@ Delivered:
   once; `PreparedDrc::check_region` re-checks only the edit neighbourhood: 5.12 us at
   100k and 37.5 us at 1M shapes, far under the 100 ms target, pinned to the full-pass
   oracle by a property test.
-- **Offscreen render fps measured** (`fps_bench` example): 1M shapes at 65.7 fps steady
-  state (meets 60fps; the one-shot API that rebuilds the scene each frame runs 23.4 fps),
-  10M at 6.1 fps (misses 30fps), bottlenecked by the per-frame CPU scene build and a
-  256 MiB single instance buffer. See PERF.md.
+- **Offscreen render fps measured, then the bottleneck fixed** (`fps_bench` example).
+  The old path measured 1M at 65.7 fps and 10M at 6.1 fps (missing 30fps), bottlenecked
+  by the per-frame CPU scene build and a 256 MiB single instance buffer. The retained
+  renderer (below) closes that: 1M at about 295 fps and 10M at about 113 fps. See PERF.md.
 - **Deep UI panels** in the egui editor: a DRC panel (run, list, click to zoom, painted
   markers), net highlighting (click a shape, extract, highlight the connected net), and
-  a properties inspector (layer, bbox, width, height, area). Logic is unit-tested;
-  reticle-app is at 105 tests.
+  a properties inspector (layer, bbox, width, height, area). Logic is unit-tested.
 
-Not yet done in v4.0.0 (honest remaining scope, none claimed as shipped):
+Wave R (closing v4.0.0), all merged to main with the full gate green at each merge:
 
-- **Windowed GPU surface (Wave A core).** The interactive canvas still paints with the
-  egui painter; rendering it through `reticle-render` via an egui-wgpu callback with an
-  on-screen fps readout is not yet wired. The fps ceiling is measured (above).
-- **GPU-driven draw list (Wave B, gap 3 above).** Prefix-sum stream compaction into a
-  `draw_indirect` buffer, MSAA, and LOD level switching are not done.
-- **Remaining UI (Wave C):** glyphon text labels, a minimap, multi-viewport split, and
-  rebindable keybindings.
-- **3D layer-stack view (Wave E)** and the **v4.0.0 release, media, WASM cold-load and
-  two-client collaboration measurements (Wave F)** are not started.
+- **Windowed GPU surface + retained scene (Wave A).** The interactive canvas now renders
+  through `reticle-render` via an `egui-wgpu` paint callback on eframe's device. A
+  `RetainedScene` caches per-cell tessellation once, expands instances into a per-instance
+  transform buffer, and stores geometry in fixed-size GPU pages uploaded with
+  `queue.write_buffer`; a camera move rewrites one uniform. An on-screen fps and
+  frame-time readout is wired. This lifts 10M from 6.1 to about 113 fps (PERF.md).
+- **GPU-driven draw list (Wave B, closes gap 3).** A workgroup-scan compaction pass turns
+  the cull visibility flags into a compacted index buffer plus a `DrawIndexedIndirectArgs`,
+  drawn with one indirect draw (native `multi_draw_indexed_indirect` where the adapter
+  offers `MULTI_DRAW_INDIRECT_COUNT`). 4x MSAA on the offscreen target with a tolerance
+  golden comparator, and zoom-driven LOD chunk selection.
+- **Remaining UI (Wave C).** Canvas text labels (an egui-painter overlay; `glyphon` was
+  evaluated and not needed), a minimap with click-to-recenter, a multi-viewport split,
+  and rebindable keybindings loaded from a TOML keymap with an editor and conflict
+  detection. Each is a unit-tested logic module.
+- **3D layer-stack view (Wave E).** An extruded 3D view (orbit camera, depth buffer,
+  per-layer thickness from an optional `stack` technology directive) rendered via its own
+  paint callback, plus a cut-line cross-section panel.
+- **Measurements (Wave F).** WASM cold-load-to-interactive (about 640 ms cold on WebGPU)
+  and two-client collaboration echo (about 0.79 ms median on the localhost relay) are now
+  measured with real harnesses and recorded in PERF.md.
+
+Remaining before the v4.0.0 tag: additional overlay media (DRC, route, collaboration,
+minimap, and 3D stills or GIFs beyond the existing hero and browse assets), then the
+tagged release. A 30-second operator launch of the native window is the one visual check
+a headless run cannot perform; correctness is otherwise covered by the golden-image and
+offscreen paths plus the fps harness.
 
 The v3.0.0 Section 16 audit below remains accurate for the v3.0.0 baseline.
 
@@ -96,10 +115,10 @@ The v3.0.0 Section 16 audit below remains accurate for the v3.0.0 baseline.
 | 3e | IO functions w/ tests | **DONE (subset)** | GDSII via `gds21`; in-house OASIS subset read+write round-trips (`oasis_roundtrip.rs`). OASIS covers rect+polygon; paths/instances/arrays return `Unsupported` (honest error, not silent drop) |
 | 3f | Scripting functions w/ tests | **DONE** | `reticle-script` rhai API (`scripting.rs`, `plugins.rs`) |
 | 3g | Collaboration functions w/ tests | **DONE** | `reticle-sync` yrs CRDT; `convergence.rs` asserts order-independent identical state across independently-mutated docs |
-| 4 | Performance measured + recorded | **PARTIAL** | 3 targets measured on this machine (index build 227 ms, nearest query 926 ns, union 271 µs, see PERF.md). Render fps / WASM load / collab echo **not measured** (reasons in PERF.md) |
+| 4 | Performance measured + recorded | **DONE (v4.0.0)** | Index build 227 ms, nearest query 926 ns, union 271 µs; retained render 1M ~295 fps and 10M ~113 fps; WASM cold load ~640 ms; collab echo ~0.79 ms median. All on this machine, all in PERF.md |
 | 5 | Property/golden/CRDT tests pass; fuzz targets exist | **PARTIAL** | Property, golden-image (`render/tests/golden.rs`), and CRDT convergence tests all pass. Fuzz **targets exist** but the libFuzzer engine does not link on Windows/MSVC (no compiler-rt), documented in `fuzz/README.md` |
 | 6 | Book + rustdoc build + deployed | **DONE** | `mdbook build docs` exits 0 (16 chapters, no placeholders); `RUSTDOCFLAGS=-D warnings cargo doc` green; book returns HTTP 200 |
-| 7 | Hero + browse GIF in README | **DONE**; DRC/route/collab GIFs **MISSING** | `assets/hero.png` (2560×1440, non-blank) and `assets/browse.gif` (48 real frames) generated by `xtask capture-media`. The 3 overlay GIFs are a documented follow-up (need DRC/net/cursor overlay render passes) |
+| 7 | Hero + browse GIF in README | **DONE**; overlay/3D media in progress | `assets/hero.png` (2560×1440, non-blank) and `assets/browse.gif` (48 real frames) generated by `xtask capture-media`. Additional DRC, route, collaboration, minimap, and 3D-view media are being captured through the overlay and offscreen passes the Wave R merges added |
 | 8 | Tagged v3.0.0 release w/ binaries + notes | **DONE** | `gh release view v3.0.0`: not draft, 3 uploaded `.exe` assets with sha256, real notes |
 | 9 | Requirements-mapping table complete + honest | **DONE** | `docs/requirements.md` |
 | 10 | No AI attribution; no backdated/forged history | **DONE** | 26 commits, all author+committer `Josef Long <Josefdean@protonmail.com>`; 0 AI-attribution strings in any message; all dates 2026-07-01 |
@@ -113,7 +132,7 @@ The v3.0.0 Section 16 audit below remains accurate for the v3.0.0 baseline.
 | `reticle-index` | **DONE** (queries); **PARTIAL** (streaming) | R-tree (`rstar` STR bulk-load), uniform grid, tile/LOD pyramid; point/rect/nearest/k-NN vs `LinearIndex` oracle | `streaming.rs` is a zero-copy **in-memory** primitive; not wired to disk/mmap. See ADR 0013 |
 | `reticle-io` | **DONE** (subset) | GDSII read/write (`gds21`); OASIS subset read/write; tech-file parser; robustness proptests | OASIS: rect+polygon only; paths/instances/arrays error as `Unsupported` |
 | `reticle-model` | **DONE** | Cells/instances/arrays, nested transforms, transactional undo/redo, `flatten` | No per-cell bbox **cache**, `cell_bbox` recomputes (correct, uncached) |
-| `reticle-render` | **DONE** | Offscreen render (golden test asserts exact pixels); instanced pipelines; GPU compute cull shader | Cull writes a visibility-flag buffer, not yet a compacted indirect-draw list; surface-present path is a frame tick (offscreen is the real path) |
+| `reticle-render` | **DONE** | Offscreen and on-screen render (golden tests assert exact pixels); instanced + retained pipelines; GPU cull with workgroup-scan compaction to an indirect draw; 4x MSAA; 3D layer-stack pipeline | v4.0.0 closes the old gaps: the cull now compacts survivors into a `DrawIndexedIndirectArgs`, and the interactive canvas presents through an egui-wgpu paint callback |
 | `reticle-drc` | **DONE** | 8 rule kinds, spatial-index accelerated, incremental `check_region`; oracle property test | Operates on bounding boxes (exact for rects; conservative for polygons/paths, documented) |
 | `reticle-route` | **DONE** | Grid + maze A* (`pathfinding`), rip-up/reroute, cross-layer vias; oracle test | Synthetic CLI demo nets can be long on very large flattened designs |
 | `reticle-extract` | **DONE** | Union-find connectivity over touching geometry + via bridging; netlist compare (opens/shorts); oracle test | Path shapes use bbox adjacency (conservative; rect/rect exact) |
@@ -124,7 +143,7 @@ The v3.0.0 Section 16 audit below remains accurate for the v3.0.0 baseline.
 | `reticle-cli` | **DONE** | Headless import/DRC/route/extract/export/render; now **flattens** the top cell so hierarchical designs are checked as real geometry; 14 tests | None |
 | `web` | **DONE** | Trunk harness, WebGPU + WebGL2 fallback; compiles to `wasm32` in the gate | None |
 | `xtask` | **DONE** | Deterministic layout generator; offscreen media capture; **real** `perf-check` (parses Criterion vs the committed baseline, fails on regression) | `perf-check` was a stub before this pass; now implemented |
-| `benches` (workspace crate) | **PARTIAL** | The actual Criterion benches live **in-crate** (`reticle-index/benches`, `reticle-geometry/benches`) and run under `cargo bench --workspace`; a committed baseline lives in `benches/history/` | The `benches` crate's own `lib.rs` doc says it hosts the `[[bench]]` targets, it does not; that comment is inaccurate |
+| `benches` (workspace crate) | **DONE** | The actual Criterion benches live **in-crate** (`reticle-index/benches`, `reticle-geometry/benches`) and run under `cargo bench --workspace`; a committed baseline lives in `benches/history/` | The crate's `lib.rs` doc was corrected in v4.0.0 to describe its real role (history baseline + version stamp), not to claim it hosts the bench targets |
 
 ## Step 1 inventory, what the greps found
 
@@ -161,23 +180,23 @@ compute, and each is pinned by an **independent reference oracle**:
 
 ## Known limitations
 
-These are the honest gaps. None is hidden behind a passing test.
+These were the honest gaps at v3.0.0. Items 1, 2, and 3 are closed in v4.0.0 (see the
+v4.0.0 progress section above); they are kept here, marked closed, so the history is
+legible. None is hidden behind a passing test.
 
-1. **Out-of-core streaming is not wired up.** `reticle-index/src/streaming.rs` provides
-   a correct, `bytecheck`-validated **zero-copy** read over an rkyv archive held in a
-   `&[u8]`, and true single-entry random access without full deserialization. But
-   nothing memory-maps a file into it and no renderer consumes it, so the "stored on
-   disk, OS pages in only what's touched" behavior does not exist yet. Implementing it
-   requires an `unsafe` mmap (e.g. `memmap2`), deliberately deferred to keep the
-   workspace all-safe. See [ADR 0013](decisions/0013-out-of-core-streaming-scope.md).
-   Large **in-memory** layouts still browse via the LOD pyramid and cell culling.
-2. **No per-cell bbox cache.** `Document::cell_bbox` recomputes recursively on each
-   call (with a cycle guard). Correct, but not memoized; a memoizing cache invalidated
-   on edit is a noted performance follow-up.
-3. **GPU cull emits flags, not an indirect-draw list.** The compute shader runs on the
-   GPU and computes per-box visibility; compaction of survivors into a `draw_indirect`
-   buffer is a follow-up. The CPU-side R-tree cull in `reticle-app` (honestly labelled)
-   is what the interactive egui canvas uses today.
+1. **Out-of-core streaming (closed in v4.0.0).** `StreamingIndex::open` now memory-maps
+   a tile-organized archive so a query faults in only touched tiles: a 574 MiB, 30M-entry
+   archive queries in about 14 us with a 4.25 MiB working set. One documented `unsafe`
+   block, miri-gated tests, [ADR 0016](decisions/0016-memmap2-out-of-core-streaming.md)
+   (supersedes 0013). The archive builder is still RAM-bound (a single archive above about
+   2 GiB is a follow-up).
+2. **Per-cell bbox cache (closed in v4.0.0).** `EditableDocument` memoizes `cell_bbox`,
+   cleared on every edit; warm reads about 295x faster, pinned to the uncached recompute
+   and to invalidation by tests.
+3. **GPU-driven draw list (closed in v4.0.0).** The cull's visibility flags are compacted
+   by a workgroup scan into a `DrawIndexedIndirectArgs` and drawn with an indirect draw;
+   4x MSAA and LOD switching are in. The CPU-side R-tree cull remains as the downlevel
+   (WebGL2, no compute) fallback path.
 4. **Fuzzing does not run on this host.** Targets are authored and committed, but
    libFuzzer needs LLVM compiler-rt (sancov/asan) which does not link under
    Windows/MSVC. Parser/boolean robustness is instead covered by proptests (2048 cases)
@@ -185,27 +204,26 @@ These are the honest gaps. None is hidden behind a passing test.
 5. **OASIS is a subset.** Rectangles and polygons round-trip; paths, instances, and
    arrays are rejected with an explicit `Unsupported` error rather than silently
    dropped. GDSII (via `gds21`) preserves the full hierarchy.
-6. **Performance targets are only partly measured.** The three index/geometry targets
-   are measured on this machine; render fps, WASM cold-load, and collaboration echo are
-   not (they need a live-frame/browser/two-client harness). See PERF.md.
-7. **Three demo GIFs (DRC, route, collab) are missing.** Hero image and browse GIF are
-   real; the overlay GIFs need render passes for DRC markers, net highlight, and remote
-   cursors.
-8. **The `benches` workspace crate is a placeholder** whose doc comment overstates its
-   role (the real benches are in-crate).
-9. **Several rendering extras are not built.** The render crate's real surface is
-   *offscreen* rendering (instanced rectangles, `lyon`-tessellated polygons/paths,
-   per-layer styling, GPU compute culling). Window/surface presentation is a frame-tick
-   stub, and **glyph-atlas text labels, a minimap, DRC/net overlays, anti-aliased
-   (MSAA) edges, and a 3D layer-stack cross-section are not implemented**, `glyphon`
-   is not even a dependency and there is no multisample state. The README feature list
-   originally presented these as shipped; it was corrected during this pass to claim
-   only what exists and to list the rest as follow-ups. The render crate's own module
-   doc already framed them as "later waves".
-10. **A few app features were not individually re-verified.** The editor modules that
-    have tests (command palette, layer manager, selection filters, measurement,
-    session save/restore, undo history) are real; "rebindable keys" and "multi-viewport"
-    were dropped from the README because no supporting code was found in this pass.
+6. **Performance targets measured (updated in v4.0.0).** The index/geometry targets, the
+   retained render fps (1M ~295, 10M ~113), the WASM cold-load (~640 ms), and the
+   collaboration echo (~0.79 ms median) are all measured on this machine now. See PERF.md.
+7. **Additional overlay and 3D media in progress.** Hero image and browse GIF are real;
+   DRC, route, collaboration, minimap, and 3D-view stills or GIFs are being captured
+   through the overlay and offscreen passes the Wave R merges added.
+8. **The `benches` crate doc is corrected (v4.0.0).** Its `lib.rs` doc now states that
+   the real Criterion benches live in-crate (`reticle-index`, `reticle-geometry`,
+   `reticle-drc`, `reticle-model`) and that this crate holds the committed history
+   baseline and the suite version stamp.
+9. **Rendering extras built (v4.0.0).** Window/surface presentation is now a real
+   `egui-wgpu` paint callback on the retained scene, not a stub, and text labels (an
+   egui-painter overlay; `glyphon` evaluated and not needed), a minimap, live DRC and net
+   overlays, 4x MSAA, and a 3D layer-stack view with a cut-line cross-section are all
+   implemented and tested. The one remaining visual check a headless run cannot do is a
+   30-second operator launch of the native window.
+10. **App features implemented (v4.0.0).** Rebindable keys (a TOML keymap with an editor
+    and conflict detection) and multi-viewport split panes are now built and unit-tested,
+    alongside the existing command palette, layer manager, selection filters, measurement,
+    session save/restore, and undo history.
 
 ## How to verify each claim yourself
 
