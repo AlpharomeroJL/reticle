@@ -21,4 +21,7 @@ tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "
 
 [dev-dependencies]
 tokio-tungstenite = "0.29.0"
-# Wave 3 wires `axum`, `tokio`, and `reticle-sync` for the relay.
+# The echo-latency example drives real CRDT updates through the relay.
+reticle-sync = { workspace = true }
+reticle-model = { workspace = true }
+reticle-geometry = { workspace = true }

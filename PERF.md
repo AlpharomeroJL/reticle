@@ -11,7 +11,7 @@ than papered over. See `docs/src/performance.md` for the methodology and
 - OS: Windows 11
 - Toolchain: Rust 1.94.1 (stable), release/bench profile (`opt-level = 3`, thin LTO)
 - Inputs: the deterministic layout generator (`xtask gen-layout`), so runs reproduce.
-- Date of this record: 2026-07-01 (retained render path re-measured 2026-07-02)
+- Date of this record: 2026-07-01 (retained render path, WASM cold load, and collaboration echo measured 2026-07-02)
 
 ## Measured
 
@@ -103,6 +103,52 @@ adapter the compacted survivors are drawn with a native `multi_draw_indexed_indi
 `draw_indexed_indirect` per bucket, and WebGL2 (no `INDIRECT_EXECUTION`) keeps the direct
 draw path.
 
+### WASM cold load to first interactive frame (v4.0.0, measured 2026-07-02)
+
+Measured in headless Chromium (WebGPU enabled) against the release Trunk build
+(`just web-build`), served over loopback so the figure is the fetch-plus-compile,
+`wgpu` device init, and first-frame cost, not wide-area transfer of the 8.16 MiB
+wasm. Method: an instrumented copy of the built `index.html` (a `MutationObserver`
+records when the app hides the loading overlay, then a double `requestAnimationFrame`
+records the first painted frame); `performance.now()` is elapsed time from navigation
+start. Backend reported as WebGPU on this host.
+
+| Phase | Cold (fresh browser process) | Warm reload |
+|---|---:|---:|
+| Loading overlay hidden (wasm instantiated, app entered) | 83 ms | 78 to 125 ms |
+| First painted frame | **640 ms** | 126 to 139 ms |
+
+The 3 s target is met with wide margin. The cold cost is dominated by the one-time
+`wgpu` WebGPU adapter and device creation (about 560 ms of the 640 ms; the wasm itself
+instantiates in about 83 ms); a warm reload, with the module compiled and the device
+already live in the process, reaches first frame in about 130 ms. This is a single cold
+sample (the browser process caches the compiled module and keeps the device warm across
+same-process navigations, so repeat loads are warm by construction); it excludes network
+transfer of the wasm, which over a real connection would add its download time on top.
+
+### Collaboration echo latency (v4.0.0, measured 2026-07-02)
+
+Measured by `cargo run -p reticle-server --example echo_latency --release`, which
+binds the real relay on an ephemeral port, connects two `tokio-tungstenite` WebSocket
+clients to one room, and each iteration has one client add a shape, encode just that
+edit as a `yrs` v1 diff against the peer's state vector (about 35 bytes), and ship it;
+the timer runs from the send to the moment the peer has decoded and applied it. 2000
+edits, first 200 discarded as warmup.
+
+| Path | Latency |
+|---|---:|
+| Local edit applied to the local document (no network) | 3.6 µs |
+| Remote echo over the localhost relay (send to peer applied), median | 788 µs |
+| Remote echo, mean | 844 µs |
+| Remote echo, p95 | 1.67 ms |
+| Remote echo, max | 2.67 ms |
+
+All 2000 edits arrived and applied on the peer (the example asserts the final shape
+count). A local edit is synchronous and lands in well under one 60 fps frame; the
+remote echo on localhost is about 0.79 ms median, roughly 100x under the 100 ms target.
+This is the relay-plus-CRDT round trip on one machine; a wide-area deployment adds real
+network latency on top.
+
 ## Targets (Section 10)
 
 Honest status of each spec target. Two are measured with a hard number; the rest are
@@ -117,8 +163,8 @@ not yet instrumented and say so, with the reason.
 | 10M flat shapes interactive at 30 fps or better | **Met (measured):** the retained path runs **113 fps** at 1920x1080 (8.8 ms/frame across eight 64 MiB page buffers), up from 6.1 fps on the old reuse path (a ~19x gain). The retained renderer caches tessellation, expands instances into a per-instance transform buffer, uploads once via `queue.write_buffer`, and never builds a single 256 MiB buffer; a camera move is a uniform write only. The one-time scene build (334 ms) is paid on an edit, not per frame. |
 | Billions of leaf shapes via cell culling and LOD | **Architecturally supported, not fps-benchmarked.** Hierarchy is never flattened for browsing; cell culling and a compute-shader cull stage are implemented and tested. |
 | Incremental DRC on a local edit under 100 ms | **Met (measured):** on a prepared context, a local re-check is 5.12 µs at 100k shapes and 37.5 µs at 1M, far under 100 ms. `DrcEngine::prepare` builds the index once (17.5 ms / 225 ms); then `PreparedDrc::check_region` touches only the edit neighbourhood, and a property test pins it to the full-pass oracle. See the `incremental` bench in `reticle-drc`. |
-| WASM cold load to first interactive frame under 3 s | **Not measured (needs in-browser timing).** The demo is deployed and loads (HTTP 200), but cold-load-to-interactive is not instrumented. |
-| Collaboration: local edits echo within one frame; remote within 100 ms on localhost | **Not measured (needs a two-client harness).** Local edits apply immediately; the relay is a `tokio` broadcast adding no latency beyond the socket. Convergence correctness is tested; wall-clock echo is not. |
+| WASM cold load to first interactive frame under 3 s | **Met (measured):** about 640 ms cold to first painted frame on the WebGPU path in headless Chromium (wasm instantiates in about 83 ms; the rest is one-time `wgpu` device init), warm reload about 130 ms. Measured over loopback, so it excludes wide-area transfer of the 8.16 MiB wasm. See the WASM cold load section above. |
+| Collaboration: local edits echo within one frame; remote within 100 ms on localhost | **Met (measured):** a local edit applies in 3.6 µs (far inside one frame); a remote edit echoes through the localhost relay to the peer in about 0.79 ms median (p95 1.67 ms), roughly 100x under the 100 ms target. Measured with the `echo_latency` example (two real WebSocket clients, real `yrs` diffs); see the collaboration echo section above. |
 
 ## Regression guard
 
