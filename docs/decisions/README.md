@@ -23,3 +23,6 @@ superseded decision is marked and linked to its replacement.
 | [0015](0015-oasis-subset-extended.md) | OASIS subset extended to paths, instances, and arrays |
 | [0016](0016-memmap2-out-of-core-streaming.md) | Out-of-core streaming via memmap2: the one unsafe block |
 | [0017](0017-quick-xml-transitive-advisory.md) | Ignore quick-xml 0.39 advisories (RUSTSEC-2026-0194/0195): unreachable, upstream-pinned |
+| [0018](0018-agent-api-layering-and-element-ids.md) | Agent API layering: serde-friendly types and session-owned element ids |
+| [0019](0019-structured-violation.md) | Structured DRC violations, enriched in place |
+| [0020](0020-product-crates-in-workspace.md) | Agent, MCP, benchmark, and demo crates live in the workspace |

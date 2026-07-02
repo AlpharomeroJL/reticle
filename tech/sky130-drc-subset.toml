@@ -1,0 +1,209 @@
+# SKY130 DRC rule subset for Reticle.
+#
+# A SUBSET of the SkyWater periphery rules for the digital metal stack. Passing
+# this deck is NOT tape-out clean; it covers min width, spacing, a few key contact
+# and via sizes, enclosures, minimum areas, and the poly endcap. See the coverage
+# table in the docs for exactly what is and is not checked.
+#
+# Source: SkyWater SKY130 Periphery Rules (Al flow),
+#   https://skywater-pdk.readthedocs.io/en/main/rules/periphery.html
+#   (generated from docs/rules/periphery/periphery.csv in github.com/google/skywater-pdk)
+#
+# Values are in database units (1 dbu = 1 nm), so a 0.17 um rule is 170. Areas are
+# in dbu squared (0.0561 um^2 = 56100). `layer`/`other_layer` are [gds_layer, datatype].
+# `kind` is one of: width, spacing, enclosure, extension, area.
+
+# --- Local interconnect (li1) ---
+[[rule]]
+id = "li.1"
+kind = "width"
+layer = [67, 20]
+value_dbu = 170
+description = "Min width of li1"
+
+[[rule]]
+id = "li.3"
+kind = "spacing"
+layer = [67, 20]
+value_dbu = 170
+description = "Min spacing of li1 to li1"
+
+[[rule]]
+id = "li.6"
+kind = "area"
+layer = [67, 20]
+value_dbu = 56100
+description = "Min area of li1 (0.0561 um^2)"
+
+# --- Metal 1 ---
+[[rule]]
+id = "m1.1"
+kind = "width"
+layer = [68, 20]
+value_dbu = 140
+description = "Min width of met1"
+
+[[rule]]
+id = "m1.2"
+kind = "spacing"
+layer = [68, 20]
+value_dbu = 140
+description = "Min spacing of met1 to met1"
+
+[[rule]]
+id = "m1.6"
+kind = "area"
+layer = [68, 20]
+value_dbu = 83000
+description = "Min area of met1 (0.083 um^2)"
+
+# --- Metal 2 ---
+[[rule]]
+id = "m2.1"
+kind = "width"
+layer = [69, 20]
+value_dbu = 140
+description = "Min width of met2"
+
+[[rule]]
+id = "m2.2"
+kind = "spacing"
+layer = [69, 20]
+value_dbu = 140
+description = "Min spacing of met2 to met2"
+
+# --- Metal 3 ---
+[[rule]]
+id = "m3.1"
+kind = "width"
+layer = [70, 20]
+value_dbu = 300
+description = "Min width of met3"
+
+[[rule]]
+id = "m3.2"
+kind = "spacing"
+layer = [70, 20]
+value_dbu = 300
+description = "Min spacing of met3 to met3"
+
+# --- Metal 4 ---
+[[rule]]
+id = "m4.1"
+kind = "width"
+layer = [71, 20]
+value_dbu = 300
+description = "Min width of met4"
+
+[[rule]]
+id = "m4.2"
+kind = "spacing"
+layer = [71, 20]
+value_dbu = 300
+description = "Min spacing of met4 to met4"
+
+# --- Metal 5 ---
+[[rule]]
+id = "m5.1"
+kind = "width"
+layer = [72, 20]
+value_dbu = 1600
+description = "Min width of met5"
+
+[[rule]]
+id = "m5.2"
+kind = "spacing"
+layer = [72, 20]
+value_dbu = 1600
+description = "Min spacing of met5 to met5"
+
+# --- Poly and diffusion ---
+[[rule]]
+id = "poly.1a"
+kind = "width"
+layer = [66, 20]
+value_dbu = 150
+description = "Min width of poly"
+
+[[rule]]
+id = "poly.2"
+kind = "spacing"
+layer = [66, 20]
+value_dbu = 210
+description = "Min spacing of poly to poly"
+
+[[rule]]
+id = "poly.8"
+kind = "extension"
+layer = [66, 20]
+other_layer = [65, 20]
+value_dbu = 130
+description = "Poly endcap: extension of poly beyond diff"
+
+[[rule]]
+id = "difftap.1"
+kind = "width"
+layer = [65, 20]
+value_dbu = 150
+description = "Min width of diff or tap"
+
+[[rule]]
+id = "difftap.3"
+kind = "spacing"
+layer = [65, 20]
+value_dbu = 270
+description = "Min spacing of diff to diff"
+
+# --- Contacts and vias (exact sizes encoded as min width) ---
+[[rule]]
+id = "licon.1"
+kind = "width"
+layer = [66, 44]
+value_dbu = 170
+description = "licon1 size 0.17 x 0.17 (min width)"
+
+[[rule]]
+id = "ct.1"
+kind = "width"
+layer = [67, 44]
+value_dbu = 170
+description = "mcon size 0.17 x 0.17 (min width)"
+
+[[rule]]
+id = "via.1a"
+kind = "width"
+layer = [68, 44]
+value_dbu = 150
+description = "via size 0.15 x 0.15 (min width)"
+
+[[rule]]
+id = "via2.1a"
+kind = "width"
+layer = [69, 44]
+value_dbu = 200
+description = "via2 size 0.20 x 0.20 (min width)"
+
+# --- Enclosures ---
+[[rule]]
+id = "m1.4"
+kind = "enclosure"
+layer = [67, 44]
+other_layer = [68, 20]
+value_dbu = 30
+description = "mcon enclosed by met1 by at least 0.030"
+
+[[rule]]
+id = "m2.4"
+kind = "enclosure"
+layer = [68, 44]
+other_layer = [69, 20]
+value_dbu = 55
+description = "via enclosed by met2 by at least 0.055"
+
+[[rule]]
+id = "li.5"
+kind = "enclosure"
+layer = [66, 44]
+other_layer = [67, 20]
+value_dbu = 80
+description = "licon enclosed by li1 by at least 0.080"
