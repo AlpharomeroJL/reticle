@@ -214,8 +214,10 @@ pub fn session_path() -> Option<std::path::PathBuf> {
 /// Best-effort location of a per-user config directory without extra dependencies.
 ///
 /// Uses `APPDATA` on Windows and `XDG_CONFIG_HOME`/`HOME/.config` elsewhere.
+/// Shared with [`crate::keymap`] so the keymap file lives next to the session
+/// file.
 #[cfg(not(target_arch = "wasm32"))]
-fn config_dir() -> Option<std::path::PathBuf> {
+pub(crate) fn config_dir() -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
     if cfg!(windows) {
         std::env::var_os("APPDATA").map(PathBuf::from)

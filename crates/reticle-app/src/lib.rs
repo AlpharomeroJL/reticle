@@ -13,16 +13,21 @@
 //! * [`culling`], viewport culling over a spatial index, plus level-of-detail.
 //! * [`tool`], the Select/Pan/Measure tool state machine.
 //! * [`measure`], distance measurement in DBU and microns.
+//! * [`minimap`], the overview panel's world-to-panel mapping and viewport rect.
 //! * [`layers`], the layer table, visibility, and name filter.
 //! * [`selection`], the shape-selection model and layer query.
 //! * [`grid`], grid spacing, snapping, and ruler ticks.
+//! * [`labels`], layout and formatting for the canvas text overlay (cell names,
+//!   selection captions, live dimensions).
 //! * [`history`], the [`reticle_model::EditableDocument`] undo/redo wrapper.
 //! * [`command`], the command-palette catalog and fuzzy filter.
+//! * [`keymap`], rebindable keyboard shortcuts: TOML load/save and conflicts.
 //! * [`drc_panel`], running the DRC engine and formatting its violations.
 //! * [`netlight`], cached connectivity extraction for net highlighting.
 //! * [`inspector`], the read-only properties summary of the selection.
 //! * [`fps`], the rolling frame-time meter behind the status-bar fps readout.
 //! * [`session`], view/UI session save/restore (native file IO).
+//! * [`viewports`], the multi-pane split layout, hit-testing, and camera swaps.
 //! * [`view3d`], the extruded 3D layer-stack window (orbit camera + wgpu glue).
 //! * [`xsection`], cut-line cross-sections (interval math + elevation panel).
 //! * [`demo`], the built-in hierarchical demo document.
@@ -41,13 +46,17 @@ pub mod fps;
 pub mod grid;
 pub mod history;
 pub mod inspector;
+pub mod keymap;
+pub mod labels;
 pub mod layers;
 pub mod measure;
+pub mod minimap;
 pub mod netlight;
 pub mod selection;
 pub mod session;
 pub mod tool;
 pub mod view3d;
+pub mod viewports;
 pub mod xsection;
 
 pub use app::App;
