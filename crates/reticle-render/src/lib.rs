@@ -27,6 +27,7 @@
 mod context;
 mod cull;
 mod geometry;
+mod pages;
 mod palette;
 mod pipelines;
 mod retained;
@@ -36,6 +37,7 @@ mod view;
 pub use context::WgpuContext;
 pub use cull::{CellCuller, CullAabb};
 pub use geometry::{MeshVertex, RectInstance, SceneGeometry};
+pub use pages::{Allocation, BufferPages, DEFAULT_PAGE_SIZE, PageAllocator};
 pub use palette::{Palette, Rgba};
 pub use pipelines::Pipelines;
 pub use retained::{CellChunk, InstanceEntry, InstanceTransform, RetainedScene};
