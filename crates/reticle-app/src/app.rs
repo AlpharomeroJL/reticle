@@ -29,6 +29,7 @@ use crate::fps::FrameMeter;
 use crate::grid::{self, GridSettings};
 use crate::history::History;
 use crate::inspector::{self, Inspection};
+use crate::labels;
 use crate::layers::{self, LayerState};
 use crate::netlight::{Generation, Netlight};
 use crate::selection::{self, Selection};
@@ -54,6 +55,10 @@ impl Status {
 /// frozen Wave 0 contract. Beyond them the struct now carries the full editor state:
 /// the editable document with undo history, the view camera, the tool machine, the
 /// layer/selection/grid models, and the command-palette UI state.
+// The app root aggregates many independent one-bit UI facts (deferred-fit flag,
+// window-open flags, overlay toggles); folding them into enums or sub-structs
+// would only add indirection to the glue layer.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug)]
 pub struct App {
     /// GPU renderer handle (used by the native PNG-export action).
@@ -76,6 +81,9 @@ pub struct App {
     selection: Selection,
     /// Grid, snapping, and ruler settings.
     grid: GridSettings,
+    /// Whether the canvas text-label overlay (cell names, selection captions, live
+    /// dimensions) is drawn.
+    labels_visible: bool,
     /// The name of the top cell being viewed.
     top_cell: String,
 
@@ -155,6 +163,7 @@ impl App {
             layer_state,
             selection: Selection::new(),
             grid: GridSettings::default(),
+            labels_visible: true,
             top_cell: demo::TOP_CELL.to_owned(),
             scene,
             doc_generation: 0,
@@ -457,6 +466,7 @@ impl App {
             ui.separator();
             ui.checkbox(&mut self.grid.visible, "Grid");
             ui.checkbox(&mut self.grid.snap_enabled, "Snap");
+            ui.checkbox(&mut self.labels_visible, "Labels");
             ui.separator();
             if ui.button("Palette (Ctrl+P)").clicked() {
                 self.palette_open = !self.palette_open;
@@ -829,6 +839,9 @@ impl App {
 
         self.draw_rulers(&painter, &screen);
         self.draw_measure(&painter, &screen);
+        if self.labels_visible {
+            self.draw_labels(&painter, &screen);
+        }
         self.draw_presence(&painter, &screen);
 
         screen
@@ -1284,6 +1297,91 @@ impl App {
             // First point placed, awaiting the second.
             let a = self.world_pos_to_screen(screen, start);
             painter.circle_filled(a, 3.0, color);
+        }
+    }
+
+    /// Draws the canvas text-label overlay: cell names, the selection caption, and
+    /// the live measurement readout.
+    ///
+    /// egui composites painter text after the GPU paint callback, so this text
+    /// always reads on top of the geometry (no extra text-rendering dependency).
+    /// Every layout and formatting decision lives in [`crate::labels`]; this method
+    /// only converts world rectangles to screen space and issues the text calls.
+    fn draw_labels(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        let font = FontId::monospace(labels::LABEL_FONT_PX);
+
+        // Cell names, centered in each placement outline, at the cell-box LOD.
+        if culling::lod_for_zoom(self.camera.pixels_per_dbu()) == DetailLevel::CellBoxes {
+            let viewport = self.camera.visible_world_rect(screen);
+            let boxes: Vec<labels::LabelBox> =
+                culling::visible_cell_boxes(self.history.document(), &self.top_cell, viewport)
+                    .into_iter()
+                    .map(|cb| {
+                        let e = self.world_rect_to_screen(screen, cb.bbox);
+                        labels::LabelBox {
+                            text: cb.cell,
+                            left: e.min.x,
+                            top: e.min.y,
+                            width: e.width(),
+                            height: e.height(),
+                        }
+                    })
+                    .collect();
+            let name_color = Color32::from_rgb(200, 210, 230);
+            for label in labels::place_box_labels(&boxes, labels::LABEL_FONT_PX) {
+                painter.text(
+                    Pos2::new(label.x, label.y),
+                    Align2::CENTER_CENTER,
+                    label.text,
+                    font.clone(),
+                    name_color,
+                );
+            }
+        }
+
+        // The selection caption: layer text plus live dimensions at the bounds.
+        let indices: Vec<usize> = self.selection.iter().collect();
+        let dpm = self.dbu_per_micron();
+        let caption = match inspector::inspect(self.scene.shapes(), &indices, &self.layer_state) {
+            Inspection::Empty => None,
+            Inspection::Single(info) => Some((
+                info.bounds,
+                labels::selection_caption(&info.layer_label(), &info.bounds, dpm),
+            )),
+            Inspection::Multiple { count, bounds } => {
+                Some((bounds, labels::multi_selection_caption(count, &bounds, dpm)))
+            }
+        };
+        if let Some((bounds, text)) = caption {
+            let e = self.world_rect_to_screen(screen, bounds);
+            let (x, y) = labels::caption_anchor(
+                e.min.x,
+                e.max.x,
+                e.min.y,
+                screen.top,
+                labels::LABEL_FONT_PX,
+            );
+            painter.text(
+                Pos2::new(x, y),
+                Align2::CENTER_CENTER,
+                text,
+                font.clone(),
+                Color32::from_rgb(255, 240, 120),
+            );
+        }
+
+        // Live dimension readout at the cursor while the second measure point is
+        // pending; the completed measurement is drawn by `draw_measure`.
+        if let (Some(start), Some(cursor)) = (self.tools.measure_start(), self.cursor_world) {
+            let text = labels::live_measure_caption(start, cursor, self.dbu_per_micron());
+            let p = self.world_pos_to_screen(screen, cursor);
+            painter.text(
+                Pos2::new(p.x + 12.0, p.y - 12.0),
+                Align2::LEFT_BOTTOM,
+                text,
+                font,
+                Color32::from_rgb(255, 210, 90),
+            );
         }
     }
 
@@ -1810,6 +1908,12 @@ mod tests {
         app.add_demo_rectangle();
         assert!(app.netlight.is_empty(), "edit must clear the highlight");
         assert_ne!(app.doc_generation, gen_before, "generation must advance");
+    }
+
+    #[test]
+    fn label_overlay_defaults_on() {
+        let app = App::new();
+        assert!(app.labels_visible, "labels should be on out of the box");
     }
 
     #[test]

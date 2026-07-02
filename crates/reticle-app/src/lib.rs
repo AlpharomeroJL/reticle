@@ -16,6 +16,8 @@
 //! * [`layers`], the layer table, visibility, and name filter.
 //! * [`selection`], the shape-selection model and layer query.
 //! * [`grid`], grid spacing, snapping, and ruler ticks.
+//! * [`labels`], layout and formatting for the canvas text overlay (cell names,
+//!   selection captions, live dimensions).
 //! * [`history`], the [`reticle_model::EditableDocument`] undo/redo wrapper.
 //! * [`command`], the command-palette catalog and fuzzy filter.
 //! * [`drc_panel`], running the DRC engine and formatting its violations.
@@ -39,6 +41,7 @@ pub mod fps;
 pub mod grid;
 pub mod history;
 pub mod inspector;
+pub mod labels;
 pub mod layers;
 pub mod measure;
 pub mod netlight;
