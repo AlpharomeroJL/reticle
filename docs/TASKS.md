@@ -34,7 +34,7 @@ produce v5.0.0.
 - [x] Close-out: WASM cold-load (~640 ms cold, WebGPU) and collab echo (~0.79 ms median) measured into PERF.md (commit 34092b6). done-gate-green
 - [x] Close-out: DRC, route, collab, minimap, and 3D media captured (merged, ci green). done-gate-green. Five real engine-rendered stills (assets/{stack3d,drc,route,minimap,collab}.png) via extended `just capture-media`; deterministic regeneration verified (router shape order fixed for byte-stability).
 - [x] Close-out: README refresh, skeptical STATUS update (commit 6630a14). done-gate-green
-- [ ] Release v4.0.0: git-cliff notes, binaries, Pages rebuild, tag. blocked on media capture.
+- [x] Release v4.0.0: version bumped to 4.0.0, git-cliff CHANGELOG, tag v4.0.0 pushed (commit f0fb07c), three host binaries on the GitHub release (not draft), gh-pages rebuilt with the v4.0.0 wasm demo + book (live, HTTP 200). done-gate-green. **v4.0.0 shipped.**
 
 ## Wave 0: contract freeze (serial)
 
