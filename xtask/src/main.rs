@@ -3,7 +3,8 @@
 //! Subcommands:
 //! - `gen-layout`, write a deterministic chip-like layout as GDSII (by shape
 //!   count, layer count, and hierarchy depth).
-//! - `capture-media`, regenerate the hero image and demo GIFs (Wave 5).
+//! - `capture-media`, regenerate the hero image, demo GIFs, and feature stills;
+//!   an optional trailing asset name limits the run to that one asset.
 //! - `perf-check`, compare benchmarks against the committed history (Wave 5).
 
 mod generator;
@@ -19,10 +20,10 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map_or("", String::as_str) {
         "gen-layout" => gen_layout(&args[1..]),
-        "capture-media" => cmd_capture_media(),
+        "capture-media" => cmd_capture_media(args.get(1).map(String::as_str)),
         "perf-check" => perf::perf_check(),
         "" => {
-            eprintln!("usage: xtask <gen-layout|capture-media|perf-check> [options]");
+            eprintln!("usage: xtask <gen-layout|capture-media [asset]|perf-check> [options]");
             ExitCode::FAILURE
         }
         other => {
@@ -77,9 +78,10 @@ fn gen_layout(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Handles `capture-media`: render the hero image and browse GIF into `assets/`.
-fn cmd_capture_media() -> ExitCode {
-    match media::capture(Path::new("assets")) {
+/// Handles `capture-media`: render the hero image, demo GIFs, and feature stills
+/// into `assets/`. `only` limits the run to a single named asset.
+fn cmd_capture_media(only: Option<&str>) -> ExitCode {
+    match media::capture(Path::new("assets"), only) {
         Ok(true) => {
             println!("media capture complete");
             ExitCode::SUCCESS
