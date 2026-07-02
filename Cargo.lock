@@ -4042,6 +4042,7 @@ dependencies = [
  "image",
  "lyon",
  "pollster",
+ "proptest",
  "reticle-geometry",
  "reticle-index",
  "reticle-model",
