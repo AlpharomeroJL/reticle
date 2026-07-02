@@ -28,8 +28,8 @@ use std::time::Instant;
 use reticle_geometry::{LayerId, Point, Rect};
 use reticle_model::{Camera, Cell, Document, DrawShape, ShapeKind};
 use reticle_render::{
-    OffscreenTarget, Palette, Pipelines, Rgba, SceneGeometry, ViewUniform, WgpuContext,
-    WgpuRenderer,
+    ExpandedScene, OffscreenTarget, Palette, Pipelines, RetainedRenderer, RetainedScene, Rgba,
+    SceneGeometry, TARGET_FORMAT, ViewUniform, WgpuContext, WgpuRenderer,
 };
 
 /// A tiny deterministic xorshift PRNG so the benchmark is reproducible without a
@@ -399,6 +399,114 @@ fn print_summary(
     }
 }
 
+/// Records one offscreen frame drawing `renderer`'s retained scene into `target`,
+/// updating only the camera uniform, then copies and reads it back. This is the
+/// steady-state retained cost: no per-frame flatten, tessellate, or buffer creation.
+fn draw_retained_frame(
+    ctx: &WgpuContext,
+    renderer: &RetainedRenderer,
+    target: &OffscreenTarget,
+    view: &ViewUniform,
+    clear: Rgba,
+) {
+    let device = ctx.device();
+    renderer.set_camera(ctx.queue(), view);
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("retained bench encoder"),
+    });
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("retained bench pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.view(),
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: f64::from(clear.components[0]),
+                        g: f64::from(clear.components[1]),
+                        b: f64::from(clear.components[2]),
+                        a: f64::from(clear.components[3]),
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        renderer.paint(&mut pass);
+    }
+    target.copy_to_buffer(&mut encoder);
+    ctx.queue().submit(std::iter::once(encoder.finish()));
+    std::hint::black_box(target.read_pixels(ctx).len());
+}
+
+/// Benchmarks the retained render path for `count` flat leaf shapes: build the
+/// retained scene and upload it once, then time only the per-frame draw plus CPU
+/// readback with a uniform-only camera update. This is the path the windowed surface
+/// uses (minus the readback a real surface skips), so it is the honest steady-state
+/// number for the new renderer.
+fn bench_retained(ctx: &WgpuContext, count: usize, target_fps: f64) {
+    println!("\n== retained path, N = {count} leaf shapes ==");
+    let empty_doc = Document::new();
+    let palette = Palette::from_technology(empty_doc.technology());
+
+    // Build the flat document and its retained scene, then expand once (this is the
+    // one-time cost the retained path pays on an edit, not per frame).
+    let build_start = Instant::now();
+    let doc = build_flat_document(count, 0x9E37_79B9_7F4A_7C15);
+    let bbox = doc
+        .cell_bbox("top")
+        .unwrap_or_else(|| Rect::new(Point::ORIGIN, Point::new(1, 1)));
+    let camera = framing_camera(bbox, WIDTH, HEIGHT);
+    let scene = RetainedScene::new(&doc, "top", &palette);
+    let expanded: ExpandedScene = scene.expand();
+    let build_time = build_start.elapsed();
+
+    let mut renderer = RetainedRenderer::new(ctx.device(), TARGET_FORMAT);
+    renderer.upload_expanded(ctx.device(), ctx.queue(), &expanded);
+    println!(
+        "built retained scene + expanded {} rect instances in {build_time:?}; {} page-sized draw(s)",
+        expanded.rect_count(),
+        renderer.rect_chunk_count()
+    );
+
+    let target = OffscreenTarget::new(ctx, WIDTH, HEIGHT);
+    let view = ViewUniform::from_camera(&camera, target.width(), target.height());
+    let clear = Rgba {
+        components: [0.0, 0.0, 0.0, 1.0],
+    };
+
+    // Warmup, and cross-check the first frame is non-blank.
+    draw_retained_frame(ctx, &renderer, &target, &view, clear);
+    let first = target.read_pixels(ctx);
+    let lit = non_background_pixels(&first);
+    assert!(lit > 0, "retained frame must be non-blank (lit {lit})");
+    for _ in 1..WARMUP_FRAMES {
+        draw_retained_frame(ctx, &renderer, &target, &view, clear);
+    }
+
+    let frames = timed_frames(count);
+    let start = Instant::now();
+    for _ in 0..frames {
+        draw_retained_frame(ctx, &renderer, &target, &view, clear);
+    }
+    let timing = Timing::new(frames, start.elapsed());
+    let meets = if timing.fps >= target_fps {
+        "yes"
+    } else {
+        "no"
+    };
+    println!("---- retained results (N = {count}, {WIDTH}x{HEIGHT}) ----");
+    println!(
+        "retained (upload once, then per-frame draw + readback):\n\
+         \x20  {:>7.2} ms/frame  {:>8.2} fps  over {} frames  | meets {:.0}fps target: {}",
+        timing.ms_per_frame, timing.fps, timing.frames, target_fps, meets
+    );
+}
+
 fn main() {
     println!("== Reticle offscreen render fps benchmark ==");
     println!("resolution       : {WIDTH}x{HEIGHT}");
@@ -430,8 +538,15 @@ fn main() {
     bench_count(&ctx, 1_000_000, 60.0, max_rects_per_buffer);
     bench_count(&ctx, 10_000_000, 30.0, max_rects_per_buffer);
 
+    // The retained path: the new renderer that caches tessellation and uploads once,
+    // then redraws with only a uniform update. This is what the windowed surface runs.
+    println!("\n=== retained (RetainedRenderer) path ===");
+    bench_retained(&ctx, 1_000_000, 60.0);
+    bench_retained(&ctx, 10_000_000, 30.0);
+
     println!("\nnote: 'full per-call' includes per-frame scene build (flatten + tessellate) and");
-    println!("pipeline/target setup; 'reuse' isolates the steady-state draw + CPU readback. Both");
-    println!("read the frame back to the CPU (an offscreen cost a surface-presenting loop skips),");
-    println!("so a real interactive path would run at or above the 'reuse' number.");
+    println!("pipeline/target setup; 'reuse' isolates the steady-state draw + CPU readback; the");
+    println!("'retained' path uploads geometry once and then only redraws (a camera move is a");
+    println!("uniform write). All read the frame back to the CPU (an offscreen cost a surface-");
+    println!("presenting loop skips), so a real interactive path runs at or above these numbers.");
 }
