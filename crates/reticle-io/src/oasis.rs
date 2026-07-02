@@ -9,69 +9,86 @@
 //! Implementing all of that is out of scope for Wave 1.
 //!
 //! Instead this module defines a small, self-describing binary container that
-//! carries the geometry Reticle most needs to round-trip today: rectangles and
-//! polygons, tagged by `(layer, datatype)`, grouped into named cells, for a
-//! document with any number of cells (its top cells are preserved). It borrows
-//! OASIS's spirit, a magic string, a `START`/`END` frame, and `CELL` /
-//! `RECTANGLE` / `POLYGON` records with explicit layer and datatype, without
-//! claiming its wire format.
+//! carries the geometry and hierarchy Reticle most needs to round-trip today:
+//! rectangles, polygons, and paths tagged by `(layer, datatype)`, plus cell
+//! instances (placements) and arrays, grouped into named cells, for a document
+//! with any number of cells (its top cells are preserved). It borrows OASIS's
+//! spirit, a magic string, a `START`/`END` frame, and `CELL` / `RECTANGLE` /
+//! `POLYGON` / `PATH` / `PLACEMENT` / `ARRAY` records with explicit layer and
+//! datatype, without claiming its wire format.
 //!
 //! The reader and writer are exact inverses, so
 //! `import(export(doc)) == doc`-equivalent geometry is guaranteed for the
-//! supported subset (see the round-trip test).
+//! supported subset (see the round-trip test and the property test).
 //!
 //! # Container layout
 //!
 //! ```text
 //! MAGIC        14 bytes  b"RETICLE-OASIS\0"
-//! version       u8       format version (currently 1)
+//! version       u8       format version (currently 2)
 //! START  0x01   { dbu_per_micron: u64, top_count: u32, [top_name]*, cell_count: u32 }
-//! CELL   0x02   { name: str, shape_count: u32, [shape]* }   (repeated cell_count times)
+//! CELL   0x02   { name: str, shape_count: u32, [shape]*,
+//!                 instance_count: u32, [PLACEMENT]*,
+//!                 array_count: u32, [ARRAY]* }             (repeated cell_count times)
 //! END    0xFF
 //!
 //! shape :=
 //!   RECTANGLE 0x10 { layer: u16, datatype: u16, min_x,min_y,max_x,max_y: i32 }
 //!   POLYGON   0x11 { layer: u16, datatype: u16, n: u32, [x: i32, y: i32]{n} }
+//!   PATH      0x12 { layer: u16, datatype: u16, width: i32, endcap,
+//!                    n: u32, [x: i32, y: i32]{n} }
+//!
+//! endcap :=                       (a 1-byte kind, then a 4-byte i32 extension)
+//!   0x00 Flat        + ext i32 (0)
+//!   0x01 Square      + ext i32 (0)
+//!   0x02 Round       + ext i32 (0)
+//!   0x03 Custom(ext) + ext i32
+//!
+//! transform :=                    (translation, orientation, magnification)
+//!   { dx: i32, dy: i32, orientation: u8, magnification: u64 (f64 bits) }
+//!
+//! PLACEMENT 0x20 { cell_ref: str, transform }
+//! ARRAY     0x21 { cell_ref: str, transform,
+//!                  columns: u32, rows: u32, column_pitch: i32, row_pitch: i32 }
 //!
 //! str := { len: u16, bytes: [u8; len] }   (UTF-8)
 //! ```
 //!
-//! All multi-byte integers are little-endian.
+//! All multi-byte integers are little-endian. The magnification is written as the
+//! IEEE-754 bit pattern of its `f64` value (`f64::to_bits`), then reconstructed on
+//! read as an exact rational, matching the GDSII importer's magnification handling.
 //!
 //! # TODO (documented coverage gaps, acceptable per the project's operating rules)
 //!
-//! - Paths ([`ShapeKind::Path`]) are not encoded. [`Oasis::export`] returns
-//!   [`ModelError::Unsupported`] if a cell contains a path, rather than silently
-//!   dropping it.
-//! - Cell instances and arrays ([`Instance`](reticle_model::Instance),
-//!   [`ArrayInstance`](reticle_model::ArrayInstance)) are not encoded (no
-//!   `PLACEMENT`/`REPETITION` analog yet). Rather than silently flatten or drop
-//!   the hierarchy, [`Oasis::export`] returns [`ModelError::Unsupported`] when a
-//!   cell carries instances or arrays.
 //! - No compression, properties, text, or non-rectangular trapezoids.
+//! - Path end caps are preserved (including a custom extension), but the round /
+//!   square distinction carries no separate geometry beyond the recorded kind.
 //! - The technology's layer table and rules are not serialized (only
 //!   `dbu_per_micron`); the layer set is reconstructed from the geometry on
 //!   import, mirroring the GDSII importer.
 
 use crate::IoError;
-use reticle_geometry::{LayerId, Point, Polygon, Rect};
+use reticle_geometry::{
+    Endcap, LayerId, Magnification, Orientation, Path, Point, Polygon, Rect, Transform,
+};
 use reticle_model::{
-    Cell, Document, DrawShape, Exporter, Importer, LayerInfo, ModelError, Result, ShapeKind,
-    Technology,
+    ArrayInstance, Cell, Document, DrawShape, Exporter, Importer, Instance, LayerInfo, Result,
+    ShapeKind, Technology,
 };
 
 /// OASIS import/export (Wave 1: in-house subset, ADR 0004).
 ///
 /// Implements [`Importer`] and [`Exporter`] for the container described in the
-/// [module docs](self). Supports rectangles and polygons on `(layer, datatype)`;
-/// paths, instances, and arrays are reported as unsupported rather than dropped.
+/// [module docs](self). Supports rectangles, polygons, and paths on
+/// `(layer, datatype)`, plus cell instances (placements) and arrays, so a
+/// document's flat geometry and hierarchy both round-trip.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Oasis;
 
 /// Magic bytes at the head of every container.
 const MAGIC: &[u8; 14] = b"RETICLE-OASIS\0";
 /// Current container format version.
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 
 // Record tags.
 const TAG_START: u8 = 0x01;
@@ -79,6 +96,25 @@ const TAG_CELL: u8 = 0x02;
 const TAG_END: u8 = 0xFF;
 const TAG_RECTANGLE: u8 = 0x10;
 const TAG_POLYGON: u8 = 0x11;
+const TAG_PATH: u8 = 0x12;
+const TAG_PLACEMENT: u8 = 0x20;
+const TAG_ARRAY: u8 = 0x21;
+
+// Endcap kind discriminants (a 1-byte kind followed by an i32 extension).
+const CAP_FLAT: u8 = 0x00;
+const CAP_SQUARE: u8 = 0x01;
+const CAP_ROUND: u8 = 0x02;
+const CAP_CUSTOM: u8 = 0x03;
+
+// Orientation discriminants (a single byte), matching the geometry enum order.
+const ORI_R0: u8 = 0x00;
+const ORI_R90: u8 = 0x01;
+const ORI_R180: u8 = 0x02;
+const ORI_R270: u8 = 0x03;
+const ORI_MIRROR_X: u8 = 0x04;
+const ORI_MIRROR_X90: u8 = 0x05;
+const ORI_MIRROR_X180: u8 = 0x06;
+const ORI_MIRROR_X270: u8 = 0x07;
 
 impl Exporter for Oasis {
     fn export(&self, doc: &Document) -> Result<Vec<u8>> {
@@ -154,24 +190,27 @@ impl Importer for Oasis {
     }
 }
 
-/// Writes one cell's `CELL` record, erroring on shapes outside the subset.
+/// Writes one cell's `CELL` record: its shapes, then its instances and arrays.
 fn write_cell(w: &mut Writer, cell: &Cell) -> Result<()> {
-    if !cell.instances.is_empty() || !cell.arrays.is_empty() {
-        return Err(ModelError::Unsupported(
-            "Reticle-OASIS subset does not encode instances or arrays",
-        ));
-    }
     w.bytes.push(TAG_CELL);
     w.string(&cell.name)?;
     w.u32(u32::try_from(cell.shapes.len()).unwrap_or(u32::MAX));
     for shape in &cell.shapes {
-        write_shape(w, shape)?;
+        write_shape(w, shape);
+    }
+    w.u32(u32::try_from(cell.instances.len()).unwrap_or(u32::MAX));
+    for inst in &cell.instances {
+        write_placement(w, inst)?;
+    }
+    w.u32(u32::try_from(cell.arrays.len()).unwrap_or(u32::MAX));
+    for arr in &cell.arrays {
+        write_array(w, arr)?;
     }
     Ok(())
 }
 
-/// Writes one shape record, erroring on paths (unsupported in the subset).
-fn write_shape(w: &mut Writer, shape: &DrawShape) -> Result<()> {
+/// Writes one shape record (rectangle, polygon, or path).
+fn write_shape(w: &mut Writer, shape: &DrawShape) {
     let layer = shape.layer;
     match &shape.kind {
         ShapeKind::Rect(r) => {
@@ -191,16 +230,41 @@ fn write_shape(w: &mut Writer, shape: &DrawShape) -> Result<()> {
                 w.i32(v.y);
             }
         }
-        ShapeKind::Path(_) => {
-            return Err(ModelError::Unsupported(
-                "Reticle-OASIS subset does not encode paths",
-            ));
+        ShapeKind::Path(p) => {
+            w.bytes.push(TAG_PATH);
+            w.layer(layer);
+            w.i32(p.width());
+            w.endcap(p.endcap());
+            w.u32(u32::try_from(p.points().len()).unwrap_or(u32::MAX));
+            for v in p.points() {
+                w.i32(v.x);
+                w.i32(v.y);
+            }
         }
     }
+}
+
+/// Writes one `PLACEMENT` record for a single [`Instance`].
+fn write_placement(w: &mut Writer, inst: &Instance) -> Result<()> {
+    w.bytes.push(TAG_PLACEMENT);
+    w.string(&inst.cell)?;
+    w.transform(&inst.transform);
     Ok(())
 }
 
-/// Reads one `CELL` record.
+/// Writes one `ARRAY` record for an [`ArrayInstance`].
+fn write_array(w: &mut Writer, arr: &ArrayInstance) -> Result<()> {
+    w.bytes.push(TAG_ARRAY);
+    w.string(&arr.cell)?;
+    w.transform(&arr.transform);
+    w.u32(arr.columns);
+    w.u32(arr.rows);
+    w.i32(arr.column_pitch);
+    w.i32(arr.row_pitch);
+    Ok(())
+}
+
+/// Reads one `CELL` record: its shapes, then its instances and arrays.
 fn read_cell(r: &mut Reader) -> Result<Cell> {
     expect_tag(r, TAG_CELL, "CELL")?;
     let name = r.string()?;
@@ -209,10 +273,18 @@ fn read_cell(r: &mut Reader) -> Result<Cell> {
     for _ in 0..shape_count {
         cell.shapes.push(read_shape(r)?);
     }
+    let instance_count = r.u32()?;
+    for _ in 0..instance_count {
+        cell.instances.push(read_placement(r)?);
+    }
+    let array_count = r.u32()?;
+    for _ in 0..array_count {
+        cell.arrays.push(read_array(r)?);
+    }
     Ok(cell)
 }
 
-/// Reads one shape record (rectangle or polygon).
+/// Reads one shape record (rectangle, polygon, or path).
 fn read_shape(r: &mut Reader) -> Result<DrawShape> {
     let tag = r.u8()?;
     match tag {
@@ -234,8 +306,49 @@ fn read_shape(r: &mut Reader) -> Result<DrawShape> {
                 ShapeKind::Polygon(Polygon::new(verts)),
             ))
         }
+        TAG_PATH => {
+            let layer = r.layer()?;
+            let width = r.i32()?;
+            let endcap = r.endcap()?;
+            let n = r.u32()?;
+            let mut points = Vec::with_capacity(n as usize);
+            for _ in 0..n {
+                points.push(Point::new(r.i32()?, r.i32()?));
+            }
+            Ok(DrawShape::new(
+                layer,
+                ShapeKind::Path(Path::new(points, width, endcap)),
+            ))
+        }
         _ => Err(IoError::Malformed("unknown Reticle-OASIS shape tag").into()),
     }
+}
+
+/// Reads one `PLACEMENT` record into an [`Instance`].
+fn read_placement(r: &mut Reader) -> Result<Instance> {
+    expect_tag(r, TAG_PLACEMENT, "PLACEMENT")?;
+    let cell = r.string()?;
+    let transform = r.transform()?;
+    Ok(Instance { cell, transform })
+}
+
+/// Reads one `ARRAY` record into an [`ArrayInstance`].
+fn read_array(r: &mut Reader) -> Result<ArrayInstance> {
+    expect_tag(r, TAG_ARRAY, "ARRAY")?;
+    let cell = r.string()?;
+    let transform = r.transform()?;
+    let columns = r.u32()?;
+    let rows = r.u32()?;
+    let column_pitch = r.i32()?;
+    let row_pitch = r.i32()?;
+    Ok(ArrayInstance {
+        cell,
+        transform,
+        columns,
+        rows,
+        column_pitch,
+        row_pitch,
+    })
 }
 
 /// Derives a sorted layer table from the geometry present in `doc`.
@@ -269,10 +382,43 @@ fn expect_tag(r: &mut Reader, expected: u8, what: &'static str) -> Result<()> {
         Err(match what {
             "START" => IoError::Malformed("expected START record"),
             "END" => IoError::Malformed("expected END record"),
+            "PLACEMENT" => IoError::Malformed("expected PLACEMENT record"),
+            "ARRAY" => IoError::Malformed("expected ARRAY record"),
             _ => IoError::Malformed("expected CELL record"),
         }
         .into())
     }
+}
+
+/// Converts a [`Magnification`] to the `f64` written on the wire.
+///
+/// [`Magnification`] keeps its numerator and denominator private, exposing only
+/// unity detection and [`Magnification::scale`]. Unity is represented exactly;
+/// other ratios are recovered by scaling a high-precision probe, matching the
+/// GDSII importer (`magnification_to_f64`).
+fn magnification_to_f64(mag: Magnification) -> f64 {
+    const PROBE: i32 = 1_000_000;
+    if mag.is_unity() {
+        return 1.0;
+    }
+    f64::from(mag.scale(PROBE)) / f64::from(PROBE)
+}
+
+/// Reconstructs a [`Magnification`] from a wire `f64`, as an exact rational.
+///
+/// Mirrors the GDSII importer (`magnification_from_f64`): unity and non-positive
+/// or out-of-range values collapse to [`Magnification::UNITY`]; other values are
+/// stored as `round(mag * 1_000_000) / 1_000_000`, well within DBU precision.
+fn magnification_from_f64(mag: f64) -> Magnification {
+    const SCALE: f64 = 1_000_000.0;
+    if !mag.is_finite() || (mag - 1.0).abs() < f64::EPSILON || mag <= 0.0 {
+        return Magnification::UNITY;
+    }
+    let num = (mag * SCALE).round();
+    if num <= 0.0 || num > f64::from(u32::MAX) {
+        return Magnification::UNITY;
+    }
+    Magnification::new(num as u32, SCALE as u32).unwrap_or(Magnification::UNITY)
 }
 
 /// A minimal little-endian byte writer.
@@ -304,6 +450,39 @@ impl Writer {
         self.bytes.extend_from_slice(&len.to_le_bytes());
         self.bytes.extend_from_slice(s.as_bytes());
         Ok(())
+    }
+    /// Writes a path end cap: a 1-byte kind followed by an i32 extension (0 for the
+    /// non-custom kinds, the custom amount otherwise).
+    fn endcap(&mut self, cap: Endcap) {
+        let (kind, ext) = match cap {
+            Endcap::Flat => (CAP_FLAT, 0),
+            Endcap::Square => (CAP_SQUARE, 0),
+            Endcap::Round => (CAP_ROUND, 0),
+            Endcap::Custom(e) => (CAP_CUSTOM, e),
+        };
+        self.bytes.push(kind);
+        self.i32(ext);
+    }
+    /// Writes a placement transform: translation, orientation, magnification.
+    fn transform(&mut self, t: &Transform) {
+        self.i32(t.translation.x);
+        self.i32(t.translation.y);
+        self.bytes.push(orientation_to_u8(t.orientation));
+        self.u64(magnification_to_f64(t.magnification).to_bits());
+    }
+}
+
+/// Maps an [`Orientation`] to its 1-byte wire discriminant.
+fn orientation_to_u8(o: Orientation) -> u8 {
+    match o {
+        Orientation::R0 => ORI_R0,
+        Orientation::R90 => ORI_R90,
+        Orientation::R180 => ORI_R180,
+        Orientation::R270 => ORI_R270,
+        Orientation::MirrorX => ORI_MIRROR_X,
+        Orientation::MirrorX90 => ORI_MIRROR_X90,
+        Orientation::MirrorX180 => ORI_MIRROR_X180,
+        Orientation::MirrorX270 => ORI_MIRROR_X270,
     }
 }
 
@@ -363,5 +542,43 @@ impl<'a> Reader<'a> {
         let raw = self.take(len)?;
         String::from_utf8(raw.to_vec())
             .map_err(|_| IoError::Malformed("Reticle-OASIS name is not valid UTF-8").into())
+    }
+    /// Reads a path end cap: a 1-byte kind followed by an i32 extension.
+    fn endcap(&mut self) -> Result<Endcap> {
+        let kind = self.u8()?;
+        let ext = self.i32()?;
+        match kind {
+            CAP_FLAT => Ok(Endcap::Flat),
+            CAP_SQUARE => Ok(Endcap::Square),
+            CAP_ROUND => Ok(Endcap::Round),
+            CAP_CUSTOM => Ok(Endcap::Custom(ext)),
+            _ => Err(IoError::Malformed("unknown Reticle-OASIS endcap kind").into()),
+        }
+    }
+    /// Reads a placement transform: translation, orientation, magnification.
+    fn transform(&mut self) -> Result<Transform> {
+        let translation = Point::new(self.i32()?, self.i32()?);
+        let orientation = orientation_from_u8(self.u8()?)?;
+        let magnification = magnification_from_f64(f64::from_bits(self.u64()?));
+        Ok(Transform {
+            translation,
+            orientation,
+            magnification,
+        })
+    }
+}
+
+/// Maps a 1-byte wire discriminant back to an [`Orientation`].
+fn orientation_from_u8(b: u8) -> Result<Orientation> {
+    match b {
+        ORI_R0 => Ok(Orientation::R0),
+        ORI_R90 => Ok(Orientation::R90),
+        ORI_R180 => Ok(Orientation::R180),
+        ORI_R270 => Ok(Orientation::R270),
+        ORI_MIRROR_X => Ok(Orientation::MirrorX),
+        ORI_MIRROR_X90 => Ok(Orientation::MirrorX90),
+        ORI_MIRROR_X180 => Ok(Orientation::MirrorX180),
+        ORI_MIRROR_X270 => Ok(Orientation::MirrorX270),
+        _ => Err(IoError::Malformed("unknown Reticle-OASIS orientation").into()),
     }
 }
