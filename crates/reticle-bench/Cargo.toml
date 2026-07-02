@@ -1,0 +1,16 @@
+[package]
+name = "reticle-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Benchmark infrastructure for the Reticle agent suite: task loader, checker runner, suite manifests, and results."
+keywords = ["eda", "layout", "benchmark", "agent", "evaluation"]
+categories = ["science", "development-tools"]
+
+[lints]
+workspace = true
+
+[dependencies]

@@ -1,0 +1,27 @@
+[package]
+name = "reticle-agent-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Serializable command API over the Reticle engine for programmatic and agent-driven layout editing."
+keywords = ["eda", "layout", "automation", "agent", "api-bindings"]
+categories = ["api-bindings", "science"]
+
+[lints]
+workspace = true
+
+[dependencies]
+reticle-geometry = { workspace = true }
+reticle-model = { workspace = true }
+reticle-io = { workspace = true }
+reticle-drc = { workspace = true }
+reticle-route = { workspace = true }
+reticle-extract = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+proptest = "1.11.0"

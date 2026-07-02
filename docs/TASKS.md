@@ -38,7 +38,7 @@ produce v5.0.0.
 
 ## Wave 0: contract freeze (serial)
 
-- [ ] Crate skeletons: reticle-agent-api, reticle-mcp, reticle-agent, reticle-bench, reticle-demo. not-started
+- [~] Crate skeletons: reticle-agent-api, reticle-mcp, reticle-agent, reticle-bench, reticle-demo scaffolded and registered in the workspace, compiling green. agent-api has the frozen ElementId and AgentError/ErrorCode foundation; the command/response surface and the other crates' types are the next freeze increments. in-progress
 - [ ] Command and response enums, Session with revision, structured AgentError. not-started
 - [ ] Transcript JSONL schema plus document_hash replay contract. not-started
 - [ ] Intent spec types and open/short report types. not-started

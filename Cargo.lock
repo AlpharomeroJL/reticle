@@ -3931,6 +3931,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
+name = "reticle-agent"
+version = "4.0.0"
+
+[[package]]
+name = "reticle-agent-api"
+version = "4.0.0"
+dependencies = [
+ "proptest",
+ "reticle-drc",
+ "reticle-extract",
+ "reticle-geometry",
+ "reticle-io",
+ "reticle-model",
+ "reticle-route",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "reticle-app"
 version = "4.0.0"
 dependencies = [
@@ -3944,6 +3963,10 @@ dependencies = [
  "reticle-render",
  "reticle-sync",
 ]
+
+[[package]]
+name = "reticle-bench"
+version = "4.0.0"
 
 [[package]]
 name = "reticle-benches"
@@ -3963,6 +3986,10 @@ dependencies = [
  "reticle-render",
  "reticle-route",
 ]
+
+[[package]]
+name = "reticle-demo"
+version = "4.0.0"
 
 [[package]]
 name = "reticle-drc"
@@ -4015,6 +4042,10 @@ dependencies = [
  "reticle-geometry",
  "reticle-model",
 ]
+
+[[package]]
+name = "reticle-mcp"
+version = "4.0.0"
 
 [[package]]
 name = "reticle-model"

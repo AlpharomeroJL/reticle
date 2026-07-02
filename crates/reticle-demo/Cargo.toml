@@ -1,0 +1,16 @@
+[package]
+name = "reticle-demo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Rate-limited demo server for Reticle: submit, status, and cancel endpoints designed for safe public exposure."
+keywords = ["eda", "layout", "demo", "server", "axum"]
+categories = ["web-programming", "science"]
+
+[lints]
+workspace = true
+
+[dependencies]
