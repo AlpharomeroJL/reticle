@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-c053301e.js";
+            window.path_to_searchindex_js = "searchindex-6120515e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-96561552.js"></script>
@@ -189,17 +189,22 @@ which is far faster than repeated insertion and yields better query performance.
 <li><strong>Uniform grid.</strong> For uniformly distributed geometry, a uniform grid buckets
 shapes by cell and answers rectangle queries by scanning the covered cells. It is
 cheap to build and update.</li>
-<li><strong>Tile and LOD pyramid.</strong> For out-of-core browsing, shapes are bucketed into
-tiles at several levels of detail. A renderer requests only the tiles inside the
-view at the level appropriate to the zoom, so memory and draw work scale with what
-is on screen rather than with the size of the design.</li>
+<li><strong>Tile and LOD pyramid.</strong> Shapes are bucketed into tiles at several levels of
+detail. A renderer requests only the tiles inside the view at the level appropriate
+to the zoom, so memory and draw work scale with what is on screen rather than with
+the size of the design.</li>
 </ul>
 <p>All indices implement the shared <code>SpatialIndex</code> trait, so callers are generic over
 the structure. A brute-force <code>LinearIndex</code> implements the same trait and serves as
 the oracle the fast indices are property-tested against.</p>
-<h2 id="out-of-core-streaming"><a class="header" href="#out-of-core-streaming">Out-of-core streaming</a></h2>
-<p>Large layouts are stored in a zero-copy archive (<code>rkyv</code>) so they can be
-memory-mapped and streamed tile by tile without deserializing the whole design.</p>
+<h2 id="zero-copy-archive-the-building-block-for-out-of-core"><a class="header" href="#zero-copy-archive-the-building-block-for-out-of-core">Zero-copy archive (the building block for out-of-core)</a></h2>
+<p>An index payload serializes to a zero-copy <code>rkyv</code> archive laid out exactly as its
+in-memory form, so a caller can read shape rectangles, and index a single entry -
+straight from the bytes with no parsing or allocation, validated by <code>rkyv</code>’s
+<code>bytecheck</code>. This is the primitive a memory-mapped, larger-than-RAM layout would sit
+on. The disk/mmap paging layer and its renderer integration are <strong>not yet wired up</strong>
+today (the API is exercised over in-memory buffers); the out-of-core streaming ADR and
+<code>STATUS.md</code> record this precisely.</p>
 <h2 id="targets"><a class="header" href="#targets">Targets</a></h2>
 <p>The bulk index build of one million shapes should complete in well under a second,
 and point or rubber-band picking over a million shapes should return in under a

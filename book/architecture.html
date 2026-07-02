@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-c053301e.js";
+            window.path_to_searchindex_js = "searchindex-6120515e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-96561552.js"></script>
@@ -217,11 +217,11 @@ test and clean to read; the heavier subsystems build on top of them.</p>
 </thead>
 <tbody>
 <tr><td><code>reticle-geometry</code></td><td>Exact integer primitives and robust polygon booleans, offsetting, winding, and convex decomposition.</td></tr>
-<tr><td><code>reticle-index</code></td><td>Bulk-loaded R-tree, uniform grid, and a tile/LOD pyramid for out-of-core browsing.</td></tr>
-<tr><td><code>reticle-model</code></td><td>The hierarchical document: cells, instances, arrays, transforms, bbox caching, flattening, and a transactional edit history.</td></tr>
+<tr><td><code>reticle-index</code></td><td>Bulk-loaded R-tree, uniform grid, and a tile/LOD pyramid for level-of-detail browsing.</td></tr>
+<tr><td><code>reticle-model</code></td><td>The hierarchical document: cells, instances, arrays, transforms, per-cell bbox computation, flattening, and a transactional edit history.</td></tr>
 <tr><td><code>reticle-proto</code></td><td>The versioned Protobuf schema and generated types for the document, wire, and collaboration formats.</td></tr>
 <tr><td><code>reticle-io</code></td><td>GDSII and OASIS import and export, plus a technology-file parser.</td></tr>
-<tr><td><code>reticle-render</code></td><td>The <code>wgpu</code> renderer: instanced pipelines, GPU-driven culling, tiles, LOD, overlays.</td></tr>
+<tr><td><code>reticle-render</code></td><td>The <code>wgpu</code> renderer: instanced pipelines, <code>lyon</code> tessellation, GPU-driven cell culling, and offscreen rendering.</td></tr>
 <tr><td><code>reticle-drc</code></td><td>A declarative, incremental design-rule checker.</td></tr>
 <tr><td><code>reticle-route</code></td><td>A grid and maze router with rip-up and reroute.</td></tr>
 <tr><td><code>reticle-extract</code></td><td>Geometric connectivity extraction across contacts and vias.</td></tr>

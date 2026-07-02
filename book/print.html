@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-c053301e.js";
+            window.path_to_searchindex_js = "searchindex-6120515e.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-96561552.js"></script>
@@ -245,11 +245,11 @@ test and clean to read; the heavier subsystems build on top of them.</p>
 </thead>
 <tbody>
 <tr><td><code>reticle-geometry</code></td><td>Exact integer primitives and robust polygon booleans, offsetting, winding, and convex decomposition.</td></tr>
-<tr><td><code>reticle-index</code></td><td>Bulk-loaded R-tree, uniform grid, and a tile/LOD pyramid for out-of-core browsing.</td></tr>
-<tr><td><code>reticle-model</code></td><td>The hierarchical document: cells, instances, arrays, transforms, bbox caching, flattening, and a transactional edit history.</td></tr>
+<tr><td><code>reticle-index</code></td><td>Bulk-loaded R-tree, uniform grid, and a tile/LOD pyramid for level-of-detail browsing.</td></tr>
+<tr><td><code>reticle-model</code></td><td>The hierarchical document: cells, instances, arrays, transforms, per-cell bbox computation, flattening, and a transactional edit history.</td></tr>
 <tr><td><code>reticle-proto</code></td><td>The versioned Protobuf schema and generated types for the document, wire, and collaboration formats.</td></tr>
 <tr><td><code>reticle-io</code></td><td>GDSII and OASIS import and export, plus a technology-file parser.</td></tr>
-<tr><td><code>reticle-render</code></td><td>The <code>wgpu</code> renderer: instanced pipelines, GPU-driven culling, tiles, LOD, overlays.</td></tr>
+<tr><td><code>reticle-render</code></td><td>The <code>wgpu</code> renderer: instanced pipelines, <code>lyon</code> tessellation, GPU-driven cell culling, and offscreen rendering.</td></tr>
 <tr><td><code>reticle-drc</code></td><td>A declarative, incremental design-rule checker.</td></tr>
 <tr><td><code>reticle-route</code></td><td>A grid and maze router with rip-up and reroute.</td></tr>
 <tr><td><code>reticle-extract</code></td><td>Geometric connectivity extraction across contacts and vias.</td></tr>
@@ -336,17 +336,22 @@ which is far faster than repeated insertion and yields better query performance.
 <li><strong>Uniform grid.</strong> For uniformly distributed geometry, a uniform grid buckets
 shapes by cell and answers rectangle queries by scanning the covered cells. It is
 cheap to build and update.</li>
-<li><strong>Tile and LOD pyramid.</strong> For out-of-core browsing, shapes are bucketed into
-tiles at several levels of detail. A renderer requests only the tiles inside the
-view at the level appropriate to the zoom, so memory and draw work scale with what
-is on screen rather than with the size of the design.</li>
+<li><strong>Tile and LOD pyramid.</strong> Shapes are bucketed into tiles at several levels of
+detail. A renderer requests only the tiles inside the view at the level appropriate
+to the zoom, so memory and draw work scale with what is on screen rather than with
+the size of the design.</li>
 </ul>
 <p>All indices implement the shared <code>SpatialIndex</code> trait, so callers are generic over
 the structure. A brute-force <code>LinearIndex</code> implements the same trait and serves as
 the oracle the fast indices are property-tested against.</p>
-<h2 id="out-of-core-streaming"><a class="header" href="#out-of-core-streaming">Out-of-core streaming</a></h2>
-<p>Large layouts are stored in a zero-copy archive (<code>rkyv</code>) so they can be
-memory-mapped and streamed tile by tile without deserializing the whole design.</p>
+<h2 id="zero-copy-archive-the-building-block-for-out-of-core"><a class="header" href="#zero-copy-archive-the-building-block-for-out-of-core">Zero-copy archive (the building block for out-of-core)</a></h2>
+<p>An index payload serializes to a zero-copy <code>rkyv</code> archive laid out exactly as its
+in-memory form, so a caller can read shape rectangles, and index a single entry -
+straight from the bytes with no parsing or allocation, validated by <code>rkyv</code>’s
+<code>bytecheck</code>. This is the primitive a memory-mapped, larger-than-RAM layout would sit
+on. The disk/mmap paging layer and its renderer integration are <strong>not yet wired up</strong>
+today (the API is exercised over in-memory buffers); the out-of-core streaming ADR and
+<code>STATUS.md</code> record this precisely.</p>
 <h2 id="targets"><a class="header" href="#targets">Targets</a></h2>
 <p>The bulk index build of one million shapes should complete in well under a second,
 and point or rubber-band picking over a million shapes should return in under a
@@ -406,23 +411,25 @@ either produces a document or returns an error.</p>
 <p><code>reticle-render</code> is the <code>wgpu</code> renderer. It targets WebGPU in the browser and
 Vulkan, Metal, or DX12 natively, with a WebGL2 fallback for reach (ADR 0009).</p>
 <h2 id="gpu-driven-culling"><a class="header" href="#gpu-driven-culling">GPU-driven culling</a></h2>
-<p>The central trick for scale is to keep the hierarchy on the GPU. Rather than the
-CPU walking billions of leaf shapes, a compute shader builds the visible draw list
-from cell bounding boxes and the current view, and an indirect draw renders it.
-The CPU work per frame is proportional to the number of visible cells, not the size
-of the design. On the WebGL2 path, which has no compute, the draw list is built on
-the CPU instead.</p>
-<h2 id="instanced-draws-tiles-and-lod"><a class="header" href="#instanced-draws-tiles-and-lod">Instanced draws, tiles, and LOD</a></h2>
-<p>Geometry is tessellated once into vertex and index buffers (<code>lyon</code>) and drawn with
-per-layer style through instanced draws. A tile and level-of-detail pyramid swaps
-dense geometry for coarser representations as the camera zooms out, so a full-chip
-view costs no more than a zoomed-in one. Edges are anti-aliased, and labels are
-drawn from a glyph atlas (<code>glyphon</code>).</p>
-<h2 id="overlays-and-views"><a class="header" href="#overlays-and-views">Overlays and views</a></h2>
-<p>On top of the base layers the renderer draws a minimap, design-rule violation
-markers, highlighted nets, and an optional 3D cross-section of the layer stack. It
-renders either to a window surface or to an offscreen texture; the offscreen path
-drives both the golden-image tests and the media capture.</p>
+<p>The central trick for scale is to keep the hierarchy on the GPU. Rather than the CPU
+walking billions of leaf shapes, a compute shader tests each cell’s bounding box
+against the current view and flags the visible ones, the first stage of a GPU-driven
+draw list (compacting the survivors into an indirect draw is a follow-up). The work is
+proportional to the number of cells considered, not the flattened shape count. The
+interactive egui canvas currently culls on the CPU with the same R-tree, and the GPU
+compute cull is validated against that CPU result in a golden test.</p>
+<h2 id="instanced-draws-and-tessellation"><a class="header" href="#instanced-draws-and-tessellation">Instanced draws and tessellation</a></h2>
+<p>Axis-aligned rectangles are drawn as instanced quads; polygons and paths are
+tessellated once into vertex and index buffers (<code>lyon</code>) and drawn with per-layer style.
+Colors come from the technology layer table with a fallback palette. A tile and
+level-of-detail pyramid in the index provides coarser representations for zoomed-out
+browsing.</p>
+<h2 id="offscreen-rendering"><a class="header" href="#offscreen-rendering">Offscreen rendering</a></h2>
+<p>The renderer renders to an offscreen texture today, the path that drives both the
+golden-image tests and the media capture (the hero image and browse GIF). Window and
+surface presentation, and overlays (a minimap, design-rule violation markers,
+highlighted nets, and a 3D layer-stack cross-section), are tracked follow-ups noted in
+<code>STATUS.md</code>; the render crate’s module docs frame them the same way.</p>
 <h2 id="targets-1"><a class="header" href="#targets-1">Targets</a></h2>
 <p>One million flat shapes at a sustained 60 fps at typical zoom, ten million
 interactive at 30 fps or better, and hierarchical designs with effectively billions
