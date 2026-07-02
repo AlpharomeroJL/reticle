@@ -31,6 +31,7 @@ mod pages;
 mod palette;
 mod pipelines;
 mod retained;
+mod surface;
 mod target;
 mod view;
 
@@ -40,7 +41,10 @@ pub use geometry::{MeshVertex, RectInstance, SceneGeometry};
 pub use pages::{Allocation, BufferPages, DEFAULT_PAGE_SIZE, PageAllocator};
 pub use palette::{Palette, Rgba};
 pub use pipelines::Pipelines;
-pub use retained::{CellChunk, InstanceEntry, InstanceTransform, RetainedScene};
+pub use retained::{
+    CellChunk, ExpandedScene, InstanceEntry, InstanceTransform, RectInstanceT, RetainedScene,
+};
+pub use surface::RetainedRenderer;
 pub use target::{OffscreenTarget, TARGET_FORMAT};
 pub use view::ViewUniform;
 

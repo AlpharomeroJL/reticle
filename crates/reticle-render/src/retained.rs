@@ -21,7 +21,7 @@
 //! cell. This module produces the CPU-side data (cached chunks + instance-buffer
 //! contents); uploading and drawing it lives in [`crate::pipelines`].
 
-use crate::geometry::SceneGeometry;
+use crate::geometry::{MeshVertex, RectInstance, SceneGeometry};
 use crate::palette::Palette;
 use bytemuck::{Pod, Zeroable};
 use reticle_geometry::Transform;
@@ -70,6 +70,81 @@ impl InstanceTransform {
 impl Default for InstanceTransform {
     fn default() -> Self {
         Self::IDENTITY
+    }
+}
+
+/// A retained instanced rectangle: a cell's local-space rect ([`RectInstance`])
+/// fused with the placement [`InstanceTransform`] that positions it. Matches
+/// `RectInstanceT` in `shapes.wgsl`; the vertex shader applies the transform, so one
+/// cached rect serves every placement of its cell.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug, Pod, Zeroable)]
+pub struct RectInstanceT {
+    /// Local-space minimum corner `(x, y)` in DBU.
+    pub min_xy: [f32; 2],
+    /// Local-space maximum corner `(x, y)` in DBU.
+    pub max_xy: [f32; 2],
+    /// Linear RGBA fill color.
+    pub color: [f32; 4],
+    /// Dihedral orientation code in `0..8`.
+    pub orientation_code: u32,
+    /// Uniform magnification applied after orientation.
+    pub magnification: f32,
+    /// Integer translation `(x, y)` in DBU, applied last.
+    pub translate: [i32; 2],
+}
+
+impl RectInstanceT {
+    /// Fuses a cached local-space rect with a placement transform.
+    #[must_use]
+    pub fn new(rect: &RectInstance, transform: InstanceTransform) -> Self {
+        Self {
+            min_xy: rect.min_xy,
+            max_xy: rect.max_xy,
+            color: rect.color,
+            orientation_code: transform.orientation_code,
+            magnification: transform.magnification,
+            translate: transform.translate,
+        }
+    }
+}
+
+/// The CPU-side geometry expanded from a [`RetainedScene`] ready for GPU upload:
+/// retained rect instances (each carrying its placement transform) plus a
+/// transform-baked triangle mesh for polygons and paths.
+///
+/// The rect path keeps the cell's tessellation shared and expands only 32-byte
+/// instance records per placement. The mesh path bakes the placement transform into
+/// the vertices (meshes are comparatively rare, so duplicating their vertices per
+/// placement is cheap and keeps the shader simple). Both are regenerated only when
+/// the scene's structure changes, never per camera move.
+#[derive(Clone, Debug, Default)]
+pub struct ExpandedScene {
+    /// One retained rect instance per (placement, cached rect).
+    pub rects: Vec<RectInstanceT>,
+    /// Transform-baked mesh vertices for polygons and paths.
+    pub mesh_vertices: Vec<MeshVertex>,
+    /// Indices into `mesh_vertices` (triangle list).
+    pub mesh_indices: Vec<u32>,
+}
+
+impl ExpandedScene {
+    /// Returns `true` if there is nothing to draw.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.rects.is_empty() && self.mesh_indices.is_empty()
+    }
+
+    /// The number of retained rect instances.
+    #[must_use]
+    pub fn rect_count(&self) -> usize {
+        self.rects.len()
+    }
+
+    /// The number of mesh indices.
+    #[must_use]
+    pub fn index_count(&self) -> usize {
+        self.mesh_indices.len()
     }
 }
 
@@ -237,6 +312,41 @@ impl RetainedScene {
         self.instances_dirty
     }
 
+    /// Expands the cached chunks and instance list into GPU-ready geometry.
+    ///
+    /// Each placement contributes its cell's cached rects as retained instances (the
+    /// transform rides along per instance) and its cached mesh vertices with the
+    /// placement transform baked in. Call this only when the scene structure changed;
+    /// the result is uploaded once and reused across camera moves.
+    #[must_use]
+    pub fn expand(&self) -> ExpandedScene {
+        let mut out = ExpandedScene::default();
+        for entry in &self.instances {
+            let Some(chunk) = self.chunks.get(&entry.cell) else {
+                continue;
+            };
+            let geom = &chunk.geometry;
+            // Rects: share the cached instance, attach this placement's transform.
+            out.rects.extend(
+                geom.rects
+                    .iter()
+                    .map(|r| RectInstanceT::new(r, entry.transform)),
+            );
+            // Mesh: bake the transform into each vertex, rebasing indices.
+            if !geom.mesh_indices.is_empty() {
+                let base = u32::try_from(out.mesh_vertices.len()).unwrap_or(u32::MAX);
+                out.mesh_vertices
+                    .extend(geom.mesh_vertices.iter().map(|v| MeshVertex {
+                        position: apply_instance(entry.transform, v.position),
+                        color: v.color,
+                    }));
+                out.mesh_indices
+                    .extend(geom.mesh_indices.iter().map(|i| i.saturating_add(base)));
+            }
+        }
+        out
+    }
+
     /// Walks the top cell's placement hierarchy into a flat instance list.
     ///
     /// The top cell's own geometry is emitted as one identity-transform entry, then
@@ -307,6 +417,29 @@ impl RetainedScene {
 /// The DBU offset multiplier for array index `i`, clamped into the coordinate range.
 fn i32_span(i: u32) -> i32 {
     i32::try_from(i).unwrap_or(i32::MAX)
+}
+
+/// Applies an [`InstanceTransform`] to a local-space position, matching the vertex
+/// shader's `vs_rect_retained` math exactly (orient, then scale, then translate) so
+/// baked mesh vertices line up with shader-transformed rects.
+fn apply_instance(t: InstanceTransform, local: [f32; 2]) -> [f32; 2] {
+    let [x, y] = local;
+    // Columns are the images of (1,0) and (0,1); must match `orientation_matrix`
+    // in shapes.wgsl and `Orientation::apply` in reticle-geometry.
+    let (ox, oy) = match t.orientation_code {
+        0 => (x, y),
+        1 => (-y, x),
+        2 => (-x, -y),
+        3 => (y, -x),
+        4 => (x, -y),
+        5 => (y, x),
+        6 => (-x, y),
+        _ => (-y, -x), // code 7: MirrorX270
+    };
+    [
+        ox * t.magnification + t.translate[0] as f32,
+        oy * t.magnification + t.translate[1] as f32,
+    ]
 }
 
 #[cfg(test)]

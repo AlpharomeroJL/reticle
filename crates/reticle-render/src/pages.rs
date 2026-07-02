@@ -281,7 +281,11 @@ impl PageAllocator {
 pub struct BufferPages {
     allocator: PageAllocator,
     buffers: Vec<wgpu::Buffer>,
+    /// The full usage the GPU buffers are created with (`base_usage | COPY_DST`).
     usage: wgpu::BufferUsages,
+    /// The caller's usage without the implicit `COPY_DST`, preserved so a
+    /// [`BufferPages::with_page_size`] rebuild keeps the same buffer kind.
+    base_usage: wgpu::BufferUsages,
     label: &'static str,
 }
 
@@ -308,6 +312,7 @@ impl BufferPages {
             allocator,
             buffers: Vec::new(),
             usage: usage | wgpu::BufferUsages::COPY_DST,
+            base_usage: usage,
             label,
         }
     }
@@ -328,6 +333,17 @@ impl BufferPages {
     #[must_use]
     pub fn page_size(&self) -> u64 {
         self.allocator.page_size()
+    }
+
+    /// A fresh, empty bank with the same usage and label but a larger page size.
+    ///
+    /// Used when a single upload outgrows the current page size: the caller swaps in
+    /// a bigger-paged bank so the whole buffer still fits one page (and one draw).
+    /// This drops the old GPU buffers, so it must only be done on a structural change,
+    /// never on a camera move.
+    #[must_use]
+    pub fn with_page_size(&self, page_size: u64) -> Self {
+        Self::new(page_size, self.base_usage, self.label)
     }
 
     /// Reserves space for `bytes` and uploads them, returning the allocation.
