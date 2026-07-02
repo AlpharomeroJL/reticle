@@ -1,53 +1,89 @@
-# Reticle task checklist
+# Reticle run tracker
 
-Tracks the build against `docs/PLAN.md`. `[x]` done, `[~]` partial, `[ ]` todo.
+Single source of truth for the v4.0.0 close-out and the v5.0.0 unified run.
+Statuses: `not-started`, `in-progress @ <branch>`, `done-gate-green`.
+Single writer: the orchestrator, on main, at every lane handoff and wave merge.
+Resume protocol: read this file, `git log --oneline -15`, and `git worktree list`,
+then continue from the first unfinished item. A lane in-progress has its partial
+work on its worktree branch: resume it, never restart it.
 
-## Wave 0, contracts & scaffolding, DONE
+History: waves 0 through 5 of the original plan shipped `v3.0.0` (see git tag and
+`CHANGELOG.md`). The v4.0.0 engine work (out-of-core streaming, bbox cache,
+incremental DRC, OASIS extensions) is merged on main. This tracker covers what
+remains: Wave R below closes v4.0.0; waves 0 through 3 of the unified packet
+produce v5.0.0.
 
-- [x] Toolchains, components, targets, CLI tools; relocated caches verified.
-- [x] Workspace, lints, profiles, dual licenses, `.gitignore`, `.gitattributes`, `rust-toolchain.toml`.
-- [x] `justfile` gate, `deny.toml`, `typos.toml`, `rustfmt.toml`, `.mcp.json`, pre-commit hook.
-- [x] Protobuf schema, shared contracts, compiling skeleton, ADRs 0001–0012, skills, MCP servers.
-- [x] `git init`; first commit as Josef Long, no AI trailer.
+## Run conventions
 
-## Wave 1, foundations, DONE
+- Lanes run in git worktrees: `git worktree add ../reticle-<lane> -b lane/<name>`.
+- Each lane sets `CARGO_TARGET_DIR=D:\dev\reticle-target-<lane>` (the user-level
+  default `D:\dev\reticle-target` must not be shared by concurrent builds).
+- Lane gate while iterating: `cargo nextest run -p <crate>` plus
+  `cargo clippy -p <crate>`. Full `just ci` runs on main at merges only.
+- Logs go to `scratch/logs/<lane>-<step>.log`, never into the conversation.
+- After Wave 0 the frozen contract surfaces are read-only to lanes; contract
+  amendments happen only at wave boundaries via the orchestrator, with an ADR.
 
-- [x] `reticle-geometry`, `reticle-proto`, `reticle-index`, `reticle-io` (implemented, tested, benched).
+## Wave R: finish and release v4.0.0
 
-## Wave 2, core subsystems, DONE
+- [x] Setup: profiles (`dev` opt-level 1, deps 3), fail-fast `just ci` order, run tracker, `scratch/logs/`. done-gate-green
+- [ ] Lane R1: windowed GPU surface, persistent scene, fps readout, 10M re-measure. not-started
+- [ ] Lane R2: compaction to indirect draw, MSAA, LOD switching, flags-vs-compacted bench. not-started
+- [ ] Lane R3: canvas text labels, minimap, split viewports, rebindable keys, benches doc fix. not-started
+- [ ] Lane R4: `stack` tech directive, 3D layer view, cut-line cross-section. not-started
+- [ ] Close-out: WASM cold-load and collab echo measured into PERF.md. not-started
+- [ ] Close-out: DRC/route/collab GIFs plus minimap and 3D media. not-started
+- [ ] Close-out: README refresh, skeptical STATUS update. not-started
+- [ ] Release v4.0.0: git-cliff notes, binaries, Pages rebuild, tag. not-started
 
-- [x] `reticle-model`, `reticle-render`, `reticle-drc`, `reticle-route`, `reticle-extract`.
+## Wave 0: contract freeze (serial)
 
-## Wave 3, collaboration, server, scripting, CLI, DONE
+- [ ] Crate skeletons: reticle-agent-api, reticle-mcp, reticle-agent, reticle-bench, reticle-demo. not-started
+- [ ] Command and response enums, Session with revision, structured AgentError. not-started
+- [ ] Transcript JSONL schema plus document_hash replay contract. not-started
+- [ ] Intent spec types and open/short report types. not-started
+- [ ] Pin/Label model types plus Edit variants; structured Violation upgrade workspace-wide. not-started
+- [ ] Benchmark task/checker/manifest/results schemas (reticle-bench). not-started
+- [ ] MCP tool JSON schemas and descriptions. not-started
+- [ ] Agent status channel types over sync awareness. not-started
+- [ ] Demo server API types and limit config. not-started
+- [ ] tech/sky130.tech with citations; tech/sky130-drc-subset.toml. not-started
+- [ ] Dependency pins; ADRs 0017+; frozen-surface manifest recorded here. not-started
 
-- [x] `reticle-sync`, `reticle-server`, `reticle-script`, `reticle-cli`.
+## Wave 1: foundations (batch 1 then batch 2)
 
-## Wave 4, application, web, xtask, DONE
+- [ ] Lane A: reticle-agent-api implementation, property tests, transcript logger/replayer. not-started
+- [ ] Lane B: intent checker in reticle-extract, oracle tests both directions. not-started
+- [ ] Lane C: pins and labels through model and io, GDS TEXT round-trip. not-started
+- [ ] Lane D: SKY130 DRC subset over reticle-drc, coverage table, per-rule fixtures. not-started
+- [ ] Lane E: sky130_fd_sc_hd cell import, corpus samples, DRC-clean gate. not-started
+- [ ] Lane F: benchmark infrastructure, mock model, `just bench-agent`. not-started
+- [ ] Lane G: demo server with enforced limits, abuse tests. not-started
+- [ ] Lane H: 3D stack with true SKY130 thicknesses. not-started
 
-- [x] `reticle-app`: egui editor (canvas, tools, palette, layers, measure, undo panel); native + WASM; 80 tests.
-- [x] `web`: Trunk harness mounting the app; WebGPU with WebGL2 fallback. Live demo verified in-browser.
-- [x] `xtask`: deterministic layout generator; offscreen media capture.
+## Wave 2: composition (three batches)
 
-## Wave 5, docs, fuzz, benches, media, release, DONE
+- [ ] Lane A: reticle-mcp server, every tool integration-tested over stdio. not-started
+- [ ] Lane B: reticle-agent propose-verify-correct harness, mock-model loop tests. not-started
+- [ ] Lane E: benchmark tiers 1-4, 50 tasks, two-way checker tests. not-started
+- [ ] Lane F: benchmark tier 5 SKY130, 10 tasks, two-way checker tests. not-started
+- [ ] Lane C: agent as CRDT collaborator, atomic transactions, presence, convergence tests. not-started
+- [ ] Lane D: agent panel, live DRC overlay, replay theater, share link, WASM build. not-started
+- [ ] Lane G: failure mining, candidates with provenance, `just bench-promote`. not-started
+- [ ] Lane H: `just demo-up`, Dockerfile and VPS docs, Pages replay bundle, key-pattern release check. not-started
+- [ ] Lane I: Playwright e2e suite, `just e2e`, WebGPU and WebGL2 runs. not-started
 
-- [x] mdbook book (overview, architecture, per-subsystem chapters) with mermaid; deployed to Pages.
-- [~] Fuzz targets authored and committed with seed harness; running the libFuzzer engine is blocked on Windows/MSVC (no compiler-rt), documented in `fuzz/README.md`. Parser robustness is covered by `reticle-io` proptests (2048 cases) in the gate.
-- [x] Benchmark history committed; `PERF.md` with measured numbers on the RTX 4060 Ti.
-- [~] `assets/hero.png` and `assets/browse.gif` generated from the real render pipeline and in the README. The DRC/route/collab GIFs need overlay render passes that are a documented follow-up.
-- [x] Repo `AlpharomeroJL/reticle` created; `main` pushed.
-- [x] Book + WASM demo deployed to `gh-pages`; Pages enabled and serving.
-- [x] `CHANGELOG.md` via `git-cliff`; tag `v3.0.0`; `gh release create` with binaries and notes.
-- [x] Requirements-mapping table current (`docs/requirements.md`); Section 16 self-audit complete.
+## Wave 3: whole-system validation and release (serial)
 
-## Section 16 self-audit
+- [ ] Live wiring test: server drives harness, browser watches via sync, cancel works. not-started
+- [ ] Full benchmark run (live model if key present, else mock, honestly labeled). not-started
+- [ ] Scale proof through the headless pipeline into PERF.md. not-started
+- [ ] Flagship media via capture-media. not-started
+- [ ] mdbook chapters and README positioning refresh. not-started
+- [ ] QA gauntlet: ci, e2e both modes, replay determinism, abuse tests, fresh-clone smoke, leak/attribution greps. not-started
+- [ ] Final skeptical STATUS re-audit. not-started
+- [ ] Release v5.0.0. not-started
 
-- Every crate builds; `just ci` is green across the workspace.
-- The native app and the browser demo both run; the live-demo link works (verified in a browser).
-- Editing, hierarchy, DRC, routing, extraction, IO, scripting, and collaboration all function, each with tests.
-- Performance is measured and recorded in `PERF.md` with real numbers and methodology.
-- Property tests, golden-image tests, and CRDT convergence tests pass; fuzz targets exist (run on Linux).
-- The book and rustdoc build and are deployed to Pages.
-- Hero image and browse GIF are generated and in the README (DRC/route/collab GIFs are a follow-up).
-- A tagged `v3.0.0` release exists with binaries and notes.
-- The requirements-mapping table is complete and honest.
-- No AI attribution appears anywhere in the repo; no commit history is backdated or fabricated.
+## Frozen-surface manifest (recorded at Wave 0 merge)
+
+Not yet frozen.
