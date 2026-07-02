@@ -175,3 +175,87 @@ fn export_writes_labels_as_text_elements() {
         "the met1 rectangle must still be exported"
     );
 }
+
+#[test]
+fn gds_roundtrip_preserves_labels_alongside_shapes() {
+    let original = labeled_document();
+
+    let bytes = Gds.export(&original).expect("export should succeed");
+    let imported = Gds.import(&bytes).expect("import should succeed");
+
+    // The top cell keeps its shape and both labels, field for field (text,
+    // position, layer, and the Center anchor).
+    let top = imported.cell("top").expect("top cell present");
+    assert_eq!(top.shapes.len(), 1);
+    assert_eq!(
+        top.labels,
+        vec![
+            Label::new("VDD", Point::new(500, 1000), MET1_LABEL),
+            Label::new("GND", Point::new(-250, -75), LI1_LABEL),
+        ]
+    );
+
+    // The child cell keeps its own label: attribution stays per cell.
+    let leaf = imported.cell("leaf").expect("leaf cell present");
+    assert_eq!(
+        leaf.labels,
+        vec![Label::new("A", Point::new(45, 45), MET1_LABEL)]
+    );
+    assert_eq!(leaf.shapes.len(), 1);
+
+    // Resolution and the label layers survive too.
+    assert_eq!(imported.technology().dbu_per_micron, 1000);
+    let layers: Vec<LayerId> = imported.technology().layers.iter().map(|l| l.id).collect();
+    assert!(layers.contains(&MET1_LABEL));
+    assert!(layers.contains(&LI1_LABEL));
+}
+
+#[test]
+fn gds_roundtrip_with_labels_is_idempotent() {
+    // Export -> import -> export reproduces identical bytes with labels present,
+    // proving the label mapping is stable across cycles like the geometry one.
+    let doc = labeled_document();
+    let bytes1 = Gds.export(&doc).expect("first export");
+    let reimported = Gds.import(&bytes1).expect("import");
+    let bytes2 = Gds.export(&reimported).expect("second export");
+    assert_eq!(
+        bytes1, bytes2,
+        "GDS export with labels must be stable across a round-trip"
+    );
+}
+
+/// Path to the committed labeled corpus fixture.
+fn labels_corpus_path() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/labels.gds")
+}
+
+#[test]
+fn imports_committed_labeled_corpus_fixture() {
+    // A committed on-disk fixture written by gds21 itself (not our exporter),
+    // holding TEXT elements with foreign-tool options; see the regenerate test.
+    let bytes = std::fs::read(labels_corpus_path()).expect("labels fixture should exist");
+    let doc = Gds.import(&bytes).expect("labels fixture should import");
+
+    let chip = doc.cell("chip").expect("chip cell present");
+    assert_eq!(chip.shapes.len(), 1);
+    assert_eq!(chip.labels.len(), 2);
+    assert_eq!(
+        chip.labels[0],
+        Label::new("VDD", Point::new(500, 1000), MET1_LABEL)
+    );
+    assert_eq!(
+        chip.labels[1],
+        Label::new("clk_in", Point::new(-30, 40), LI1_LABEL)
+    );
+}
+
+/// Regenerates the labeled corpus fixture from the gds21-built stream. Ignored
+/// by default so it never rewrites the committed file during normal runs.
+#[test]
+#[ignore = "run explicitly to regenerate tests/corpus/labels.gds"]
+fn regenerate_labels_corpus() {
+    let bytes = foreign_gds_with_text();
+    let path = labels_corpus_path();
+    std::fs::create_dir_all(path.parent().unwrap()).expect("create corpus dir");
+    std::fs::write(&path, &bytes).expect("write labels fixture");
+}
