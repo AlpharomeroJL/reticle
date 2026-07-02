@@ -63,6 +63,7 @@ fn sample_document() -> Document {
             },
         ],
         rules: Vec::new(),
+        stack: Vec::new(),
     };
     doc.set_technology(tech);
     doc
