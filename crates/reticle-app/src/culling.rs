@@ -48,6 +48,44 @@ pub fn lod_for_zoom(pixels_per_dbu: f64) -> DetailLevel {
     }
 }
 
+/// The projected extent, in pixels, at or below which a single cell placement is drawn
+/// as its bounding-box quad rather than its tessellated shapes.
+///
+/// At roughly one pixel a cell's internal geometry cannot be told apart from a filled
+/// outline, so drawing the whole tessellated chunk is wasted work; the draw list swaps
+/// in the cell's bounding-box quad instead. This is the per-cell analogue of the global
+/// [`lod_for_zoom`] switch.
+const LOD_MIN_PROJECTED_PIXELS: f64 = 1.0;
+
+/// Chooses the detail level for a single cell placement, given its bounding box in
+/// top-cell DBU and the current zoom.
+///
+/// A chunk is drawn as its bounding-box quad ([`DetailLevel::CellBoxes`]) when either
+/// the global zoom is already in the cell-box regime ([`lod_for_zoom`]) or this cell's
+/// own projected extent is at or below one pixel; otherwise its tessellated shapes are
+/// drawn ([`DetailLevel::Shapes`]). Keying on the cell's own extent means a tiny cell
+/// drops to a box before a large one does at the same zoom.
+///
+/// The projected extent is the larger of the box's width and height scaled by
+/// `pixels_per_dbu`. A degenerate (empty or non-positive-area) box or a non-positive
+/// zoom is treated as sub-pixel and drawn as a box.
+#[must_use]
+pub fn chunk_lod(bbox: Rect, pixels_per_dbu: f64) -> DetailLevel {
+    if lod_for_zoom(pixels_per_dbu) == DetailLevel::CellBoxes {
+        return DetailLevel::CellBoxes;
+    }
+    if pixels_per_dbu <= 0.0 {
+        return DetailLevel::CellBoxes;
+    }
+    let extent_dbu = bbox.width().max(bbox.height()) as f64;
+    let projected = extent_dbu * pixels_per_dbu;
+    if projected <= LOD_MIN_PROJECTED_PIXELS {
+        DetailLevel::CellBoxes
+    } else {
+        DetailLevel::Shapes
+    }
+}
+
 /// A spatial index over a flattened top cell, for viewport culling and hit-testing.
 ///
 /// The index holds the flattened [`DrawShape`] list plus an R-tree keyed on each
@@ -241,6 +279,56 @@ mod tests {
         assert_eq!(lod_for_zoom(0.5), DetailLevel::Shapes);
         assert_eq!(lod_for_zoom(0.001), DetailLevel::CellBoxes);
         assert_eq!(lod_for_zoom(LOD_THRESHOLD_PPD), DetailLevel::CellBoxes);
+    }
+
+    #[test]
+    fn chunk_lod_switches_on_projected_extent() {
+        // A 1000-DBU cell at 1 px/DBU projects to 1000 px: well above threshold, so
+        // its shapes are drawn.
+        let cell = Rect::new(Point::new(0, 0), Point::new(1000, 1000));
+        assert_eq!(chunk_lod(cell, 1.0), DetailLevel::Shapes);
+
+        // The same cell at 0.0005 px/DBU projects to 0.5 px (sub-pixel), so it drops to
+        // a bounding-box quad. (This zoom is below the global threshold too, but the
+        // point is the per-cell extent decision.)
+        assert_eq!(chunk_lod(cell, 0.0005), DetailLevel::CellBoxes);
+
+        // Boundary at 1 projected pixel, isolated from the global zoom rule by keeping
+        // the zoom (0.05) above LOD_THRESHOLD_PPD (0.02). A 20-DBU cell at 0.05 px/DBU
+        // projects to exactly 1.0 px, which counts as sub-pixel (inclusive) => box.
+        let small = Rect::new(Point::new(0, 0), Point::new(20, 20));
+        assert_eq!(chunk_lod(small, 0.05), DetailLevel::CellBoxes);
+        // A 40-DBU cell at the same zoom projects to 2.0 px => shapes.
+        let small2 = Rect::new(Point::new(0, 0), Point::new(40, 40));
+        assert_eq!(chunk_lod(small2, 0.05), DetailLevel::Shapes);
+    }
+
+    #[test]
+    fn chunk_lod_respects_global_zoom_and_degenerate_inputs() {
+        let big = Rect::new(Point::new(0, 0), Point::new(1_000_000, 1_000_000));
+        // Even a huge cell is drawn as a box once the global zoom is in the cell-box
+        // regime (at or below LOD_THRESHOLD_PPD), matching `lod_for_zoom`.
+        assert_eq!(lod_for_zoom(LOD_THRESHOLD_PPD), DetailLevel::CellBoxes);
+        assert_eq!(chunk_lod(big, LOD_THRESHOLD_PPD), DetailLevel::CellBoxes);
+        // Above the global threshold the large cell's shapes are drawn.
+        assert_eq!(chunk_lod(big, 1.0), DetailLevel::Shapes);
+
+        // A degenerate (empty) box or non-positive zoom is treated as sub-pixel.
+        let empty = Rect::new(Point::new(5, 5), Point::new(5, 5));
+        assert_eq!(chunk_lod(empty, 1.0), DetailLevel::CellBoxes);
+        assert_eq!(chunk_lod(big, 0.0), DetailLevel::CellBoxes);
+    }
+
+    /// A tiny anchor: a chunk that is a box under the per-cell rule but not under the
+    /// global zoom rule proves the two decisions are independent (the per-cell extent
+    /// can trigger LOD even when the global zoom would still draw shapes).
+    #[test]
+    fn chunk_lod_per_cell_extent_is_independent_of_global_zoom() {
+        // 10-DBU cell at 0.05 px/DBU: global zoom 0.05 > 0.02 threshold => Shapes
+        // globally, but projected extent is 0.5 px => the chunk still drops to a box.
+        let tiny = Rect::new(Point::new(0, 0), Point::new(10, 10));
+        assert_eq!(lod_for_zoom(0.05), DetailLevel::Shapes);
+        assert_eq!(chunk_lod(tiny, 0.05), DetailLevel::CellBoxes);
     }
 
     #[test]

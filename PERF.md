@@ -80,6 +80,29 @@ frame is only the GPU draw plus readback across eight 64 MiB page buffers, with 
 single monolithic buffer. A surface-presenting loop skips the readback, so the on-screen
 windowed path runs at or above these numbers.
 
+### GPU-driven draw list: flags vs compacted
+
+The GPU-driven draw list replaces the flags-only cull with a cull-plus-compaction pass
+that reserves survivors with a per-workgroup exclusive scan and fills a
+`DrawIndexedIndirectArgs`, so the draw count comes from the GPU and only a tiny count is
+read back (methodology: `bench_flags_vs_compacted` in `fps_bench`, each op blocks to GPU
+completion; a viewport keeps about half the boxes).
+
+| N cull boxes | Flags only (cull + read back N flags) | Compaction (GPU scan -> draw args, count read) | Speedup |
+|---|---:|---:|---:|
+| 1,000,000 | 7.19 ms/op | 3.20 ms/op | ~2.2x |
+| 4,000,000 | 28.52 ms/op | 12.15 ms/op | ~2.3x |
+
+Reading N visibility flags back to the CPU is O(N) each frame; compaction keeps the
+survivor list on the GPU and returns only a count, so its per-frame CPU cost is O(1) and
+the whole pass is roughly 2.2 to 2.3x faster at these sizes. The larger N is bounded at
+about 4.19M by the single-dispatch cull stage's storage-binding (128 MiB) and
+workgroup-count (65,535) limits; culling above that needs chunking, a follow-up. On this
+adapter the compacted survivors are drawn with a native `multi_draw_indexed_indirect`
+(the device enables `MULTI_DRAW_INDIRECT_COUNT`); backends without it fall back to one
+`draw_indexed_indirect` per bucket, and WebGL2 (no `INDIRECT_EXECUTION`) keeps the direct
+draw path.
+
 ## Targets (Section 10)
 
 Honest status of each spec target. Two are measured with a hard number; the rest are

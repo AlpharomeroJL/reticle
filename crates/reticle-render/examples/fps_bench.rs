@@ -28,8 +28,9 @@ use std::time::Instant;
 use reticle_geometry::{LayerId, Point, Rect};
 use reticle_model::{Camera, Cell, Document, DrawShape, ShapeKind};
 use reticle_render::{
-    ExpandedScene, OffscreenTarget, Palette, Pipelines, RetainedRenderer, RetainedScene, Rgba,
-    SceneGeometry, TARGET_FORMAT, ViewUniform, WgpuContext, WgpuRenderer,
+    CellCompactor, CellCuller, CullAabb, ExpandedScene, OffscreenTarget, Palette, Pipelines,
+    RetainedRenderer, RetainedScene, Rgba, SceneGeometry, TARGET_FORMAT, ViewUniform, WgpuContext,
+    WgpuRenderer,
 };
 
 /// A tiny deterministic xorshift PRNG so the benchmark is reproducible without a
@@ -507,6 +508,113 @@ fn bench_retained(ctx: &WgpuContext, count: usize, target_fps: f64) {
     );
 }
 
+/// Builds `count` axis-aligned cull boxes scattered across the world with the same
+/// deterministic PRNG the render benches use, so the set is reproducible.
+fn build_cull_boxes(count: usize, seed: u64) -> Vec<CullAabb> {
+    let mut rng = XorShift(seed);
+    let span = 2u64 * HALF as u64;
+    let mut boxes = Vec::with_capacity(count);
+    for _ in 0..count {
+        let x = ((rng.next_u64() % span) as i64 - i64::from(HALF)) as i32;
+        let y = ((rng.next_u64() % span) as i64 - i64::from(HALF)) as i32;
+        let w = (rng.next_u64() % 4_000 + 500) as i32;
+        let h = (rng.next_u64() % 4_000 + 500) as i32;
+        boxes.push(CullAabb {
+            min_xy: [x as f32, y as f32],
+            max_xy: [(x + w) as f32, (y + h) as f32],
+        });
+    }
+    boxes
+}
+
+/// Compares the two GPU cull stages head to head at `count` boxes: the flags-only
+/// stage against the flags-plus-compaction stage.
+///
+/// * "flags only" is [`CellCuller::cull`]: it dispatches the overlap test, writes one
+///   visibility flag per box, and reads all `count` flags back to the CPU. A
+///   CPU-driven draw list then has to walk those flags itself.
+/// * "cull + compact" runs the same cull, then [`CellCompactor::compact`] scans the
+///   flags on the GPU into a dense survivor list and fills a `DrawIndexedIndirectArgs`;
+///   only the tiny instance count is read back. This is what the GPU-driven draw list
+///   uses, so its per-frame CPU cost is O(1) rather than O(count).
+///
+/// Both paths block to GPU completion each iteration (the flags path via its readback,
+/// the compaction path via its count readback), so the milliseconds are honest
+/// wall-clock. The viewport keeps roughly half the boxes, a realistic partial cull.
+fn bench_flags_vs_compacted(ctx: &WgpuContext, requested: usize) {
+    // The single-dispatch cull stage bounds N two ways, so clamp to the smaller rather
+    // than tripping a validation error (chunking the cull is a separate follow-up):
+    //   * it binds the box array as one storage buffer, capped by
+    //     `max_storage_buffer_binding_size` (`CullAabb` is 16 bytes);
+    //   * it dispatches one workgroup of 64 per 64 boxes, and the group count in a
+    //     dimension is capped by `max_compute_workgroups_per_dimension`.
+    // The compacted index buffer (4 bytes/entry) and the 256-wide compaction dispatch
+    // are both looser, so the cull is the limit.
+    /// The cull compute workgroup size; matches `WORKGROUP_SIZE` in `cull.wgsl`.
+    const CULL_WORKGROUP_SIZE: usize = 64;
+    let limits = ctx.device().limits();
+    let cull_box_bytes = std::mem::size_of::<CullAabb>() as u64;
+    let binding_cap = usize::try_from(limits.max_storage_buffer_binding_size / cull_box_bytes)
+        .unwrap_or(usize::MAX);
+    let dispatch_cap =
+        (limits.max_compute_workgroups_per_dimension as usize).saturating_mul(CULL_WORKGROUP_SIZE);
+    let cap = binding_cap.min(dispatch_cap);
+    let count = requested.min(cap);
+    if count < requested {
+        println!(
+            "\n== flags vs compacted, N = {count} cull boxes (capped from {requested} by the \
+             single-dispatch cull limits: binding {binding_cap}, dispatch {dispatch_cap}) =="
+        );
+    } else {
+        println!("\n== flags vs compacted, N = {count} cull boxes ==");
+    }
+    let boxes = build_cull_boxes(count, 0x5EED_1234_ABCD_0001);
+    // A viewport over one quadrant keeps roughly a quarter to a half of the boxes.
+    let viewport = Rect::new(Point::new(-HALF, -HALF), Point::new(0, HALF));
+
+    let culler = CellCuller::new(ctx);
+    let compactor = CellCompactor::new(ctx);
+
+    // Warm up and record how many survive (a cross-check that the cull is non-trivial).
+    let flags = culler.cull(ctx, &boxes, viewport);
+    let survivors = flags.iter().filter(|&&f| f != 0).count();
+    let (_dense, instance_count) = compactor.read_back(ctx, &compactor.compact(ctx, &flags));
+    assert_eq!(
+        instance_count as usize, survivors,
+        "compacted instance_count must equal the survivor flags"
+    );
+    println!("survivors: {survivors} of {count} boxes kept by the viewport");
+
+    // A handful of iterations; each blocks to GPU completion, so the wall-clock is real.
+    let iters = if count >= 10_000_000 { 10 } else { 30 };
+    for _ in 0..WARMUP_FRAMES {
+        let f = culler.cull(ctx, &boxes, viewport);
+        let _ = compactor.read_back(ctx, &compactor.compact(ctx, &f));
+    }
+
+    // Flags-only path.
+    let start = Instant::now();
+    for _ in 0..iters {
+        let f = culler.cull(ctx, &boxes, viewport);
+        std::hint::black_box(f.len());
+    }
+    let flags_ms = start.elapsed().as_secs_f64() * 1000.0 / f64::from(iters);
+
+    // Cull + compaction path (compaction on precomputed GPU-shaped flags, tiny readback).
+    let flags_fixed = culler.cull(ctx, &boxes, viewport);
+    let start = Instant::now();
+    for _ in 0..iters {
+        let out = compactor.compact(ctx, &flags_fixed);
+        let (_dense, n) = compactor.read_back(ctx, &out);
+        std::hint::black_box(n);
+    }
+    let compact_ms = start.elapsed().as_secs_f64() * 1000.0 / f64::from(iters);
+
+    println!("---- flags vs compacted results (N = {count}) ----");
+    println!("flags only  (cull + read back {count} flags)   : {flags_ms:>8.3} ms/op");
+    println!("compaction  (GPU scan -> draw args, count read): {compact_ms:>8.3} ms/op");
+}
+
 fn main() {
     println!("== Reticle offscreen render fps benchmark ==");
     println!("resolution       : {WIDTH}x{HEIGHT}");
@@ -543,6 +651,13 @@ fn main() {
     println!("\n=== retained (RetainedRenderer) path ===");
     bench_retained(&ctx, 1_000_000, 60.0);
     bench_retained(&ctx, 10_000_000, 30.0);
+
+    // The GPU-driven draw list's cull stages: flags-only against flags-plus-compaction.
+    // The larger N is bounded by the single-dispatch cull's storage-binding and
+    // workgroup-count limits (see bench_flags_vs_compacted), so it uses 4,000,000.
+    println!("\n=== GPU-driven cull: flags vs compacted ===");
+    bench_flags_vs_compacted(&ctx, 1_000_000);
+    bench_flags_vs_compacted(&ctx, 4_000_000);
 
     println!("\nnote: 'full per-call' includes per-frame scene build (flatten + tessellate) and");
     println!("pipeline/target setup; 'reuse' isolates the steady-state draw + CPU readback; the");

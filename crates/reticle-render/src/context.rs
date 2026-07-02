@@ -48,10 +48,18 @@ impl WgpuContext {
             .await
             .ok()?;
 
+        // Opportunistically enable native multi-draw indirect when the adapter
+        // advertises it. This is a native-only feature (absent on WebGPU/WebGL2), so
+        // it is requested only when supported and the browser device is unaffected.
+        // It lets the GPU-driven draw list issue one `multi_draw_indexed_indirect`
+        // instead of a loop of single indirect draws (see `IndirectRects`).
+        let optional = wgpu::Features::MULTI_DRAW_INDIRECT_COUNT;
+        let required_features = optional & adapter.features();
+
         let (device, queue) = adapter
             .request_device(&DeviceDescriptor {
                 label: Some("reticle-render device"),
-                required_features: wgpu::Features::empty(),
+                required_features,
                 // Keep to the conservative default limit set so headless native and
                 // the browser's WebGPU both satisfy the request.
                 required_limits: Limits::default(),
