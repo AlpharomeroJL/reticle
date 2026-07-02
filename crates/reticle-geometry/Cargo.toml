@@ -16,6 +16,9 @@ workspace = true
 # `i_overlay` provides robust boolean/offset operations (ADR 0003).
 [dependencies]
 i_overlay = "7.0.2"
+# serde derives on the small value types (Point, Rect, LayerId) so higher crates
+# can serialize intent specs and structured data without duplicating them (ADR 0021).
+serde = { workspace = true, features = ["derive"] }
 
 # `proptest` drives oracle tests; `criterion` drives benchmarks.
 [dev-dependencies]

@@ -7,7 +7,19 @@ use core::fmt;
 /// A layer/datatype pair, the GDSII addressing scheme for geometry. Richer layer
 /// metadata (name, color, style) lives in `reticle-model`; this is the stable
 /// identifier every shape carries.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, PartialOrd, Ord)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Debug,
+    Default,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct LayerId {
     /// GDSII layer number.
     pub layer: u16,

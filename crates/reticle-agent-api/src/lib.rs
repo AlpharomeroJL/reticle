@@ -15,7 +15,6 @@ pub mod args;
 mod command;
 mod error;
 mod ids;
-mod intent;
 mod response;
 mod status;
 mod transcript;
@@ -23,10 +22,17 @@ mod transcript;
 pub use command::AgentCommand;
 pub use error::{AgentError, ErrorCode};
 pub use ids::ElementId;
-pub use intent::{ForbiddenPair, IntentNet, IntentReport, IntentSpec, Open, Short, Terminal};
 pub use response::{AgentResponse, Revision};
 pub use status::{AGENT_ACTOR, AgentStatus};
 pub use transcript::{CommandRecord, Outcome, Transcript};
+
+// The connectivity intent types live in `reticle-extract`, next to the extraction
+// the checker uses, and are re-exported here for callers of the command surface
+// (ADR 0021). `reticle-agent-api` depends on `reticle-extract`, so this avoids a
+// dependency cycle that placing them here would create.
+pub use reticle_extract::{
+    ForbiddenPair, IntentNet, IntentReport, IntentSpec, Open, Short, Terminal,
+};
 
 /// The result of applying a command: a response or a structured error.
 pub type CommandResult = Result<AgentResponse, AgentError>;
@@ -99,7 +105,6 @@ mod tests {
     /// The transcript record, intent spec, and status all round-trip through JSON.
     #[test]
     fn frozen_types_round_trip() {
-        use super::args::{LayerArg, RectArg};
         use super::{
             AgentStatus, CommandRecord, IntentNet, IntentReport, IntentSpec, Outcome, Terminal,
             Transcript,
@@ -132,14 +137,11 @@ mod tests {
                 name: "vdd".into(),
                 terminals: vec![Terminal {
                     name: "vdd".into(),
-                    layer: LayerArg {
-                        layer: 68,
-                        datatype: 20,
-                    },
-                    region: RectArg {
-                        min: super::args::PointArg { x: 0, y: 0 },
-                        max: super::args::PointArg { x: 10, y: 10 },
-                    },
+                    layer: reticle_geometry::LayerId::new(68, 20),
+                    region: reticle_geometry::Rect::new(
+                        reticle_geometry::Point::new(0, 0),
+                        reticle_geometry::Point::new(10, 10),
+                    ),
                 }],
             }],
             forbidden: vec![],
