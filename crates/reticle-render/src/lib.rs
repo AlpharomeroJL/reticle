@@ -27,6 +27,7 @@
 mod context;
 mod cull;
 mod geometry;
+mod indirect;
 mod pages;
 mod palette;
 mod pipelines;
@@ -38,6 +39,7 @@ mod view;
 pub use context::WgpuContext;
 pub use cull::{CellCompactor, CellCuller, CompactionOutput, CullAabb, QUAD_INDEX_COUNT};
 pub use geometry::{MeshVertex, RectInstance, SceneGeometry};
+pub use indirect::{IndirectRects, MultiDraw, upload_instances};
 pub use pages::{Allocation, BufferPages, DEFAULT_PAGE_SIZE, PageAllocator};
 pub use palette::{Palette, Rgba};
 pub use pipelines::Pipelines;
