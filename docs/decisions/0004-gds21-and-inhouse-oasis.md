@@ -26,14 +26,13 @@ fuzzed like the GDSII one. If a complete OASIS implementation is ever needed it 
 grow incrementally behind the same `Importer`/`Exporter` traits. This is the one
 subsystem where hand-rolling is unavoidable because no suitable crate exists.
 
-## Status (2026-07-01 audit)
+## Status
 
-As actually implemented, the in-house OASIS subset round-trips **rectangles and
-polygons on layer/datatype**. Paths, placements (instances), and arrays are **not**
-encoded, `Oasis::export` returns `ModelError::Unsupported` for them rather than
-dropping data silently, and `Oasis::import` is the exact inverse. The record set
-listed under Decision above (PLACEMENT, PATH, repetition, full modal-state) is the
-aspirational target, not the current coverage. GDSII (via `gds21`) preserves the full
-hierarchy, so hierarchical designs export losslessly to `.gds`. The libFuzzer engine
-does not link under Windows/MSVC, so the OASIS/GDSII fuzz targets run on Linux; on the
+The v3.0.0 audit shipped a rectangle and polygon subset that returned
+`ModelError::Unsupported` for paths, placements (instances), and arrays. Reticle
+v4.0.0 extended the subset to encode and decode all of those, at format version 0x02,
+so hierarchical designs now round-trip through OASIS as well as GDSII; see
+[ADR 0015](0015-oasis-subset-extended.md). The subset is still not the full OASIS
+standard (no CBLOCK compression, no strict-mode record set). The libFuzzer engine does
+not link under Windows/MSVC, so the OASIS and GDSII fuzz targets run on Linux; on the
 build host, robustness is covered by the `reticle-io` proptests. See `docs/STATUS.md`.

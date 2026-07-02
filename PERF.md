@@ -31,6 +31,24 @@ The **committed** column is the source-controlled baseline in
 The benches live in-crate (`crates/reticle-index/benches`, `crates/reticle-geometry/benches`)
 and run under `cargo bench --workspace`.
 
+## v4.0.0 additions (measured on this machine)
+
+| Benchmark | Median | Notes |
+|---|---:|---|
+| Per-cell bbox: uncached recompute | 6.14 µs | `reticle-model`, ~100k-effective-leaf hierarchy |
+| Per-cell bbox: warm cached lookup | 20.8 ns | about 295x faster; `EditableDocument` cache, cleared on every edit |
+| DRC full-cell pass, 100k / 1M rectangles | 32.8 ms / 643 ms | the cost of re-checking everything |
+| DRC prepare (one-time index build), 100k / 1M | 17.5 ms / 225 ms | paid once per editing session |
+| DRC incremental re-check on a prepared context, 100k / 1M | 5.12 µs / 37.5 µs | the true per-edit cost, far under the 100 ms target |
+
+Out-of-core streaming (measured by `cargo run -p reticle-index --example stream_demo
+--release`): a 30,000,000-entry tiled archive is 574 MiB on disk. Memory-mapped, a
+small-viewport query returns in about 14 µs while touching only 4 of 262,144 tiles and
+453 of 30,000,000 entries, and the process working set stays at 4.25 MiB (about 135x
+below the file size) because only the touched pages are faulted in by the OS. The
+archive builder is still bounded by RAM (ADR 0016), so a single archive above about
+2 GiB is a follow-up; the read path itself is genuinely out-of-core.
+
 ## Targets (Section 10)
 
 Honest status of each spec target. Two are measured with a hard number; the rest are
@@ -44,7 +62,7 @@ not yet instrumented and say so, with the reason.
 | 1M flat shapes at a sustained 60 fps | **Not measured (no fps harness).** The offscreen renderer draws the generated ~1.88M-leaf-shape design at 2560×1440 (`assets/hero.png`, confirmed non-blank); a per-frame fps benchmark on the surface-present path is a follow-up (surface presentation is not yet wired, see `docs/STATUS.md`). |
 | 10M flat shapes interactive at 30 fps or better | **Not measured.** Rests on GPU-driven culling (implemented; compute shader validated against a CPU oracle) and an LOD pyramid; a 10M formal benchmark is a follow-up. |
 | Billions of leaf shapes via cell culling and LOD | **Architecturally supported, not fps-benchmarked.** Hierarchy is never flattened for browsing; cell culling and a compute-shader cull stage are implemented and tested. |
-| Incremental DRC on a local edit under 100 ms | **Not measured (no latency benchmark).** `reticle-drc::check_region` re-checks only geometry touching the edit, bounded by one index query, and is correctness-tested against a full-cell pass; a formal incremental-edit latency benchmark is a follow-up. |
+| Incremental DRC on a local edit under 100 ms | **Met (measured):** on a prepared context, a local re-check is 5.12 µs at 100k shapes and 37.5 µs at 1M, far under 100 ms. `DrcEngine::prepare` builds the index once (17.5 ms / 225 ms); then `PreparedDrc::check_region` touches only the edit neighbourhood, and a property test pins it to the full-pass oracle. See the `incremental` bench in `reticle-drc`. |
 | WASM cold load to first interactive frame under 3 s | **Not measured (needs in-browser timing).** The demo is deployed and loads (HTTP 200), but cold-load-to-interactive is not instrumented. |
 | Collaboration: local edits echo within one frame; remote within 100 ms on localhost | **Not measured (needs a two-client harness).** Local edits apply immediately; the relay is a `tokio` broadcast adding no latency beyond the socket. Convergence correctness is tested; wall-clock echo is not. |
 
