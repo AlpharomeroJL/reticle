@@ -9,7 +9,8 @@
 //! # Formats
 //!
 //! - [`Gds`], GDSII binary. Rectangles/polygons ↔ boundaries, paths ↔ paths,
-//!   instances ↔ struct refs, arrays ↔ array refs. See [`mod@gds`].
+//!   labels ↔ TEXT elements, instances ↔ struct refs, arrays ↔ array refs.
+//!   See [`mod@gds`].
 //! - [`Oasis`], a compact, self-describing binary subset that round-trips
 //!   rectangles and polygons on `(layer, datatype)`. It is **not** conformant
 //!   OASIS; see [`mod@oasis`] for the honest scope and gaps.
