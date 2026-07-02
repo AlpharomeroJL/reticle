@@ -31,10 +31,10 @@ produce v5.0.0.
 - [x] Lane R2: compaction to indirect draw, MSAA, LOD switching, flags-vs-compacted bench. done-gate-green, merged to main at 47a466d (ci green). Delivered: GPU stream compaction (exclusive scan + atomic reserve) into DrawIndexedIndirectArgs; draw_indexed_indirect with native multi-draw gated on MULTI_DRAW_INDIRECT_COUNT (wgpu-29 has no Features::MULTI_DRAW_INDIRECT), downlevel CPU fallback; 4x MSAA offscreen + tolerance golden; per-chunk LOD via lod_for_zoom. Compaction ~2.2x over flags readback (RTX 4060 Ti). 9 new tests. Follow-up flagged: pre-existing single-dispatch CellCuller caps ~4.19M (storage binding + workgroup dispatch limits).
 - [x] Lane R3: canvas text labels, minimap, split viewports, rebindable keys, benches doc fix. done-gate-green, merged to main at 9dc2736 (last of the four). Delivered: egui-painter text overlay (glyphon confirmed unnecessary), minimap with click-to-recenter, multi-viewport split panes, TOML keymap + editor with conflict detection, benches doc-comment fix. 49 new tests. Merge conflicts in app.rs and lib.rs resolved (keep-both: R3 keymap/viewports beside R4 view3d/xsection).
 - [x] Lane R4: `stack` tech directive, 3D layer view, cut-line cross-section. done-gate-green, merged to main at 47a466d. Delivered: stack directive; pipeline3d.rs + shaders/stack3d.wgsl extrusion with orbit camera; view3d.rs egui-wgpu panel; xsection.rs two-click cut-line cross-section; Tool::CutLine. 26 new tests (incl. a GPU golden run on the RTX 4060 Ti). Merge-integration fix bf94932: a Technology literal R1 added post-branch needed the stack field.
-- [ ] Close-out: WASM cold-load and collab echo measured into PERF.md. not-started
-- [ ] Close-out: DRC/route/collab GIFs plus minimap and 3D media. not-started
-- [ ] Close-out: README refresh, skeptical STATUS update. not-started
-- [ ] Release v4.0.0: git-cliff notes, binaries, Pages rebuild, tag. not-started
+- [x] Close-out: WASM cold-load (~640 ms cold, WebGPU) and collab echo (~0.79 ms median) measured into PERF.md (commit 34092b6). done-gate-green
+- [~] Close-out: DRC/route/collab GIFs plus minimap and 3D media. in-progress @ lane/co-media (media agent capturing via the new overlay/offscreen passes).
+- [x] Close-out: README refresh, skeptical STATUS update (commit 6630a14). done-gate-green
+- [ ] Release v4.0.0: git-cliff notes, binaries, Pages rebuild, tag. blocked on media capture.
 
 ## Wave 0: contract freeze (serial)
 
