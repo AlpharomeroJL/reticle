@@ -25,6 +25,7 @@ use crate::command::{self, Command};
 use crate::culling::{self, DetailLevel, SceneIndex};
 use crate::demo;
 use crate::drc_panel::{self, DrcResults};
+use crate::fps::FrameMeter;
 use crate::grid::{self, GridSettings};
 use crate::history::History;
 use crate::inspector::{self, Inspection};
@@ -118,6 +119,8 @@ pub struct App {
     status: Status,
     /// The last world position under the cursor, for the status readout.
     cursor_world: Option<Point>,
+    /// Rolling frame-time meter behind the status-bar fps readout.
+    frame_meter: FrameMeter,
 }
 
 impl Default for App {
@@ -167,6 +170,7 @@ impl App {
             layer_query: String::new(),
             status: Status::default(),
             cursor_world: None,
+            frame_meter: FrameMeter::default(),
         }
     }
 
@@ -694,6 +698,8 @@ impl App {
             }
             ui.separator();
             ui.label(format!("Zoom: {:.4} px/DBU", self.camera.pixels_per_dbu()));
+            ui.separator();
+            ui.label(self.frame_meter.label());
             if let Some(m) = self.tools.measurement() {
                 ui.separator();
                 ui.label(format!(
@@ -1332,6 +1338,12 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.handle_shortcuts(&ctx);
+
+        // Sample this frame's duration for the status-bar fps readout. `stable_dt`
+        // is egui's smoothed inter-frame time, clamped so a long stall does not spike.
+        let dt = ctx.input(|i| i.stable_dt);
+        self.frame_meter
+            .record(std::time::Duration::from_secs_f32(dt.max(0.0)));
 
         // The surface color format when eframe is on its wgpu backend; drives the
         // retained GPU canvas. `None` (e.g. a glow build) falls back to egui painting.

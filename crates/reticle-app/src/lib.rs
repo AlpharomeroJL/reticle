@@ -21,6 +21,7 @@
 //! * [`drc_panel`], running the DRC engine and formatting its violations.
 //! * [`netlight`], cached connectivity extraction for net highlighting.
 //! * [`inspector`], the read-only properties summary of the selection.
+//! * [`fps`], the rolling frame-time meter behind the status-bar fps readout.
 //! * [`session`], view/UI session save/restore (native file IO).
 //! * [`demo`], the built-in hierarchical demo document.
 //! * [`app`], the [`eframe::App`] implementation that draws it all.
@@ -34,6 +35,7 @@ pub mod command;
 pub mod culling;
 pub mod demo;
 pub mod drc_panel;
+pub mod fps;
 pub mod grid;
 pub mod history;
 pub mod inspector;
