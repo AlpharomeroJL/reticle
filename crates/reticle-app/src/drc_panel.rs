@@ -287,6 +287,11 @@ mod tests {
     fn format_violation_includes_rule_and_coords() {
         let v = Violation {
             rule: "min_width".to_owned(),
+            kind: reticle_model::RuleKind::Width,
+            layer: reticle_geometry::LayerId::new(1, 0),
+            other_layer: None,
+            measured: 5,
+            required: 10,
             location: Rect::new(Point::new(1, 2), Point::new(3, 4)),
             message: "too thin".to_owned(),
         };

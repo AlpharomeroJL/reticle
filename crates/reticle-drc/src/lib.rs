@@ -359,14 +359,15 @@ impl CellContext {
                 } else {
                     " (bounding-box estimate for non-rectangular shape)"
                 };
-                out.push(Violation {
-                    rule: rule.name.clone(),
-                    location: it.bbox,
-                    message: format!(
+                out.push(Violation::new(
+                    rule,
+                    feature,
+                    it.bbox,
+                    format!(
                         "width {feature} < minimum {min} on layer {}/{}{note}",
                         it.layer.layer, it.layer.datatype
                     ),
-                });
+                ));
             }
         }
     }
@@ -385,14 +386,15 @@ impl CellContext {
                 } else {
                     " (bounding-box estimate for non-rectangular shape)"
                 };
-                out.push(Violation {
-                    rule: rule.name.clone(),
-                    location: it.bbox,
-                    message: format!(
+                out.push(Violation::new(
+                    rule,
+                    area,
+                    it.bbox,
+                    format!(
                         "area {area} < minimum {min} on layer {}/{}{note}",
                         it.layer.layer, it.layer.datatype
                     ),
-                });
+                ));
             }
         }
     }
@@ -429,11 +431,12 @@ impl CellContext {
                 } else {
                     " (bounding-box estimate for non-rectangular shape)"
                 };
-                out.push(Violation {
-                    rule: rule.name.clone(),
+                out.push(Violation::new(
+                    rule,
+                    gap,
                     location,
-                    message: format!("spacing {gap} < minimum {min}{note}"),
-                });
+                    format!("spacing {gap} < minimum {min}{note}"),
+                ));
             }
         });
     }
@@ -456,11 +459,12 @@ impl CellContext {
                 if !Self::in_region(&location, scope.region()) {
                     return;
                 }
-                out.push(Violation {
-                    rule: rule.name.clone(),
+                out.push(Violation::new(
+                    rule,
+                    gap,
                     location,
-                    message: format!("notch {gap} < minimum {min}"),
-                });
+                    format!("notch {gap} < minimum {min}"),
+                ));
             }
         });
     }
@@ -494,25 +498,27 @@ impl CellContext {
             }
             match best {
                 Some(margin) if margin >= min => {}
-                Some(margin) => out.push(Violation {
-                    rule: rule.name.clone(),
-                    location: inner.bbox,
-                    message: format!(
+                Some(margin) => out.push(Violation::new(
+                    rule,
+                    margin,
+                    inner.bbox,
+                    format!(
                         "enclosure {margin} < minimum {min} by layer {}/{}",
                         outer_layer.layer, outer_layer.datatype
                     ),
-                }),
-                None => out.push(Violation {
-                    rule: rule.name.clone(),
-                    location: inner.bbox,
-                    message: format!(
+                )),
+                None => out.push(Violation::new(
+                    rule,
+                    i64::MIN,
+                    inner.bbox,
+                    format!(
                         "shape on layer {}/{} is not enclosed by layer {}/{} (required {min})",
                         inner.layer.layer,
                         inner.layer.datatype,
                         outer_layer.layer,
                         outer_layer.datatype
                     ),
-                }),
+                )),
             }
         }
     }
@@ -541,14 +547,15 @@ impl CellContext {
                 if let Some((over, side)) = shortest_extension(&ext.bbox, &base.bbox)
                     && over < min
                 {
-                    out.push(Violation {
-                        rule: rule.name.clone(),
-                        location: ext.bbox,
-                        message: format!(
+                    out.push(Violation::new(
+                        rule,
+                        over,
+                        ext.bbox,
+                        format!(
                             "extension {over} past layer {}/{} on the {side} < minimum {min}",
                             base_layer.layer, base_layer.datatype
                         ),
-                    });
+                    ));
                 }
             }
         }
@@ -583,14 +590,15 @@ impl CellContext {
         // Per-mille to avoid floating point: covered * 1000 / window_area.
         let permille = (covered.saturating_mul(1000)) / window_area;
         if permille < rule.value {
-            out.push(Violation {
-                rule: rule.name.clone(),
-                location: window,
-                message: format!(
+            out.push(Violation::new(
+                rule,
+                permille,
+                window,
+                format!(
                     "density {permille}\u{2030} < minimum {}\u{2030} on layer {}/{}",
                     rule.value, rule.layer.layer, rule.layer.datatype
                 ),
-            });
+            ));
         }
     }
 
@@ -612,14 +620,15 @@ impl CellContext {
             // (Items store only bboxes, so consult the flattened offending bbox and
             // let the message point the user at it; a bbox-only engine cannot see
             // interior edges, so we conservatively flag the shape for review.)
-            out.push(Violation {
-                rule: rule.name.clone(),
-                location: it.bbox,
-                message: format!(
+            out.push(Violation::new(
+                rule,
+                i64::MIN,
+                it.bbox,
+                format!(
                     "non-rectangular shape on layer {}/{} may contain non-Manhattan edges",
                     it.layer.layer, it.layer.datatype
                 ),
-            });
+            ));
         }
     }
 
