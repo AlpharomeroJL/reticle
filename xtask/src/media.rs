@@ -6,6 +6,8 @@
 
 use crate::overlay::{Canvas, WorldMap};
 use image::{ImageBuffer, Rgba};
+use reticle_app::camera::ScreenRect;
+use reticle_app::minimap::MinimapLayout;
 use reticle_drc::DrcEngine;
 use reticle_geometry::{LayerId, Point, Rect};
 use reticle_model::{
@@ -53,7 +55,64 @@ pub fn capture(out_dir: &Path, only: Option<&str>) -> std::io::Result<bool> {
     if wants("drc") {
         capture_drc(&ctx, &mut renderer, out_dir)?;
     }
+    if wants("minimap") {
+        capture_minimap(&ctx, &mut renderer, out_dir)?;
+    }
     Ok(true)
+}
+
+/// Renders a zoomed-in view of a generated layout with the app's minimap in the
+/// top-right corner (overview box plus the current viewport rectangle) to
+/// `minimap.png`. The panel placement and both rectangles come from the app's
+/// own [`MinimapLayout`] math.
+fn capture_minimap(
+    ctx: &WgpuContext,
+    renderer: &mut WgpuRenderer,
+    out_dir: &Path,
+) -> std::io::Result<()> {
+    /// The minimap accent color for the viewport rectangle.
+    const ACCENT: [u8; 4] = [90, 200, 250, 255];
+    let doc = crate::generator::generate_layout(60_000, 6, 3);
+    let Some(top) = doc.top_cells().first().cloned() else {
+        eprintln!("generated document has no top cell");
+        return Ok(());
+    };
+    let bbox = document_bounds(&doc, &top);
+    let camera = offset_camera(bbox, STILL, 5.0, 0.38, 0.60);
+    let mut rgba = renderer.render_document_offscreen(ctx, &doc, &top, &camera, STILL);
+
+    let canvas_rect = ScreenRect {
+        left: 0.0,
+        top: 0.0,
+        width: STILL.0 as f32,
+        height: STILL.1 as f32,
+    };
+    let Some(layout) = MinimapLayout::compute(&canvas_rect, bbox) else {
+        eprintln!("minimap layout is degenerate; skipping minimap.png");
+        return Ok(());
+    };
+
+    // Overview content: the whole document fit to the panel's content rectangle.
+    let (cx, cy, cw, ch) = layout.world_rect_to_panel(bbox);
+    let mini_size = ((cw.round() as u32).max(1), (ch.round() as u32).max(1));
+    let mini_cam = frame_camera(bbox, mini_size, 1.0);
+    let mini = renderer.render_document_offscreen(ctx, &doc, &top, &mini_cam, mini_size);
+
+    let mut canvas = Canvas::new(&mut rgba, STILL);
+    let panel = layout.panel;
+    let (px1, py1) = (panel.left + panel.width, panel.top + panel.height);
+    canvas.fill_rect(panel.left, panel.top, px1, py1, [14, 16, 22, 240]);
+    canvas.blit(&mini, mini_size, cx.round() as i32, cy.round() as i32);
+    canvas.stroke_rect(panel.left, panel.top, px1, py1, 2.0, [96, 104, 120, 255]);
+
+    // The camera's visible world rectangle, clamped into the panel.
+    let (vx, vy, vw, vh) = layout.world_rect_to_panel(camera.viewport);
+    canvas.fill_rect(vx, vy, vx + vw, vy + vh, [90, 200, 250, 36]);
+    canvas.stroke_rect(vx, vy, vx + vw, vy + vh, 2.0, ACCENT);
+
+    save_png(&out_dir.join("minimap.png"), &rgba, STILL)?;
+    eprintln!("wrote {}", out_dir.join("minimap.png").display());
+    Ok(())
 }
 
 /// Runs real DRC on a small deliberately broken layout and renders the geometry
@@ -259,6 +318,31 @@ fn frame_camera(bbox: Rect, size: (u32, u32), zoom: f32) -> Camera {
     let cx = i64::midpoint(i64::from(bbox.min.x), i64::from(bbox.max.x));
     let cy = i64::midpoint(i64::from(bbox.min.y), i64::from(bbox.max.y));
     let center = Point::new(cx as i32, cy as i32);
+    let half_w = (width / ppd / 2.0) as i32;
+    let half_h = (height / ppd / 2.0) as i32;
+    Camera {
+        center,
+        pixels_per_dbu: ppd,
+        viewport: Rect::new(
+            center.translate(-half_w, -half_h),
+            center.translate(half_w, half_h),
+        ),
+    }
+}
+
+/// A camera like [`frame_camera`] but centered at the fractional position
+/// `(fx, fy)` of `bbox` instead of its middle, for looking at an off-center
+/// region.
+fn offset_camera(bbox: Rect, size: (u32, u32), zoom: f32, fx: f32, fy: f32) -> Camera {
+    let (width, height) = (size.0 as f32, size.1 as f32);
+    let world_w = bbox.width().max(1) as f32;
+    let world_h = bbox.height().max(1) as f32;
+    let fit = (width / world_w).min(height / world_h);
+    let ppd = fit * zoom;
+    let center = Point::new(
+        bbox.min.x + (world_w * fx) as i32,
+        bbox.min.y + (world_h * fy) as i32,
+    );
     let half_w = (width / ppd / 2.0) as i32;
     let half_h = (height / ppd / 2.0) as i32;
     Camera {

@@ -51,6 +51,22 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Copies an opaque RGBA sub-image into the canvas with its top-left corner
+    /// at `(dst_x, dst_y)`, clipping at the canvas edges.
+    pub fn blit(&mut self, src: &[u8], src_size: (u32, u32), dst_x: i32, dst_y: i32) {
+        for sy in 0..src_size.1 as i32 {
+            for sx in 0..src_size.0 as i32 {
+                let (x, y) = (dst_x + sx, dst_y + sy);
+                if x < 0 || y < 0 || x >= self.width || y >= self.height {
+                    continue;
+                }
+                let si = ((sy * src_size.0 as i32 + sx) * 4) as usize;
+                let di = ((y * self.width + x) * 4) as usize;
+                self.buf[di..di + 4].copy_from_slice(&src[si..si + 4]);
+            }
+        }
+    }
+
     /// Strokes the rectangle border with a band of `thickness` pixels drawn
     /// outward from the given edges.
     pub fn stroke_rect(
