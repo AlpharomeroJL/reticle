@@ -2,8 +2,9 @@
 //!
 //! Exactly one [`Tool`] is active at a time and it decides how pointer input on the
 //! canvas is interpreted: [`Tool::Select`] picks shapes and rubber-bands,
-//! [`Tool::Pan`] drags the view, and [`Tool::Measure`] captures two points and
-//! reports the distance between them. The machine here is pure state; the egui
+//! [`Tool::Pan`] drags the view, [`Tool::Measure`] captures two points and
+//! reports the distance between them, and [`Tool::CutLine`] captures two points
+//! defining the cross-section cut. The machine here is pure state; the egui
 //! layer reads [`ToolState::active`] each frame and routes interaction accordingly.
 
 use crate::measure::Measurement;
@@ -19,6 +20,8 @@ pub enum Tool {
     Pan,
     /// Measure the distance between two clicked points.
     Measure,
+    /// Define a cross-section cut line from two clicked points.
+    CutLine,
 }
 
 impl Tool {
@@ -29,13 +32,14 @@ impl Tool {
             Self::Select => "Select",
             Self::Pan => "Pan",
             Self::Measure => "Measure",
+            Self::CutLine => "Cut",
         }
     }
 
     /// Every tool, in toolbar order.
     #[must_use]
-    pub fn all() -> [Tool; 3] {
-        [Tool::Select, Tool::Pan, Tool::Measure]
+    pub fn all() -> [Tool; 4] {
+        [Tool::Select, Tool::Pan, Tool::Measure, Tool::CutLine]
     }
 }
 
@@ -47,6 +51,11 @@ pub struct ToolState {
     measure_start: Option<Point>,
     /// The completed measurement, if two points have been placed.
     measurement: Option<Measurement>,
+    /// The first cut-line point, once placed; `None` before the first click.
+    cut_start: Option<Point>,
+    /// The completed cut line, if two points have been placed. Kept across tool
+    /// switches so the cross-section panel stays meaningful while editing.
+    cut_line: Option<(Point, Point)>,
 }
 
 impl ToolState {
@@ -64,11 +73,13 @@ impl ToolState {
 
     /// Switches to `tool`, resetting any in-progress measurement.
     ///
-    /// Switching tools always clears a half-placed measure point so a stale start
-    /// never leaks into the next measurement.
+    /// Switching tools always clears a half-placed measure or cut point so a
+    /// stale start never leaks into the next two-click gesture; a completed cut
+    /// line survives the switch.
     pub fn set_active(&mut self, tool: Tool) {
         if self.active != tool {
             self.measure_start = None;
+            self.cut_start = None;
         }
         self.active = tool;
     }
@@ -109,6 +120,43 @@ impl ToolState {
     pub fn clear_measure(&mut self) {
         self.measure_start = None;
         self.measurement = None;
+    }
+
+    /// The cut tool's first point, if one has been placed but not yet closed.
+    #[must_use]
+    pub fn cut_start(&self) -> Option<Point> {
+        self.cut_start
+    }
+
+    /// The most recent completed cut line, if any.
+    #[must_use]
+    pub fn cut_line(&self) -> Option<(Point, Point)> {
+        self.cut_line
+    }
+
+    /// Handles a click at world point `at` while the cut-line tool is active.
+    ///
+    /// The first click records the start point; the second click completes the
+    /// cut line and re-arms the tool for a fresh cut on the next click. Returns
+    /// the completed `(start, end)` pair on the closing click.
+    pub fn cutline_click(&mut self, at: Point) -> Option<(Point, Point)> {
+        match self.cut_start.take() {
+            None => {
+                self.cut_start = Some(at);
+                None
+            }
+            Some(start) => {
+                let line = (start, at);
+                self.cut_line = Some(line);
+                Some(line)
+            }
+        }
+    }
+
+    /// Clears any in-progress and completed cut line.
+    pub fn clear_cut(&mut self) {
+        self.cut_start = None;
+        self.cut_line = None;
     }
 }
 
@@ -171,5 +219,34 @@ mod tests {
         for t in Tool::all() {
             assert!(!t.label().is_empty());
         }
+    }
+
+    #[test]
+    fn two_clicks_complete_a_cut_line() {
+        let mut s = ToolState::new();
+        s.set_active(Tool::CutLine);
+        assert!(s.cutline_click(Point::new(0, 0)).is_none());
+        assert_eq!(s.cut_start(), Some(Point::new(0, 0)));
+        let line = s
+            .cutline_click(Point::new(100, 40))
+            .expect("second click closes the cut");
+        assert_eq!(line, (Point::new(0, 0), Point::new(100, 40)));
+        assert_eq!(s.cut_line(), Some(line));
+        // Re-armed: the next click starts a fresh cut.
+        assert!(s.cut_start().is_none());
+    }
+
+    #[test]
+    fn switching_tools_clears_cut_start_but_keeps_the_line() {
+        let mut s = ToolState::new();
+        s.set_active(Tool::CutLine);
+        s.cutline_click(Point::new(0, 0));
+        s.cutline_click(Point::new(10, 0));
+        s.cutline_click(Point::new(99, 99)); // half-placed next cut
+        s.set_active(Tool::Select);
+        assert!(s.cut_start().is_none(), "half-placed start must clear");
+        assert!(s.cut_line().is_some(), "completed cut must survive");
+        s.clear_cut();
+        assert!(s.cut_line().is_none());
     }
 }

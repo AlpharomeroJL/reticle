@@ -131,6 +131,35 @@ pub struct LayerInfo {
     pub visible: bool,
 }
 
+/// Physical layer-stack data for one layer: where the layer sits in z and how
+/// thick it is, both in integer nanometers.
+///
+/// This is a separate table on [`Technology`] rather than extra fields on
+/// [`LayerInfo`]: stack data is optional and orthogonal to the display layer
+/// table (a `stack` directive may describe a layer that has no `layer` entry
+/// and vice versa), and a separate list keeps every existing [`Technology`]
+/// constructor and every technology file without stack lines working
+/// unchanged.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct StackEntry {
+    /// The layer/datatype this entry describes.
+    pub layer: LayerId,
+    /// Bottom of the layer slab, in nanometers. May be negative (below the
+    /// substrate origin).
+    pub z_bottom_nm: i64,
+    /// Slab thickness in nanometers; always positive.
+    pub thickness_nm: i64,
+}
+
+impl StackEntry {
+    /// Top of the layer slab, in nanometers (`z_bottom_nm + thickness_nm`),
+    /// saturating at the numeric range instead of wrapping.
+    #[must_use]
+    pub fn z_top_nm(&self) -> i64 {
+        self.z_bottom_nm.saturating_add(self.thickness_nm)
+    }
+}
+
 /// The technology description: database resolution, layers, and DRC rules.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Technology {
@@ -142,6 +171,20 @@ pub struct Technology {
     pub layers: Vec<LayerInfo>,
     /// Declarative DRC rules (see [`crate::Rule`]).
     pub rules: Vec<crate::Rule>,
+    /// Physical layer-stack entries from `stack` directives, in declaration
+    /// order. Empty when the technology declares no stack data.
+    pub stack: Vec<StackEntry>,
+}
+
+impl Technology {
+    /// The stack entry for `layer`, if the technology declares one.
+    ///
+    /// When a layer is declared more than once the first declaration wins,
+    /// matching how the renderer's palette resolves duplicate layer entries.
+    #[must_use]
+    pub fn stack_for(&self, layer: LayerId) -> Option<&StackEntry> {
+        self.stack.iter().find(|entry| entry.layer == layer)
+    }
 }
 
 /// A hierarchical layout document: a set of named cells plus technology data.

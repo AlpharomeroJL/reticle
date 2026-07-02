@@ -71,6 +71,72 @@ fn empty_and_comment_only_input_is_valid() {
     assert_eq!(tech.dbu_per_micron, 0);
     assert!(tech.layers.is_empty());
     assert!(tech.rules.is_empty());
+    assert!(tech.stack.is_empty());
+}
+
+#[test]
+fn files_without_stack_lines_parse_unchanged() {
+    // The pre-stack sample must keep parsing exactly as before, with an empty
+    // stack table.
+    let tech = parse_technology(SAMPLE).expect("sample should parse");
+    assert!(tech.stack.is_empty());
+}
+
+#[test]
+fn parses_stack_lines() {
+    let source = "\
+dbu_per_micron 1000
+layer 1 0 metal1 4488FFFF
+
+# Physical stack: <layer> <datatype> <z_bottom> <thickness> (nanometers).
+stack 1 0 500 200
+STACK 2 0 700 150   # keyword is case-insensitive, like the other directives
+stack 3 7 -50 400   # negative z_bottom is allowed (below the substrate origin)
+";
+    let tech = parse_technology(source).expect("stack sample should parse");
+
+    assert_eq!(tech.stack.len(), 3);
+    assert_eq!(tech.stack[0].layer, LayerId::new(1, 0));
+    assert_eq!(tech.stack[0].z_bottom_nm, 500);
+    assert_eq!(tech.stack[0].thickness_nm, 200);
+    assert_eq!(tech.stack[0].z_top_nm(), 700);
+
+    assert_eq!(tech.stack[1].layer, LayerId::new(2, 0));
+    assert_eq!(tech.stack[1].z_bottom_nm, 700);
+    assert_eq!(tech.stack[1].thickness_nm, 150);
+
+    assert_eq!(tech.stack[2].layer, LayerId::new(3, 7));
+    assert_eq!(tech.stack[2].z_bottom_nm, -50);
+    assert_eq!(tech.stack[2].thickness_nm, 400);
+
+    // The lookup helper resolves by layer id, first declaration first.
+    let hit = tech.stack_for(LayerId::new(2, 0)).expect("declared layer");
+    assert_eq!(hit.z_bottom_nm, 700);
+    assert!(tech.stack_for(LayerId::new(9, 9)).is_none());
+}
+
+#[test]
+fn duplicate_stack_lines_keep_first_declaration() {
+    let source = "stack 1 0 100 50\nstack 1 0 900 99\n";
+    let tech = parse_technology(source).expect("duplicates parse");
+    assert_eq!(tech.stack.len(), 2, "entries are kept in declaration order");
+    let hit = tech.stack_for(LayerId::new(1, 0)).expect("layer declared");
+    assert_eq!((hit.z_bottom_nm, hit.thickness_nm), (100, 50));
+}
+
+#[test]
+fn rejects_malformed_stack() {
+    // Too few tokens.
+    assert!(parse_technology("stack 1 0 500\n").is_err());
+    // Too many tokens.
+    assert!(parse_technology("stack 1 0 500 200 7\n").is_err());
+    // Non-numeric layer, z_bottom, and thickness.
+    assert!(parse_technology("stack x 0 500 200\n").is_err());
+    assert!(parse_technology("stack 1 0 low 200\n").is_err());
+    assert!(parse_technology("stack 1 0 500 thick\n").is_err());
+    // Thickness must be positive.
+    assert!(parse_technology("stack 1 0 500 0\n").is_err());
+    assert!(parse_technology("stack 1 0 500 -10\n").is_err());
 }
 
 #[test]

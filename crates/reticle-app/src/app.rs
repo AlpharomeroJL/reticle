@@ -108,6 +108,8 @@ pub struct App {
     zoom_to_selected_violation: bool,
     /// The net-highlight state: cached connectivity plus the highlighted net.
     netlight: Netlight,
+    /// The 3D layer-stack window's orbit-camera state.
+    view3d: crate::view3d::View3d,
 
     /// Whether the command palette window is open.
     palette_open: bool,
@@ -165,6 +167,7 @@ impl App {
             drc: DrcResults::new(),
             zoom_to_selected_violation: false,
             netlight: Netlight::new(),
+            view3d: crate::view3d::View3d::new(),
             palette_open: false,
             palette_query: String::new(),
             layer_query: String::new(),
@@ -884,6 +887,20 @@ impl App {
                 }
             }
             Tool::Select => self.handle_select_input(ctx, response, screen),
+            Tool::CutLine => {
+                if response.clicked()
+                    && let Some(pos) = response.interact_pointer_pos()
+                {
+                    let raw = self.camera.screen_to_world(screen, pos.x, pos.y);
+                    let world = self.grid.snap(raw);
+                    if let Some((a, b)) = self.tools.cutline_click(world) {
+                        self.status
+                            .set(format!("Cut ({}, {}) -> ({}, {})", a.x, a.y, b.x, b.y));
+                    } else {
+                        self.status.set("Cut line: pick the second point");
+                    }
+                }
+            }
         }
     }
 
@@ -1383,6 +1400,20 @@ impl eframe::App for App {
         });
 
         self.palette_window(&ctx, canvas_screen);
+        self.view3d.show(
+            &ctx,
+            frame,
+            self.history.document(),
+            &self.top_cell,
+            &self.layer_state,
+        );
+        crate::xsection::window(
+            &ctx,
+            self.tools.cut_line(),
+            self.scene.shapes(),
+            self.history.document().technology(),
+            &self.layer_state,
+        );
 
         // Keep animating while dragging/measuring so interaction feels live.
         ctx.request_repaint();

@@ -17,6 +17,7 @@
 //! layer <layer> <datatype> <name> <rgba_hex>     # one layer-table entry
 //! rule <kind> <layer> <datatype> <value>         # single-layer rule
 //! rule <kind> <layer> <datatype> <olayer> <odatatype> <value>  # two-layer rule
+//! stack <layer> <datatype> <z_bottom> <thickness>  # optional physical stack entry
 //! ```
 //!
 //! * `<rgba_hex>` is 8 hex digits `RRGGBBAA` (an optional leading `#` or `0x` is
@@ -26,6 +27,13 @@
 //!   `spacing`, `enclosure`, and `extension`; the single-layer form for the rest.
 //! * `<value>` is the rule threshold: DBU for length rules, DBU² for `area`,
 //!   milli-degrees for `angle`.
+//! * `stack` describes where a layer sits physically: `<z_bottom>` is the bottom
+//!   of the layer slab in integer nanometers (negative allowed), `<thickness>` is
+//!   the slab height in integer nanometers and must be positive. The directive is
+//!   optional and backward compatible: files without `stack` lines parse exactly
+//!   as before, leaving [`Technology::stack`] empty. Entries are kept in
+//!   declaration order; on duplicates for one layer the first declaration wins
+//!   (see [`Technology::stack_for`]).
 //!
 //! # Example
 //!
@@ -37,11 +45,13 @@
 //! rule width   1 0 100
 //! rule spacing 1 0 140
 //! rule enclosure 2 0 1 0 20
+//! stack 1 0 500 200
+//! stack 2 0 700 150
 //! ```
 
 use crate::IoError;
 use reticle_geometry::LayerId;
-use reticle_model::{LayerInfo, Result, Rule, RuleKind, Technology};
+use reticle_model::{LayerInfo, Result, Rule, RuleKind, StackEntry, Technology};
 
 /// Parses a Reticle technology file into a [`Technology`].
 ///
@@ -75,6 +85,7 @@ pub fn parse_technology(source: &str) -> Result<Technology> {
             "dbu_per_micron" => tech.dbu_per_micron = parse_dbu(&rest, line_no)?,
             "layer" => tech.layers.push(parse_layer(&rest, line_no)?),
             "rule" => tech.rules.push(parse_rule(&rest, line_no)?),
+            "stack" => tech.stack.push(parse_stack(&rest, line_no)?),
             other => {
                 return Err(IoError::tech(line_no, format!("unknown directive `{other}`")).into());
             }
@@ -146,6 +157,36 @@ fn parse_layer(rest: &[&str], line_no: usize) -> Result<LayerInfo> {
         name: (*name).to_string(),
         color_rgba,
         visible: true,
+    })
+}
+
+/// Parses a `stack <layer> <datatype> <z_bottom> <thickness>` directive.
+///
+/// `<z_bottom>` and `<thickness>` are integer nanometers; `<thickness>` must be
+/// positive. See the [module documentation](self) for the full grammar.
+fn parse_stack(rest: &[&str], line_no: usize) -> Result<StackEntry> {
+    let [layer, datatype, z_bottom, thickness] = rest else {
+        return Err(IoError::tech(
+            line_no,
+            "`stack` expects: <layer> <datatype> <z_bottom> <thickness>",
+        )
+        .into());
+    };
+    let layer = parse_u16(layer, line_no, "layer")?;
+    let datatype = parse_u16(datatype, line_no, "datatype")?;
+    let z_bottom_nm: i64 = z_bottom
+        .parse()
+        .map_err(|_| IoError::tech(line_no, format!("invalid stack z_bottom `{z_bottom}`")))?;
+    let thickness_nm: i64 = thickness
+        .parse()
+        .map_err(|_| IoError::tech(line_no, format!("invalid stack thickness `{thickness}`")))?;
+    if thickness_nm <= 0 {
+        return Err(IoError::tech(line_no, "`stack` thickness must be positive").into());
+    }
+    Ok(StackEntry {
+        layer: LayerId::new(layer, datatype),
+        z_bottom_nm,
+        thickness_nm,
     })
 }
 

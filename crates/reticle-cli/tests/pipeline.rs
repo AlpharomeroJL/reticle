@@ -89,6 +89,7 @@ fn sample_document() -> Document {
         dbu_per_micron: 1_000,
         layers: Vec::new(),
         rules: Vec::new(),
+        stack: Vec::new(),
     };
     doc.set_technology(tech);
     doc

@@ -23,6 +23,8 @@
 //! * [`inspector`], the read-only properties summary of the selection.
 //! * [`fps`], the rolling frame-time meter behind the status-bar fps readout.
 //! * [`session`], view/UI session save/restore (native file IO).
+//! * [`view3d`], the extruded 3D layer-stack window (orbit camera + wgpu glue).
+//! * [`xsection`], cut-line cross-sections (interval math + elevation panel).
 //! * [`demo`], the built-in hierarchical demo document.
 //! * [`app`], the [`eframe::App`] implementation that draws it all.
 //!
@@ -45,5 +47,7 @@ pub mod netlight;
 pub mod selection;
 pub mod session;
 pub mod tool;
+pub mod view3d;
+pub mod xsection;
 
 pub use app::App;
