@@ -11,18 +11,23 @@
 //! implemented in a later wave; this module establishes the identifier and error
 //! contracts the rest of the surface builds on.
 
+mod apply;
 pub mod args;
 mod command;
 mod error;
 mod ids;
+mod replay;
 mod response;
+mod session;
 mod status;
 mod transcript;
 
 pub use command::AgentCommand;
 pub use error::{AgentError, ErrorCode};
 pub use ids::ElementId;
+pub use replay::{replay, transcript_of, verify_replay};
 pub use response::{AgentResponse, Revision};
+pub use session::Session;
 pub use status::{AGENT_ACTOR, AgentStatus};
 pub use transcript::{CommandRecord, Outcome, Transcript};
 
