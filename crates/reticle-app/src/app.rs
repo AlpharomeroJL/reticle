@@ -1467,6 +1467,7 @@ fn palette_from_layers(layers: &LayerState) -> Palette {
             })
             .collect(),
         rules: Vec::new(),
+        stack: Vec::new(),
     };
     Palette::from_technology(&tech)
 }
