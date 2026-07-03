@@ -30,6 +30,8 @@
 //! * [`store`], the transcript storage seam: filesystem on native, a bundled
 //!   transcript on wasm, so the theater opens on both.
 //! * [`netlight`], cached connectivity extraction for net highlighting.
+//! * [`productivity`], clipboard/duplicate/array/move-delta/via-stack editing logic
+//!   behind the productivity side panel, every edit undo-integrated.
 //! * [`inspector`], the read-only properties summary of the selection.
 //! * [`fps`], the rolling frame-time meter behind the status-bar fps readout.
 //! * [`session`], view/UI session save/restore (native file IO).
@@ -65,6 +67,7 @@ pub mod layers;
 pub mod measure;
 pub mod minimap;
 pub mod netlight;
+pub mod productivity;
 pub mod replay;
 pub mod selection;
 pub mod session;

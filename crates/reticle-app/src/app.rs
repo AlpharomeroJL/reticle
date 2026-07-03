@@ -35,6 +35,7 @@ use crate::labels;
 use crate::layers::{self, LayerState};
 use crate::minimap::MinimapLayout;
 use crate::netlight::{Generation, Netlight};
+use crate::productivity::{self, ProductivityState};
 use crate::replay::ReplayTheater;
 use crate::selection::{self, Selection};
 use crate::tool::{Tool, ToolState};
@@ -51,6 +52,17 @@ impl Status {
     fn set(&mut self, text: impl Into<String>) {
         self.text = text.into();
     }
+}
+
+/// Which via-stack layer field a picker combo writes to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ViaLayerField {
+    /// The lower enclosure layer.
+    Lower,
+    /// The upper enclosure layer.
+    Upper,
+    /// The cut/via layer.
+    Cut,
 }
 
 /// The top-level application state: the collaborative document and the renderer.
@@ -142,6 +154,10 @@ pub struct App {
     netlight: Netlight,
     /// The 3D layer-stack window's orbit-camera state.
     view3d: crate::view3d::View3d,
+
+    /// The productivity panel state: the in-app clipboard plus the array,
+    /// move-by-delta, and via-stack dialog fields.
+    productivity: ProductivityState,
 
     /// The rebindable shortcut map every key press resolves through.
     keymap: Keymap,
@@ -293,6 +309,7 @@ impl App {
             zoom_to_selected_violation: false,
             netlight: Netlight::new(),
             view3d: crate::view3d::View3d::new(),
+            productivity: ProductivityState::new(),
             keymap: load_keymap(),
             keymap_open: false,
             rebinding: None,
@@ -774,6 +791,440 @@ impl App {
             }
             Err(e) => self.status.set(format!("Edit failed: {e}")),
         }
+    }
+
+    /// The number of shapes drawn directly in the current top cell (not brought in
+    /// by an instance or array).
+    ///
+    /// The flattened scene lists these direct shapes first, in cell order, so a
+    /// selection index below this count maps one-to-one to the top cell's
+    /// `shapes` vector. Instanced and arrayed geometry occupies the indices beyond
+    /// it and cannot be edited in place through [`reticle_model::Edit::RemoveShape`],
+    /// which addresses a cell's own shape list.
+    fn top_cell_direct_shape_count(&self) -> usize {
+        self.history
+            .document()
+            .cell(&self.top_cell)
+            .map_or(0, |cell| cell.shapes.len())
+    }
+
+    /// The selected shapes that live directly in the top cell, as `(direct_index,
+    /// shape)` pairs sorted by index.
+    ///
+    /// Selection indices are into the flattened scene; only those below
+    /// [`top_cell_direct_shape_count`](Self::top_cell_direct_shape_count) name a
+    /// directly-owned shape and so are the only ones a cut or move can act on. The
+    /// returned shapes are cloned from the live document so callers can translate and
+    /// re-add them.
+    fn selected_direct_shapes(&self) -> Vec<(usize, DrawShape)> {
+        let direct = self.top_cell_direct_shape_count();
+        let Some(cell) = self.history.document().cell(&self.top_cell) else {
+            return Vec::new();
+        };
+        let mut picked: Vec<(usize, DrawShape)> = self
+            .selection
+            .iter()
+            .filter(|&i| i < direct)
+            .map(|i| (i, cell.shapes[i].clone()))
+            .collect();
+        picked.sort_by_key(|(i, _)| *i);
+        picked
+    }
+
+    /// The resolved [`DrawShape`]s currently selected, read from the flattened scene.
+    ///
+    /// Unlike [`selected_direct_shapes`](Self::selected_direct_shapes) this includes
+    /// instanced and arrayed geometry, because copy only reads geometry and never
+    /// needs to address the source cell's shape list.
+    fn selected_scene_shapes(&self) -> Vec<DrawShape> {
+        let shapes = self.scene.shapes();
+        self.selection
+            .iter()
+            .filter_map(|i| shapes.get(i).cloned())
+            .collect()
+    }
+
+    /// Adds every shape in `shapes` to the top cell through the undo history, then
+    /// rebuilds the scene once. Returns the number added.
+    ///
+    /// Each shape is a separate [`reticle_model::Edit::AddShape`], so each is
+    /// individually undoable; the scene and derived caches rebuild a single time at
+    /// the end. On the first failing edit it stops, rebuilds, and reports the error.
+    fn add_shapes_undoable(&mut self, shapes: Vec<DrawShape>) -> usize {
+        let mut added = 0;
+        for shape in shapes {
+            match self.history.apply(reticle_model::Edit::AddShape {
+                cell: self.top_cell.clone(),
+                shape,
+            }) {
+                Ok(()) => added += 1,
+                Err(e) => {
+                    self.status.set(format!("Edit failed: {e}"));
+                    break;
+                }
+            }
+        }
+        if added > 0 {
+            self.rebuild_scene();
+        }
+        added
+    }
+
+    /// Copies the selected shapes onto the in-app clipboard.
+    fn productivity_copy(&mut self) {
+        let shapes = self.selected_scene_shapes();
+        if shapes.is_empty() {
+            self.status.set("Copy: nothing selected");
+            return;
+        }
+        let n = shapes.len();
+        self.productivity.clipboard.set(shapes);
+        self.status.set(format!("Copied {n} shape(s)"));
+    }
+
+    /// Cuts the selected direct shapes: copies them to the clipboard, then removes
+    /// them from the top cell through the undo history.
+    ///
+    /// Only shapes drawn directly in the top cell can be removed; any selected
+    /// instanced or arrayed geometry is copied but left in place, and the status line
+    /// notes how many were skipped.
+    fn productivity_cut(&mut self) {
+        // The clipboard captures the full selection (including instanced geometry).
+        let all = self.selected_scene_shapes();
+        if all.is_empty() {
+            self.status.set("Cut: nothing selected");
+            return;
+        }
+        let clip_count = all.len();
+        self.productivity.clipboard.set(all);
+
+        let direct = self.selected_direct_shapes();
+        let removable = direct.len();
+        let skipped = clip_count - removable;
+        // Remove in descending index order so each removal leaves the lower indices
+        // valid.
+        let mut removed = 0;
+        for (index, _) in direct.into_iter().rev() {
+            match self.history.apply(reticle_model::Edit::RemoveShape {
+                cell: self.top_cell.clone(),
+                index,
+            }) {
+                Ok(()) => removed += 1,
+                Err(e) => {
+                    self.status.set(format!("Edit failed: {e}"));
+                    break;
+                }
+            }
+        }
+        if removed > 0 {
+            self.rebuild_scene();
+        }
+        if skipped > 0 {
+            self.status.set(format!(
+                "Cut {removed} shape(s); {skipped} instanced skipped"
+            ));
+        } else {
+            self.status.set(format!("Cut {removed} shape(s)"));
+        }
+    }
+
+    /// Pastes the clipboard into the top cell, offset by the panel's paste delta.
+    fn productivity_paste(&mut self) {
+        if self.productivity.clipboard.is_empty() {
+            self.status.set("Paste: clipboard empty");
+            return;
+        }
+        let shapes = productivity::translate_shapes(
+            self.productivity.clipboard.shapes(),
+            self.productivity.paste_dx,
+            self.productivity.paste_dy,
+        );
+        let n = self.add_shapes_undoable(shapes);
+        if n > 0 {
+            self.status.set(format!("Pasted {n} shape(s)"));
+        }
+    }
+
+    /// Duplicates the current selection in place, offset by the panel's paste delta.
+    ///
+    /// This is copy-plus-paste in one step over the resolved selection geometry, so
+    /// it works on instanced shapes too (the duplicate is flat geometry in the top
+    /// cell).
+    fn productivity_duplicate(&mut self) {
+        let selected = self.selected_scene_shapes();
+        if selected.is_empty() {
+            self.status.set("Duplicate: nothing selected");
+            return;
+        }
+        let shapes = productivity::translate_shapes(
+            &selected,
+            self.productivity.paste_dx,
+            self.productivity.paste_dy,
+        );
+        let n = self.add_shapes_undoable(shapes);
+        if n > 0 {
+            self.status.set(format!("Duplicated {n} shape(s)"));
+        }
+    }
+
+    /// Arrays the current selection into a rows x columns grid at the panel's pitch,
+    /// adding every element to the top cell through the undo history.
+    ///
+    /// The element count is capped by [`productivity::MAX_ARRAY_ELEMENTS`]; past the
+    /// cap the commit is refused. Element `(0, 0)` reproduces the current selection,
+    /// so the originals stay put and the array grows from them.
+    fn productivity_array(&mut self) {
+        let selected = self.selected_scene_shapes();
+        if selected.is_empty() {
+            self.status.set("Array: nothing selected");
+            return;
+        }
+        if !self.productivity.array_is_committable() {
+            self.status.set(format!(
+                "Array: {} elements exceeds the {} cap",
+                self.productivity.array_count(),
+                productivity::MAX_ARRAY_ELEMENTS
+            ));
+            return;
+        }
+        let shapes = self.productivity.array_expand(&selected);
+        let n = self.add_shapes_undoable(shapes);
+        if n > 0 {
+            self.status.set(format!(
+                "Arrayed into {}x{} ({n} shape(s))",
+                self.productivity.array_rows, self.productivity.array_cols
+            ));
+        }
+    }
+
+    /// Moves the selected direct shapes by the panel's move delta.
+    ///
+    /// A move is a remove of each original followed by an add of its translated copy,
+    /// both through the undo history. Only directly-owned shapes can move; instanced
+    /// geometry is left in place and reported as skipped.
+    fn productivity_move_delta(&mut self) {
+        let direct = self.selected_direct_shapes();
+        if direct.is_empty() {
+            self.status.set("Move: no movable selection");
+            return;
+        }
+        let (dx, dy) = (self.productivity.move_dx, self.productivity.move_dy);
+        // Remove originals in descending index order, keeping lower indices valid.
+        let mut ok = true;
+        for (index, _) in direct.iter().rev() {
+            if let Err(e) = self.history.apply(reticle_model::Edit::RemoveShape {
+                cell: self.top_cell.clone(),
+                index: *index,
+            }) {
+                self.status.set(format!("Edit failed: {e}"));
+                ok = false;
+                break;
+            }
+        }
+        if ok {
+            // Re-add the translated copies (appended to the cell's shape list).
+            for (_, shape) in &direct {
+                let moved = productivity::translate_shape(shape, dx, dy);
+                if let Err(e) = self.history.apply(reticle_model::Edit::AddShape {
+                    cell: self.top_cell.clone(),
+                    shape: moved,
+                }) {
+                    self.status.set(format!("Edit failed: {e}"));
+                    break;
+                }
+            }
+        }
+        self.rebuild_scene();
+        self.status.set(format!("Moved {} shape(s)", direct.len()));
+    }
+
+    /// Builds and commits a via stack at the panel's center through the undo history.
+    ///
+    /// The cut and its two layer enclosures are sized from the technology enclosure
+    /// rules (see [`productivity::via_stack_shapes`]); each of the three rectangles is
+    /// a separate undoable `AddShape`.
+    fn productivity_via_stack(&mut self) {
+        let tech = self.history.document().technology().clone();
+        let Some(stack) = self.productivity.build_via_stack(&tech) else {
+            self.status.set("Via stack: cut size must be positive");
+            return;
+        };
+        let n = self.add_shapes_undoable(stack.into_shapes());
+        if n > 0 {
+            self.status.set(format!("Placed via stack ({n} shape(s))"));
+        }
+    }
+
+    /// Draws the productivity side panel: clipboard copy/cut/paste and duplicate, the
+    /// interactive array tool with a live preview, move-by-delta numeric entry, and
+    /// the via-stack builder.
+    ///
+    /// The panel is thin glue: it binds egui widgets to [`ProductivityState`] fields
+    /// and calls the `productivity_*` action methods, each of which routes its
+    /// mutation through the undo history. The live array preview is drawn on the
+    /// canvas by [`array_preview_shapes`](Self::array_preview_shapes), not here.
+    fn productivity_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Productivity");
+
+        // Clipboard: copy / cut / paste / duplicate.
+        ui.label(format!(
+            "Selection: {} | Clipboard: {}",
+            self.selection.len(),
+            self.productivity.clipboard.len()
+        ));
+        ui.horizontal(|ui| {
+            if ui.button("Copy").clicked() {
+                self.productivity_copy();
+            }
+            if ui.button("Cut").clicked() {
+                self.productivity_cut();
+            }
+            if ui.button("Paste").clicked() {
+                self.productivity_paste();
+            }
+            if ui.button("Duplicate").clicked() {
+                self.productivity_duplicate();
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Offset dx/dy:");
+            ui.add(egui::DragValue::new(&mut self.productivity.paste_dx).speed(10));
+            ui.add(egui::DragValue::new(&mut self.productivity.paste_dy).speed(10));
+        });
+
+        ui.separator();
+
+        // Move-by-delta.
+        ui.label("Move selection by delta");
+        ui.horizontal(|ui| {
+            ui.label("dx/dy:");
+            ui.add(egui::DragValue::new(&mut self.productivity.move_dx).speed(10));
+            ui.add(egui::DragValue::new(&mut self.productivity.move_dy).speed(10));
+            if ui.button("Move").clicked() {
+                self.productivity_move_delta();
+            }
+        });
+
+        ui.separator();
+
+        // Interactive array tool.
+        ui.label("Array");
+        ui.horizontal(|ui| {
+            ui.label("rows/cols:");
+            ui.add(
+                egui::DragValue::new(&mut self.productivity.array_rows)
+                    .speed(1)
+                    .range(0..=1000),
+            );
+            ui.add(
+                egui::DragValue::new(&mut self.productivity.array_cols)
+                    .speed(1)
+                    .range(0..=1000),
+            );
+        });
+        ui.horizontal(|ui| {
+            ui.label("row/col pitch:");
+            ui.add(egui::DragValue::new(&mut self.productivity.array_row_pitch).speed(10));
+            ui.add(egui::DragValue::new(&mut self.productivity.array_col_pitch).speed(10));
+        });
+        ui.checkbox(&mut self.productivity.array_preview, "Live preview");
+        ui.horizontal(|ui| {
+            let committable = self.productivity.array_is_committable();
+            if ui
+                .add_enabled(committable, egui::Button::new("Build array"))
+                .clicked()
+            {
+                self.productivity_array();
+            }
+            ui.label(format!("{} elems", self.productivity.array_count()));
+        });
+
+        ui.separator();
+
+        // Via-stack builder.
+        ui.label("Via stack");
+        self.via_layer_combo(ui, "lower", ViaLayerField::Lower);
+        self.via_layer_combo(ui, "upper", ViaLayerField::Upper);
+        self.via_layer_combo(ui, "cut", ViaLayerField::Cut);
+        ui.horizontal(|ui| {
+            ui.label("cut size:");
+            ui.add(
+                egui::DragValue::new(&mut self.productivity.via_cut_size)
+                    .speed(10)
+                    .range(1..=100_000),
+            );
+        });
+        ui.horizontal(|ui| {
+            ui.label("center x/y:");
+            ui.add(egui::DragValue::new(&mut self.productivity.via_center_x).speed(10));
+            ui.add(egui::DragValue::new(&mut self.productivity.via_center_y).speed(10));
+        });
+        ui.horizontal(|ui| {
+            ui.label("default enc:");
+            ui.add(
+                egui::DragValue::new(&mut self.productivity.via_default_enclosure)
+                    .speed(1)
+                    .range(0..=100_000),
+            );
+        });
+        if ui.button("Place via stack").clicked() {
+            self.productivity_via_stack();
+        }
+    }
+
+    /// Draws one labeled layer-picker combo box for the via-stack builder, writing
+    /// the chosen [`LayerId`] into the named field.
+    fn via_layer_combo(&mut self, ui: &mut egui::Ui, label: &str, field: ViaLayerField) {
+        let rows: Vec<(LayerId, String)> = self
+            .layer_state
+            .rows()
+            .iter()
+            .map(|r| (r.id, r.name.clone()))
+            .collect();
+        let current = match field {
+            ViaLayerField::Lower => self.productivity.via_lower,
+            ViaLayerField::Upper => self.productivity.via_upper,
+            ViaLayerField::Cut => self.productivity.via_cut,
+        };
+        let current_name = rows.iter().find(|(id, _)| *id == current).map_or_else(
+            || format!("{}/{}", current.layer, current.datatype),
+            |(_, n)| n.clone(),
+        );
+        ui.horizontal(|ui| {
+            ui.label(format!("{label}:"));
+            egui::ComboBox::from_id_salt((label, "via_layer"))
+                .selected_text(current_name)
+                .show_ui(ui, |ui| {
+                    for (id, name) in &rows {
+                        let target = match field {
+                            ViaLayerField::Lower => &mut self.productivity.via_lower,
+                            ViaLayerField::Upper => &mut self.productivity.via_upper,
+                            ViaLayerField::Cut => &mut self.productivity.via_cut,
+                        };
+                        ui.selectable_value(target, *id, name);
+                    }
+                });
+        });
+    }
+
+    /// The live array-preview shapes for the current selection and array parameters,
+    /// or an empty list when preview is off, nothing is selected, or the count is
+    /// over the cap.
+    ///
+    /// These are the element `(1..)` copies only (the originals are already on the
+    /// canvas), drawn as an overlay by the canvas so the user sees the array before
+    /// committing.
+    fn array_preview_shapes(&self) -> Vec<DrawShape> {
+        if !self.productivity.array_preview || !self.productivity.array_is_committable() {
+            return Vec::new();
+        }
+        let selected = self.selected_scene_shapes();
+        if selected.is_empty() {
+            return Vec::new();
+        }
+        // Skip element (0,0): it coincides with the existing selection.
+        let full = self.productivity.array_expand(&selected);
+        full.into_iter().skip(selected.len()).collect()
     }
 
     /// Highlights the net electrically connected to the shape at `idx`.
@@ -1508,6 +1959,7 @@ impl App {
 
         // Engine-driven overlays on top of the geometry.
         self.draw_net_highlight(&painter, &screen, viewport);
+        self.draw_array_preview(&painter, &screen, viewport);
         self.draw_drc_markers(&painter, &screen);
 
         self.draw_rulers(&painter, &screen);
@@ -1912,6 +2364,29 @@ impl App {
             let Some(shape) = shapes.get(idx) else {
                 continue;
             };
+            if !shape.bounding_box().intersects(&viewport) {
+                continue;
+            }
+            self.draw_shape_outline(painter, screen, shape, stroke, fill);
+        }
+    }
+
+    /// Draws the interactive array tool's live preview: a faint outline of each
+    /// pending array element before the user commits.
+    ///
+    /// The preview shapes come from [`array_preview_shapes`](Self::array_preview_shapes)
+    /// (the element `1..` copies of the current selection at the panel's pitch), so
+    /// this is empty unless preview is on, something is selected, and the count is
+    /// within the cap. Only elements intersecting `viewport` are drawn.
+    fn draw_array_preview(&self, painter: &egui::Painter, screen: &ScreenRect, viewport: Rect) {
+        let preview = self.array_preview_shapes();
+        if preview.is_empty() {
+            return;
+        }
+        let color = Color32::from_rgb(180, 210, 120);
+        let stroke = Stroke::new(1.5, color);
+        let fill = Color32::from_rgba_unmultiplied(180, 210, 120, 40);
+        for shape in &preview {
             if !shape.bounding_box().intersects(&viewport) {
                 continue;
             }
@@ -2325,6 +2800,8 @@ impl eframe::App for App {
                         self.agent_section(ui);
                         ui.separator();
                         self.share_section(ui);
+                        ui.separator();
+                        self.productivity_panel(ui);
                     });
             });
         egui::CentralPanel::default().show(ui, |ui| {
@@ -3049,5 +3526,159 @@ mod tests {
         assert!(app.drc.select(0).is_some());
         app.zoom_to_selected_violation = true;
         assert_eq!(app.drc.selected(), Some(0));
+    }
+
+    /// Selects the first `n` direct (non-instanced) shapes of the top cell, which are
+    /// the first `n` entries of the flattened scene.
+    fn select_first_direct(app: &mut App, n: usize) {
+        let direct = app.top_cell_direct_shape_count();
+        app.selection.set(0..n.min(direct));
+    }
+
+    #[test]
+    fn copy_then_paste_adds_shapes_and_is_undoable() {
+        let mut app = App::new();
+        // Copy the first direct top-cell shape.
+        select_first_direct(&mut app, 1);
+        app.productivity_copy();
+        assert_eq!(app.productivity.clipboard.len(), 1);
+
+        let before = app.scene.len();
+        app.productivity_paste();
+        assert_eq!(app.scene.len(), before + 1, "paste adds one shape");
+
+        // The paste landed on the undo stack.
+        assert!(app.history.can_undo());
+        app.run_command(Command::Undo, None);
+        assert_eq!(app.scene.len(), before, "undo removes the pasted shape");
+    }
+
+    #[test]
+    fn duplicate_offsets_selection_and_is_undoable() {
+        let mut app = App::new();
+        select_first_direct(&mut app, 2);
+        let selected = app.selection.len();
+        assert!(selected >= 1);
+        let before = app.scene.len();
+        app.productivity_duplicate();
+        assert_eq!(app.scene.len(), before + selected);
+        app.run_command(Command::Undo, None);
+        // Undo peels the duplicates back off one at a time; one undo removes one.
+        assert_eq!(app.scene.len(), before + selected - 1);
+    }
+
+    #[test]
+    fn build_array_commits_every_element_undoably() {
+        let mut app = App::new();
+        select_first_direct(&mut app, 1);
+        app.productivity.array_rows = 2;
+        app.productivity.array_cols = 3;
+        app.productivity.array_row_pitch = 1000;
+        app.productivity.array_col_pitch = 1000;
+        let before = app.scene.len();
+        app.productivity_array();
+        // One source shape into a 2x3 grid adds six shapes.
+        assert_eq!(app.scene.len(), before + 6);
+        // Each element is its own undo entry.
+        assert!(app.history.undo_depth() >= 6);
+    }
+
+    #[test]
+    fn array_over_the_cap_is_refused() {
+        let mut app = App::new();
+        select_first_direct(&mut app, 1);
+        app.productivity.array_rows = 500;
+        app.productivity.array_cols = 500; // 250_000 > MAX_ARRAY_ELEMENTS
+        let before = app.scene.len();
+        app.productivity_array();
+        assert_eq!(app.scene.len(), before, "an over-cap array commits nothing");
+    }
+
+    #[test]
+    fn move_delta_shifts_a_direct_shape_and_is_undoable() {
+        // Start from a document whose top cell owns a direct rect, so the assertion
+        // on the shifted geometry is exercised regardless of the demo's shape mix.
+        let mut app = App::new();
+        let rect = Rect::new(Point::new(0, 0), Point::new(300, 300));
+        app.history
+            .apply(reticle_model::Edit::AddShape {
+                cell: app.top_cell.clone(),
+                shape: DrawShape::new(LayerId::new(4, 0), ShapeKind::Rect(rect)),
+            })
+            .unwrap();
+        app.rebuild_scene();
+
+        // The rect we just added is the last direct shape of the top cell.
+        let direct = app.top_cell_direct_shape_count();
+        let idx = direct - 1;
+        assert!(matches!(app.scene.shapes()[idx].kind, ShapeKind::Rect(_)));
+
+        let before_len = app.scene.len();
+        app.selection.set([idx]);
+        app.productivity.move_dx = 1234;
+        app.productivity.move_dy = -567;
+        app.productivity_move_delta();
+        // A move is remove + add, so the total count is unchanged.
+        assert_eq!(app.scene.len(), before_len);
+        // The moved copy exists at the shifted position somewhere in the scene.
+        let want = Rect::new(Point::new(1234, -567), Point::new(1534, -267));
+        let found = app
+            .scene
+            .shapes()
+            .iter()
+            .any(|s| matches!(&s.kind, ShapeKind::Rect(r) if *r == want));
+        assert!(found, "the moved shape appears at the new position");
+        assert!(app.history.can_undo());
+    }
+
+    #[test]
+    fn via_stack_places_three_shapes_undoably() {
+        let mut app = App::new();
+        app.productivity.via_lower = LayerId::new(4, 0);
+        app.productivity.via_upper = LayerId::new(5, 0);
+        app.productivity.via_cut = LayerId::new(7, 0);
+        app.productivity.via_cut_size = 200;
+        app.productivity.via_center_x = 5000;
+        app.productivity.via_center_y = 5000;
+        let before = app.scene.len();
+        app.productivity_via_stack();
+        assert_eq!(app.scene.len(), before + 3, "cut plus two enclosures");
+        assert!(app.history.undo_depth() >= 3);
+    }
+
+    #[test]
+    fn array_preview_is_empty_without_a_selection() {
+        let mut app = App::new();
+        app.selection.clear();
+        assert!(app.array_preview_shapes().is_empty());
+        // With a selection and preview on, it yields the non-origin elements.
+        select_first_direct(&mut app, 1);
+        app.productivity.array_rows = 2;
+        app.productivity.array_cols = 2;
+        app.productivity.array_preview = true;
+        assert_eq!(
+            app.array_preview_shapes().len(),
+            3,
+            "4 elements minus origin"
+        );
+        app.productivity.array_preview = false;
+        assert!(app.array_preview_shapes().is_empty());
+    }
+
+    #[test]
+    fn cut_removes_direct_shapes_and_fills_clipboard() {
+        let mut app = App::new();
+        select_first_direct(&mut app, 1);
+        assert_eq!(app.selection.len(), 1);
+        let before = app.scene.len();
+        app.productivity_cut();
+        assert_eq!(
+            app.productivity.clipboard.len(),
+            1,
+            "cut fills the clipboard"
+        );
+        assert_eq!(app.scene.len(), before - 1, "cut removes the direct shape");
+        app.run_command(Command::Undo, None);
+        assert_eq!(app.scene.len(), before, "undo restores the cut shape");
     }
 }
