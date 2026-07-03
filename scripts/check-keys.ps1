@@ -125,17 +125,25 @@ foreach ($f in $files) {
 # --- Optional full-history scan ------------------------------------------------
 if ($History) {
     Write-Output 'check-keys: scanning full git history (this can be slow)...'
-    # Every blob object ever committed. For each, scan its content.
-    $blobLines = git rev-list --objects --all | ForEach-Object { ($_ -split ' ')[0] }
+    # Every object ever committed, as "sha path" pairs. Scan each unique blob, but
+    # skip minified/vendored assets and the excluded dirs by path, the same rationale
+    # as the working-tree scan: their long tokens are third-party code, not secrets.
+    $objects = git rev-list --objects --all
     $seen = @{}
-    foreach ($sha in $blobLines) {
-        if ([string]::IsNullOrWhiteSpace($sha) -or $seen.ContainsKey($sha)) { continue }
+    foreach ($line in $objects) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $parts = $line -split ' ', 2
+        $sha = $parts[0]
+        $path = if ($parts.Count -gt 1) { $parts[1] } else { '' }
+        if ($seen.ContainsKey($sha)) { continue }
         $seen[$sha] = $true
+        if (($path -like '*.min.js') -or ($path -eq 'Cargo.lock') -or
+            ($ExcludeDirs | Where-Object { $path -like "$_*" })) { continue }
         $type = (git cat-file -t $sha 2>$null)
         if ($type -ne 'blob') { continue }
         $content = git cat-file -p $sha 2>$null
         if ($null -eq $content) { continue }
-        Scan-Lines "history:$sha" @($content)
+        Scan-Lines "history:$sha ($path)" @($content)
     }
 }
 
