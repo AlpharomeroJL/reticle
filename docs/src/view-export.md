@@ -75,7 +75,7 @@ PNG export takes one of two paths:
 - A **selection** export, or **any monochrome** export, uses the pure rasterizer
   in the `viewexport` module: a small scanline filler that paints each shape over
   a white page and feeds the crate's dependency-free PNG encoder. It needs no GPU,
-  so it is unit-tested, and it is what makes selection-only and print-mode PNGs
+  so it is unit-tested, and it is what makes selection-only and print-mode PNG images
   possible.
 
 On the web there is no filesystem and no blocking GPU context, so PNG export
