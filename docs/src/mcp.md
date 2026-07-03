@@ -23,7 +23,7 @@ export, render, the editor operations below, and so on) plus three read-only
 Five of the command tools lift the in-app editor's productivity operations to the
 agent surface, so a model can restructure geometry the way a person would with the
 Operations panel (ADR
-[0031](https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0031-agent-editor-ops.md)):
+[0031](https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0031-wave3-agent-command-expansion.md)):
 
 - `boolean_combine` union, intersection, difference, or xor over two or more shapes,
   writing the result to a target layer and deleting the inputs;

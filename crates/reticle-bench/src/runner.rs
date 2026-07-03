@@ -236,6 +236,9 @@ fn snapshot_transcript(session: &Session) -> Transcript {
     Transcript {
         records: session.transcript().to_vec(),
         final_hash: reticle_model::document_hash(session.document()),
+        // The bench runner records commands only; the agent harness's per-iteration
+        // plan log does not apply here.
+        plan: Vec::new(),
     }
 }
 

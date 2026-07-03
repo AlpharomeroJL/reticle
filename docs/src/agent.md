@@ -102,6 +102,21 @@ The source is whatever a caller needs: a channel receiver behind a live UI or HT
 endpoint, or a scripted `RefinementFn` closure in a deterministic test. The loop owns no
 channel of its own, so the same code path serves an interactive session and a reproducible
 convergence test on the mock model.
+## Planning transparency (`PlanStep`)
+
+Before each iteration's proposal, the harness records a `PlanStep`: the iteration's
+goal (the task prompt), the intended tools (the `op` names of the commands the model
+proposed, in order), and the expected checks (the always-on DRC oracle plus the
+task's own checker). These steps accumulate into `Transcript::plan`, a parallel log
+that rides alongside the command records, and the agent panel renders them as a
+Plan section so a viewer can see the agent's stated intent next to what it did.
+
+A plan step is narration, not a contract: nothing enforces that an iteration used
+exactly the tools it listed or that its checks passed. That is deliberate, so the
+stated plan and the recorded outcome can be compared after the fact for failure
+mining. The field is additive and replay-neutral: it carries `#[serde(default)]`, so
+a transcript written before the plan log existed still deserializes (as an empty
+plan), and replay reads only the records and the final hash.
 
 ## Live collaboration (`reticle-agent::collab`)
 

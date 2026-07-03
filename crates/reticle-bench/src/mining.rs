@@ -1310,6 +1310,7 @@ mod tests {
             transcript: Transcript {
                 records,
                 final_hash: 0,
+                plan: Vec::new(),
             },
         }
     }

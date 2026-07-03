@@ -132,6 +132,9 @@ pub fn scripted_default() -> ParsedTranscript {
     let Transcript {
         records,
         final_hash,
+        // The parsed-transcript store carries only records and hash; the plan log is
+        // panel-side narration and is not part of this reduced form.
+        ..
     } = transcript;
     (records, Some(final_hash))
 }
