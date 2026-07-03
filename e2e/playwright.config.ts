@@ -2,21 +2,30 @@ import { defineConfig } from "@playwright/test";
 
 // End-to-end tests for the Reticle browser demo.
 //
-// Two projects exercise the two render paths the app supports (ADR 0009):
+// Three projects:
 //   * webgl2  - the hard gate. navigator.gpu is hidden by an init script so wgpu
 //               takes its WebGL2 fallback on ANY host, GPU or not. The app must
-//               boot and render.
+//               boot and render. Served at root by serve-dist.mjs (port 8080).
 //   * webgpu  - launched with the WebGPU-enabling Chromium flags. Where a real
 //               adapter exists it asserts the WebGPU path; where it does not
 //               (for example Playwright's headless Chromium, which ships without
 //               Dawn) the WebGPU-only assertions skip honestly while the boot
-//               check still runs.
+//               check still runs. Served at root by serve-dist.mjs (port 8080).
+//   * ghpages-subpath - serves the SAME bundle under the `/reticle/` subpath
+//               (serve-subpath.mjs, port 8081), exactly as GitHub Pages does, and
+//               asserts the app boots with no 404 on the js/wasm. A bundle built
+//               without `--public-url /reticle/` emits absolute-root asset refs
+//               that 404 here, so this project catches the front-door base-path
+//               regression BEFORE deploy. It reuses the same boot signal as
+//               webgl2 (main.rs hides #overlay only after the renderer starts).
 //
-// The bundle under test is the Trunk build in ../crates/web/dist, served by the
-// dependency-free serve-dist.mjs.
+// The bundle under test is the Trunk build in ../crates/web/dist. For the subpath
+// project it MUST be built with `--public-url /reticle/` (see `just e2e-subpath`).
 
 const PORT = Number(process.env.PORT || 8080);
+const SUBPATH_PORT = Number(process.env.SUBPATH_PORT || 8081);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
+const SUBPATH_BASE_URL = `http://127.0.0.1:${SUBPATH_PORT}/reticle/`;
 
 // Flags that ask Chromium to expose WebGPU with a software (SwiftShader/Dawn)
 // adapter. They are a no-op where the Chromium build has no WebGPU support.
@@ -46,19 +55,41 @@ export default defineConfig({
   projects: [
     {
       name: "webgl2",
+      testIgnore: /subpath-boot\.spec\.ts/,
       use: { launchOptions: { args: WEBGL2_ARGS } },
     },
     {
       name: "webgpu",
+      testIgnore: /subpath-boot\.spec\.ts/,
       use: { launchOptions: { args: WEBGPU_ARGS } },
     },
+    {
+      // Only the subpath spec runs here, pointed at the /reticle/-mounted server.
+      name: "ghpages-subpath",
+      testMatch: /subpath-boot\.spec\.ts/,
+      use: {
+        baseURL: SUBPATH_BASE_URL,
+        launchOptions: { args: WEBGL2_ARGS },
+      },
+    },
   ],
-  webServer: {
-    command: "node serve-dist.mjs",
-    url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
-    stdout: "pipe",
-    stderr: "pipe",
-  },
+  webServer: [
+    {
+      command: "node serve-dist.mjs",
+      url: BASE_URL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+    {
+      command: "node serve-subpath.mjs",
+      // Wait on the subpath URL so Playwright confirms the mount is live.
+      url: SUBPATH_BASE_URL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  ],
 });
