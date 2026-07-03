@@ -46,6 +46,9 @@ allow = [
     "CC0-1.0",
     "BSL-1.0",
     "OpenSSL",
+    # Mozilla's CA-certificate bundle (webpki-roots), pulled by ureq's rustls TLS
+    # in reticle-agent. A permissive data license for the cert list, not code.
+    "CDLA-Permissive-2.0",
     # Font licenses for the fonts egui bundles (Ubuntu and emoji fonts).
     "OFL-1.1",
     "Ubuntu-font-1.0",
