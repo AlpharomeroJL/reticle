@@ -312,7 +312,7 @@ pub fn document_summary(session: &Session) -> String {
     let doc = session.document();
     let cells: Vec<_> = doc.cells().collect();
     if cells.is_empty() {
-        return "(empty document — no cells yet)".to_owned();
+        return "(empty document, no cells yet)".to_owned();
     }
     let mut out = String::new();
     for cell in cells {
