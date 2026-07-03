@@ -1076,6 +1076,25 @@ mod tests {
     }
 
     #[test]
+    fn spans_scale_nm_to_dbu_equivalent_units() {
+        // Stack entries are nanometers; geometry is DBU. At 2000 DBU per
+        // micron one nanometer is two DBU, so a slab declared at 500 nm and
+        // 200 nm thick must span 1000..1400 world units to stay proportional
+        // to the horizontal geometry.
+        let mut tech = tech_with_stack(vec![StackEntry {
+            layer: LAYER_A,
+            z_bottom_nm: 500,
+            thickness_nm: 200,
+        }]);
+        tech.dbu_per_micron = 2000;
+        let shapes = [rect_shape(LAYER_A, 0, 0, 1600, 100)];
+        let spans = layer_spans(&tech, &shapes);
+        assert_eq!(spans.len(), 1);
+        assert!(approx(spans[0].z_bottom, 1000.0));
+        assert!(approx(spans[0].z_top, 1400.0));
+    }
+
+    #[test]
     fn spans_synthesize_uniform_slabs_in_layer_id_order() {
         // No stack entries: both layers get synthetic slabs. The scene is
         // 1600 DBU wide, so the slab thickness is 1600 / 16 = 100 exactly.
