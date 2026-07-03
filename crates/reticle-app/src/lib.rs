@@ -18,6 +18,8 @@
 //! * [`layers`], the layer table, visibility, and name filter.
 //! * [`selection`], the shape-selection model and layer query.
 //! * [`grid`], grid spacing, snapping, and ruler ticks.
+//! * [`snap`], geometry-aware snapping (vertices, edges, midpoints, centers),
+//!   draggable ruler guides, and the snap-settings state.
 //! * [`labels`], layout and formatting for the canvas text overlay (cell names,
 //!   selection captions, live dimensions).
 //! * [`history`], the [`reticle_model::EditableDocument`] undo/redo wrapper.
@@ -75,6 +77,7 @@ pub mod replay;
 pub mod selection;
 pub mod session;
 pub mod share;
+pub mod snap;
 pub mod store;
 pub mod tool;
 pub mod view3d;
