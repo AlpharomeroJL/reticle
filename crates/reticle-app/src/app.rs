@@ -43,6 +43,7 @@ use crate::selection::{self, Selection};
 use crate::snap::{self, Guide, SnapHint, SnapState};
 use crate::tech_editor::TechEditorState;
 use crate::tool::{Tool, ToolState};
+use crate::tour::{Tour, TourTarget};
 use crate::viewports::{self, Split, Viewports};
 /// A transient status message shown in the bottom bar.
 #[derive(Clone, Debug, Default)]
@@ -55,6 +56,66 @@ impl Status {
     /// Replaces the status message.
     fn set(&mut self, text: impl Into<String>) {
         self.text = text.into();
+    }
+}
+
+/// The button a tour overlay press requested this frame.
+///
+/// Collected inside the overlay closure and applied after it returns so the borrow
+/// of `self` inside the closure ends before the tour state is mutated.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TourAction {
+    /// Advance to the next step (or finish on the last one).
+    Next,
+    /// Skip the rest of the current chapter.
+    Skip,
+    /// Dismiss the tour entirely.
+    Close,
+}
+
+/// The on-screen rectangle for each tour highlight target, measured this frame.
+///
+/// The `ui()` method fills this from the panel and canvas rectangles it already
+/// lays out, so the tour highlights the *actual* control without hard-coding pixel
+/// coordinates. A target left as `None` (not laid out this frame, e.g. a panel
+/// scrolled off) simply draws no highlight box.
+#[derive(Clone, Copy, Debug, Default)]
+struct TourTargets {
+    /// The central canvas rectangle.
+    canvas: Option<EguiRect>,
+    /// The left layer panel rectangle.
+    layers: Option<EguiRect>,
+    /// The top toolbar rectangle.
+    toolbar: Option<EguiRect>,
+    /// The right-hand column rectangle (DRC, net highlight, agent, ops,
+    /// productivity, snap, search, tech, and view/export all live in it).
+    right_column: Option<EguiRect>,
+    /// The minimap rectangle inside the canvas, when the minimap is drawn.
+    minimap: Option<EguiRect>,
+}
+
+impl TourTargets {
+    /// The rectangle to highlight for `target`, or `None` if it was not measured.
+    ///
+    /// Several right-column panels share the column rectangle, because the tour
+    /// points at "the panel on the right" rather than a sub-rectangle that depends
+    /// on scroll position; that keeps the highlight robust.
+    fn rect_for(&self, target: TourTarget) -> Option<EguiRect> {
+        match target {
+            TourTarget::Canvas => self.canvas,
+            TourTarget::LayerPanel => self.layers,
+            TourTarget::Toolbar | TourTarget::DrawTools => self.toolbar,
+            TourTarget::Minimap => self.minimap.or(self.canvas),
+            TourTarget::DrcPanel
+            | TourTarget::NetHighlight
+            | TourTarget::AgentPanel
+            | TourTarget::OpsPanel
+            | TourTarget::ProductivityPanel
+            | TourTarget::SnapPanel
+            | TourTarget::SearchPanel
+            | TourTarget::TechPanel
+            | TourTarget::ViewExportPanel => self.right_column,
+        }
     }
 }
 
@@ -248,6 +309,12 @@ pub struct App {
     /// applied to the egui `Visuals` each frame and the whole struct persists with
     /// the session view state (see [`crate::viewexport`]).
     view_export: crate::viewexport::ViewExport,
+
+    // ---- Lane 4A: first-run tour --------------------------------------------
+    /// The first-run tour state machine (pure; see [`crate::tour`]). Auto-starts on
+    /// a fresh install and is relaunchable from the Help menu. Its "seen" bit
+    /// persists with the session so the automatic tour shows only once.
+    tour: Tour,
 }
 
 /// The view the app opens into.
@@ -404,6 +471,7 @@ impl App {
             frame_meter: FrameMeter::default(),
             start_view,
             view_export: crate::viewexport::ViewExport::new(),
+            tour: Tour::from_seen(tour_already_seen()),
         }
     }
 
@@ -771,7 +839,208 @@ impl App {
             if ui.button("Shortcuts").clicked() {
                 self.keymap_open = !self.keymap_open;
             }
+            self.help_menu(ui);
         });
+    }
+
+    /// The Help menu: relaunches the first-run tour.
+    ///
+    /// "Take the tour" replays the core walkthrough plus the optional Wave 2
+    /// chapter; "Core tour only" replays just the core chapter. Either way the tour
+    /// restarts from the first step (see [`crate::tour::Tour::relaunch`]).
+    fn help_menu(&mut self, ui: &mut egui::Ui) {
+        // egui closes the menu automatically once a button inside it is clicked.
+        ui.menu_button("Help", |ui| {
+            if ui.button("Take the tour").clicked() {
+                self.tour.relaunch(true);
+                self.status.set("Tour started");
+            }
+            if ui.button("Core tour only").clicked() {
+                self.tour.relaunch(false);
+                self.status.set("Core tour started");
+            }
+        });
+    }
+
+    /// Whether the tour counts as seen for persistence.
+    ///
+    /// It is seen unless it is an automatic first-run that has not finished yet, so
+    /// a completed or dismissed first run, and any relaunch, persist `tour_seen =
+    /// true`. That is what stops the automatic tour from ever showing twice.
+    ///
+    /// Native-only: the only caller is [`eframe::App::save`], which is itself gated
+    /// off on wasm (there is no session file to write there).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn tour_seen(&self) -> bool {
+        // Seen unless it is an unfinished first run.
+        !self.tour.is_first_run() || self.tour.is_finished()
+    }
+
+    /// Draws the tour overlay for the current step, if the tour is running.
+    ///
+    /// The overlay is a centered card with the step's title, body, a progress
+    /// readout, and Next/Skip/Close buttons, plus a highlight box drawn around the
+    /// step's target region. It is a no-op when the tour is idle or finished.
+    ///
+    /// `targets` maps each [`TourTarget`] to the on-screen rectangle the app
+    /// measured this frame (a panel rect or the canvas rect); a target with no known
+    /// rectangle simply draws no highlight box. Keeping the rectangles out here means
+    /// the tour never depends on exact pixel coordinates.
+    fn tour_overlay(&mut self, ctx: &egui::Context, targets: &TourTargets) {
+        let Some(step) = self.tour.current().copied() else {
+            return;
+        };
+
+        // Draw the highlight box around the step's target, if its rectangle is known
+        // this frame. A bright stroke on the foreground layer, so it sits over the
+        // panels without stealing input.
+        if let Some(rect) = targets.rect_for(step.target) {
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("tour_highlight"),
+            ));
+            painter.rect_stroke(
+                rect,
+                4.0,
+                Stroke::new(3.0, Color32::from_rgb(255, 196, 0)),
+                StrokeKind::Outside,
+            );
+        }
+
+        // The instruction card. A fixed-width area near the bottom-center so it does
+        // not cover the panel it points at.
+        let (idx, total) = self.tour.progress().unwrap_or((0, 0));
+        let chapter = step.chapter.label();
+        let mut action: Option<TourAction> = None;
+        egui::Area::new(egui::Id::new("tour_card"))
+            .anchor(Align2::CENTER_BOTTOM, Vec2::new(0.0, -32.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style())
+                    .inner_margin(egui::Margin::same(12))
+                    .show(ui, |ui| {
+                        ui.set_max_width(360.0);
+                        ui.horizontal(|ui| {
+                            ui.strong(step.title);
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.weak(format!("{chapter} - {idx}/{total}"));
+                                },
+                            );
+                        });
+                        ui.add_space(4.0);
+                        ui.label(step.body);
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            let last = idx == total;
+                            let next_label = if last { "Done" } else { "Next" };
+                            if ui.button(next_label).clicked() {
+                                action = Some(TourAction::Next);
+                            }
+                            if ui.button("Skip").clicked() {
+                                action = Some(TourAction::Skip);
+                            }
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.button("Close").clicked() {
+                                        action = Some(TourAction::Close);
+                                    }
+                                },
+                            );
+                        });
+                    });
+            });
+
+        match action {
+            Some(TourAction::Next) => self.tour.next(),
+            Some(TourAction::Skip) => self.tour.skip(),
+            Some(TourAction::Close) => self.tour.finish(),
+            None => {}
+        }
+    }
+
+    /// Draws the docked toolbar, status bar, side panels, and central canvas.
+    ///
+    /// Returns the measured canvas rectangle (for the palette/export next frame) and
+    /// the [`TourTargets`] rectangles the running tour highlights. Each panel reports
+    /// its rectangle straight from `Panel::show`, so a highlight tracks the real
+    /// layout even after a resize; the minimap target is the actual minimap panel
+    /// when it is drawn, falling back to the canvas otherwise.
+    fn main_panels(
+        &mut self,
+        ui: &mut egui::Ui,
+        gpu_format: Option<eframe::egui_wgpu::wgpu::TextureFormat>,
+    ) -> (Option<ScreenRect>, TourTargets) {
+        let toolbar = egui::Panel::top("toolbar")
+            .show(ui, |ui| self.toolbar(ui))
+            .response
+            .rect;
+        egui::Panel::bottom("status").show(ui, |ui| {
+            self.status_bar(ui);
+        });
+        let layers = egui::Panel::left("layers")
+            .resizable(true)
+            .default_size(210.0)
+            .show(ui, |ui| self.layer_panel(ui))
+            .response
+            .rect;
+        let right_column = egui::Panel::right("history")
+            .resizable(true)
+            .default_size(240.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.history_panel(ui);
+                        ui.separator();
+                        self.inspector_panel(ui);
+                        ui.separator();
+                        self.drc_panel(ui);
+                        ui.separator();
+                        self.agent_section(ui);
+                        ui.separator();
+                        self.share_section(ui);
+                        ui.separator();
+                        self.ops_panel(ui);
+                        self.productivity_panel(ui);
+                        self.snap_panel(ui);
+                        ui.separator();
+                        self.view_export_panel(ui);
+                        self.search_panel(ui);
+                        ui.separator();
+                        self.tech_editor_panel(ui);
+                    });
+            })
+            .response
+            .rect;
+        let mut canvas_screen: Option<ScreenRect> = None;
+        egui::CentralPanel::default().show(ui, |ui| {
+            canvas_screen = Some(self.canvas(ui, gpu_format));
+        });
+
+        // The minimap rides in the canvas's top-right; highlight the real panel when
+        // it is drawn and the scene has bounds, else fall back to the canvas.
+        let minimap = canvas_screen.and_then(|screen| {
+            if self.minimap_visible
+                && let Some(bounds) = self.scene.bounds()
+                && let Some(layout) = MinimapLayout::compute(&screen, bounds)
+            {
+                Some(egui_rect_of(&layout.panel))
+            } else {
+                None
+            }
+        });
+
+        let targets = TourTargets {
+            canvas: canvas_screen.map(|s| egui_rect_of(&s)),
+            layers: Some(layers),
+            toolbar: Some(toolbar),
+            right_column: Some(right_column),
+            minimap,
+        };
+        (canvas_screen, targets)
     }
 
     /// Draws the left layer-manager panel: filter, per-layer swatch + visibility.
@@ -4217,51 +4486,9 @@ impl eframe::App for App {
         // retained GPU canvas. `None` (e.g. a glow build) falls back to egui painting.
         let gpu_format = frame.wgpu_render_state().map(|state| state.target_format);
 
-        // Cache the canvas rect across panels so the palette/export can use it.
-        let mut canvas_screen: Option<ScreenRect> = None;
-
-        egui::Panel::top("toolbar").show(ui, |ui| {
-            self.toolbar(ui);
-        });
-        egui::Panel::bottom("status").show(ui, |ui| {
-            self.status_bar(ui);
-        });
-        egui::Panel::left("layers")
-            .resizable(true)
-            .default_size(210.0)
-            .show(ui, |ui| {
-                self.layer_panel(ui);
-            });
-        egui::Panel::right("history")
-            .resizable(true)
-            .default_size(240.0)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        self.history_panel(ui);
-                        ui.separator();
-                        self.inspector_panel(ui);
-                        ui.separator();
-                        self.drc_panel(ui);
-                        ui.separator();
-                        self.agent_section(ui);
-                        ui.separator();
-                        self.share_section(ui);
-                        ui.separator();
-                        self.ops_panel(ui);
-                        self.productivity_panel(ui);
-                        self.snap_panel(ui);
-                        ui.separator();
-                        self.view_export_panel(ui);
-                        self.search_panel(ui);
-                        ui.separator();
-                        self.tech_editor_panel(ui);
-                    });
-            });
-        egui::CentralPanel::default().show(ui, |ui| {
-            canvas_screen = Some(self.canvas(ui, gpu_format));
-        });
+        // Draw the docked panels and the canvas, collecting the canvas rect (for the
+        // palette/export) and the tour highlight rectangles.
+        let (canvas_screen, tour_targets) = self.main_panels(ui, gpu_format);
         // Cache the canvas rect so next frame's view/export panel can frame the
         // current view (the panel draws before the canvas is measured).
         self.view_export.last_canvas = canvas_screen;
@@ -4283,6 +4510,10 @@ impl eframe::App for App {
         );
         self.keymap_window(&ctx);
         self.replay_window(&ctx);
+
+        // Draw the first-run tour overlay last so its card and highlight sit over
+        // everything else.
+        self.tour_overlay(&ctx, &tour_targets);
 
         // Keep animating while dragging/measuring so interaction feels live.
         ctx.request_repaint();
@@ -4306,6 +4537,7 @@ impl eframe::App for App {
                 self.grid,
                 self.view_export.theme,
                 &hidden,
+                self.tour_seen(),
             );
             let _ = crate::session::save(&state);
             // The keymap persists alongside the session so rebinds survive exit
@@ -4445,6 +4677,27 @@ fn load_keymap() -> Keymap {
 #[cfg(target_arch = "wasm32")]
 fn load_keymap() -> Keymap {
     Keymap::default()
+}
+
+/// Whether the first-run tour has already been shown, from the persisted session.
+///
+/// On native this reads the `tour_seen` bit out of the saved session file, so the
+/// automatic tour runs only on the very first launch. A missing or unreadable
+/// session counts as not-seen, so a brand-new install still gets the tour.
+#[cfg(not(target_arch = "wasm32"))]
+fn tour_already_seen() -> bool {
+    crate::session::load().is_some_and(|s| s.tour_seen)
+}
+
+/// Whether the first-run tour has already been shown, on the web.
+///
+/// There is no filesystem on `wasm32`, so the flag cannot persist between page
+/// loads. Treat the tour as already seen so it does not reopen on every visit to
+/// the public bundle (which lands on the replay theater anyway); the Help menu can
+/// still relaunch it within a session.
+#[cfg(target_arch = "wasm32")]
+fn tour_already_seen() -> bool {
+    true
 }
 
 /// Converts a canvas [`ScreenRect`] to an egui rectangle.
