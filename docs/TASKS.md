@@ -77,7 +77,7 @@ produce v5.0.0.
 - [~] Lane A: reticle-mcp server, every tool integration-tested over stdio. in-progress @ lane/2a-mcp
 - [~] Lane B: reticle-agent propose-verify-correct harness, mock-model loop tests. in-progress @ lane/2b-agent
 - [~] Lane E: benchmark tiers 1-4, 50 tasks, two-way checker tests. in-progress @ lane/2e-tasks14
-- [~] Lane F: benchmark tier 5 SKY130, 10 tasks, two-way checker tests. in-progress @ lane/2f-tier5
+- [ ] Lane F: benchmark tier 5 SKY130, 10 tasks, two-way checker tests. DEFERRED to Batch 2 (depends on Lane E's checker library; reuses it, so cannot run parallel with E without conflict).
 - [ ] Lane C: agent as CRDT collaborator, atomic transactions, presence, convergence tests. not-started
 - [ ] Lane D: agent panel, live DRC overlay, replay theater, share link, WASM build. not-started
 - [ ] Lane G: failure mining, candidates with provenance, `just bench-promote`. not-started
