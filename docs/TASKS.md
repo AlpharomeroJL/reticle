@@ -70,14 +70,14 @@ produce v5.0.0.
 - [x] Lane E: sky130_fd_sc_hd cell import. done-gate-green, merged. Fetched 5 real cells (network worked), committed 3 minimal to corpus/sky130/ with Apache-2.0 NOTICE; round-trip stable (no importer gaps); DRC subset run with honest findings (fill_1 clean; tap_1/inv_1 flag li.5/li.3/poly.8 from bbox-conservative engine + deck approximations, documented, not tape-out-clean).
 - [x] Lane F: benchmark infrastructure. done-gate-green, merged. reticle-bench: loader, ModelClient + deterministic MockModel, runner (monotonic clock), CheckerRegistry (rect_present/drc_clean/intent, two-way tested), results writer + markdown summary, bin + `just bench-agent`; 3 tier-1 sample tasks; 26 tests.
 - [x] Lane G: demo server. done-gate-green, merged. axum submit/status/cancel enforcing every LimitConfig field (429 rate, 409 per-IP, 503 global, 400 prompt/vocab, budget->cancel); Harness trait + MockHarness + CancelToken; 24 tests incl. 8 abuse tests.
-- [~] Lane H: 3D stack SKY130 thicknesses. in-progress @ lane/1h-stack3d (resuming after the session-limit interruption).
+- [x] Lane H: 3D stack SKY130 thicknesses. done-gate-green, merged. 3D layer stack renders on real SKY130 physical heights (nm-to-DBU scaling verified, met5 thickest at top); GPU golden ran on the RTX 4060 Ti; cross-section test lands cuts in the correct met1/met2 z bands. **Wave 1 complete, ci green.**
 
 ## Wave 2: composition (three batches)
 
-- [ ] Lane A: reticle-mcp server, every tool integration-tested over stdio. not-started
-- [ ] Lane B: reticle-agent propose-verify-correct harness, mock-model loop tests. not-started
-- [ ] Lane E: benchmark tiers 1-4, 50 tasks, two-way checker tests. not-started
-- [ ] Lane F: benchmark tier 5 SKY130, 10 tasks, two-way checker tests. not-started
+- [~] Lane A: reticle-mcp server, every tool integration-tested over stdio. in-progress @ lane/2a-mcp
+- [~] Lane B: reticle-agent propose-verify-correct harness, mock-model loop tests. in-progress @ lane/2b-agent
+- [~] Lane E: benchmark tiers 1-4, 50 tasks, two-way checker tests. in-progress @ lane/2e-tasks14
+- [~] Lane F: benchmark tier 5 SKY130, 10 tasks, two-way checker tests. in-progress @ lane/2f-tier5
 - [ ] Lane C: agent as CRDT collaborator, atomic transactions, presence, convergence tests. not-started
 - [ ] Lane D: agent panel, live DRC overlay, replay theater, share link, WASM build. not-started
 - [ ] Lane G: failure mining, candidates with provenance, `just bench-promote`. not-started
