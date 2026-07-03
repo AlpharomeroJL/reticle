@@ -117,6 +117,30 @@ web-serve:
     cd crates/web; trunk serve index.html
 
 # ---------------------------------------------------------------------------
+# GitHub Pages artifact (the public "front door")
+# ---------------------------------------------------------------------------
+# The site is served under the subpath https://alpharomerojl.github.io/reticle/,
+# so Trunk MUST emit assets under `/reticle/` (via --public-url) or the browser
+# fetches them at absolute root and 404s, hanging the page on the spinner.
+#
+# `deploy-pages` builds the release bundle with the subpath baked in, builds the
+# book, assembles the FULL gh-pages artifact into a fresh scratch/pages/ (web
+# bundle + .nojekyll + book/), and asserts the emitted index.html references
+# `/reticle/`-prefixed assets with no bare `/web-` absolute-root reference left.
+# It never touches git; the orchestrator publishes scratch/pages/ to gh-pages.
+# scratch/ is gitignored, so nothing here is committed.
+deploy-pages:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-pages.ps1
+
+# `smoke-pages` is a DEPLOYED-URL check: it fetches the live index.html, extracts
+# every asset it references, and asserts each returns 200 and sits under the
+# `/reticle/` prefix. It only passes after the orchestrator redeploys the correct
+# artifact; against the currently-broken live site it fails and says why. Pass a
+# different base URL as the argument to point it elsewhere.
+smoke-pages base="https://alpharomerojl.github.io/reticle/":
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-pages.ps1 -BaseUrl {{base}}
+
+# ---------------------------------------------------------------------------
 # End-to-end browser tests (Playwright), its own gate.
 # ---------------------------------------------------------------------------
 # Builds the Trunk demo bundle, then drives it in headless Chromium. Two

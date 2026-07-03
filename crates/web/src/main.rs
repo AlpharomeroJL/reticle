@@ -28,26 +28,56 @@ fn main() {
             .expect("no window")
             .document()
             .expect("no document on window");
-        let canvas = document
+        let canvas = match document
             .get_element_by_id("reticle-canvas")
-            .expect("index.html is missing a #reticle-canvas element")
-            .dyn_into::<web_sys::HtmlCanvasElement>()
-            .expect("#reticle-canvas is not a <canvas>");
+            .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+        {
+            Some(canvas) => canvas,
+            None => {
+                set_overlay_error(
+                    &document,
+                    "the page is missing its #reticle-canvas element",
+                );
+                return;
+            }
+        };
 
-        // Hide the loading overlay once we take over the canvas.
-        if let Some(overlay) = document.get_element_by_id("overlay") {
-            let _ = overlay.set_attribute("style", "display:none");
-        }
-
-        eframe::WebRunner::new()
+        // Start the renderer. Only hide the loading overlay AFTER start resolves
+        // Ok, i.e. the wgpu backend (WebGPU or its WebGL2 fallback) initialized on
+        // the canvas. On Err we surface a visible message rather than panicking
+        // into a blank canvas or leaving the spinner up forever.
+        let result = eframe::WebRunner::new()
             .start(
                 canvas,
                 web_options,
                 Box::new(move |_cc| Ok(Box::new(reticle_app::App::with_start_view(start_view)))),
             )
-            .await
-            .expect("failed to start the Reticle web app");
+            .await;
+
+        match result {
+            Ok(()) => {
+                if let Some(overlay) = document.get_element_by_id("overlay") {
+                    let _ = overlay.set_attribute("style", "display:none");
+                }
+            }
+            Err(err) => {
+                set_overlay_error(&document, &format!("{err:?}"));
+            }
+        }
     });
+}
+
+/// Writes a visible error into the `#status` element (and keeps the overlay up)
+/// so a start failure is reported to the visitor instead of a silent spinner or a
+/// blank canvas. Mirrors the wording used by the failure handler in `index.html`.
+#[cfg(target_arch = "wasm32")]
+fn set_overlay_error(document: &web_sys::Document, message: &str) {
+    if let Some(status) = document.get_element_by_id("status") {
+        status.set_class_name("status error");
+        status.set_text_content(Some(&format!(
+            "Failed to load Reticle: {message}. Check the console."
+        )));
+    }
 }
 
 /// Reads the `?view=` query parameter and maps it to a `reticle_app::StartView`.
