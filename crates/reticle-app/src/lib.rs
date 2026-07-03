@@ -23,10 +23,12 @@
 //! * [`command`], the command-palette catalog and fuzzy filter.
 //! * [`keymap`], rebindable keyboard shortcuts: TOML load/save and conflicts.
 //! * [`drc_panel`], running the DRC engine and formatting its violations.
-//! * `agent_panel` (native only), the agent panel's run state machine and
-//!   narration feed over the `reticle-agent-api` transcript types.
-//! * `replay` (native only), the replay theater: transcript JSONL loading and
-//!   the step/play/pause/speed playback machine over a live session.
+//! * [`agent_panel`], the agent panel's run state machine and narration feed over
+//!   the `reticle-agent-api` transcript types.
+//! * [`replay`], the replay theater: transcript JSONL loading and the
+//!   step/play/pause/speed playback machine over a live session.
+//! * [`store`], the transcript storage seam: filesystem on native, a bundled
+//!   transcript on wasm, so the theater opens on both.
 //! * [`netlight`], cached connectivity extraction for net highlighting.
 //! * [`inspector`], the read-only properties summary of the selection.
 //! * [`fps`], the rolling frame-time meter behind the status-bar fps readout.
@@ -41,12 +43,11 @@
 //! The public [`App`] type is the frozen Wave 0 contract; it is now a real
 //! `eframe::App` built on the modules above.
 
-// The agent panel and replay theater are native-only today. `reticle-agent-api`
-// itself is wasm-buildable (its render command degrades to a clean error on wasm),
-// but the panel and theater window glue still assume the native paths; the web build
-// shows a stub panel note instead. TODO(wave3): un-gate the replay theater for wasm
-// (it is model-free) so the public bundle can open straight into it (ADR 0026).
-#[cfg(not(target_arch = "wasm32"))]
+// The agent panel and replay theater are model-free and now build on wasm too.
+// `reticle-agent-api` is wasm-buildable (its render command degrades to a clean
+// error on wasm), and the theater sources its transcript through `store` (the
+// filesystem on native, a bundled transcript on wasm), so the public web bundle
+// can open straight into a playing theater (ADR 0026).
 pub mod agent_panel;
 pub mod app;
 pub mod camera;
@@ -64,11 +65,11 @@ pub mod layers;
 pub mod measure;
 pub mod minimap;
 pub mod netlight;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod replay;
 pub mod selection;
 pub mod session;
 pub mod share;
+pub mod store;
 pub mod tool;
 pub mod view3d;
 pub mod viewports;

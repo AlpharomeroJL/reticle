@@ -143,17 +143,30 @@ smoke-pages base="https://alpharomerojl.github.io/reticle/":
 # ---------------------------------------------------------------------------
 # End-to-end browser tests (Playwright), its own gate.
 # ---------------------------------------------------------------------------
-# Builds the Trunk demo bundle, then drives it in headless Chromium. Two
-# projects: `webgl2` is the hard gate (WebGPU is hidden so wgpu takes its WebGL2
-# fallback, and the app must boot and render); `webgpu` launches with the
-# WebGPU-enabling flags and asserts the WebGPU path where a real adapter exists,
-# skipping those checks honestly where it does not (Playwright's headless
-# Chromium ships without WebGPU). See e2e/README.md and ADR 0027.
+# Builds the Trunk demo bundle (root paths, served at root), then drives it in
+# headless Chromium. Two projects run here: `webgl2` is the hard gate (WebGPU is
+# hidden so wgpu takes its WebGL2 fallback, and the app must boot and render);
+# `webgpu` launches with the WebGPU-enabling flags and asserts the WebGPU path
+# where a real adapter exists, skipping those checks honestly where it does not
+# (Playwright's headless Chromium ships without WebGPU). The `ghpages-subpath`
+# project is excluded here because it needs the `--public-url /reticle/` build;
+# run it via `just e2e-subpath`. See e2e/README.md and ADR 0027.
 e2e:
     cd crates/web; trunk build index.html
     npm --prefix e2e install
     cd e2e; npx playwright install chromium
-    cd e2e; npx playwright test
+    cd e2e; npx playwright test --project=webgl2 --project=webgpu
+
+# gh-pages subpath boot gate. Builds the bundle WITH `--public-url /reticle/`
+# (the deploy shape) and runs the `ghpages-subpath` Playwright project, which
+# serves that bundle under `/reticle/` and asserts the app boots with no 404 on
+# the js/wasm. This is the fail-before-deploy guard for the base-path regression
+# that broke the front door. A root-path build would 404 here, which is the point.
+e2e-subpath:
+    cd crates/web; trunk build index.html --release --public-url /reticle/
+    npm --prefix e2e install
+    cd e2e; npx playwright install chromium
+    cd e2e; npx playwright test --project=ghpages-subpath
 
 book:
     mdbook build docs
