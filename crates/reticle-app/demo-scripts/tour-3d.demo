@@ -1,0 +1,10 @@
+# tour-3d: open the 3D layer-stack view on the SKY130 cell and orbit the camera so
+# the extruded metal layers read in depth. The orbit is applied per captured frame,
+# so the whole clip is a smooth turn around the stack.
+viewport 1600x1000
+use-case inspect-cell
+wait 20
+view3d on
+wait 8
+orbit 4 0
+capture 90 20

@@ -1,0 +1,23 @@
+# tour-edit: the drawing and editing tools on the build-with-tools starter layout.
+# Draw a polygon, drag one of its vertices, draw a second polygon, boolean-union the
+# two, then array-duplicate the result. Each edit is a real undoable operation.
+viewport 1600x1000
+use-case build
+wait 20
+add-poly 300,300 900,300 900,700 300,700
+wait 4
+capture 30 20
+vertex-move 3 2 350,300
+wait 4
+capture 30 20
+add-poly 650,500 1250,500 1250,950 650,950
+wait 4
+capture 30 20
+select 3 4
+union
+wait 4
+capture 35 20
+select 3
+array 2 1 1200
+wait 6
+capture 45 20

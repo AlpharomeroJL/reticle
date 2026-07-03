@@ -1,0 +1,8 @@
+# tour-agent: the replay theater plays a recorded propose-verify-correct run. The
+# narration feed advances and the violation counter is driven toward zero while the
+# editor panels stay visible around it. The theater opens playing within the first
+# two seconds.
+viewport 1600x1000
+use-case watch-agent
+wait 16
+capture 150 20

@@ -342,6 +342,12 @@ pub struct App {
     /// for the 3D tour. Ignored outside capture mode (the window shows normally).
     #[cfg(not(target_arch = "wasm32"))]
     demo_show_3d: bool,
+
+    /// Whether a demo capture wants the right column scrolled to the search panel (the
+    /// filter-query bar and outline tree), which otherwise sits below the fold. Set by
+    /// a `filter`/`outline-locate` step so the query tour shows the bar it is driving.
+    #[cfg(not(target_arch = "wasm32"))]
+    demo_focus_search: bool,
 }
 
 /// The view the app opens into.
@@ -509,6 +515,8 @@ impl App {
             demo: None,
             #[cfg(not(target_arch = "wasm32"))]
             demo_show_3d: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            demo_focus_search: false,
         }
     }
 
@@ -636,6 +644,7 @@ impl App {
     /// capture shows the real feature rather than a staged mock. Scheduler-only steps
     /// (`Wait`/`Capture`/`Snap`/`Orbit`) never reach here.
     #[cfg(not(target_arch = "wasm32"))]
+    #[allow(clippy::too_many_lines)] // one arm per demo verb reads better flat
     fn apply_demo_step(&mut self, step: &crate::demoscript::Step) {
         use crate::demoscript::Step;
         match step {
@@ -665,16 +674,114 @@ impl App {
                     self.view3d.reset();
                 }
             }
-            // Editing, query, and free camera steps are added in the follow-up task;
-            // until then they log rather than silently no-op.
-            Step::Filter(_)
-            | Step::OutlineLocate(_)
-            | Step::AddPoly(_)
-            | Step::VertexMove { .. }
-            | Step::Union
-            | Step::Array { .. }
-            | Step::Zoom(_)
-            | Step::Pan(..) => {
+            Step::Filter(query) => {
+                self.demo_focus_search = true;
+                self.search.query_text.clone_from(query);
+                self.run_filter_query();
+            }
+            Step::OutlineLocate(path) => {
+                self.demo_focus_search = true;
+                let target = self
+                    .search
+                    .outline
+                    .nodes()
+                    .iter()
+                    .find(|n| n.locate.is_some() && n.label.contains(path.as_str()))
+                    .and_then(|n| n.locate);
+                match target {
+                    Some(rect) => self.search.pending_locate = Some(rect),
+                    None => eprintln!("demo: outline-locate found no node matching `{path}`"),
+                }
+            }
+            Step::AddPoly(points) => {
+                let verts: Vec<Point> = points
+                    .iter()
+                    .map(|(x, y)| {
+                        Point::new(
+                            i32::try_from(*x).unwrap_or(0),
+                            i32::try_from(*y).unwrap_or(0),
+                        )
+                    })
+                    .collect();
+                // Drawn on met1 (68/20) so it can boolean-union with the starter met1
+                // geometry the build scenario seeds.
+                let shape = DrawShape::new(
+                    LayerId::new(68, 20),
+                    ShapeKind::Polygon(reticle_geometry::Polygon::new(verts)),
+                );
+                if self
+                    .history
+                    .apply(reticle_model::Edit::AddShape {
+                        cell: self.top_cell.clone(),
+                        shape,
+                    })
+                    .is_ok()
+                {
+                    self.rebuild_scene();
+                }
+            }
+            Step::VertexMove {
+                shape,
+                vertex,
+                delta,
+            } => {
+                if let Some(scene_shape) = self.scene.shapes().get(*shape) {
+                    let kind = scene_shape.kind.clone();
+                    let (verts, _closed) = crate::draw::editable_vertices(&kind);
+                    if let Some(v) = verts.get(*vertex) {
+                        let to = Point::new(
+                            v.x + i32::try_from(delta.0).unwrap_or(0),
+                            v.y + i32::try_from(delta.1).unwrap_or(0),
+                        );
+                        let moved = crate::draw::move_vertex(&verts, *vertex, to);
+                        self.replace_shape_vertices(*shape, moved, "Moved vertex");
+                    }
+                }
+            }
+            Step::Union => {
+                // Mirror the interactive boolean path: collect the selection, build the
+                // edits, then apply them as one group and rebuild derived state.
+                let selection: Vec<usize> = self.selection.iter().collect();
+                let editable = self.editable_shape_count();
+                let top = self.top_cell.clone();
+                let edits = crate::ops::boolean_edits(
+                    crate::ops::BoolKind::Union,
+                    self.scene.shapes(),
+                    &selection,
+                    &top,
+                    editable,
+                );
+                if !edits.is_empty() && self.history.apply_group(edits).is_ok() {
+                    self.rebuild_scene();
+                }
+            }
+            Step::Array { cols, rows, pitch } => {
+                let direct = self.selected_direct_shapes();
+                if !direct.is_empty() {
+                    let shapes: Vec<DrawShape> = direct.iter().map(|(_, s)| s.clone()).collect();
+                    let pitch = i32::try_from(*pitch).unwrap_or(0);
+                    let arrayed =
+                        crate::productivity::array_shapes(&shapes, *rows, *cols, pitch, pitch);
+                    // Element (0,0) reproduces the originals, which already exist, so
+                    // only the remaining copies are added.
+                    let top = self.top_cell.clone();
+                    let edits: Vec<reticle_model::Edit> = arrayed
+                        .into_iter()
+                        .skip(shapes.len())
+                        .map(|shape| reticle_model::Edit::AddShape {
+                            cell: top.clone(),
+                            shape,
+                        })
+                        .collect();
+                    if !edits.is_empty() && self.history.apply_group(edits).is_ok() {
+                        self.rebuild_scene();
+                        // Reframe so the new array copies are on screen.
+                        self.fit_requested = true;
+                    }
+                }
+            }
+            // Free camera nudges are not used by any committed script yet.
+            Step::Zoom(_) | Step::Pan(..) => {
                 eprintln!("demo: step {step:?} not yet implemented");
             }
             // Handled by the scheduler, never dispatched as an action.
@@ -1260,6 +1367,12 @@ impl App {
                         self.snap_panel(ui);
                         ui.separator();
                         self.view_export_panel(ui);
+                        // During the query tour, scroll the column so the filter bar
+                        // and outline tree (otherwise below the fold) are on screen.
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if self.demo_focus_search {
+                            ui.scroll_to_cursor(Some(egui::Align::TOP));
+                        }
                         self.search_panel(ui);
                         ui.separator();
                         self.tech_editor_panel(ui);
