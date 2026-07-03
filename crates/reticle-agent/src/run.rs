@@ -47,6 +47,38 @@ impl Default for LoopOptions {
     }
 }
 
+/// Which backend produced a run, stamped onto the [`ResultRecord`].
+///
+/// Keeps a mock run, a local (Ollama) run, and a frontier (`anthropic`) run distinct in
+/// the results, so a summary never conflates them. The `model` id already lives on the
+/// record via [`ModelClient::id`]; this adds the backend family and an optional
+/// quantization the model id alone does not carry.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Provenance {
+    /// The backend family: `"mock"`, `"ollama"`, `"anthropic"`, or another label.
+    pub backend: String,
+    /// The model's quantization, when known (for example `"Q4_K_M"`); `None` otherwise.
+    pub quantization: Option<String>,
+}
+
+impl Provenance {
+    /// A provenance with just a backend label and no quantization.
+    #[must_use]
+    pub fn new(backend: impl Into<String>) -> Self {
+        Self {
+            backend: backend.into(),
+            quantization: None,
+        }
+    }
+
+    /// Sets the quantization label.
+    #[must_use]
+    pub fn with_quantization(mut self, quantization: impl Into<String>) -> Self {
+        self.quantization = Some(quantization.into());
+        self
+    }
+}
+
 /// The paths of the four artifacts a run writes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Artifacts {
@@ -124,6 +156,10 @@ impl std::error::Error for LoopError {}
 /// caller-provided duration in milliseconds (the CLI measures real time; tests pass a
 /// fixed value so records are reproducible).
 ///
+/// `provenance` labels which backend produced the run (see [`Provenance`]); it is
+/// stamped straight onto the [`ResultRecord`] so a mock, a local, and a frontier run are
+/// never conflated.
+///
 /// # Errors
 ///
 /// Returns [`LoopError::Technology`] or [`LoopError::UnknownChecker`] on a setup
@@ -139,6 +175,7 @@ pub fn run_agent_task<M: ModelClient>(
     options: LoopOptions,
     out_dir: &Path,
     wall_ms: u64,
+    provenance: &Provenance,
     mut context_hook: impl FnMut(&mut M, &Session),
 ) -> Result<RunOutcome, LoopError> {
     let checker = registry
@@ -177,6 +214,8 @@ pub fn run_agent_task<M: ModelClient>(
         first_proposal_violations: loop_result.first_proposal_violations,
         final_violations: loop_result.final_violations,
         wall_ms,
+        backend: provenance.backend.clone(),
+        quantization: provenance.quantization.clone(),
     };
 
     let (artifacts, render_note) = write_artifacts(task, &session, &record, out_dir)?;
@@ -611,6 +650,7 @@ mod tests {
             },
             &out_dir,
             0,
+            &crate::run::Provenance::new("mock"),
             |_, _| {},
         )
         .expect("run");
@@ -638,6 +678,7 @@ mod tests {
             LoopOptions::default(),
             &out_dir,
             0,
+            &crate::run::Provenance::new("mock"),
             |_, _| {},
         )
         .expect("run");
@@ -682,6 +723,7 @@ mod tests {
             LoopOptions::default(),
             &out_dir,
             0,
+            &crate::run::Provenance::new("mock"),
             |_, _| {},
         )
         .expect("run");
@@ -713,6 +755,7 @@ mod tests {
             LoopOptions::default(),
             &out_dir,
             0,
+            &crate::run::Provenance::new("mock"),
             |_model, session| {
                 hook_calls += 1;
                 // On the first call the document is still empty.
@@ -774,6 +817,7 @@ mod tests {
             LoopOptions::default(),
             &out_dir,
             0,
+            &crate::run::Provenance::new("anthropic"),
             // Drive the real document-context path the CLI uses.
             |m, session| m.set_document_context(document_summary(session)),
         )
@@ -803,6 +847,167 @@ mod tests {
     }
 
     #[test]
+    fn ollama_backend_drives_loop_end_to_end_and_scrubs_key() {
+        use crate::ollama::OllamaModel;
+        use crate::redact::ApiKey;
+
+        // A distinctive optional key that would be unmistakable if it leaked.
+        const KEY: &str = "sk-local-LEAKTEST-0123456789abcdef";
+        // A recorded OpenAI-compatible response: an emit_commands tool call whose
+        // `arguments` are a JSON string (as OpenAI encodes them) with a clean batch.
+        let args = serde_json::json!({
+            "commands": [
+                { "op": "create_cell", "name": "top" },
+                { "op": "add_rect", "cell": "top",
+                  "layer": { "layer": 68, "datatype": 20 },
+                  "rect": { "min": { "x": 0, "y": 0 }, "max": { "x": 500, "y": 500 } } }
+            ]
+        })
+        .to_string();
+        let response = serde_json::json!({
+            "choices": [ { "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [ { "type": "function", "function": {
+                    "name": "emit_commands",
+                    "arguments": args
+                }}]
+            }}]
+        })
+        .to_string();
+
+        let mut model = OllamaModel::for_test(
+            Some(ApiKey::from_raw(KEY)),
+            "http://localhost:11434/v1",
+            "gpt-oss:16k",
+        )
+        .with_transport(Box::new(CannedTransport(response)));
+        let out_dir = unique_dir("ollama-e2e");
+        let outcome = run_agent_task(
+            &drc_task(),
+            &mut model,
+            &CheckerRegistry::default(),
+            "",
+            "0.1.0",
+            LoopOptions::default(),
+            &out_dir,
+            0,
+            &crate::run::Provenance::new("ollama").with_quantization("Q4_K_M"),
+            // Drive the real document-context path the CLI uses.
+            |m, session| m.set_document_context(document_summary(session)),
+        )
+        .expect("run");
+
+        assert!(
+            outcome.record.success,
+            "the canned clean batch should pass drc_clean"
+        );
+        // Provenance was stamped onto the record.
+        assert_eq!(outcome.record.backend, "ollama");
+        assert_eq!(outcome.record.quantization.as_deref(), Some("Q4_K_M"));
+        assert_eq!(outcome.record.model, "gpt-oss:16k");
+
+        // The optional key must not appear in ANY written artifact.
+        for path in [
+            &outcome.artifacts.transcript,
+            &outcome.artifacts.gds,
+            &outcome.artifacts.result,
+        ] {
+            let bytes = std::fs::read(path).expect("read artifact");
+            let needle = KEY.as_bytes();
+            let leaked = bytes.windows(needle.len()).any(|w| w == needle);
+            assert!(!leaked, "optional key leaked into {}", path.display());
+        }
+        cleanup(&out_dir);
+    }
+
+    #[test]
+    fn ollama_backend_text_array_fallback_drives_loop() {
+        use crate::ollama::OllamaModel;
+
+        // A recorded response where the model ignored tool_choice and answered in prose
+        // with a JSON command array in `content` (the fallback path).
+        let response = serde_json::json!({
+            "choices": [ { "message": {
+                "role": "assistant",
+                "content": "Here is the batch: [\
+                    {\"op\":\"create_cell\",\"name\":\"top\"},\
+                    {\"op\":\"add_rect\",\"cell\":\"top\",\
+                     \"layer\":{\"layer\":68,\"datatype\":20},\
+                     \"rect\":{\"min\":{\"x\":0,\"y\":0},\"max\":{\"x\":500,\"y\":500}}}\
+                ] applied now."
+            }}]
+        })
+        .to_string();
+
+        let mut model =
+            OllamaModel::for_test(None, "http://localhost:11434/v1", "qwen2.5-coder:16k")
+                .with_transport(Box::new(CannedTransport(response)));
+        let out_dir = unique_dir("ollama-fallback");
+        let outcome = run_agent_task(
+            &drc_task(),
+            &mut model,
+            &CheckerRegistry::default(),
+            "",
+            "0.1.0",
+            LoopOptions::default(),
+            &out_dir,
+            0,
+            &crate::run::Provenance::new("ollama"),
+            |m, session| m.set_document_context(document_summary(session)),
+        )
+        .expect("run");
+
+        assert!(
+            outcome.record.success,
+            "the text-array fallback batch should pass drc_clean"
+        );
+        cleanup(&out_dir);
+    }
+
+    #[test]
+    fn ollama_backend_error_body_yields_failure_not_panic() {
+        use crate::ollama::OllamaModel;
+
+        // A recorded OpenAI-compatible error body (non-2xx shape). The loop must record a
+        // failure (no commands applied), never panic.
+        let response = serde_json::json!({
+            "error": { "type": "invalid_request_error", "message": "model not found" }
+        })
+        .to_string();
+
+        let mut model = OllamaModel::for_test(None, "http://localhost:11434/v1", "missing:16k")
+            .with_transport(Box::new(CannedTransport(response)));
+        let out_dir = unique_dir("ollama-error");
+        let outcome = run_agent_task(
+            &drc_task(),
+            &mut model,
+            &CheckerRegistry::default(),
+            "",
+            "0.1.0",
+            LoopOptions::default(),
+            &out_dir,
+            0,
+            &crate::run::Provenance::new("ollama"),
+            |m, session| m.set_document_context(document_summary(session)),
+        )
+        .expect("run");
+
+        assert!(
+            !outcome.record.success,
+            "an error body must be recorded as a failure"
+        );
+        // The model surfaced a scrubbed error describing the API failure.
+        assert!(
+            model
+                .last_error()
+                .is_some_and(|e| e.contains("invalid_request_error")),
+            "the API error should be surfaced on last_error"
+        );
+        cleanup(&out_dir);
+    }
+
+    #[test]
     fn unknown_checker_is_an_error() {
         let task = BenchTask {
             checker: "no_such".into(),
@@ -819,6 +1024,7 @@ mod tests {
             LoopOptions::default(),
             &out_dir,
             0,
+            &crate::run::Provenance::new("mock"),
             |_, _| {},
         )
         .expect_err("missing checker");
