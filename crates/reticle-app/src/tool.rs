@@ -22,6 +22,18 @@ pub enum Tool {
     Measure,
     /// Define a cross-section cut line from two clicked points.
     CutLine,
+    /// Draw an axis-aligned rectangle by dragging (shift squares it, alt/ctrl draws
+    /// from the center).
+    DrawRect,
+    /// Draw a polygon by clicking to place vertices, closing on a double-click or
+    /// Enter.
+    DrawPolygon,
+    /// Draw a path (wire) by clicking to place points, finishing on a double-click or
+    /// Enter, with a configurable width and end cap.
+    DrawPath,
+    /// Edit the vertices of the selected shape: drag a vertex, insert one on a
+    /// segment, or delete one.
+    EditVertex,
 }
 
 impl Tool {
@@ -33,13 +45,36 @@ impl Tool {
             Self::Pan => "Pan",
             Self::Measure => "Measure",
             Self::CutLine => "Cut",
+            Self::DrawRect => "Rect",
+            Self::DrawPolygon => "Polygon",
+            Self::DrawPath => "Path",
+            Self::EditVertex => "Vertices",
         }
     }
 
     /// Every tool, in toolbar order.
     #[must_use]
-    pub fn all() -> [Tool; 4] {
-        [Tool::Select, Tool::Pan, Tool::Measure, Tool::CutLine]
+    pub fn all() -> [Tool; 8] {
+        [
+            Tool::Select,
+            Tool::Pan,
+            Tool::Measure,
+            Tool::CutLine,
+            Tool::DrawRect,
+            Tool::DrawPolygon,
+            Tool::DrawPath,
+            Tool::EditVertex,
+        ]
+    }
+
+    /// Whether this is one of the drawing or vertex-editing tools, so the app knows
+    /// to reset its in-progress [`DrawState`](crate::draw::DrawState) when leaving it.
+    #[must_use]
+    pub fn is_draw(self) -> bool {
+        matches!(
+            self,
+            Self::DrawRect | Self::DrawPolygon | Self::DrawPath | Self::EditVertex
+        )
     }
 }
 
