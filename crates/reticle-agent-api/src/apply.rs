@@ -651,23 +651,39 @@ impl Session {
         let top = self.top_cell_name().ok_or_else(|| {
             AgentError::new(ErrorCode::InvalidArgument, "document has no cell to render")
         })?;
-        let Some(ctx) = reticle_render::WgpuContext::new_blocking() else {
-            return Err(AgentError::new(
+        // Offscreen rendering needs a blocking GPU context, which exists only on
+        // native (`WgpuContext::new_blocking` is `#[cfg(not(wasm32))]`). On wasm the
+        // command degrades to a clean engine error so the crate still compiles and a
+        // wasm host can report "unsupported" instead of failing to build.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let Some(ctx) = reticle_render::WgpuContext::new_blocking() else {
+                return Err(AgentError::new(
+                    ErrorCode::EngineError,
+                    "no GPU adapter available for rendering",
+                ));
+            };
+            let camera = framing_camera(to_rect(region), width, height);
+            let mut renderer = reticle_render::WgpuRenderer::new();
+            let rgba = renderer.render_document_offscreen(
+                &ctx,
+                self.document(),
+                &top,
+                &camera,
+                (width, height),
+            );
+            let png = encode_png(&rgba, width, height)?;
+            Ok(self.blob(png))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // `region` and `top` are consumed only by the native render path above.
+            let _ = (region, top);
+            Err(AgentError::new(
                 ErrorCode::EngineError,
-                "no GPU adapter available for rendering",
-            ));
-        };
-        let camera = framing_camera(to_rect(region), width, height);
-        let mut renderer = reticle_render::WgpuRenderer::new();
-        let rgba = renderer.render_document_offscreen(
-            &ctx,
-            self.document(),
-            &top,
-            &camera,
-            (width, height),
-        );
-        let png = encode_png(&rgba, width, height)?;
-        Ok(self.blob(png))
+                "offscreen rendering is not available on wasm (no blocking GPU context)",
+            ))
+        }
     }
 
     // ----- session persistence ---------------------------------------------
@@ -955,6 +971,7 @@ fn parse_expected_netlist(source: &str) -> Result<reticle_extract::Netlist, Agen
 
 /// A camera that frames `bbox` in a `width` x `height` image with a small margin,
 /// mirroring the CLI's offscreen framing.
+#[cfg(not(target_arch = "wasm32"))]
 fn framing_camera(bbox: Rect, width: u32, height: u32) -> reticle_model::Camera {
     /// Fraction of the viewport left empty around the design.
     const MARGIN: f32 = 0.05;
@@ -986,6 +1003,7 @@ fn framing_camera(bbox: Rect, width: u32, height: u32) -> reticle_model::Camera 
 }
 
 /// Encodes tightly packed RGBA8 `pixels` as PNG bytes.
+#[cfg(not(target_arch = "wasm32"))]
 fn encode_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, AgentError> {
     let buffer = image::RgbaImage::from_raw(width, height, pixels.to_vec())
         .ok_or_else(|| AgentError::new(ErrorCode::EngineError, "rendered buffer size mismatch"))?;
