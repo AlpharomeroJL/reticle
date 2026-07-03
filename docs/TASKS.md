@@ -88,14 +88,20 @@ produce v5.0.0.
 
 ## Wave 3: whole-system validation and release (serial)
 
-- [ ] Live wiring test: server drives harness, browser watches via sync, cancel works. not-started
-- [ ] Full benchmark run (live model if key present, else mock, honestly labeled). not-started
-- [ ] Scale proof through the headless pipeline into PERF.md. not-started
-- [ ] Flagship media via capture-media. not-started
-- [ ] mdbook chapters and README positioning refresh. not-started
-- [ ] QA gauntlet: ci, e2e both modes, replay determinism, abuse tests, fresh-clone smoke, leak/attribution greps. not-started
+- [x] Live wiring test: server drives harness, browser watches via sync, cancel works. done (c08cc2b). Two integration tests in reticle-demo-server: a WebSocket watcher decodes the real AgentHarness CRDT frames and materializes the drawn geometry; and the DemoServer drives the real harness on submit, then POST /cancel moves the running session to Cancelled server-side.
+- [x] Full benchmark run (live model if key present, else mock, honestly labeled). done (4090684). No ANTHROPIC_API_KEY present, so the deterministic MockModel ran all 63 tasks; the mock solves the 3 scripted sample tasks (3/63), the other 60 need a real model. Recorded in docs/src/benchmarks.md as a machinery baseline, explicitly not a model score.
+- [x] Scale proof through the headless pipeline into PERF.md. done (ba73217). 4,194,304-leaf hierarchical layout: import 37 ms / 7.5 MB, offscreen render to 2560x1440 809 ms / 594 MB (clean); DRC and extract reported with the honest caveat that they are dominated by emitting per-item reports. New scripts/measure-run.ps1.
+- [x] Flagship media via capture-media. done (05f02ad). xtask capture-media agent replays the theater transcript offscreen, producing assets/agent.gif (build, flag, correct arc with live DRC markers) and assets/agent.png (flagged-violation still).
+- [x] mdbook chapters and README positioning refresh. done (af9032f). New agent and MCP chapters plus the benchmark chapter; README v5.0.0 positioning refresh with the agent thesis, agent.gif, agent feature/how-it-works, agent crates in the graph, scale numbers, and demo-up/bench-agent/e2e quickstart.
+- [ ] QA gauntlet: ci, e2e both modes, replay determinism, abuse tests, fresh-clone smoke, leak/attribution greps. in-progress
 - [ ] Final skeptical STATUS re-audit. not-started
 - [ ] Release v5.0.0. not-started
+
+Known follow-up (documented, honest): the in-app replay theater window is native-only
+on wasm (35 cfg gates in reticle-app entangle it with fs-based session persistence),
+so the public browser bundle opens to the editor, not the theater. Disclosed in
+deployment.md and ADR 0026; the agent story on the web is the agent.gif plus the demo
+server. Un-gating the theater for wasm is a follow-up.
 
 ## Frozen-surface manifest (recorded at Wave 0 merge)
 
