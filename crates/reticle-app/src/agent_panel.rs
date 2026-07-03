@@ -35,8 +35,55 @@ pub const AGENT_CELL: &str = "AGENT_DEMO";
 /// Maximum narration lines kept; older lines are dropped from the front.
 const MAX_NARRATION: usize = 200;
 
+/// Maximum conversation entries kept; older turns are dropped from the front.
+const MAX_CONVERSATION: usize = 200;
+
 /// Default pacing of the feed, in seconds between emitted steps.
 const DEFAULT_STEP_PERIOD: f32 = 0.6;
+
+/// Who authored a [`ConversationEntry`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Speaker {
+    /// A message the user typed (the initial prompt or a follow-up instruction).
+    User,
+    /// A line the agent (or the panel narrating on its behalf) produced.
+    Agent,
+}
+
+/// One turn in the panel's conversation transcript.
+///
+/// This is the UI-side record of the back-and-forth: the user's prompts and
+/// follow-up instructions interleaved with the agent's status lines. It is
+/// distinct from the engine [`Transcript`] (which records applied commands and
+/// their outcomes); a conversation entry is human-facing text, not a replayable
+/// command.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ConversationEntry {
+    /// Who said it.
+    pub speaker: Speaker,
+    /// The message text.
+    pub text: String,
+}
+
+impl ConversationEntry {
+    /// A user turn carrying `text`.
+    #[must_use]
+    pub fn user(text: impl Into<String>) -> Self {
+        Self {
+            speaker: Speaker::User,
+            text: text.into(),
+        }
+    }
+
+    /// An agent turn carrying `text`.
+    #[must_use]
+    pub fn agent(text: impl Into<String>) -> Self {
+        Self {
+            speaker: Speaker::Agent,
+            text: text.into(),
+        }
+    }
+}
 
 /// The agent panel's run state machine.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -69,6 +116,8 @@ pub struct AgentStep {
 pub struct AgentPanelState {
     /// The prompt text the user is editing.
     pub prompt: String,
+    /// The follow-up instruction the user is composing in conversation mode.
+    pub followup: String,
     state: RunState,
     feed: Vec<AgentStep>,
     next: usize,
@@ -78,6 +127,8 @@ pub struct AgentPanelState {
     seconds_per_step: f32,
     acc: f32,
     transcript: Option<Transcript>,
+    conversation: Vec<ConversationEntry>,
+    followups: Vec<String>,
 }
 
 impl Default for AgentPanelState {
@@ -92,6 +143,7 @@ impl AgentPanelState {
     pub fn new() -> Self {
         Self {
             prompt: String::new(),
+            followup: String::new(),
             state: RunState::Idle,
             feed: Vec::new(),
             next: 0,
@@ -101,13 +153,22 @@ impl AgentPanelState {
             seconds_per_step: DEFAULT_STEP_PERIOD,
             acc: 0.0,
             transcript: None,
+            conversation: Vec::new(),
+            followups: Vec::new(),
         }
     }
 
     /// Starts a scripted run for the current prompt (see [`scripted_run`]).
+    ///
+    /// The prompt opens the conversation as the first user turn, so the
+    /// conversation transcript begins with what was asked.
     pub fn start(&mut self) {
         let (transcript, feed) = scripted_run(&self.prompt);
+        let opening = self.prompt.clone();
         self.begin(feed, Some(transcript));
+        if !opening.trim().is_empty() {
+            self.push_conversation(ConversationEntry::user(opening));
+        }
     }
 
     /// Starts a run that narrates an existing transcript instead of the script.
@@ -120,6 +181,8 @@ impl AgentPanelState {
     ///
     /// The accumulator starts one full period in credit so the first step is
     /// emitted by the very next [`tick`](Self::tick) rather than after a delay.
+    /// The conversation transcript is cleared so a fresh run starts a fresh
+    /// conversation.
     fn begin(&mut self, feed: Vec<AgentStep>, transcript: Option<Transcript>) {
         self.feed = feed;
         self.next = 0;
@@ -129,6 +192,8 @@ impl AgentPanelState {
         self.latest = None;
         self.cursor = None;
         self.transcript = transcript;
+        self.conversation.clear();
+        self.followups.clear();
         self.state = RunState::Running;
     }
 
@@ -143,6 +208,81 @@ impl AgentPanelState {
         if let Some(status) = &mut self.latest {
             status.running = false;
         }
+    }
+
+    // ----- conversation mode -------------------------------------------------
+
+    /// Submits the follow-up instruction in [`followup`](Self::followup) to the
+    /// running session as a new constraint, appending it to the conversation and
+    /// clearing the input box.
+    ///
+    /// The message is appended as a user turn, followed by an agent
+    /// acknowledgement turn, and the instruction is recorded in the follow-up
+    /// list a Wave-3 scoped harness will forward to the live agent. On the UI
+    /// side today that acknowledgement is scripted, because the panel narrates a
+    /// recorded transcript rather than driving a live model; the honest seam is
+    /// [`followups`](Self::followups), which a live harness consumes.
+    ///
+    /// A follow-up is only accepted while a run is [`Running`](RunState::Running)
+    /// (an instruction has no session to attach to otherwise) and only when the
+    /// trimmed text is non-empty. Returns the appended instruction on success,
+    /// `None` when it was rejected (nothing was mutated in that case).
+    pub fn submit_followup(&mut self) -> Option<String> {
+        let text = self.followup.trim().to_owned();
+        if text.is_empty() || self.state != RunState::Running {
+            return None;
+        }
+        self.followup.clear();
+        self.push_conversation(ConversationEntry::user(text.clone()));
+        self.push_conversation(ConversationEntry::agent(format!(
+            "acknowledged; folding \"{text}\" into the run as a new constraint"
+        )));
+        self.push_line(format!("follow-up: {text}"));
+        self.followups.push(text.clone());
+        Some(text)
+    }
+
+    /// Appends `entry` to the conversation, dropping the oldest turn above
+    /// [`MAX_CONVERSATION`].
+    fn push_conversation(&mut self, entry: ConversationEntry) {
+        self.conversation.push(entry);
+        if self.conversation.len() > MAX_CONVERSATION {
+            let excess = self.conversation.len() - MAX_CONVERSATION;
+            self.conversation.drain(..excess);
+        }
+    }
+
+    /// Appends an agent-authored line to the conversation transcript.
+    ///
+    /// The app uses this to surface each verify result (DRC clean or a violation
+    /// count) as a conversational turn, so the transcript reads as a dialogue and
+    /// not just a raw command log.
+    pub fn note_agent(&mut self, text: impl Into<String>) {
+        self.push_conversation(ConversationEntry::agent(text));
+    }
+
+    /// Clears the conversation transcript, the follow-up list, and the input box.
+    pub fn clear_conversation(&mut self) {
+        self.conversation.clear();
+        self.followups.clear();
+        self.followup.clear();
+    }
+
+    /// The conversation transcript so far, oldest turn first.
+    #[must_use]
+    pub fn conversation(&self) -> &[ConversationEntry] {
+        &self.conversation
+    }
+
+    /// The follow-up instructions submitted during this run, in order.
+    ///
+    /// This is the Wave-3 seam: a live scoped harness reads these and forwards
+    /// them to the model as additional constraints on the running session. The
+    /// UI records them here regardless, so the affordance is real even before
+    /// that harness exists.
+    #[must_use]
+    pub fn followups(&self) -> &[String] {
+        &self.followups
     }
 
     /// Advances the run by `dt` seconds, emitting any steps that come due.
@@ -805,6 +945,99 @@ mod tests {
         drain(&mut panel);
         assert_eq!(panel.progress().0, transcript.records.len());
         assert!(panel.transcript().is_some());
+    }
+
+    #[test]
+    fn start_opens_the_conversation_with_the_prompt() {
+        let mut panel = AgentPanelState::new();
+        panel.prompt = "draw a clean wire".to_owned();
+        panel.start();
+        // The prompt is the first (user) conversation turn.
+        let convo = panel.conversation();
+        assert_eq!(convo.len(), 1);
+        assert_eq!(convo[0].speaker, Speaker::User);
+        assert_eq!(convo[0].text, "draw a clean wire");
+        assert!(panel.followups().is_empty());
+    }
+
+    #[test]
+    fn submit_followup_appends_a_turn_and_records_the_instruction() {
+        let mut panel = AgentPanelState::new();
+        panel.prompt = "start".to_owned();
+        panel.start();
+        assert!(panel.is_running());
+        panel.followup = "  keep it on met1  ".to_owned();
+        let sent = panel.submit_followup().expect("accepted while running");
+        // Trimmed instruction is returned and the input box is cleared.
+        assert_eq!(sent, "keep it on met1");
+        assert!(panel.followup.is_empty());
+        // The follow-up is recorded on the Wave-3 seam.
+        assert_eq!(panel.followups(), ["keep it on met1"]);
+        // Conversation now has: prompt (user), follow-up (user), ack (agent).
+        let convo = panel.conversation();
+        assert_eq!(convo.len(), 3);
+        assert_eq!(convo[1].speaker, Speaker::User);
+        assert_eq!(convo[1].text, "keep it on met1");
+        assert_eq!(convo[2].speaker, Speaker::Agent);
+        assert!(convo[2].text.contains("keep it on met1"));
+    }
+
+    #[test]
+    fn submit_followup_rejects_empty_and_when_not_running() {
+        let mut panel = AgentPanelState::new();
+        // Not running: rejected, nothing recorded.
+        panel.followup = "too early".to_owned();
+        assert!(panel.submit_followup().is_none());
+        assert!(panel.followups().is_empty());
+        assert!(panel.conversation().is_empty());
+        // Running but blank: rejected, input untouched-but-blank.
+        panel.prompt = "go".to_owned();
+        panel.start();
+        panel.followup = "   ".to_owned();
+        assert!(panel.submit_followup().is_none());
+        assert!(panel.followups().is_empty());
+    }
+
+    #[test]
+    fn note_agent_and_clear_conversation() {
+        let mut panel = AgentPanelState::new();
+        panel.prompt = "go".to_owned();
+        panel.start();
+        panel.note_agent("verified: DRC clean");
+        assert_eq!(panel.conversation().len(), 2);
+        assert_eq!(panel.conversation()[1].speaker, Speaker::Agent);
+        // Clearing empties the conversation, the follow-up list, and the input.
+        panel.followup = "draft".to_owned();
+        panel.clear_conversation();
+        assert!(panel.conversation().is_empty());
+        assert!(panel.followups().is_empty());
+        assert!(panel.followup.is_empty());
+    }
+
+    #[test]
+    fn starting_a_new_run_resets_the_conversation() {
+        let mut panel = AgentPanelState::new();
+        panel.prompt = "first".to_owned();
+        panel.start();
+        panel.followup = "note".to_owned();
+        panel.submit_followup().expect("running");
+        assert!(panel.conversation().len() >= 2);
+        // A fresh start clears the prior conversation and follow-ups.
+        panel.prompt = "second".to_owned();
+        panel.start();
+        assert_eq!(panel.conversation().len(), 1);
+        assert_eq!(panel.conversation()[0].text, "second");
+        assert!(panel.followups().is_empty());
+    }
+
+    #[test]
+    fn conversation_is_capped() {
+        let mut panel = AgentPanelState::new();
+        for i in 0..(MAX_CONVERSATION + 25) {
+            panel.push_conversation(ConversationEntry::agent(format!("line {i}")));
+        }
+        assert_eq!(panel.conversation().len(), MAX_CONVERSATION);
+        assert_eq!(panel.conversation()[0].text, "line 25", "oldest dropped");
     }
 
     #[test]

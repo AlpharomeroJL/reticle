@@ -159,6 +159,10 @@ pub struct App {
     /// Where the theater reads transcripts from: the filesystem on native, a
     /// bundled transcript on wasm. Boxed so the field type is the same on both.
     store: Box<dyn crate::store::SessionStore>,
+    /// The session history browser: past run transcripts the user can reopen,
+    /// the directory the native scan reads, and its error line (empty when none).
+    /// Refreshed on demand from [`crate::agent_history`], so no scan runs per frame.
+    agent_history: crate::agent_history::HistoryBrowser,
 
     /// The DRC panel state: the last run's violations and the highlighted one.
     drc: DrcResults,
@@ -331,6 +335,7 @@ impl App {
             replay_path: String::new(),
             replay_error: String::new(),
             store: Box::new(crate::store::default_store()),
+            agent_history: crate::agent_history::HistoryBrowser::new(),
             drc: DrcResults::new(),
             zoom_to_selected_violation: false,
             netlight: Netlight::new(),
@@ -1391,6 +1396,46 @@ impl App {
             // Frame the violation on the next canvas pass.
             self.zoom_to_selected_violation = true;
         }
+
+        // "Ask agent to fix" the selected violation: assemble its region + rule
+        // into a scoped context string and launch a scoped agent session on it.
+        if let Some(i) = self.drc.selected()
+            && let Some(v) = self.drc.violations().get(i)
+        {
+            let can_ask = !self.agent.is_running();
+            if ui
+                .add_enabled(can_ask, egui::Button::new("Ask agent to fix"))
+                .on_hover_text(
+                    "Launch a scoped agent run seeded with this violation's region and rule",
+                )
+                .clicked()
+            {
+                let context = drc_panel::fix_violation_prompt(v);
+                self.ask_agent_to_fix(context);
+            }
+        }
+    }
+
+    /// Launches a scoped agent run seeded with the assembled violation `context`.
+    ///
+    /// The context string (region bounding box plus the broken rule; see
+    /// [`drc_panel::fix_violation_prompt`]) becomes the agent panel's prompt and
+    /// the run starts, so today the affordance hands the scoped instruction to the
+    /// same panel plumbing a typed prompt drives.
+    ///
+    /// # Wave-3B seam
+    ///
+    /// The MINIMAL context pack and the real *scoped* harness (which would clip the
+    /// session to `context`'s region and constrain edits to it) are Wave 3 Lane 3B.
+    /// This method is the seam that harness consumes: it centralizes assembling the
+    /// scoped instruction and handing it off. A Wave-3B harness replaces the body's
+    /// `self.agent.start()` with a scoped-session launch that reads the same
+    /// `context`, and everything upstream (the DRC button, the assembled string)
+    /// stays unchanged.
+    fn ask_agent_to_fix(&mut self, context: String) {
+        self.agent.prompt = context;
+        self.agent.start();
+        self.status.set("Agent: scoped fix run started");
     }
 
     /// Draws the agent panel: prompt box, Run/Stop, live status, and narration.
@@ -1459,6 +1504,135 @@ impl App {
                     ui.monospace(line);
                 }
             });
+        self.agent_conversation(ui);
+        self.agent_history_section(ui);
+    }
+
+    /// Draws conversation mode: the running dialogue plus a follow-up input.
+    ///
+    /// Submitting a follow-up appends it to the running session as a new
+    /// constraint (see [`AgentPanelState::submit_followup`](crate::agent_panel::AgentPanelState::submit_followup)):
+    /// the message and an acknowledgement join the conversation transcript, and
+    /// the instruction is recorded on the panel's follow-up list, the seam a
+    /// Wave-3 scoped harness reads to steer the live model. The input is only
+    /// enabled while a run is active, since a follow-up needs a session to attach
+    /// to.
+    fn agent_conversation(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.strong("Conversation");
+            if ui.small_button("Clear").clicked() {
+                self.agent.clear_conversation();
+            }
+        });
+        egui::ScrollArea::vertical()
+            .max_height(120.0)
+            .auto_shrink([false, false])
+            .stick_to_bottom(true)
+            .id_salt("agent_conversation")
+            .show(ui, |ui| {
+                use crate::agent_panel::Speaker;
+                if self.agent.conversation().is_empty() {
+                    ui.label("Run the agent, then send a follow-up to steer it.");
+                }
+                for entry in self.agent.conversation() {
+                    let who = match entry.speaker {
+                        Speaker::User => "you",
+                        Speaker::Agent => "agent",
+                    };
+                    ui.label(format!("{who}: {}", entry.text));
+                }
+            });
+        let running = self.agent.is_running();
+        ui.horizontal(|ui| {
+            ui.add_enabled(
+                running,
+                egui::TextEdit::singleline(&mut self.agent.followup)
+                    .hint_text("Add a constraint or instruction..."),
+            );
+            if ui.add_enabled(running, egui::Button::new("Send")).clicked()
+                && let Some(text) = self.agent.submit_followup()
+            {
+                self.status.set(format!("Follow-up sent: {text}"));
+            }
+        });
+        if !running {
+            ui.label("(Follow-ups apply to a running session.)");
+        }
+    }
+
+    /// Draws the session history browser: a Refresh action, the path the native
+    /// scan reads, and the list of past run transcripts. Clicking one loads it
+    /// into the replay theater.
+    ///
+    /// The listing is on-demand (Refresh scans; drawing never touches the disk),
+    /// and loading goes through the same [`store`](crate::store) seam the theater
+    /// already loads through, so on wasm the browser lists the bundled demo and
+    /// selecting it plays that.
+    fn agent_history_section(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.strong("History");
+            if ui.button("Refresh").clicked() {
+                self.agent_history.refresh();
+            }
+        });
+        #[cfg(not(target_arch = "wasm32"))]
+        ui.horizontal(|ui| {
+            ui.label("Dir:");
+            ui.text_edit_singleline(&mut self.agent_history.dir);
+        });
+        let mut chosen: Option<String> = None;
+        egui::ScrollArea::vertical()
+            .max_height(120.0)
+            .auto_shrink([false, false])
+            .id_salt("agent_history_list")
+            .show(ui, |ui| {
+                if self.agent_history.is_empty() {
+                    ui.label("No past runs listed. Press Refresh.");
+                }
+                for entry in self.agent_history.entries() {
+                    if ui.selectable_label(false, &entry.label).clicked() {
+                        chosen = Some(entry.reference.clone());
+                    }
+                }
+            });
+        if let Some(reference) = chosen {
+            self.load_history_entry(&reference);
+        }
+        if !self.agent_history.error.is_empty() {
+            ui.colored_label(Color32::from_rgb(255, 120, 120), &self.agent_history.error);
+        }
+    }
+
+    /// Loads the history transcript named by `reference` into the replay theater
+    /// and opens it, through the platform [`store`](crate::store).
+    ///
+    /// On native this reads the JSONL file at `reference`. On wasm the store
+    /// returns `Ok(None)` for an arbitrary reference, so the theater keeps its
+    /// bundled transcript; either way the theater ends up loaded and open.
+    fn load_history_entry(&mut self, reference: &str) {
+        match self.store.load_reference(reference) {
+            Ok(Some((records, hash))) => {
+                self.replay.load(records, hash);
+                self.replay_open = true;
+                self.drc.clear();
+                self.agent_history.error.clear();
+                let (_, total) = self.replay.progress();
+                self.status
+                    .set(format!("History: loaded {total} record(s)"));
+            }
+            Ok(None) => {
+                // wasm: no filesystem. Open the theater on its bundled default.
+                if let Ok((records, hash)) = self.store.default_transcript() {
+                    self.replay.load(records, hash);
+                }
+                self.replay_open = true;
+                self.drc.clear();
+                self.status.set("History: playing bundled demo");
+            }
+            Err(message) => self.agent_history.error = message,
+        }
     }
 
     /// Installs a verify step's violation list into the DRC panel and overlay.
@@ -1475,6 +1649,23 @@ impl App {
         } else {
             self.status.set(format!("Agent verify: {n} violation(s)"));
         }
+    }
+
+    /// A verify step crossed by the *agent panel's own run*: install its overlay
+    /// (as [`apply_agent_drc_update`](Self::apply_agent_drc_update)) and also note
+    /// the result as an agent turn in the conversation, so the dialogue reflects
+    /// the propose-verify-correct loop. The theater's own ticks use the plain
+    /// overlay update, so replaying a transcript there does not write into this
+    /// panel's conversation.
+    fn apply_agent_run_verify(&mut self, violations: Vec<reticle_model::Violation>) {
+        let n = violations.len();
+        if n == 0 {
+            self.agent.note_agent("verified: DRC clean");
+        } else {
+            self.agent
+                .note_agent(format!("verified: {n} violation(s) remaining"));
+        }
+        self.apply_agent_drc_update(violations);
     }
 
     /// Applies a theater seek/step result to the DRC overlay: install the list
@@ -3499,7 +3690,7 @@ impl eframe::App for App {
         // response, and installing it in the DRC results updates the panel list
         // and the canvas markers live, mid-run.
         if let Some(update) = self.agent.tick(dt) {
-            self.apply_agent_drc_update(update);
+            self.apply_agent_run_verify(update);
         }
 
         // Advance replay-theater playback the same way; a playing transcript
@@ -3995,6 +4186,93 @@ mod tests {
         app.apply_replay_overlay(update);
         assert!(!app.drc.has_run());
         assert_eq!(app.replay.progress(), (0, total));
+    }
+
+    /// "Ask agent to fix" a selected violation seeds the agent panel with the
+    /// assembled region + rule context and starts a run on it (the Wave-3B seam).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn ask_agent_to_fix_seeds_and_starts_a_scoped_run() {
+        let mut app = App::new();
+        // Install a violation the way an agent verify or a local DRC run would.
+        let v = reticle_model::Violation {
+            rule: "min_width_met1".to_owned(),
+            kind: reticle_model::RuleKind::Width,
+            layer: reticle_geometry::LayerId::new(4, 0),
+            other_layer: None,
+            measured: 60,
+            required: 100,
+            location: reticle_geometry::Rect::new(
+                reticle_geometry::Point::new(23_000, 0),
+                reticle_geometry::Point::new(23_060, 2_000),
+            ),
+            message: "feature 60 < min width 100".to_owned(),
+        };
+        app.drc.set_violations(vec![v.clone()]);
+        app.drc.select(0).expect("index 0 exists");
+
+        let context = crate::drc_panel::fix_violation_prompt(&v);
+        app.ask_agent_to_fix(context.clone());
+        // The prompt is the scoped context and a run is now active.
+        assert_eq!(app.agent.prompt, context);
+        assert!(app.agent.is_running());
+        assert!(app.agent.prompt.contains("(23000, 0)-(23060, 2000)"));
+        assert!(app.agent.prompt.contains("min_width_met1"));
+        assert_eq!(app.status.text, "Agent: scoped fix run started");
+    }
+
+    /// Loading a history entry through the store drives the replay theater: on
+    /// native a real transcript path loads and opens the theater.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn load_history_entry_loads_the_theater_from_a_path() {
+        use std::io::Write as _;
+        // Write a real scripted transcript to a temp JSONL file.
+        let (transcript, _) = crate::agent_panel::scripted_run("history load");
+        let count = transcript.records.len();
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "reticle-hist-load-{}.transcript.jsonl",
+            std::process::id()
+        ));
+        {
+            let mut f = std::fs::File::create(&path).expect("create transcript");
+            for record in &transcript.records {
+                writeln!(f, "{}", serde_json::to_string(record).expect("serialize"))
+                    .expect("write record");
+            }
+            writeln!(f, "{{\"final_hash\":{}}}", transcript.final_hash).expect("write trailer");
+        }
+
+        let mut app = App::new();
+        assert!(!app.replay_open);
+        app.load_history_entry(path.to_str().expect("utf-8 path"));
+        assert!(app.replay_open, "loading opens the theater");
+        assert_eq!(app.replay.progress(), (0, count));
+        assert!(app.agent_history.error.is_empty());
+        assert!(app.status.text.contains("loaded"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// A follow-up submitted through the panel while a run is active lands in the
+    /// conversation and on the follow-up seam.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn conversation_followup_records_through_the_panel() {
+        let mut app = App::new();
+        app.agent.prompt = "route a net".to_owned();
+        app.agent.start();
+        app.agent.followup = "avoid the keepout".to_owned();
+        let sent = app.agent.submit_followup().expect("running");
+        assert_eq!(sent, "avoid the keepout");
+        assert_eq!(app.agent.followups(), ["avoid the keepout"]);
+        assert!(
+            app.agent
+                .conversation()
+                .iter()
+                .any(|e| e.text == "avoid the keepout")
+        );
     }
 
     /// The Share section's defaults compose a joinable relay link for the

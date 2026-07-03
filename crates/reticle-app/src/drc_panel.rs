@@ -207,6 +207,65 @@ pub fn format_violation(v: &Violation) -> String {
     )
 }
 
+/// The stable keyword for a [`RuleKind`], matching the wire form the agent API
+/// emits and parses.
+#[must_use]
+pub fn rule_kind_tag(kind: RuleKind) -> &'static str {
+    match kind {
+        RuleKind::Width => "width",
+        RuleKind::Spacing => "spacing",
+        RuleKind::Enclosure => "enclosure",
+        RuleKind::Extension => "extension",
+        RuleKind::Notch => "notch",
+        RuleKind::Area => "area",
+        RuleKind::Density => "density",
+        RuleKind::Angle => "angle",
+        // `RuleKind` is non-exhaustive; tag any future kind neutrally.
+        _ => "rule",
+    }
+}
+
+/// Assembles the scoped-fix context string handed to the agent for one violation.
+///
+/// This is the payload behind the DRC panel's "Ask agent to fix" affordance: it
+/// pins the agent to the violation's region (its bounding box, in DBU) and the
+/// rule it broke (name, kind, layers, and measured-versus-required values), so a
+/// scoped run has an objective target and a bounded area to work in rather than
+/// the whole design. The MINIMAL context pack and the real scoped harness are
+/// Wave 3 Lane 3B; this string is the seam that harness consumes, and it is also
+/// what seeds the agent panel's prompt today so the affordance is honest.
+///
+/// The layer is rendered `layer/datatype`; a two-layer rule (spacing, enclosure,
+/// extension) also names its other layer. The region is the four DBU corners of
+/// the violation's [`location`](Violation::location) plus its width and height.
+#[must_use]
+pub fn fix_violation_prompt(v: &Violation) -> String {
+    use std::fmt::Write as _;
+    let loc = &v.location;
+    let mut layers = format!("{}/{}", v.layer.layer, v.layer.datatype);
+    if let Some(other) = v.other_layer {
+        let _ = write!(layers, " vs {}/{}", other.layer, other.datatype);
+    }
+    format!(
+        "Fix this DRC violation at region ({}, {})-({}, {}) \
+         [w={} h={} DBU] per rule \"{}\" (kind {}, layer {}, measured {} vs required {}). \
+         Keep the fix inside that region and re-run DRC to confirm it clears. \
+         Context: {}",
+        loc.min.x,
+        loc.min.y,
+        loc.max.x,
+        loc.max.y,
+        loc.width(),
+        loc.height(),
+        v.rule,
+        rule_kind_tag(v.kind),
+        layers,
+        v.measured,
+        v.required,
+        v.message,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,6 +379,61 @@ mod tests {
         let cell = flat.cell(demo::TOP_CELL).expect("flat top cell");
         assert_eq!(cell.shapes.len(), doc.flatten(demo::TOP_CELL).len());
         assert!(cell.instances.is_empty() && cell.arrays.is_empty());
+    }
+
+    #[test]
+    fn fix_violation_prompt_carries_region_and_rule() {
+        let v = Violation {
+            rule: "min_width_met1".to_owned(),
+            kind: RuleKind::Width,
+            layer: LayerId::new(4, 0),
+            other_layer: None,
+            measured: 60,
+            required: 100,
+            location: Rect::new(Point::new(23_000, 0), Point::new(23_060, 2000)),
+            message: "feature 60 < min width 100".to_owned(),
+        };
+        let prompt = fix_violation_prompt(&v);
+        // The region bbox corners and its extent are present.
+        assert!(prompt.contains("(23000, 0)-(23060, 2000)"));
+        assert!(prompt.contains("w=60 h=2000 DBU"));
+        // The rule name, kind, layer, and measured-vs-required are present.
+        assert!(prompt.contains("min_width_met1"));
+        assert!(prompt.contains("kind width"));
+        assert!(prompt.contains("layer 4/0"));
+        assert!(prompt.contains("measured 60 vs required 100"));
+        // The original message is carried as context.
+        assert!(prompt.contains("feature 60 < min width 100"));
+        // No other layer named for a one-layer rule.
+        assert!(!prompt.contains(" vs 0/0"));
+    }
+
+    #[test]
+    fn fix_violation_prompt_names_the_other_layer_for_two_layer_rules() {
+        let v = Violation {
+            rule: "met1_met2_spacing".to_owned(),
+            kind: RuleKind::Spacing,
+            layer: LayerId::new(4, 0),
+            other_layer: Some(LayerId::new(5, 0)),
+            measured: 80,
+            required: 140,
+            location: Rect::new(Point::new(0, 0), Point::new(80, 200)),
+            message: "gap 80 < min spacing 140".to_owned(),
+        };
+        let prompt = fix_violation_prompt(&v);
+        assert!(prompt.contains("kind spacing"));
+        assert!(prompt.contains("layer 4/0 vs 5/0"));
+    }
+
+    #[test]
+    fn rule_kind_tag_matches_the_wire_keywords() {
+        // The tags must round-trip through the agent API's kind parsing, so a
+        // scoped fix prompt names kinds the same way run_drc reports them.
+        assert_eq!(rule_kind_tag(RuleKind::Width), "width");
+        assert_eq!(rule_kind_tag(RuleKind::Spacing), "spacing");
+        assert_eq!(rule_kind_tag(RuleKind::Enclosure), "enclosure");
+        assert_eq!(rule_kind_tag(RuleKind::Area), "area");
+        assert_eq!(rule_kind_tag(RuleKind::Angle), "angle");
     }
 
     #[test]
