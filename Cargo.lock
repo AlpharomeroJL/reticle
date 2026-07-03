@@ -4017,6 +4017,7 @@ version = "4.0.0"
 dependencies = [
  "eframe",
  "egui-wgpu",
+ "reticle-agent-api",
  "reticle-drc",
  "reticle-extract",
  "reticle-geometry",
@@ -4025,6 +4026,7 @@ dependencies = [
  "reticle-model",
  "reticle-render",
  "reticle-sync",
+ "serde_json",
 ]
 
 [[package]]
