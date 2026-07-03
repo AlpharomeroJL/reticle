@@ -47,6 +47,38 @@ impl Default for LoopOptions {
     }
 }
 
+/// Which backend produced a run, stamped onto the [`ResultRecord`].
+///
+/// Keeps a mock run, a local (Ollama) run, and a frontier (`anthropic`) run distinct in
+/// the results, so a summary never conflates them. The `model` id already lives on the
+/// record via [`ModelClient::id`]; this adds the backend family and an optional
+/// quantization the model id alone does not carry.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Provenance {
+    /// The backend family: `"mock"`, `"ollama"`, `"anthropic"`, or another label.
+    pub backend: String,
+    /// The model's quantization, when known (for example `"Q4_K_M"`); `None` otherwise.
+    pub quantization: Option<String>,
+}
+
+impl Provenance {
+    /// A provenance with just a backend label and no quantization.
+    #[must_use]
+    pub fn new(backend: impl Into<String>) -> Self {
+        Self {
+            backend: backend.into(),
+            quantization: None,
+        }
+    }
+
+    /// Sets the quantization label.
+    #[must_use]
+    pub fn with_quantization(mut self, quantization: impl Into<String>) -> Self {
+        self.quantization = Some(quantization.into());
+        self
+    }
+}
+
 /// The paths of the four artifacts a run writes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Artifacts {
@@ -124,6 +156,10 @@ impl std::error::Error for LoopError {}
 /// caller-provided duration in milliseconds (the CLI measures real time; tests pass a
 /// fixed value so records are reproducible).
 ///
+/// `provenance` labels which backend produced the run (see [`Provenance`]); it is
+/// stamped straight onto the [`ResultRecord`] so a mock, a local, and a frontier run are
+/// never conflated.
+///
 /// # Errors
 ///
 /// Returns [`LoopError::Technology`] or [`LoopError::UnknownChecker`] on a setup
@@ -139,6 +175,7 @@ pub fn run_agent_task<M: ModelClient>(
     options: LoopOptions,
     out_dir: &Path,
     wall_ms: u64,
+    provenance: &Provenance,
     mut context_hook: impl FnMut(&mut M, &Session),
 ) -> Result<RunOutcome, LoopError> {
     let checker = registry
@@ -177,6 +214,8 @@ pub fn run_agent_task<M: ModelClient>(
         first_proposal_violations: loop_result.first_proposal_violations,
         final_violations: loop_result.final_violations,
         wall_ms,
+        backend: provenance.backend.clone(),
+        quantization: provenance.quantization.clone(),
     };
 
     let (artifacts, render_note) = write_artifacts(task, &session, &record, out_dir)?;
@@ -611,6 +650,7 @@ mod tests {
             },
             &out_dir,
             0,
+            &crate::run::Provenance::new("mock"),
             |_, _| {},
         )
         .expect("run");
@@ -638,6 +678,7 @@ mod tests {
             LoopOptions::default(),
             &out_dir,
             0,
+            &crate::run::Provenance::new("mock"),
             |_, _| {},
         )
         .expect("run");
@@ -682,6 +723,7 @@ mod tests {
             LoopOptions::default(),
             &out_dir,
             0,
+            &crate::run::Provenance::new("mock"),
             |_, _| {},
         )
         .expect("run");
@@ -713,6 +755,7 @@ mod tests {
             LoopOptions::default(),
             &out_dir,
             0,
+            &crate::run::Provenance::new("mock"),
             |_model, session| {
                 hook_calls += 1;
                 // On the first call the document is still empty.
@@ -774,6 +817,7 @@ mod tests {
             LoopOptions::default(),
             &out_dir,
             0,
+            &crate::run::Provenance::new("anthropic"),
             // Drive the real document-context path the CLI uses.
             |m, session| m.set_document_context(document_summary(session)),
         )
@@ -819,6 +863,7 @@ mod tests {
             LoopOptions::default(),
             &out_dir,
             0,
+            &crate::run::Provenance::new("mock"),
             |_, _| {},
         )
         .expect_err("missing checker");

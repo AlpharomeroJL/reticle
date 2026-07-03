@@ -79,6 +79,8 @@ mod tests {
             first_proposal_violations: 3,
             final_violations: 0,
             wall_ms: 1200,
+            backend: "mock".into(),
+            quantization: Some("Q4_K_M".into()),
         };
         let back: ResultRecord =
             serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();

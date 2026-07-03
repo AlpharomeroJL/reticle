@@ -39,6 +39,15 @@ pub struct SuiteManifest {
 }
 
 /// One result row from running a task against a model.
+///
+/// # Backend provenance
+///
+/// [`backend`](Self::backend) and [`quantization`](Self::quantization) record which kind
+/// of client produced the row, so a `mock` run, a local (Ollama) run, and a frontier
+/// (`anthropic`) run are never conflated in a summary or history file. Both carry
+/// `#[serde(default)]`, so result JSON written before these fields existed still
+/// deserializes: an older record reads back as `backend = ""` and `quantization = None`.
+/// The markdown summary shows a Backend column (and quantization where present).
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct ResultRecord {
     /// The task that was run.
@@ -57,4 +66,14 @@ pub struct ResultRecord {
     pub final_violations: u32,
     /// Wall-clock time for the whole task, in milliseconds.
     pub wall_ms: u64,
+    /// Which kind of client produced this row: `"mock"`, `"ollama"`, `"anthropic"`, or
+    /// another backend label. Defaults to the empty string for records written before
+    /// the field existed, so older result JSON still parses.
+    #[serde(default)]
+    pub backend: String,
+    /// The model's quantization, when the backend reports one (for example
+    /// `"Q4_K_M"` on a local GGUF model). `None` for frontier or mock backends and for
+    /// records written before the field existed.
+    #[serde(default)]
+    pub quantization: Option<String>,
 }

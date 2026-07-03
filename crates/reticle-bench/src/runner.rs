@@ -195,6 +195,10 @@ pub fn run_task_with_transcript(
         first_proposal_violations,
         final_violations,
         wall_ms: clock.elapsed_ms(),
+        // The bench runner drives the deterministic mock; a live-backend runner stamps
+        // these after the fact (see `reticle-bench`'s `--backend` path).
+        backend: model.id().to_owned(),
+        quantization: None,
     };
     Ok((record, reticle_agent_api::transcript_of(&session)))
 }
