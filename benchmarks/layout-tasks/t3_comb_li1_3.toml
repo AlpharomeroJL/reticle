@@ -1,0 +1,5 @@
+id = "t3_comb_li1_3"
+tier = 3
+prompt = "Create a cell named top. Draw two interdigitated li1 combs, each a spine with three fingers, kept electrically separate."
+technology = "sky130.tech"
+checker = "comb:layer=67/20,fingers=3"

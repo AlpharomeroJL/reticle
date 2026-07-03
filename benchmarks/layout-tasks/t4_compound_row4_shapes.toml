@@ -1,0 +1,5 @@
+id = "t4_compound_row4_shapes"
+tier = 4
+prompt = "Create a leaf cell holding one met1 rectangle, then a cell named top that places four instances of it, so the flattened design has at least four shapes."
+technology = "sky130.tech"
+checker = "compound_cell:instances=4,min_shapes=4"

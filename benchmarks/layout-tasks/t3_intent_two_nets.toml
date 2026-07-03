@@ -1,0 +1,6 @@
+id = "t3_intent_two_nets"
+tier = 3
+prompt = "Create a cell named top with two independent met1 nets: net p connects terminal p0 near (0,0) to p1 near (400,0); net q connects q0 near (0,200) to q1 near (400,200). Keep p and q from shorting to each other."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"p","terminals":[{"name":"p0","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}},{"name":"p1","layer":{"layer":68,"datatype":20},"region":{"min":{"x":380,"y":0},"max":{"x":400,"y":20}}}]},{"name":"q","terminals":[{"name":"q0","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":200},"max":{"x":20,"y":220}}},{"name":"q1","layer":{"layer":68,"datatype":20},"region":{"min":{"x":380,"y":200},"max":{"x":400,"y":220}}}]}],"forbidden":[{"net_a":"p","net_b":"q"}]}'

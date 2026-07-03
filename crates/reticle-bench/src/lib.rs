@@ -9,6 +9,10 @@
 //!   scripts a propose-verify-correct sequence with no live model.
 //! - [`checkers`]: the built-in [`RectPresent`], [`DrcClean`], and [`IntentCheck`]
 //!   checkers and the [`CheckerRegistry`] that dispatches a task's checker name.
+//! - [`geom_checkers`]: parameterized geometric checkers ([`ShapeCount`],
+//!   [`LayerArea`], [`ContactStack`], [`ViaChain`], [`Comb`], [`GuardRing`],
+//!   [`CompoundCell`]) whose parameters are carried in the task's `checker` string
+//!   and parsed by [`params`].
 //! - [`runner`]: [`run_task`], which drives a session through the loop and records a
 //!   [`ResultRecord`] with a deterministic (step-counted) wall time.
 //! - [`results`]: write records as JSON and render a Markdown [`Summary`].
@@ -21,15 +25,21 @@ mod checker;
 mod schema;
 
 pub mod checkers;
+pub mod geom_checkers;
 pub mod loader;
 pub mod model;
+pub mod params;
 pub mod results;
 pub mod runner;
 
 pub use checker::{CheckFailure, CheckResult, Checker};
 pub use checkers::{CheckerRegistry, DrcClean, IntentCheck, RectPresent};
+pub use geom_checkers::{
+    Comb, CompoundCell, ContactStack, GuardRing, LayerArea, ShapeCount, ViaChain,
+};
 pub use loader::{LoadError, load_manifest, load_suite, load_task};
 pub use model::{Context, MockModel, ModelClient};
+pub use params::{ParamError, ParsedChecker};
 pub use results::{Summary, TierStats, WriteError, summarize, write_records};
 pub use runner::{RunError, RunOptions, run_task};
 pub use schema::{BenchTask, ResultRecord, SuiteManifest, Tier};

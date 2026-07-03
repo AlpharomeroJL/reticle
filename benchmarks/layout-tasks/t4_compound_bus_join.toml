@@ -1,0 +1,6 @@
+id = "t4_compound_bus_join"
+tier = 4
+prompt = "Create a cell named top that assembles a small block and joins two met1 terminals a near (0,0) and b near (1000,0) into one net across the assembled geometry."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"sig","terminals":[{"name":"a","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}},{"name":"b","layer":{"layer":68,"datatype":20},"region":{"min":{"x":980,"y":0},"max":{"x":1000,"y":20}}}]}],"forbidden":[]}'

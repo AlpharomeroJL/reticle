@@ -1,0 +1,5 @@
+id = "t1_min_area_met1"
+tier = 1
+prompt = "Create a cell named top and draw a met1 rectangle whose area is at least 0.083um^2 (83000 dbu^2), for example 300x300 dbu, so it passes the met1 minimum-area rule."
+technology = "sky130.tech"
+checker = "layer_area:layer=68/20,min_area=83000"

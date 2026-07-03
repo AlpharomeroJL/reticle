@@ -1,0 +1,6 @@
+id = "t3_intent_crossover"
+tier = 3
+prompt = "Create a cell named top. Route a horizontal met1 net h from a near (0,100) to b near (400,100), and a vertical met2 net v from c near (200,0) to d near (200,300). They cross at (200,100) but must stay on separate nets (no via)."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"h","terminals":[{"name":"a","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":100},"max":{"x":20,"y":120}}},{"name":"b","layer":{"layer":68,"datatype":20},"region":{"min":{"x":380,"y":100},"max":{"x":400,"y":120}}}]},{"name":"v","terminals":[{"name":"c","layer":{"layer":69,"datatype":20},"region":{"min":{"x":190,"y":0},"max":{"x":210,"y":20}}},{"name":"d","layer":{"layer":69,"datatype":20},"region":{"min":{"x":190,"y":280},"max":{"x":210,"y":300}}}]}],"forbidden":[{"net_a":"h","net_b":"v"}]}'

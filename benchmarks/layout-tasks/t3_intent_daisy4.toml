@@ -1,0 +1,6 @@
+id = "t3_intent_daisy4"
+tier = 3
+prompt = "Create a cell named top and connect four met1 terminals into a single net: a near (0,0), b near (300,0), c near (600,0), and d near (900,0)."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"sig","terminals":[{"name":"a","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}},{"name":"b","layer":{"layer":68,"datatype":20},"region":{"min":{"x":290,"y":0},"max":{"x":310,"y":20}}},{"name":"c","layer":{"layer":68,"datatype":20},"region":{"min":{"x":590,"y":0},"max":{"x":610,"y":20}}},{"name":"d","layer":{"layer":68,"datatype":20},"region":{"min":{"x":880,"y":0},"max":{"x":900,"y":20}}}]}],"forbidden":[]}'
