@@ -72,6 +72,12 @@ typos:
 check-style:
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check-style.ps1
 
+# ---- Secret scan: fail if any leaked key/secret pattern is in the working tree ----
+# Pass `-History` to also scan the full git history (slower). Runs before every
+# release; the real Anthropic key must only ever come from the environment.
+check-keys *args:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check-keys.ps1 {{args}}
+
 # ---- Unused dependency audit (advisory; not part of the hard gate) ----
 machete:
     cargo machete
@@ -115,6 +121,18 @@ book:
 
 book-serve:
     mdbook serve docs
+
+# ---------------------------------------------------------------------------
+# Public demo server (reticle-demo-server)
+# ---------------------------------------------------------------------------
+# Build and run the rate-limited demo: the demo HTTP service plus an in-process
+# collaboration relay a spectator can watch. Uses the real reticle-agent harness
+# when ANTHROPIC_API_KEY is set in the environment, otherwise a deterministic
+# offline harness so this works with no key and no network. Configure with the
+# HOST/PORT and RETICLE_RELAY_ADDR environment variables (defaults 127.0.0.1:3040
+# and 127.0.0.1:3041). See docs/deployment.md.
+demo-up:
+    cargo run -p reticle-demo-server --release
 
 # ---------------------------------------------------------------------------
 # Headless pipeline helpers (layout generation, DRC, routing, media)
