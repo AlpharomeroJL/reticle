@@ -44,6 +44,7 @@ use crate::snap::{self, Guide, SnapHint, SnapState};
 use crate::tech_editor::TechEditorState;
 use crate::tool::{Tool, ToolState};
 use crate::tour::{Tour, TourTarget};
+use crate::usecases::{Scenario, UseCase};
 use crate::viewports::{self, Split, Viewports};
 /// A transient status message shown in the bottom bar.
 #[derive(Clone, Debug, Default)]
@@ -303,6 +304,12 @@ pub struct App {
     /// selects this from the page URL so a public visitor lands on the theater
     /// (ADR 0026).
     start_view: StartView,
+    /// Whether the Start screen (the worked-use-case chooser) is currently shown.
+    /// Set on startup for the editor default so a first-time user is offered the
+    /// four scenarios; cleared once one is chosen or dismissed, and never shown for
+    /// the replay-theater start view (that visitor lands straight in the theater).
+    /// See [`crate::usecases`] and [`App::start_screen`].
+    start_screen: bool,
 
     /// View and export polish: the egui theme, per-document camera bookmarks, the
     /// export scope/format, and the print-style monochrome toggle. The theme is
@@ -470,6 +477,10 @@ impl App {
             cursor_world: None,
             frame_meter: FrameMeter::default(),
             start_view,
+            // Greet a first-time user with the worked-use-case chooser on the
+            // editor default; the replay-theater start view drops the visitor
+            // straight into the theater and never shows it.
+            start_screen: start_view == StartView::Editor,
             view_export: crate::viewexport::ViewExport::new(),
             tour: Tour::from_seen(tour_already_seen()),
         }
@@ -479,6 +490,71 @@ impl App {
     #[must_use]
     pub fn start_view(&self) -> StartView {
         self.start_view
+    }
+
+    /// Whether the Start screen (the worked-use-case chooser) is currently shown.
+    ///
+    /// It greets a first-time user on the editor default and is cleared once a
+    /// scenario is chosen or the chooser is dismissed. See [`crate::usecases`].
+    #[must_use]
+    pub fn start_screen(&self) -> bool {
+        self.start_screen
+    }
+
+    /// Enters the chosen worked [`UseCase`], then dismisses the Start screen.
+    ///
+    /// A document-backed scenario installs its prepared document as the live layout
+    /// (replacing the demo, framing its top cell); the agent scenario opens the
+    /// replay theater on the bundled run. Centralizing this here keeps the Start
+    /// screen's click wiring a single call and lets the whole flow be unit-tested
+    /// without a window.
+    pub fn enter_use_case(&mut self, use_case: UseCase) {
+        match use_case.prepare() {
+            Scenario::LoadDocument { document, top_cell } => {
+                self.install_document(document, top_cell);
+                self.status
+                    .set(format!("Loaded scenario: {}", use_case.title()));
+            }
+            Scenario::OpenReplayTheater => {
+                if let Ok((records, hash)) = self.store.default_transcript() {
+                    self.replay.load(records, hash);
+                }
+                self.replay_open = true;
+                self.replay.play();
+                self.status
+                    .set(format!("Opened scenario: {}", use_case.title()));
+            }
+        }
+        self.start_screen = false;
+    }
+
+    /// Installs `document` as the live editing layout, framing `top_cell`.
+    ///
+    /// This replaces the demo (or a previously loaded scenario) wholesale: it
+    /// rebuilds every piece of derived state the editor keeps in step with the
+    /// document, exactly as [`build`](Self::build) does on startup, so the layer
+    /// manager, canvas, spatial index, retained GPU scene, outline, collaboration
+    /// mirror, and camera all reflect the new layout. The undo history starts fresh
+    /// (a loaded scenario is a new editing session, not an edit of the old one), and
+    /// any stale DRC results, selection, and net highlight are cleared.
+    fn install_document(&mut self, document: reticle_model::Document, top_cell: String) {
+        self.layer_state = LayerState::from_technology(document.technology());
+        self.document = SyncDocument::from_document("local", &document);
+        self.scene = SceneIndex::build(&document, &top_cell);
+        let palette = palette_from_layers(&self.layer_state);
+        self.retained = RetainedScene::new(&document, &top_cell, &palette);
+        self.expanded = Arc::new(self.retained.expand());
+        self.search.outline = OutlineTree::build(&document);
+        self.top_cell = top_cell;
+        self.history = History::new(document);
+        // Force the retained GPU scene and net cache to rebuild against the new
+        // document on the next frame, and reframe the camera on it.
+        self.doc_generation = self.doc_generation.wrapping_add(1);
+        self.render_revision = self.render_revision.wrapping_add(1);
+        self.selection.clear();
+        self.netlight.clear();
+        self.drc.clear();
+        self.fit_requested = true;
     }
 
     /// The renderer (frozen Wave 0 contract accessor).
@@ -1041,6 +1117,65 @@ impl App {
             minimap,
         };
         (canvas_screen, targets)
+    }
+    /// Draws the Start screen: the worked-use-case chooser shown at startup.
+    ///
+    /// Lists the four [`UseCase`]s as cards (title, one-line description, and a
+    /// Start button) plus a link to skip straight to the editor. A click is recorded
+    /// into a local and acted on after the layout closure so the borrow of `self`
+    /// through the egui closure is released first; entering a use case installs its
+    /// document or opens the theater and dismisses this screen.
+    fn start_screen_ui(&mut self, ui: &mut egui::Ui) {
+        let mut chosen: Option<UseCase> = None;
+        let mut skip = false;
+        egui::CentralPanel::default().show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.add_space(12.0);
+                    ui.vertical_centered(|ui| {
+                        ui.heading("Welcome to Reticle");
+                        ui.label(
+                            "Pick a worked example to get started, or skip to a blank editor.",
+                        );
+                    });
+                    ui.add_space(12.0);
+                    // One card per scenario, in offer order.
+                    for use_case in UseCase::ALL {
+                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.strong(use_case.title());
+                                    ui.label(use_case.description());
+                                });
+                                // Push the Start button to the right edge of the card.
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui.button("Start").clicked() {
+                                            chosen = Some(use_case);
+                                        }
+                                    },
+                                );
+                            });
+                        });
+                        ui.add_space(6.0);
+                    }
+                    ui.add_space(6.0);
+                    ui.vertical_centered(|ui| {
+                        if ui.link("Skip to the editor").clicked() {
+                            skip = true;
+                        }
+                    });
+                });
+        });
+        if let Some(use_case) = chosen {
+            self.enter_use_case(use_case);
+        } else if skip {
+            // Dismiss the chooser and keep the demo document already loaded.
+            self.start_screen = false;
+            self.status.set("Editor");
+        }
     }
 
     /// Draws the left layer-manager panel: filter, per-layer swatch + visibility.
@@ -4458,6 +4593,16 @@ impl eframe::App for App {
             crate::viewexport::Theme::Dark => egui::Visuals::dark(),
             crate::viewexport::Theme::Light => egui::Visuals::light(),
         });
+
+        // The Start screen greets a first-time user with the four worked use cases.
+        // While it is showing it owns the whole frame: it draws the chooser and
+        // returns, so the editor panels and canvas are not built underneath it.
+        if self.start_screen {
+            self.start_screen_ui(ui);
+            ctx.request_repaint();
+            return;
+        }
+
         self.handle_shortcuts(&ctx);
 
         // Sample this frame's duration for the status-bar fps readout. `stable_dt`
@@ -5097,6 +5242,78 @@ mod tests {
             !app.replay_open,
             "the editor default does not open the theater"
         );
+    }
+
+    #[test]
+    fn new_greets_with_the_start_screen() {
+        // The editor default shows the worked-use-case chooser at startup.
+        let app = App::new();
+        assert!(
+            app.start_screen(),
+            "the editor default greets with the chooser"
+        );
+        // The replay-theater start view drops the visitor straight into the theater.
+        let web = App::with_start_view(super::StartView::ReplayTheater);
+        assert!(
+            !web.start_screen(),
+            "the replay start view skips the chooser"
+        );
+    }
+
+    #[test]
+    fn entering_the_inspect_scenario_loads_the_sky130_cell() {
+        let mut app = App::new();
+        app.enter_use_case(super::UseCase::InspectCell);
+        // The chooser is dismissed and the live document is now the inverter, not
+        // the demo.
+        assert!(!app.start_screen());
+        assert_eq!(app.top_cell, "sky130_fd_sc_hd__inv_1");
+        assert!(
+            app.history
+                .document()
+                .cell("sky130_fd_sc_hd__inv_1")
+                .is_some(),
+            "the inverter cell is loaded"
+        );
+        // Derived state was rebuilt against the new document.
+        assert!(
+            !app.scene.is_empty(),
+            "scene index rebuilt for the new cell"
+        );
+        assert!(
+            !app.history.can_undo(),
+            "a loaded scenario is a fresh session"
+        );
+    }
+
+    #[test]
+    fn entering_the_violation_scenario_loads_a_checkable_doc() {
+        let mut app = App::new();
+        app.enter_use_case(super::UseCase::FindAndFixViolation);
+        assert!(!app.start_screen());
+        // Running DRC on the loaded document reports the seeded violation.
+        let n = app.drc.run(app.history.document(), &app.top_cell);
+        assert!(n >= 1, "the seeded violation is reported after loading");
+    }
+
+    #[test]
+    fn entering_the_agent_scenario_opens_the_theater() {
+        let mut app = App::new();
+        assert!(!app.replay_open);
+        app.enter_use_case(super::UseCase::WatchTheAgent);
+        assert!(!app.start_screen());
+        assert!(app.replay_open, "the agent scenario opens the theater");
+        let (_, total) = app.replay.progress();
+        assert!(total > 0, "the bundled transcript is loaded and playing");
+    }
+
+    #[test]
+    fn entering_the_build_scenario_loads_the_starter_doc() {
+        let mut app = App::new();
+        app.enter_use_case(super::UseCase::BuildWithTools);
+        assert!(!app.start_screen());
+        assert_eq!(app.top_cell, "SANDBOX");
+        assert!(app.history.document().cell("SANDBOX").is_some());
     }
 
     #[test]
