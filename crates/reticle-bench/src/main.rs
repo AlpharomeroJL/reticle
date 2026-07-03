@@ -11,6 +11,7 @@
 //! reticle-bench --suite benchmarks/layout-tasks               # whole suite
 //! reticle-bench --suite benchmarks/layout-tasks --tier 1      # one tier
 //! reticle-bench --suite benchmarks/layout-tasks --task t1_...  # one task
+//! reticle-bench promote cand_...   # promote a mined candidate into the suite
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -29,7 +30,8 @@ mod scripts;
 #[command(name = "reticle-bench", version, about, long_about = None)]
 struct Cli {
     /// The suite directory (holds `manifest.toml` and one `<id>.toml` per task).
-    #[arg(long, default_value = "benchmarks/layout-tasks")]
+    /// Global so it can also follow a subcommand.
+    #[arg(long, default_value = "benchmarks/layout-tasks", global = true)]
     suite: PathBuf,
 
     /// Run only tasks in this tier.
@@ -48,6 +50,25 @@ struct Cli {
     /// Directory to write the JSON result records into.
     #[arg(long, default_value = "scratch/bench-results")]
     results_dir: PathBuf,
+
+    /// An action other than running the suite.
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+/// Actions other than running the suite.
+#[derive(clap::Subcommand, Debug)]
+enum Command {
+    /// Promote a mined candidate into the live suite, but only if its checker
+    /// passes the candidate's two-way vectors (the good document is accepted
+    /// and the bad document rejected); bumps the suite manifest version.
+    Promote {
+        /// The candidate id (the file stem under the candidates directory).
+        id: String,
+        /// The candidates directory; defaults to `<suite>/candidates`.
+        #[arg(long)]
+        candidates: Option<PathBuf>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -71,7 +92,13 @@ fn main() -> ExitCode {
 
 /// Loads the suite, runs the selected tasks against the mock, writes records, and
 /// prints the Markdown summary. Returns whether every run task passed.
+///
+/// With the `promote` subcommand, promotes a candidate instead: `Ok(false)`
+/// (exit 1) is a gate refusal, `Err` (exit 2) a setup failure.
 fn run(cli: &Cli) -> Result<bool, String> {
+    if let Some(Command::Promote { id, candidates }) = &cli.command {
+        return run_promote(cli, id, candidates.clone());
+    }
     if !cli.mock {
         return Err("only the mock model is available in this lane; pass --mock".into());
     }
@@ -108,6 +135,29 @@ fn run(cli: &Cli) -> Result<bool, String> {
 
     let all_passed = flat.iter().all(|r| r.success);
     Ok(all_passed)
+}
+
+/// Promotes candidate `id` through the two-way gate. A refusal (vectors
+/// failing, unknown checker, double promotion) prints the reason and returns
+/// `Ok(false)` so the process exits 1; success prints what was written.
+fn run_promote(cli: &Cli, id: &str, candidates: Option<PathBuf>) -> Result<bool, String> {
+    let candidates = candidates.unwrap_or_else(|| cli.suite.join("candidates"));
+    match reticle_bench::mining::promote_candidate(&cli.suite, &candidates, id) {
+        Ok(promotion) => {
+            println!(
+                "promoted `{}`: wrote {} and bumped the suite to {}",
+                promotion.id,
+                promotion.task_path.display(),
+                promotion.new_version
+            );
+            Ok(true)
+        }
+        Err(e) if e.is_refusal() => {
+            eprintln!("bench-promote refused `{id}`: {e}");
+            Ok(false)
+        }
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// Selects the tasks to run: filtered by tier and/or task id, or all when neither is

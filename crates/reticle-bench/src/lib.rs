@@ -27,6 +27,7 @@ mod schema;
 pub mod checkers;
 pub mod geom_checkers;
 pub mod loader;
+pub mod mining;
 pub mod model;
 pub mod params;
 pub mod results;
