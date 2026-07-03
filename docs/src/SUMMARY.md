@@ -1,6 +1,7 @@
 # Summary
 
 [Introduction](introduction.md)
+[Positioning](positioning.md)
 
 # Design
 
@@ -17,6 +18,7 @@
 - [Search and selection depth](search-selection.md)
 - [Design-rule checking](drc.md)
   - [SKY130 rule coverage](sky130-drc-coverage.md)
+- [SKY130 grounding](sky130.md)
 - [Routing](routing.md)
 - [Connectivity extraction](extraction.md)
 - [Collaboration](collaboration.md)
@@ -28,6 +30,7 @@
 - [In-app agent UX](agent-ux.md)
 - [MCP server](mcp.md)
 - [Agent benchmark suite](benchmarks.md)
+  - [Benchmark methodology](benchmark.md)
 
 # Reference
 
