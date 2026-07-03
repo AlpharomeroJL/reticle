@@ -17,13 +17,20 @@
 use crate::replay::{LoadError, parse_jsonl};
 use reticle_agent_api::{CommandRecord, Transcript};
 
+/// A parsed transcript: the records in order plus the expected final hash a
+/// faithful replay reproduces (absent when the source carried no trailer).
+pub type ParsedTranscript = (Vec<CommandRecord>, Option<u64>);
+
 /// A source of replay transcripts for the theater.
 ///
 /// The theater does not care whether a transcript came from a file, a bundled
 /// asset, or anywhere else; it only needs the parsed records plus the expected
 /// final hash. Implementations provide a default transcript (what the theater
 /// opens into) and, where the platform supports it, loading a named one.
-pub trait SessionStore {
+///
+/// [`std::fmt::Debug`] is a supertrait so the store can live in the `#[derive(Debug)]`
+/// [`App`](crate::app::App) as a boxed trait object.
+pub trait SessionStore: std::fmt::Debug {
     /// A short label naming where this store reads transcripts from, for the UI.
     fn origin_label(&self) -> &'static str;
 
@@ -35,7 +42,7 @@ pub trait SessionStore {
     /// Returns a [`LoadError`] if the default transcript cannot be produced (for
     /// the bundled store this only happens if the compiled-in asset is malformed,
     /// which a test guards against).
-    fn default_transcript(&self) -> Result<(Vec<CommandRecord>, Option<u64>), LoadError>;
+    fn default_transcript(&self) -> Result<ParsedTranscript, LoadError>;
 
     /// Loads a transcript named by `reference` (a filesystem path on native).
     ///
@@ -47,10 +54,7 @@ pub trait SessionStore {
     ///
     /// Returns a human-readable message when a reference was given but could not
     /// be read or parsed.
-    fn load_reference(
-        &self,
-        reference: &str,
-    ) -> Result<Option<(Vec<CommandRecord>, Option<u64>)>, String>;
+    fn load_reference(&self, reference: &str) -> Result<Option<ParsedTranscript>, String>;
 }
 
 /// The native store: transcripts are read from the filesystem.
@@ -64,16 +68,13 @@ impl SessionStore for FsSessionStore {
         "filesystem"
     }
 
-    fn default_transcript(&self) -> Result<(Vec<CommandRecord>, Option<u64>), LoadError> {
+    fn default_transcript(&self) -> Result<ParsedTranscript, LoadError> {
         // Native opens into the same model-free scripted run the theater has always
         // shown; there is no on-disk default until the user loads one.
         Ok(scripted_default())
     }
 
-    fn load_reference(
-        &self,
-        reference: &str,
-    ) -> Result<Option<(Vec<CommandRecord>, Option<u64>)>, String> {
+    fn load_reference(&self, reference: &str) -> Result<Option<ParsedTranscript>, String> {
         let trimmed = reference.trim();
         if trimmed.is_empty() {
             return Err("Enter a transcript .jsonl path".to_owned());
@@ -109,14 +110,11 @@ impl SessionStore for BundledSessionStore {
         "bundled demo"
     }
 
-    fn default_transcript(&self) -> Result<(Vec<CommandRecord>, Option<u64>), LoadError> {
+    fn default_transcript(&self) -> Result<ParsedTranscript, LoadError> {
         parse_jsonl(BUNDLED_TRANSCRIPT)
     }
 
-    fn load_reference(
-        &self,
-        _reference: &str,
-    ) -> Result<Option<(Vec<CommandRecord>, Option<u64>)>, String> {
+    fn load_reference(&self, _reference: &str) -> Result<Option<ParsedTranscript>, String> {
         // No filesystem in the browser: signal "not supported here" so the caller
         // keeps the bundled default and explains why, rather than erroring.
         Ok(None)
@@ -129,7 +127,7 @@ impl SessionStore for BundledSessionStore {
 /// (ADR 0026), reduced to its transcript records and final hash. It drives a real
 /// engine replay, so it is genuine content, not a placeholder.
 #[must_use]
-pub fn scripted_default() -> (Vec<CommandRecord>, Option<u64>) {
+pub fn scripted_default() -> ParsedTranscript {
     let (transcript, _feed) = crate::agent_panel::scripted_run("place a clean met1 wire");
     let Transcript {
         records,
@@ -158,10 +156,8 @@ pub fn default_store() -> BundledSessionStore {
 mod tests {
     use super::*;
     use reticle_model::document_hash;
+    use std::fmt::Write as _;
 
-    // The scripted run must produce a transcript whose recorded final hash matches
-    // a real replay of it, or the theater would report a mismatch. This is the same
-    // invariant the theater's HashCheck asserts, checked here as plain code.
     // One-shot generator for the committed bundled transcript. Run explicitly with
     // RETICLE_EMIT_TRANSCRIPT=1 to (re)write assets/theater-demo.transcript.jsonl
     // from the scripted run; it is ignored in normal test runs. Kept so the asset
@@ -178,10 +174,11 @@ mod tests {
             out.push_str(&serde_json::to_string(record).expect("record serializes"));
             out.push('\n');
         }
-        out.push_str(&format!(
-            "{{\"final_hash\":{}}}\n",
+        let _ = writeln!(
+            out,
+            "{{\"final_hash\":{}}}",
             final_hash.expect("final hash present")
-        ));
+        );
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/assets/theater-demo.transcript.jsonl"
@@ -191,6 +188,9 @@ mod tests {
         std::fs::write(path, out).expect("write transcript");
     }
 
+    // The scripted run must produce a transcript whose recorded final hash matches
+    // a real replay of it, or the theater would report a mismatch. This is the same
+    // invariant the theater's HashCheck asserts, checked here as plain code.
     #[test]
     fn scripted_default_replays_to_its_recorded_hash() {
         let (records, expected) = scripted_default();

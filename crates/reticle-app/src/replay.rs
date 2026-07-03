@@ -23,8 +23,10 @@
 //! The app module owns only the thin window glue: transport buttons, the
 //! readouts, and painting the flattened shapes through a [`FitView`].
 //!
-//! Native-only, like the agent panel: `reticle-agent-api` does not build for
-//! `wasm32-unknown-unknown` today.
+//! Model-free and portable: this compiles and runs on both native and
+//! `wasm32-unknown-unknown`. The transcript source differs by platform (the
+//! filesystem on native, a bundled transcript on wasm); that seam lives in
+//! [`crate::store`], not here.
 
 use reticle_agent_api::{AgentCommand, AgentResponse, CommandRecord, Outcome, Session};
 use reticle_geometry::{Point, Rect};
