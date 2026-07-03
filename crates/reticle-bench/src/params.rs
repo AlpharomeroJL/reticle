@@ -29,7 +29,7 @@ use reticle_geometry::LayerId;
 /// Built with [`ParsedChecker::parse`]. The typed accessors
 /// ([`layer`](Self::layer), [`u32`](Self::u32), [`i64`](Self::i64)) return a
 /// [`ParamError`] naming the offending key so a malformed task fails to build with a
-/// clear message rather than mis-checking.
+/// clear message rather than checking the wrong thing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParsedChecker {
     /// The bare checker name (the text before the first `:`).

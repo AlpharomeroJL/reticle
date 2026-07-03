@@ -443,7 +443,7 @@ struct EmitInput {
 ///
 /// Prefers the `emit_commands` tool call; if none is present, falls back to a JSON
 /// array of commands embedded in a text block. Returns an error string (for a scrubbed
-/// `last_error`) when the body is an API error, is unparseable, or contains no commands
+/// `last_error`) when the body is an API error, is unparsable, or contains no commands
 /// in either form.
 fn parse_commands(raw: &str) -> Result<Vec<AgentCommand>, String> {
     let response: MessageResponse =
