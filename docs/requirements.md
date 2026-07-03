@@ -15,7 +15,8 @@ kept honest as scope evolves; it is audited before each release.
 | WebGPU, Vulkan, OpenGL | `wgpu` targeting WebGPU and Vulkan/Metal/DX12 natively, with a WebGL2 fallback via the `eframe` glow backend for broad reach. | Built |
 | CRDTs, operational transforms, WebSockets | `yrs` CRDT over WebSockets with awareness. | Built |
 | GDSII, KiCad, CAD tooling | GDSII (`gds21`) and an in-house OASIS subset, a technology-file parser, and a DRC engine. | Built |
-| Novel UI, 2D and 3D visualization | Layout canvas, minimap, DRC and net overlays, layer stack views; an optional 3D layer-stack cross-section is a documented follow-up. | Built (3D deferred) |
+| Novel UI, 2D and 3D visualization | Layout canvas, minimap, DRC and net overlays, layer-stack views, and a 3D layer-stack view with a cut-line cross-section. | Built |
+| Agent-driven editing with objective verification | A serializable command API (`reticle-agent-api`), a propose-verify-correct harness graded by the SKY130 DRC subset and connectivity intent (`reticle-agent`), an MCP server (`reticle-mcp`), a 63-task graded benchmark (`reticle-bench`), and a rate-limited demo server that runs the loop live (`reticle-demo-server`). | Built (mock-graded in this environment; the live model runs the same harness when a key is present) |
 
 Notes on honest scope: the OASIS reader/writer is a focused subset (no mature Rust
 crate exists); the interactive canvas renders with `egui` while the `wgpu` renderer
