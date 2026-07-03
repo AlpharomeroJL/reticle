@@ -29,4 +29,7 @@ superseded decision is marked and linked to its replacement.
 | [0021](0021-intent-types-in-extract.md) | Intent types live in reticle-extract; serde on geometry value types |
 | [0022](0022-agent-crdt-collaborator-bridge.md) | The agent as a live CRDT collaborator: a step-atomic bridge |
 | [0023](0023-resume-authoritative-plan.md) | Resume orientation: docs/TASKS.md is the authoritative plan |
+| [0024](0024-demo-server-binary-crate.md) | The demo server binary lives in its own composition crate |
+| [0025](0025-real-demo-harness-streams-steps.md) | The real demo harness streams atomic steps to the relay |
+| [0026](0026-pages-opens-to-replay-theater.md) | The public Pages bundle opens to the replay theater |
 | [0027](0027-e2e-webgl2-gate-webgpu-attempted.md) | Playwright e2e: WebGL2 hard gate, WebGPU attempted and skipped honestly headless |

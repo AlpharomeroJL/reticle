@@ -31,6 +31,7 @@ members = [
     "crates/reticle-agent",
     "crates/reticle-bench",
     "crates/reticle-demo",
+    "crates/reticle-demo-server",
     "crates/web",
     "xtask",
     "benches",
@@ -71,6 +72,7 @@ reticle-mcp = { path = "crates/reticle-mcp", version = "4.0.0" }
 reticle-agent = { path = "crates/reticle-agent", version = "4.0.0" }
 reticle-bench = { path = "crates/reticle-bench", version = "4.0.0" }
 reticle-demo = { path = "crates/reticle-demo", version = "4.0.0" }
+reticle-demo-server = { path = "crates/reticle-demo-server", version = "4.0.0" }
 
 # Shared external dependencies for the v5 agent, benchmark, and demo crates.
 serde = { version = "1.0.228", features = ["derive"] }

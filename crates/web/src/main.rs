@@ -4,6 +4,13 @@
 //! The wasm entry point starts the `eframe`/`egui` application on the page canvas;
 //! `eframe`'s wgpu backend uses WebGPU where available and falls back to WebGL2
 //! (ADR 0009). Native builds are a no-op so the workspace build stays green.
+//!
+//! # Start view
+//!
+//! A public visitor lands on the replay theater by default (ADR 0026); the page URL
+//! selects the view via a `?view=` query parameter: `?view=editor` opens the full
+//! editor, `?view=replay` (or an absent parameter, the published default) opens the
+//! replay theater. The choice is passed to [`reticle_app::App::with_start_view`].
 
 /// wasm entry point: start the egui app on the `#reticle-canvas` element.
 #[cfg(target_arch = "wasm32")]
@@ -12,8 +19,9 @@ fn main() {
 
     console_error_panic_hook::set_once();
     let web_options = eframe::WebOptions::default();
+    let start_view = start_view_from_url();
 
-    wasm_bindgen_futures::spawn_local(async {
+    wasm_bindgen_futures::spawn_local(async move {
         let document = web_sys::window()
             .expect("no window")
             .document()
@@ -33,11 +41,33 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|_cc| Ok(Box::new(reticle_app::App::new()))),
+                Box::new(move |_cc| Ok(Box::new(reticle_app::App::with_start_view(start_view)))),
             )
             .await
             .expect("failed to start the Reticle web app");
     });
+}
+
+/// Reads the `?view=` query parameter and maps it to a [`reticle_app::StartView`].
+///
+/// An absent parameter defaults to [`reticle_app::StartView::ReplayTheater`], so the
+/// published public bundle opens to the theater; `?view=editor` opens the editor.
+#[cfg(target_arch = "wasm32")]
+fn start_view_from_url() -> reticle_app::StartView {
+    use reticle_app::StartView;
+
+    let search = web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .unwrap_or_default();
+    // `search` is like "?view=editor"; UrlSearchParams accepts the leading '?'.
+    let Ok(params) = web_sys::UrlSearchParams::new_with_str(&search) else {
+        return StartView::ReplayTheater;
+    };
+    match params.get("view") {
+        Some(value) => StartView::from_query_value(&value),
+        // No explicit view: the public default is the replay theater.
+        None => StartView::ReplayTheater,
+    }
 }
 
 /// Native builds of the harness do nothing; the desktop application is the

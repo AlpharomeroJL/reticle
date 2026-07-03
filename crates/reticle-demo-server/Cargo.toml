@@ -1,0 +1,55 @@
+[package]
+name = "reticle-demo-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Composition binary for the Reticle public demo: the rate-limited demo service, an in-process collaboration relay, and the real reticle-agent harness when a key is present."
+keywords = ["eda", "layout", "demo", "server", "agent"]
+categories = ["web-programming", "science"]
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "reticle-demo-server"
+path = "src/main.rs"
+
+[dependencies]
+# The rate-limited service and its mandatory LimitConfig. This is the whole point
+# of the demo: DemoServer cannot be built without a LimitConfig.
+reticle-demo = { workspace = true }
+# The real propose-verify-correct loop, the Anthropic-backed model client, and the
+# AgentCollaborator bridge (ADR 0022) that mirrors edits onto a reticle-sync CRDT.
+reticle-agent = { workspace = true }
+# The collaboration relay hosted in-process so a spectator can watch the room.
+reticle-server = { workspace = true }
+# The frozen command surface and the agent actor id used on the wire.
+reticle-agent-api = { workspace = true }
+# Geometry value types used when building the demo task and reading presence.
+reticle-geometry = { workspace = true }
+# The document model (the RuleSet trait) and the SKY130 DRC subset, so the harness
+# verifies each step exactly as the reticle-agent loop does.
+reticle-model = { workspace = true }
+reticle-drc = { workspace = true }
+# The benchmark model seam (ModelClient/Context) the harness drives; also the
+# deterministic MockModel used by the offline scripted client and the tests.
+reticle-bench = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+# Match the relay and demo crates' axum/tokio so a single copy links.
+axum = "0.8.9"
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
+# The WebSocket client that publishes CRDT frames to the in-process relay,
+# exactly as reticle-sync peers do (see reticle-server's echo_latency example).
+# The same version reticle-server already resolves, so no new copy is pulled.
+tokio-tungstenite = "0.29.0"
+futures-util = "0.3.32"
+
+[dev-dependencies]
+# Drive the demo router in-process with oneshot requests, as tests/abuse.rs does.
+tower = { version = "0.5.3", features = ["util"] }
+http-body-util = "0.1.3"

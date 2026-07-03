@@ -53,13 +53,32 @@
       #overlay .warn {
         color: #f9e2af;
       }
+      /* A small, always-clickable link to switch between the replay theater (the
+         public default) and the full editor. Stays visible after the app mounts. */
+      #view-switch {
+        position: fixed;
+        top: 0.6rem;
+        right: 0.8rem;
+        z-index: 10;
+        font-size: 0.85rem;
+        padding: 0.3rem 0.6rem;
+        border-radius: 0.4rem;
+        background: rgba(30, 34, 45, 0.85);
+        color: #cdd6f4;
+        text-decoration: none;
+        border: 1px solid #313244;
+      }
+      #view-switch:hover {
+        background: rgba(49, 50, 68, 0.95);
+      }
     </style>
   </head>
   <body>
     <canvas id="reticle-canvas"></canvas>
+    <a id="view-switch" href="?view=editor">Open the full editor</a>
     <div id="overlay">
       <div class="title">Reticle</div>
-      <div class="status" id="status">Loading&hellip;</div>
+      <div class="status" id="status">Loading the replay theater&hellip;</div>
     </div>
     <script>
       // Report the rendering backend to the user. wgpu performs the actual
@@ -74,6 +93,21 @@
           status.textContent =
             "WebGPU is unavailable in this browser; falling back to WebGL2. " +
             "For the full experience use a current version of Chrome or Edge.";
+        }
+
+        // Point the view switch at the other view. The public default (no
+        // parameter, or view=replay) is the theater, so offer the editor; when the
+        // editor is showing, offer the theater. The Rust entry point reads the same
+        // parameter to pick the start view.
+        var params = new URLSearchParams(window.location.search);
+        var view = (params.get("view") || "replay").toLowerCase();
+        var link = document.getElementById("view-switch");
+        if (view === "editor") {
+          link.textContent = "Open the replay theater";
+          link.href = "?view=replay";
+        } else {
+          link.textContent = "Open the full editor";
+          link.href = "?view=editor";
         }
       })();
     </script>
