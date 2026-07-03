@@ -922,6 +922,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_live_qwen_content_embedded_tool_call() {
+        // A verbatim capture of what a real local qwen2.5-coder:16k returned to a forced
+        // tool_choice probe on this host: it did NOT populate the native `tool_calls`
+        // array; instead it serialized the whole tool call as a JSON object into
+        // `message.content`. The text fallback must still recover the command array. This
+        // is exactly the "some local models ignore forced tool_choice" case, exercised
+        // against a genuine wire response so the fallback is not just theoretical.
+        let content = "{\n  \"name\": \"emit_commands\",\n  \"arguments\": {\n    \
+             \"commands\": [\n      {\n        \"op\": \"list_layers\"\n      }\n    ]\n  }\n}";
+        let body = serde_json::json!({
+            "id": "chatcmpl-658",
+            "object": "chat.completion",
+            "model": "qwen2.5-coder:16k",
+            "choices": [ { "index": 0, "message": {
+                "role": "assistant",
+                "content": content
+            }, "finish_reason": "stop" }]
+        })
+        .to_string();
+        let cmds = parse_commands(&body).expect("parse live content").commands;
+        assert_eq!(cmds, vec![AgentCommand::ListLayers]);
+    }
+
+    #[test]
     fn propose_calls_endpoint_and_returns_commands() {
         let mut model = model_with(&tool_call_body());
         model.set_document_context("(empty document)");
