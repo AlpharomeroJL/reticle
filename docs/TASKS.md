@@ -178,10 +178,15 @@ theater" (root cause confirmed by fetching the live URL).
   Tier 2 91%, Tier 3 60%, Tier 4 25%, Tier 5 60%; mean 1.76 iterations). Honest
   local baseline, labeled by backend/model/quantization. Not deterministic;
   transcript-replay determinism is unaffected (it replays recorded transcripts).
-- [~] qwen2.5-coder:16k (Q4_K_M) comparison run: launched locally (does not use the
-  Anthropic API). Results to benchmarks/results/qwen25-coder-16k/.
-- [ ] Consolidated two-model summary table into the benchmark chapter once both
-  runs are committed.
+- [x] qwen2.5-coder:16k (Q4_K_M) comparison run DONE and committed under
+  benchmarks/results/qwen25-coder-16k/. Measured 28/63 = 44% overall (Tier 1 44%,
+  Tier 2 100%, Tier 3 28%, Tier 4 12%, Tier 5 50%; mean 2.02 iterations). qwen
+  ignores the forced tool_choice and answers through the text-array fallback, which
+  is less reliable than gpt-oss's native tool_calls, so it scores lower.
+- Two-model comparison (local Ollama, honest, labeled): gpt-oss:16k MXFP4 42/63 =
+  67% vs qwen2.5-coder:16k Q4_K_M 28/63 = 44%.
+- [ ] Consolidated two-model table into the benchmark chapter (docs/src) at Wave 3F
+  or the Wave 4C credibility pass.
 
 ## Wave 2: editor and UI feature expansion (8 lanes, 4 concurrent)
 
@@ -201,10 +206,15 @@ recovery: local benchmark work (qwen run) is limit-safe and proceeds; re-dispatc
 Batch 1 into the existing worktrees once the limit resets. Local model runs and all
 git/file integration are limit-safe; only Claude subagents consume the limit.
 
-- [ ] 2A drawing and vertex editing; 2B boolean/transform ops; 2C productivity
-  editing; 2D snapping and guides (Batch 1, re-dispatch pending limit reset).
+- [x] Batch 1 DONE-gate-green, merged (9090e99, fe4fb28, 4f121a1, 47a9c6c; full
+  just ci GREEN, 899 tests). 2A draw/vertex editing (draw.rs, 4 Tool variants);
+  2B boolean/transform (ops.rs, apply_group single-step undo); 2C productivity
+  (productivity.rs, clipboard/array/via-stack); 2D snapping/guides (snap.rs,
+  App::snap_world seam, drawing routes through it). app.rs hotspot conflicts
+  reconciled by union (one hunk needed a manual brace close for run_ops). Each
+  shipped tests and its mdbook chapter.
 - [ ] 2E layer/technology editing UI; 2F search and selection depth; 2G view and
-  export polish; 2H in-app agent UX upgrades (Batch 2).
+  export polish; 2H in-app agent UX upgrades (Batch 2, next).
 
 ## Wave 3: agent capability expansion (parallel, up to 6 lanes) [not-started]
 
