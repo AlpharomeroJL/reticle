@@ -29,7 +29,7 @@
 //!
 //! # Response parsing
 //!
-//! Reads `choices[0].message.tool_calls[*].function.arguments`. In the OpenAI format
+//! Reads `choices[0].message.tool_calls[*].function.arguments`. In the `OpenAI` format
 //! those `arguments` are a JSON **string**, not an object, so they are parsed a second
 //! time into `{ "commands": [...] }`. The `emit_commands` call is preferred; if no tool
 //! call is present, the fallback scans `choices[0].message.content` for a `[...]` array
@@ -392,7 +392,7 @@ impl std::error::Error for BuildError {}
 
 // ----- conversation buffer and summarization --------------------------------
 
-/// One chat message in the OpenAI format: a role and its text content.
+/// One chat message in the `OpenAI` format: a role and its text content.
 ///
 /// Only the `role`/`content` shape is sent; tool-call plumbing is not round-tripped back
 /// into the request, because the harness re-derives the next user message from the
@@ -594,7 +594,7 @@ Return the smallest batch that makes progress. To create geometry you must first
 create_cell the target cell (unless it already exists in the current document), then \
 add shapes to it. Prefer generous, DRC-clean dimensions over minimal ones.";
 
-/// Builds the OpenAI function-tool object for `emit_commands`.
+/// Builds the `OpenAI` function-tool object for `emit_commands`.
 ///
 /// Permissive on each command's inner shape (an untyped object) so the frozen
 /// [`AgentCommand`] contract, not a duplicated schema, is the source of truth; validation
@@ -675,8 +675,8 @@ struct ToolCall {
 struct ToolCallFunction {
     #[serde(default)]
     name: String,
-    /// The arguments as a JSON **string** (OpenAI encodes tool arguments this way), which
-    /// must be parsed again into `{ "commands": [...] }`.
+    /// The arguments as a JSON **string** (`OpenAI` encodes tool arguments this way),
+    /// which must be parsed again into `{ "commands": [...] }`.
     #[serde(default)]
     arguments: String,
 }
