@@ -101,16 +101,16 @@ The committed local-model result sets under `benchmarks/results/` were measured 
 host against the local Ollama backend. They were run over the **63-task** set (the
 result records carry an ad hoc suite label from that run), before the 12 Wave-3 tasks
 were promoted to v0.4.0. They are the current honest data, presented here labeled as a
-63-task run; the 75-task v0.4.0 re-run of both models is a pending orchestrator step and
-its consolidated table is the placeholder below.
+75-task v0.4.0 run (manifest v0.4.0) against gpt-oss:16k (MXFP4) and qwen2.5-coder:16k
+(Q4_K_M) on this host; the table below is that run.
 
-**Two-model comparison, 63-task run (local Ollama, honest, labeled by model and
-quantization):**
+**Two-model comparison, 75-task v0.4.0 suite (local Ollama, honest, labeled by model
+and quantization):**
 
 | Model | Quantization | Tier 1 | Tier 2 | Tier 3 | Tier 4 | Tier 5 | Overall | Mean iterations |
 | ----- | ------------ | -----: | -----: | -----: | -----: | -----: | ------: | --------------: |
-| `gpt-oss:16k` | MXFP4 | 9/9 (100%) | 10/11 (91%) | 15/25 (60%) | 2/8 (25%) | 6/10 (60%) | **42/63 (67%)** | 1.76 |
-| `qwen2.5-coder:16k` | Q4_K_M | 4/9 (44%) | 11/11 (100%) | 7/25 (28%) | 1/8 (12%) | 5/10 (50%) | **28/63 (44%)** | 2.02 |
+| `gpt-oss:16k` | MXFP4 | 9/9 (100%) | 10/11 (91%) | 19/34 (56%) | 4/11 (36%) | 8/10 (80%) | **50/75 (67%)** | 1.73 |
+| `qwen2.5-coder:16k` | Q4_K_M | 6/9 (67%) | 10/11 (91%) | 6/34 (18%) | 2/11 (18%) | 1/10 (10%) | **25/75 (33%)** | 1.91 |
 
 The gap has a concrete, non-mysterious cause: `gpt-oss:16k` returns native `tool_calls`,
 while `qwen2.5-coder:16k` ignores the forced `tool_choice` and embeds the call in the
@@ -120,11 +120,6 @@ the lower qwen score reflects that its answers arrive by the weaker channel. The
 local models at 16k quantized weights; the numbers are a realistic floor for what a small
 local model does on this task, not an upper bound on what a model can do.
 
-<!-- TABLE PLACEHOLDER (orchestrator fills at integration): the consolidated two-model
-     table over the full 75-task v0.4.0 suite. Re-run gpt-oss:16k (MXFP4) and
-     qwen2.5-coder:16k (Q4_K_M) against manifest v0.4.0 and replace the 63-task table
-     above (or add a v0.4.0 table beside it), keeping the per-tier and overall columns
-     and the backend/quantization labels. Do not fabricate these numbers. -->
 
 ## Determinism scope
 

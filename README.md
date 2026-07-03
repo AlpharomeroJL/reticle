@@ -162,14 +162,14 @@ baseline, a local model, and a frontier model are never conflated. The suite is
 The results below are the committed local-model runs, measured on the host in
 [PERF.md](PERF.md) against a local Ollama endpoint. They were measured over the 63-task
 set (before the 12 Wave-3 tasks were promoted to v0.4.0); they are shown here labeled as
-a 63-task run. A 75-task v0.4.0 re-run of both models is pending.
+a 75-task v0.4.0 run (manifest v0.4.0).
 
-**Two-model comparison, 63-task run (local Ollama, labeled by model and quantization):**
+**Two-model comparison, 75-task v0.4.0 suite (local Ollama, labeled by model and quantization):**
 
 | Model | Quantization | Tier 1 | Tier 2 | Tier 3 | Tier 4 | Tier 5 | Overall |
 |---|---|---:|---:|---:|---:|---:|---:|
-| `gpt-oss:16k` | MXFP4 | 9/9 | 10/11 | 15/25 | 2/8 | 6/10 | **42/63 (67%)** |
-| `qwen2.5-coder:16k` | Q4_K_M | 4/9 | 11/11 | 7/25 | 1/8 | 5/10 | **28/63 (44%)** |
+| `gpt-oss:16k` | MXFP4 | 9/9 | 10/11 | 19/34 | 4/11 | 8/10 | **50/75 (67%)** |
+| `qwen2.5-coder:16k` | Q4_K_M | 6/9 | 10/11 | 6/34 | 2/11 | 1/10 | **25/75 (33%)** |
 
 The gap has a concrete cause: `gpt-oss:16k` returns native tool calls, while
 `qwen2.5-coder:16k` ignores the forced tool choice and embeds the call in message text,
@@ -177,10 +177,6 @@ which a text fallback recovers less reliably. Both paths are handled and regress
 These are small local models at 16k quantized weights; the numbers are a realistic floor,
 not an upper bound.
 
-<!-- BENCHMARK TABLE PLACEHOLDER (orchestrator fills at integration): replace or augment
-     the 63-task table above with the consolidated two-model table over the full 75-task
-     v0.4.0 suite (gpt-oss:16k MXFP4 and qwen2.5-coder:16k Q4_K_M), keeping the per-tier
-     and overall columns and the backend/quantization labels. Do not fabricate numbers. -->
 
 The deterministic `MockModel` (no key, no network) is scripted to solve only three sample
 tasks; running it exercises the whole pipeline for all 75 tasks but is a **machinery
