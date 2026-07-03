@@ -1,0 +1,8 @@
+# Tier-5 routing at the real minimum met1 pitch: m1.1 width plus m1.2 spacing
+# is 0.28um; the two straps must connect their terminals without shorting.
+id = "t5_route_min_pitch_pair"
+tier = 5
+prompt = "Create a cell named top and route two parallel met1 (68/20) straps at the minimum legal met1 pitch of 0.28um: each strap exactly 0.14um (140 dbu) wide per m1.1, separated by exactly 0.14um per m1.2. Net a runs from terminal a_w near (0,0) to a_e near (1000,0); net b runs one pitch up, from b_w near (0,280) to b_e near (1000,280). The two nets must stay electrically separate."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"a","terminals":[{"name":"a_w","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}},{"name":"a_e","layer":{"layer":68,"datatype":20},"region":{"min":{"x":980,"y":0},"max":{"x":1000,"y":20}}}]},{"name":"b","terminals":[{"name":"b_w","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":280},"max":{"x":20,"y":300}}},{"name":"b_e","layer":{"layer":68,"datatype":20},"region":{"min":{"x":980,"y":280},"max":{"x":1000,"y":300}}}]}],"forbidden":[{"net_a":"a","net_b":"b"}]}'

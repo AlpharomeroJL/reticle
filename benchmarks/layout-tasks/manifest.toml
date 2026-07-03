@@ -1,10 +1,13 @@
-# Layout-tasks suite for the Reticle agent benchmark (v0.2.0).
+# Layout-tasks suite for the Reticle agent benchmark (v0.3.0).
 #
 # The 3 sample tasks prove the machinery end to end against the mock model;
 # the 50 authored tasks span tiers 1-4: primitive placement and legality,
 # structured geometry (contacts, via chains, combs, guard rings),
-# connectivity-intent, and compound cells. Bump `version` when tasks change.
-version = "0.2.0"
+# connectivity-intent, and compound cells. The 10 tier-5 tasks are grounded in
+# the real SKY130 PDK: named periphery rules (m1.1, m1.4, m2.4, li.5, ct.1,
+# licon.1, via.1a) and the measured geometry of the sky130_fd_sc_hd tap and
+# fill cells. Bump `version` when tasks change.
+version = "0.3.0"
 tasks = [
     "t1_place_met1_rect",
     "t1_drc_clean_met1",
@@ -59,4 +62,14 @@ tasks = [
     "t4_compound_connected_pair",
     "t4_compound_bus_join",
     "t4_compound_power_grid",
+    "t5_met1_min_wire",
+    "t5_fill_rail_pair",
+    "t5_mcon_stack_m1_enc",
+    "t5_licon_tap_li1_enc",
+    "t5_mcon_rail_chain_8",
+    "t5_via1_stitch_6",
+    "t5_route_min_pitch_pair",
+    "t5_route_cell_escape",
+    "t5_tap_cell_core",
+    "t5_fill_tile_row",
 ]
