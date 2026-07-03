@@ -16,16 +16,26 @@
 //! slot.
 
 use reticle_geometry::{
-    Endcap, LayerId, Magnification, Orientation, Path, Point, Polygon, Rect, Transform,
+    BooleanOp, Endcap, LayerId, Magnification, Orientation, Path, Point, Polygon, Rect, Shape as _,
+    Transform, polygon_boolean,
 };
 use reticle_model::{
-    ArrayInstance, Cell, DrawShape, Edit, EditableDocument, Instance, ShapeKind, Violation,
+    ArrayInstance, Cell, DrawShape, Edit, EditableDocument, Instance, Rule, RuleKind, ShapeKind,
+    Violation,
 };
 
-use crate::args::{EndcapArg, LayerArg, OrientationArg, PointArg, RectArg, TransformArg};
+use crate::args::{
+    AlignArg, AxisArg, BooleanOpArg, EndcapArg, LayerArg, OrientationArg, PointArg, RectArg,
+    TransformArg,
+};
 use crate::session::{ElementKind, ElementRef};
 use crate::{AgentCommand, AgentError, AgentResponse, CommandResult, ElementId, ErrorCode};
 use crate::{CommandRecord, Outcome, Session};
+
+/// One resolved shape for a Wave 2 op: its id, its current slot in the cell's shape
+/// vector, and a clone of its geometry. Produced by
+/// [`Session::resolve_shapes_in_cell`].
+type ResolvedShape = (ElementId, usize, DrawShape);
 
 impl Session {
     /// Applies one command, returning its response or a structured error.
@@ -138,6 +148,32 @@ impl Session {
             } => self.render_png(region, width, height),
             AgentCommand::SaveSession => self.save_session(),
             AgentCommand::LoadSession { snapshot } => self.load_session(&snapshot),
+            AgentCommand::BooleanCombine {
+                cell,
+                bool_op,
+                ids,
+                layer,
+            } => self.boolean_combine(&cell, bool_op, &ids, layer),
+            AgentCommand::AlignShapes { ids, align } => self.align_shapes(&ids, align),
+            AgentCommand::DistributeShapes { ids, axis } => self.distribute_shapes(&ids, axis),
+            AgentCommand::OffsetShapes { ids, delta } => self.offset_shapes(&ids, delta),
+            AgentCommand::BuildViaStack {
+                cell,
+                lower_layer,
+                upper_layer,
+                cut_layer,
+                center,
+                cut_size,
+                default_enclosure,
+            } => self.build_via_stack(
+                &cell,
+                lower_layer,
+                upper_layer,
+                cut_layer,
+                center,
+                cut_size,
+                default_enclosure,
+            ),
         }
     }
 
@@ -395,6 +431,319 @@ impl Session {
             self.alloc.remove(&cell, ElementKind::Shape, slot);
         }
         Ok(self.ok(ids.to_vec()))
+    }
+
+    // ----- Wave 2 editor ops as agent commands ------------------------------
+
+    /// Resolves a set of ids to shapes in a single cell, cloning each shape.
+    ///
+    /// Every id must be live and name a shape (not an instance or array), and all
+    /// must live in the same cell; a multi-cell selection, an unknown id, or a
+    /// non-shape id is an [`ErrorCode::InvalidArgument`]/[`ErrorCode::NoSuchElement`]
+    /// error so the operation stays atomic. Returns the shared cell name and a list
+    /// of `(id, slot, shape)` in the order the ids were given.
+    fn resolve_shapes_in_cell(
+        &self,
+        ids: &[ElementId],
+    ) -> Result<(String, Vec<ResolvedShape>), AgentError> {
+        let mut cell_name: Option<String> = None;
+        let mut resolved = Vec::with_capacity(ids.len());
+        for &id in ids {
+            let r = self.alloc.resolve(id).ok_or_else(|| no_such_element(id))?;
+            if r.kind != ElementKind::Shape {
+                return Err(AgentError::invalid(format!(
+                    "{id} is an instance or array; this operation only accepts shapes"
+                )));
+            }
+            match &cell_name {
+                None => cell_name = Some(r.cell.clone()),
+                Some(name) if name != &r.cell => {
+                    return Err(AgentError::invalid(
+                        "all shapes must be in the same cell for this operation",
+                    ));
+                }
+                Some(_) => {}
+            }
+            let (cell, slot) = (r.cell.clone(), r.slot);
+            let shape = self
+                .document()
+                .cell(&cell)
+                .and_then(|c| c.shapes.get(slot))
+                .cloned()
+                .ok_or_else(|| no_such_element(id))?;
+            resolved.push((id, slot, shape));
+        }
+        let cell = cell_name.ok_or_else(|| AgentError::invalid("no shapes given"))?;
+        Ok((cell, resolved))
+    }
+
+    /// Combines a set of shapes with a planar boolean, writing the result polygons
+    /// to `layer` in the same cell and deleting the input shapes.
+    ///
+    /// Mirrors the editor's boolean: rectangles and polygons become boolean input
+    /// (a path is a stroke, not a fill, and is skipped); union/intersection/xor fold
+    /// pairwise and difference subtracts every later shape from the first. An
+    /// operation that yields no geometry (for example a disjoint intersection) still
+    /// consumes its inputs, matching a destructive editor combine. The result
+    /// polygons are appended to `layer` and their ids returned.
+    fn boolean_combine(
+        &mut self,
+        cell: &str,
+        op: BooleanOpArg,
+        ids: &[ElementId],
+        layer: LayerArg,
+    ) -> CommandResult {
+        if ids.len() < 2 {
+            return Err(AgentError::invalid(
+                "a boolean combine needs at least two shapes",
+            ));
+        }
+        let (owner, resolved) = self.resolve_shapes_in_cell(ids)?;
+        if owner != cell {
+            return Err(AgentError::invalid(format!(
+                "shapes are in cell `{owner}`, not `{cell}`"
+            )));
+        }
+        let polys: Vec<Polygon> = resolved
+            .iter()
+            .filter_map(|(_, _, s)| shape_as_polygon(s))
+            .collect();
+        if polys.len() < 2 {
+            return Err(AgentError::invalid(
+                "a boolean combine needs at least two fillable shapes (rectangles or \
+                 polygons); paths are skipped",
+            ));
+        }
+        let result = fold_boolean(to_boolean_op(op), &polys)?;
+
+        // Delete the inputs highest-slot-first so earlier removals do not shift the
+        // slots of later ones, then reconcile each id out of the allocator.
+        let mut slots: Vec<(ElementId, usize)> =
+            resolved.iter().map(|(id, slot, _)| (*id, *slot)).collect();
+        slots.sort_by(|a, b| b.1.cmp(&a.1));
+        for (_, slot) in &slots {
+            self.commit(Edit::RemoveShape {
+                cell: cell.to_owned(),
+                index: *slot,
+            })?;
+            self.alloc.remove(cell, ElementKind::Shape, *slot);
+        }
+
+        // Append the result polygons to the target layer, allocating a fresh id each.
+        let out_layer = layer_id(layer);
+        let mut new_ids = Vec::with_capacity(result.len());
+        for poly in result {
+            if poly.len() < 3 {
+                continue;
+            }
+            let slot = self.document().cell(cell).map_or(0, |c| c.shapes.len());
+            self.commit(Edit::AddShape {
+                cell: cell.to_owned(),
+                shape: DrawShape::new(out_layer, ShapeKind::Polygon(poly)),
+            })?;
+            new_ids.push(self.alloc.allocate(cell, ElementKind::Shape, slot));
+        }
+        Ok(self.ok(new_ids))
+    }
+
+    /// Aligns a set of shapes within their combined bounding box, keeping each id.
+    ///
+    /// Computes a per-shape translation from the alignment kind (mirroring the
+    /// editor's align), then re-lays each moved shape in place by removing it and
+    /// re-appending the translated geometry under the same id. Shapes already in
+    /// position are untouched.
+    fn align_shapes(&mut self, ids: &[ElementId], align: AlignArg) -> CommandResult {
+        if ids.len() < 2 {
+            return Err(AgentError::invalid("aligning needs at least two shapes"));
+        }
+        let (cell, resolved) = self.resolve_shapes_in_cell(ids)?;
+        let shapes: Vec<DrawShape> = resolved.iter().map(|(_, _, s)| s.clone()).collect();
+        let offsets = align_offsets(&shapes, align);
+        self.apply_translations(&cell, &resolved, &offsets)?;
+        Ok(self.ok(ids.to_vec()))
+    }
+
+    /// Distributes a set of shapes so adjacent gaps are equal along `axis`, keeping
+    /// each id. With fewer than three shapes there is nothing to distribute.
+    fn distribute_shapes(&mut self, ids: &[ElementId], axis: AxisArg) -> CommandResult {
+        if ids.len() < 3 {
+            return Err(AgentError::invalid(
+                "distributing needs at least three shapes",
+            ));
+        }
+        let (cell, resolved) = self.resolve_shapes_in_cell(ids)?;
+        let shapes: Vec<DrawShape> = resolved.iter().map(|(_, _, s)| s.clone()).collect();
+        let horizontal = matches!(axis, AxisArg::Horizontal);
+        let offsets = distribute_offsets(&shapes, horizontal);
+        self.apply_translations(&cell, &resolved, &offsets)?;
+        Ok(self.ok(ids.to_vec()))
+    }
+
+    /// Applies a per-shape `(dx, dy)` translation list (aligned with `resolved`),
+    /// rebinding each moved shape's id to its new slot.
+    ///
+    /// Like [`transform_shapes`](Self::transform_shapes), the append-only edit
+    /// vocabulary forces a remove-then-append per moved shape; ids are re-resolved
+    /// each step because an earlier removal in the same cell shifts later slots. A
+    /// zero offset leaves the shape (and its slot) untouched.
+    fn apply_translations(
+        &mut self,
+        cell: &str,
+        resolved: &[ResolvedShape],
+        offsets: &[(i32, i32)],
+    ) -> Result<(), AgentError> {
+        for ((id, _, _), (dx, dy)) in resolved.iter().zip(offsets.iter().copied()) {
+            if dx == 0 && dy == 0 {
+                continue;
+            }
+            let slot = self
+                .alloc
+                .resolve(*id)
+                .map(|r| r.slot)
+                .ok_or_else(|| no_such_element(*id))?;
+            let shape = self
+                .document()
+                .cell(cell)
+                .and_then(|c| c.shapes.get(slot))
+                .cloned()
+                .ok_or_else(|| no_such_element(*id))?;
+            let moved = translate_shape(&shape, dx, dy);
+            self.commit(Edit::RemoveShape {
+                cell: cell.to_owned(),
+                index: slot,
+            })?;
+            self.alloc.remove(cell, ElementKind::Shape, slot);
+            let new_slot = self.document().cell(cell).map_or(0, |c| c.shapes.len());
+            self.commit(Edit::AddShape {
+                cell: cell.to_owned(),
+                shape: moved,
+            })?;
+            self.alloc.rebind(*id, cell, ElementKind::Shape, new_slot);
+        }
+        Ok(())
+    }
+
+    /// Offsets (grows or shrinks) each shape by `delta` DBU, replacing it on its own
+    /// layer and keeping its id.
+    ///
+    /// Mirrors the editor's offset: a rectangle or polygon is offset by `delta` and
+    /// its result replaces it; a path is skipped. A shrink that collapses a shape to
+    /// nothing removes it (the id is retired). A zero delta is a no-op. Ids are
+    /// re-resolved each step because a removal shifts later slots.
+    fn offset_shapes(&mut self, ids: &[ElementId], delta: i32) -> CommandResult {
+        if delta == 0 {
+            return Ok(self.ok(ids.to_vec()));
+        }
+        let (cell, resolved) = self.resolve_shapes_in_cell(ids)?;
+        let mut kept = Vec::with_capacity(resolved.len());
+        for (id, _, shape) in &resolved {
+            let Some(poly) = shape_as_polygon(shape) else {
+                // A path is not a fill region; leave it in place, id unchanged.
+                kept.push(*id);
+                continue;
+            };
+            let result =
+                reticle_geometry::offset(&[poly], delta).map_err(|e| map_geometry_err(&e))?;
+            let result: Vec<Polygon> = result.into_iter().filter(|p| p.len() >= 3).collect();
+
+            // Re-resolve: an earlier retirement in this cell may have shifted the slot.
+            let slot = self
+                .alloc
+                .resolve(*id)
+                .map(|r| r.slot)
+                .ok_or_else(|| no_such_element(*id))?;
+            let out_layer = shape.layer;
+            self.commit(Edit::RemoveShape {
+                cell: cell.clone(),
+                index: slot,
+            })?;
+            self.alloc.remove(&cell, ElementKind::Shape, slot);
+            if result.is_empty() {
+                // A shrink erased the shape; the id is retired with it.
+                continue;
+            }
+            // The first result polygon inherits this shape's id; any extra polygons
+            // (an offset can split a shape) get fresh ids.
+            for (i, poly) in result.into_iter().enumerate() {
+                let new_slot = self.document().cell(&cell).map_or(0, |c| c.shapes.len());
+                self.commit(Edit::AddShape {
+                    cell: cell.clone(),
+                    shape: DrawShape::new(out_layer, ShapeKind::Polygon(poly)),
+                })?;
+                if i == 0 {
+                    self.alloc.rebind(*id, &cell, ElementKind::Shape, new_slot);
+                    kept.push(*id);
+                } else {
+                    kept.push(self.alloc.allocate(&cell, ElementKind::Shape, new_slot));
+                }
+            }
+        }
+        Ok(self.ok(kept))
+    }
+
+    /// Builds a via stack in `cell`: a square cut on `cut_layer` centered at
+    /// `center`, enclosed on `lower_layer` and `upper_layer` by the margins the
+    /// technology's enclosure rules require (falling back to `default_enclosure`).
+    ///
+    /// Ports the editor's via-stack builder. The enclosure margin for each picked
+    /// layer is the largest [`RuleKind::Enclosure`] rule of that layer enclosing the
+    /// cut layer, or `default_enclosure` when the technology declares none. The three
+    /// shapes are appended (cut, then lower and upper enclosure) and their ids
+    /// returned in that order. A non-positive `cut_size` is an
+    /// [`ErrorCode::InvalidArgument`] error.
+    #[allow(clippy::too_many_arguments)]
+    fn build_via_stack(
+        &mut self,
+        cell: &str,
+        lower_layer: LayerArg,
+        upper_layer: LayerArg,
+        cut_layer: LayerArg,
+        center: PointArg,
+        cut_size: i32,
+        default_enclosure: i32,
+    ) -> CommandResult {
+        self.require_cell(cell)?;
+        if cut_size <= 0 {
+            return Err(AgentError::invalid("via cut size must be positive"));
+        }
+        let lower = layer_id(lower_layer);
+        let upper = layer_id(upper_layer);
+        let cut = layer_id(cut_layer);
+        let c = to_point(center);
+
+        let half = cut_size / 2;
+        let cut_rect = Rect::new(
+            Point::new(c.x.saturating_sub(half), c.y.saturating_sub(half)),
+            Point::new(
+                c.x.saturating_add(cut_size - half),
+                c.y.saturating_add(cut_size - half),
+            ),
+        );
+        let rules = &self.document().technology().rules;
+        let lower_margin = enclosure_of(rules, lower, cut).unwrap_or(default_enclosure);
+        let upper_margin = enclosure_of(rules, upper, cut).unwrap_or(default_enclosure);
+
+        let shapes = [
+            DrawShape::new(cut, ShapeKind::Rect(cut_rect)),
+            DrawShape::new(
+                lower,
+                ShapeKind::Rect(cut_rect.expanded(lower_margin.max(0))),
+            ),
+            DrawShape::new(
+                upper,
+                ShapeKind::Rect(cut_rect.expanded(upper_margin.max(0))),
+            ),
+        ];
+        let mut new_ids = Vec::with_capacity(shapes.len());
+        for shape in shapes {
+            let slot = self.document().cell(cell).map_or(0, |c| c.shapes.len());
+            self.commit(Edit::AddShape {
+                cell: cell.to_owned(),
+                shape,
+            })?;
+            new_ids.push(self.alloc.allocate(cell, ElementKind::Shape, slot));
+        }
+        Ok(self.ok(new_ids))
     }
 
     // ----- queries ----------------------------------------------------------
@@ -852,6 +1201,222 @@ fn transform_shape(transform: &Transform, shape: &DrawShape) -> DrawShape {
         )),
     };
     DrawShape::new(shape.layer, kind)
+}
+
+// ----- Wave 2 op helpers ----------------------------------------------------
+
+/// Maps a serde [`BooleanOpArg`] to the engine's [`BooleanOp`].
+fn to_boolean_op(op: BooleanOpArg) -> BooleanOp {
+    match op {
+        BooleanOpArg::Union => BooleanOp::Union,
+        BooleanOpArg::Intersection => BooleanOp::Intersection,
+        BooleanOpArg::Difference => BooleanOp::Difference,
+        BooleanOpArg::Xor => BooleanOp::Xor,
+    }
+}
+
+/// Maps a [`reticle_geometry::GeometryError`] onto an [`AgentError`].
+fn map_geometry_err(e: &reticle_geometry::GeometryError) -> AgentError {
+    AgentError::new(ErrorCode::InvalidArgument, format!("geometry: {e}"))
+}
+
+/// Converts a fillable shape (rectangle or polygon) to a boolean-input polygon, or
+/// `None` for a path (a stroke, not a fill region). Mirrors the editor's rule that
+/// booleans and offsets run on filled geometry only.
+fn shape_as_polygon(shape: &DrawShape) -> Option<Polygon> {
+    match &shape.kind {
+        ShapeKind::Rect(r) => Some(Polygon::from_rect(*r)),
+        ShapeKind::Polygon(p) => Some(p.clone()),
+        ShapeKind::Path(_) => None,
+    }
+}
+
+/// Folds a boolean across polygons on one layer.
+///
+/// Union / intersection / xor are associative and accumulate pairwise; difference
+/// subtracts every later polygon from the first (the usual "A minus the rest"). An
+/// empty accumulator short-circuits. Degenerate (fewer than three vertices) inputs
+/// are skipped.
+fn fold_boolean(op: BooleanOp, polys: &[Polygon]) -> Result<Vec<Polygon>, AgentError> {
+    let mut it = polys.iter().filter(|p| p.len() >= 3);
+    let Some(first) = it.next() else {
+        return Ok(Vec::new());
+    };
+    let mut acc = vec![first.clone()];
+    for poly in it {
+        let rhs = vec![poly.clone()];
+        acc = polygon_boolean(op, &acc, &rhs).map_err(|e| map_geometry_err(&e))?;
+        if acc.is_empty() {
+            break;
+        }
+    }
+    Ok(acc)
+}
+
+/// The combined bounding box of a set of shapes, or `None` if empty.
+fn combined_bbox(shapes: &[DrawShape]) -> Option<Rect> {
+    shapes
+        .iter()
+        .map(reticle_geometry::Shape::bounding_box)
+        .reduce(|a, b| a.union(&b))
+}
+
+/// Rounds a widened DBU delta back to [`i32`], saturating (bounding-box deltas are
+/// always in range in practice).
+fn narrow_dbu(v: i64) -> i32 {
+    i32::try_from(v).unwrap_or(if v < 0 { i32::MIN } else { i32::MAX })
+}
+
+/// Midpoint of two coordinates, rounded to the nearest DBU.
+fn midpoint_dbu(a: i32, b: i32) -> i32 {
+    let m = f64::midpoint(f64::from(a), f64::from(b)).round();
+    if m >= f64::from(i32::MAX) {
+        i32::MAX
+    } else if m <= f64::from(i32::MIN) {
+        i32::MIN
+    } else {
+        m as i32
+    }
+}
+
+/// Per-shape `(dx, dy)` translations to align `shapes` within their combined
+/// bounding box. Mirrors the editor's `align_offsets`. An empty selection or a
+/// degenerate box yields all-zero offsets.
+fn align_offsets(shapes: &[DrawShape], align: AlignArg) -> Vec<(i32, i32)> {
+    let Some(bounds) = combined_bbox(shapes) else {
+        return vec![(0, 0); shapes.len()];
+    };
+    let diff = |a: i32, b: i32| i64::from(a) - i64::from(b);
+    shapes
+        .iter()
+        .map(|s| {
+            let b = s.bounding_box();
+            match align {
+                AlignArg::Left => (narrow_dbu(diff(bounds.min.x, b.min.x)), 0),
+                AlignArg::Right => (narrow_dbu(diff(bounds.max.x, b.max.x)), 0),
+                AlignArg::Top => (0, narrow_dbu(diff(bounds.max.y, b.max.y))),
+                AlignArg::Bottom => (0, narrow_dbu(diff(bounds.min.y, b.min.y))),
+                AlignArg::CenterX => {
+                    let target = midpoint_dbu(bounds.min.x, bounds.max.x);
+                    let cur = midpoint_dbu(b.min.x, b.max.x);
+                    (narrow_dbu(diff(target, cur)), 0)
+                }
+                AlignArg::CenterY => {
+                    let target = midpoint_dbu(bounds.min.y, bounds.max.y);
+                    let cur = midpoint_dbu(b.min.y, b.max.y);
+                    (0, narrow_dbu(diff(target, cur)))
+                }
+            }
+        })
+        .collect()
+}
+
+/// Per-shape `(dx, dy)` translations to distribute `shapes` so adjacent edge-to-edge
+/// gaps are equal along the axis. Mirrors the editor's `distribute_offsets`: the two
+/// extreme shapes stay put and the inner shapes are respaced. Fewer than three
+/// shapes yields all-zero offsets.
+fn distribute_offsets(shapes: &[DrawShape], horizontal: bool) -> Vec<(i32, i32)> {
+    let n = shapes.len();
+    let mut offsets = vec![(0, 0); n];
+    if n < 3 {
+        return offsets;
+    }
+    let center = |idx: usize| -> f64 {
+        let b = shapes[idx].bounding_box();
+        if horizontal {
+            f64::midpoint(f64::from(b.min.x), f64::from(b.max.x))
+        } else {
+            f64::midpoint(f64::from(b.min.y), f64::from(b.max.y))
+        }
+    };
+    let extent = |idx: usize| -> f64 {
+        let b = shapes[idx].bounding_box();
+        if horizontal {
+            f64::from(b.max.x) - f64::from(b.min.x)
+        } else {
+            f64::from(b.max.y) - f64::from(b.min.y)
+        }
+    };
+    let lo = |idx: usize| -> f64 {
+        let b = shapes[idx].bounding_box();
+        if horizontal {
+            f64::from(b.min.x)
+        } else {
+            f64::from(b.min.y)
+        }
+    };
+
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| {
+        center(a)
+            .partial_cmp(&center(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let first = order[0];
+    let last = order[n - 1];
+    let span = (lo(last) + extent(last)) - lo(first);
+    let total_extent: f64 = order.iter().map(|&i| extent(i)).sum();
+    let gap = (span - total_extent) / (n as f64 - 1.0);
+
+    let mut cursor = lo(first) + extent(first) + gap;
+    for &idx in &order[1..n - 1] {
+        let delta = round_dbu_f64(cursor - lo(idx));
+        offsets[idx] = if horizontal { (delta, 0) } else { (0, delta) };
+        cursor += extent(idx) + gap;
+    }
+    offsets
+}
+
+/// Rounds a float coordinate delta to the nearest DBU, clamped to the range.
+fn round_dbu_f64(v: f64) -> i32 {
+    let r = v.round();
+    if r >= f64::from(i32::MAX) {
+        i32::MAX
+    } else if r <= f64::from(i32::MIN) {
+        i32::MIN
+    } else {
+        r as i32
+    }
+}
+
+/// Translates a shape by `(dx, dy)` DBU, preserving its layer and kind (saturating
+/// at the DBU range). Mirrors the editor's `translate_shape`.
+fn translate_shape(shape: &DrawShape, dx: i32, dy: i32) -> DrawShape {
+    let kind = match &shape.kind {
+        ShapeKind::Rect(rect) => ShapeKind::Rect(Rect::new(
+            rect.min.translate(dx, dy),
+            rect.max.translate(dx, dy),
+        )),
+        ShapeKind::Polygon(poly) => ShapeKind::Polygon(Polygon::new(
+            poly.vertices()
+                .iter()
+                .map(|p| p.translate(dx, dy))
+                .collect(),
+        )),
+        ShapeKind::Path(path) => ShapeKind::Path(Path::new(
+            path.points().iter().map(|p| p.translate(dx, dy)).collect(),
+            path.width(),
+            path.endcap(),
+        )),
+    };
+    DrawShape::new(shape.layer, kind)
+}
+
+/// The minimum enclosure of `inner_layer` by `outer_layer` required by `rules`, in
+/// DBU, or `None` if the technology declares no such rule. Mirrors the editor's
+/// `enclosure_of`: matches an [`RuleKind::Enclosure`] rule whose primary `layer` is
+/// the enclosing layer and whose `other_layer` is the enclosed layer, taking the
+/// largest value when several apply.
+fn enclosure_of(rules: &[Rule], outer_layer: LayerId, inner_layer: LayerId) -> Option<i32> {
+    rules
+        .iter()
+        .filter(|rule| {
+            rule.kind == RuleKind::Enclosure
+                && rule.layer == outer_layer
+                && rule.other_layer == Some(inner_layer)
+        })
+        .map(|rule| narrow_dbu(rule.value))
+        .max()
 }
 
 // ----- JSON shaping ---------------------------------------------------------
