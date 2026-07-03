@@ -2,14 +2,36 @@
 //!
 //! This crate freezes the per-task schema ([`BenchTask`]), the checker trait
 //! ([`Checker`] with [`CheckResult`]), the versioned [`SuiteManifest`], and the
-//! [`ResultRecord`]. The loader, the checker-trait runner, the results writer, and
-//! the deterministic mock model that exercises the propose-verify-correct loop
-//! land in a later wave; these are the shapes they share.
+//! [`ResultRecord`], then builds the machinery around them:
+//!
+//! - [`loader`]: read a [`BenchTask`] from TOML and a whole suite from a directory.
+//! - [`model`]: the [`ModelClient`] seam and a deterministic [`MockModel`] that
+//!   scripts a propose-verify-correct sequence with no live model.
+//! - [`checkers`]: the built-in [`RectPresent`], [`DrcClean`], and [`IntentCheck`]
+//!   checkers and the [`CheckerRegistry`] that dispatches a task's checker name.
+//! - [`runner`]: [`run_task`], which drives a session through the loop and records a
+//!   [`ResultRecord`] with a deterministic (step-counted) wall time.
+//! - [`results`]: write records as JSON and render a Markdown [`Summary`].
+//!
+//! The end-to-end flow (load a suite, run each task against the mock, summarize) is
+//! exercised by the sample suite under `benchmarks/layout-tasks/` and the crate's
+//! own tests.
 
 mod checker;
 mod schema;
 
+pub mod checkers;
+pub mod loader;
+pub mod model;
+pub mod results;
+pub mod runner;
+
 pub use checker::{CheckFailure, CheckResult, Checker};
+pub use checkers::{CheckerRegistry, DrcClean, IntentCheck, RectPresent};
+pub use loader::{LoadError, load_manifest, load_suite, load_task};
+pub use model::{Context, MockModel, ModelClient};
+pub use results::{Summary, TierStats, WriteError, summarize, write_records};
+pub use runner::{RunError, RunOptions, run_task};
 pub use schema::{BenchTask, ResultRecord, SuiteManifest, Tier};
 
 #[cfg(test)]

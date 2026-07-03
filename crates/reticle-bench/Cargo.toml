@@ -13,10 +13,25 @@ categories = ["science", "development-tools"]
 [lints]
 workspace = true
 
+[[bin]]
+name = "reticle-bench"
+path = "src/main.rs"
+
 [dependencies]
 reticle-model = { workspace = true }
 reticle-agent-api = { workspace = true }
+reticle-drc = { workspace = true }
+reticle-extract = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# Pinned exactly to match the workspace's other data-plane loader (reticle-drc):
+# task and manifest TOML is committed benchmark data and must not drift under a
+# routine `cargo update`.
+toml = "=1.1.2"
+# The runner binary's argument parser; version matched to reticle-cli.
+clap = { version = "4.6.1", features = ["derive"] }
 
 [dev-dependencies]
+# Geometry primitives (LayerId/Point/Rect) used only to build documents in the
+# checker unit tests; the library itself takes geometry through reticle-model.
+reticle-geometry = { workspace = true }
