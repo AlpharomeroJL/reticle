@@ -204,9 +204,22 @@ impl Session {
 
     /// Milliseconds elapsed since the session's clock origin, establishing the
     /// origin on the first call so a transcript's timestamps start near zero.
+    ///
+    /// On `wasm32-unknown-unknown` there is no monotonic clock (`Instant::now`
+    /// panics), so timestamps degrade to zero rather than aborting the session.
     pub(crate) fn now_ms(&mut self) -> u64 {
-        let origin = *self.started.get_or_insert_with(std::time::Instant::now);
-        origin.elapsed().as_millis() as u64
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let origin = *self.started.get_or_insert_with(std::time::Instant::now);
+            origin.elapsed().as_millis() as u64
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // No monotonic clock on wasm; `started` stays `None` and this read keeps
+            // the field live for the dead-code lint.
+            let _ = &self.started;
+            0
+        }
     }
 
     /// A serializable snapshot of the session: its command transcript.
