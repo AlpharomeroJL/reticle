@@ -26,9 +26,12 @@ bytemuck = { version = "1.25.0", features = ["derive"] }
 # `image` is PNG-only: golden tests need no other codecs, and this avoids the
 # heavy AVIF encoder chain (rav1e) and its unmaintained transitive `paste`.
 # `proptest` drives the compaction test against a CPU reference over random bitsets.
+# `reticle-io` parses the committed SKY130 technology file so the 3D stack tests
+# run against the real process stack rather than hand-built entries.
 [dev-dependencies]
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 proptest = "1.11.0"
+reticle-io = { workspace = true }
 
 [[example]]
 name = "fps_bench"

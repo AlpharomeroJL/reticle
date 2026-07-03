@@ -4093,6 +4093,7 @@ dependencies = [
  "proptest",
  "reticle-geometry",
  "reticle-index",
+ "reticle-io",
  "reticle-model",
  "wgpu",
 ]
