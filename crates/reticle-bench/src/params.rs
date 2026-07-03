@@ -1,5 +1,5 @@
-//! Parsing per-task checker parameters out of the frozen [`BenchTask::checker`]
-//! string.
+//! Parsing per-task checker parameters out of the frozen
+//! [`BenchTask::checker`](crate::BenchTask::checker) string.
 //!
 //! The task schema is frozen: a task names its checker with a single `checker`
 //! string and carries no free-form parameter map. To keep geometric checkers
