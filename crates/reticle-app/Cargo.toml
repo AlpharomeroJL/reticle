@@ -32,6 +32,15 @@ reticle-sync = { workspace = true }
 reticle-drc = { workspace = true }
 reticle-extract = { workspace = true }
 
+# The agent panel and the replay theater drive the frozen agent command API
+# (`Session`, `Transcript`, `AgentCommand`). That crate does not compile for
+# wasm32 today: its `render_png` command calls the native-only blocking GPU
+# context in `reticle-render`. Both features are therefore native-only and the
+# corresponding modules are cfg-gated out of the web build.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reticle-agent-api = { workspace = true }
+serde_json = { workspace = true }
+
 # `reticle-io` parses the committed SKY130 technology file so the cross-section
 # test checks real process-stack z bands rather than hand-built entries.
 [dev-dependencies]

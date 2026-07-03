@@ -20,6 +20,8 @@ use reticle_render::{
 use reticle_sync::SyncDocument;
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::agent_panel::AgentPanelState;
 use crate::camera::{ScreenRect, ViewCamera};
 use crate::command::{self, Command};
 use crate::culling::{self, DetailLevel, SceneIndex};
@@ -116,6 +118,11 @@ pub struct App {
     /// it is refreshed only when [`App::sync_retained`] rebuilds.
     expanded: Arc<ExpandedScene>,
 
+    /// The agent panel: prompt, run state machine, narration, and cursor.
+    /// Native only: `reticle-agent-api` does not compile for wasm32 today.
+    #[cfg(not(target_arch = "wasm32"))]
+    agent: AgentPanelState,
+
     /// The DRC panel state: the last run's violations and the highlighted one.
     drc: DrcResults,
     /// Whether the camera should frame the selected violation on the next frame
@@ -189,6 +196,8 @@ impl App {
             render_revision: 0,
             visibility_sig: 0,
             expanded,
+            #[cfg(not(target_arch = "wasm32"))]
+            agent: AgentPanelState::new(),
             drc: DrcResults::new(),
             zoom_to_selected_violation: false,
             netlight: Netlight::new(),
@@ -738,6 +747,101 @@ impl App {
         }
     }
 
+    /// Draws the agent panel: prompt box, Run/Stop, live status, and narration.
+    ///
+    /// The state machine and the narration feed live in [`crate::agent_panel`];
+    /// this is glue only. The panel drives a scripted transcript (no model or
+    /// key), so Run always has something honest to narrate.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn agent_section(&mut self, ui: &mut egui::Ui) {
+        use crate::agent_panel::RunState;
+
+        ui.heading("Agent");
+        ui.horizontal(|ui| {
+            ui.label("Prompt:");
+            ui.text_edit_singleline(&mut self.agent.prompt);
+        });
+        ui.horizontal(|ui| {
+            let running = self.agent.is_running();
+            if ui.add_enabled(!running, egui::Button::new("Run")).clicked() {
+                self.agent.start();
+                self.status.set("Agent run started");
+            }
+            if ui.add_enabled(running, egui::Button::new("Stop")).clicked() {
+                self.agent.stop();
+                self.status.set("Agent run stopped");
+            }
+        });
+        if let Some(status) = self.agent.latest_status() {
+            let (done, total) = self.agent.progress();
+            ui.label(format!(
+                "iter {} | {} | {} violation(s) | step {done}/{total}",
+                status.iteration, status.step, status.violations
+            ));
+        } else {
+            ui.label(match self.agent.state() {
+                RunState::Idle => "Idle: enter a prompt and press Run",
+                RunState::Running => "Starting...",
+                RunState::Stopped => "Stopped",
+            });
+        }
+        ui.separator();
+        egui::ScrollArea::vertical()
+            .max_height(140.0)
+            .auto_shrink([false, false])
+            .stick_to_bottom(true)
+            .id_salt("agent_narration")
+            .show(ui, |ui| {
+                if self.agent.narration().is_empty() {
+                    ui.label("No run yet");
+                }
+                for line in self.agent.narration() {
+                    ui.monospace(line);
+                }
+            });
+    }
+
+    /// The web build's agent panel stub: the command API is native-only today.
+    #[cfg(target_arch = "wasm32")]
+    fn agent_section(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Agent");
+        ui.label("Agent runs are native-only in this build.");
+    }
+
+    /// Draws the agent's cursor: a distinct ringed crosshair plus the agent's
+    /// actor name, so it cannot be mistaken for a collaborator's presence dot.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn draw_agent_cursor(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        if self.agent.state() == crate::agent_panel::RunState::Idle {
+            return;
+        }
+        let Some(world) = self.agent.cursor() else {
+            return;
+        };
+        let p = self.world_pos_to_screen(screen, world);
+        let color = Color32::from_rgb(235, 80, 220);
+        let stroke = Stroke::new(2.0, color);
+        painter.circle_stroke(p, 9.0, stroke);
+        painter.circle_filled(p, 3.0, color);
+        // Four crosshair ticks just outside the ring.
+        for (dx, dy) in [(1.0f32, 0.0f32), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+            painter.line_segment(
+                [
+                    Pos2::new(p.x + dx * 5.0, p.y + dy * 5.0),
+                    Pos2::new(p.x + dx * 13.0, p.y + dy * 13.0),
+                ],
+                stroke,
+            );
+        }
+        painter.text(
+            Pos2::new(p.x + 15.0, p.y - 12.0),
+            Align2::LEFT_CENTER,
+            reticle_agent_api::AGENT_ACTOR,
+            FontId::proportional(11.0),
+            color,
+        );
+    }
+
     /// Draws the properties inspector section for the current selection.
     fn inspector_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Properties");
@@ -1011,6 +1115,8 @@ impl App {
             self.draw_minimap(&painter, &screen);
         }
         self.draw_presence(&painter, &screen);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.draw_agent_cursor(&painter, &screen);
 
         // Mark the focused pane when split (drawn unclipped so the full border
         // stroke shows).
@@ -1765,6 +1871,15 @@ impl eframe::App for App {
         self.frame_meter
             .record(std::time::Duration::from_secs_f32(dt.max(0.0)));
 
+        // Advance the agent run by this frame's dt so narration and the agent
+        // cursor animate while the panel is running.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // The verify steps' violation lists feed the DRC overlay (wired in
+            // the DRC-overlay milestone); narration and status update here.
+            let _drc_update = self.agent.tick(dt);
+        }
+
         // The surface color format when eframe is on its wgpu backend; drives the
         // retained GPU canvas. `None` (e.g. a glow build) falls back to egui painting.
         let gpu_format = frame.wgpu_render_state().map(|state| state.target_format);
@@ -1796,6 +1911,8 @@ impl eframe::App for App {
                         self.inspector_panel(ui);
                         ui.separator();
                         self.drc_panel(ui);
+                        ui.separator();
+                        self.agent_section(ui);
                     });
             });
         egui::CentralPanel::default().show(ui, |ui| {
