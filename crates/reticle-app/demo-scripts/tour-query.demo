@@ -1,0 +1,14 @@
+# tour-query: the filter-query bar selects shapes by layer and size, and the outline
+# tree locates a cell on the canvas. The filter runs within the first two seconds.
+viewport 1600x1000
+use-case inspect-cell
+wait 20
+filter layer:met1
+wait 6
+capture 45 20
+filter layer:li1 width<600
+wait 6
+capture 45 20
+outline-locate inv
+wait 6
+capture 40 20

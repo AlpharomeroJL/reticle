@@ -1,0 +1,13 @@
+# hero: the editor on a real SKY130 cell with every panel doing something. Layers
+# panel (left), DRC panel with the 11 violations listed, minimap (top right), and the
+# properties inspector populated by a selected shape, with that shape's net
+# highlighted on the canvas. This still replaces the old canvas-only hero.
+viewport 1600x1000
+use-case inspect-cell
+wait 22
+run-drc
+wait 4
+select 5
+highlight-net 5
+wait 6
+snap hero
