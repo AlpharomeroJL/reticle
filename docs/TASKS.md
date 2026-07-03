@@ -247,9 +247,25 @@ reticle-agent-layer). Batch 2 = 3E failure-mining, 3F benchmark expansion (needs
   RefinementSource seam). 3D per-iteration plan step in Transcript.plan (additive,
   serde-default; ADR 0032) rendered in the panel. run.rs auto-merged (3C+3D). Two
   more temp-dir test flakes fixed (loader, plugins).
-- [ ] Batch 2: 3E mine the local-model runs, cluster by the new tool surface,
-  promote two-way-tested checkers, bump suite version; 3F +12 tasks (suite -> 75)
-  for boolean/array/via-stack/refinement, re-run both local models.
+- [x] Batch 2 DONE-gate-green, merged (c66306b 3E, e10d276 3F; ci GREEN, 1065
+  tests, pushed 28d9b30). 3E tool-surface clustering dimension in mining (honest
+  note: committed local runs are ResultRecord-only, no transcripts, so no
+  tool-surface candidates minable yet). 3F +12 tasks -> suite v0.4.0 (75 tasks):
+  boolean/array/via-stack/refinement, 2 new checkers two-way tested, additive
+  BenchTask.refinement field wired to 3C's run_agent_task_refined.
+
+**Wave 3 complete: agent tool surface, scoped context packs, iterative refinement,
+planning transparency, tool-surface mining, and the 75-task suite all merged and
+gate-green.** Orchestrator step in progress: 75-task re-run on gpt-oss:16k then
+qwen2.5-coder:16k (v0.4.0), results to benchmarks/results/v0.4.0/.
+
+## Wave 4: guided experience and presentation (3 lanes) [in-progress]
+
+- [~] 4A embedded first-run tour (reticle-app tour.rs, native+wasm); 4B worked use
+  cases + Start screen (4 scenarios) + use-cases.md; 4C credibility chapters
+  (positioning/benchmark/sky130) + README overhaul. Orchestrator does the media
+  regen (hero + GIFs) and the final two-model 75-task benchmark table at
+  integration (avoids GPU contention with the running benchmark).
 
 ## Wave 4: guided experience and presentation (parallel, 3 lanes) [not-started]
 
