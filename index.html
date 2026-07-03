@@ -8,10 +8,97 @@
       name="description"
       content="Browser-native, GPU-accelerated editor for very large hierarchical 2D IC-layout scenes."
     />
+    <!--
+      Failure surface. Trunk injects its own `<script type="module">` in place of
+      the `data-trunk rel="rust"` link below; that module does a top-level
+      `await init(...)` to fetch and instantiate the wasm. If the fetch 404s (for
+      example when the site is served under a subpath but the assets were emitted
+      at absolute root), the top-level await rejects with NO catch of its own and
+      the page would otherwise sit on the loading spinner forever.
+
+      This classic (non-module) script runs synchronously here in <head>, BEFORE
+      Trunk's deferred module executes, so its global handlers are already
+      registered when init runs. Any import/init/wasm-fetch failure is turned into
+      a visible message in #status instead of a silent hang. A successful boot is
+      signalled by Trunk's `TrunkApplicationStarted` event and by main.rs hiding
+      the overlay; we cancel the "still loading" watchdog on that event.
+    -->
+    <script>
+      (function () {
+        function statusEl() {
+          return document.getElementById("status");
+        }
+        function showError(message) {
+          var el = statusEl();
+          if (!el) return;
+          el.className = "status error";
+          el.textContent =
+            "Failed to load Reticle: " + message + ". Check the console.";
+        }
+        function describe(reason) {
+          if (!reason) return "unknown error";
+          if (reason.message) return String(reason.message);
+          return String(reason);
+        }
+
+        // The renderer booted: Trunk fires this after init resolves. Mark booted so
+        // the watchdog does not later overwrite a live app with a timeout message.
+        var booted = false;
+        window.addEventListener("TrunkApplicationStarted", function () {
+          booted = true;
+        });
+
+        // A rejected top-level await in Trunk's loader surfaces here.
+        window.addEventListener("unhandledrejection", function (event) {
+          booted = true; // stop the watchdog; we are reporting the real cause
+          showError(describe(event.reason));
+        });
+        // A failed module import (network 404 on the .js, syntax error) surfaces as
+        // a window error event.
+        window.addEventListener(
+          "error",
+          function (event) {
+            var target = event.target;
+            // Ignore benign resource-load errors on unrelated elements; report
+            // script/module and wasm load failures.
+            if (
+              target &&
+              (target.tagName === "SCRIPT" || target.tagName === "LINK")
+            ) {
+              booted = true;
+              var src = target.src || target.href || "a module";
+              showError("could not load " + src);
+              return;
+            }
+            if (event.error) {
+              booted = true;
+              showError(describe(event.error));
+            }
+          },
+          true,
+        );
+
+        // Watchdog: if neither a boot nor an error has been observed after a
+        // generous window, tell the user rather than spinning forever. A slow
+        // connection legitimately takes a few seconds to stream and compile the
+        // wasm, so this is deliberately long and only fires when nothing happened.
+        window.addEventListener("DOMContentLoaded", function () {
+          setTimeout(function () {
+            if (booted) return;
+            var el = statusEl();
+            if (!el) return;
+            el.className = "status warn";
+            el.textContent =
+              "Reticle is still loading. If this persists, the assets may have " +
+              "failed to load; check the browser console for details.";
+          }, 20000);
+        });
+      })();
+    </script>
     
 <script type="module">
-import init, * as bindings from '/web-c3f057a2d57f82a0.js';
-const wasm = await init({ module_or_path: '/web-c3f057a2d57f82a0_bg.wasm' });
+import init, * as bindings from '/reticle/web-1968935bbf316c56.js';
+const wasm = await init({ module_or_path: '/reticle/web-1968935bbf316c56_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -64,6 +151,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       #overlay .warn {
         color: #f9e2af;
       }
+      #overlay .error {
+        color: #f38ba8;
+        max-width: 40rem;
+      }
       /* A small, always-clickable link to switch between the replay theater (the
          public default) and the full editor. Stays visible after the app mounts. */
       #view-switch {
@@ -83,7 +174,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         background: rgba(49, 50, 68, 0.95);
       }
     </style>
-  <link rel="modulepreload" href="/web-c3f057a2d57f82a0.js" crossorigin="anonymous" integrity="sha384-onvr9LwBgbLzNjkjfAkF43sgysLUQweM+ONunHL9oFcW9MtlwfczEx/CIGGZikhT"><link rel="preload" href="/web-c3f057a2d57f82a0_bg.wasm" crossorigin="anonymous" integrity="sha384-vvs3M9MYNBIHpNMoTkKZS+CRa4hbLbG5uOoCJE7BaabTxMASGS4PqcvcA43v+J1J" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/reticle/web-1968935bbf316c56.js" crossorigin="anonymous" integrity="sha384-dzGoUZ6cNATcMAXqIF9Q+eJmO5tLFeqC+6HWCczR0HQ+02VDqPXzbtKTNKjv8OKp"><link rel="preload" href="/reticle/web-1968935bbf316c56_bg.wasm" crossorigin="anonymous" integrity="sha384-mOpJU3bjh30yloIU0/1LrW1bAFtObZybC4xaC5uUTsg3QLZ/+0RzyHcu+bFHKSlm" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="reticle-canvas"></canvas>
     <a id="view-switch" href="?view=editor">Open the full editor</a>
@@ -95,15 +186,21 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       // Report the rendering backend to the user. wgpu performs the actual
       // WebGPU -> WebGL2 fallback at the graphics layer (ADR 0009); this only
       // surfaces which path is in use so the demo is honest about capability.
+      // It never claims WebGPU when navigator.gpu is absent: the WebGL2 fallback
+      // notice is shown instead, and wgpu takes the WebGL2 path at the graphics
+      // layer so the canvas still renders.
       (function () {
         var status = document.getElementById("status");
-        if ("gpu" in navigator) {
-          status.textContent = "WebGPU detected. Starting the GPU renderer…";
-        } else {
-          status.className = "status warn";
-          status.textContent =
-            "WebGPU is unavailable in this browser; falling back to WebGL2. " +
-            "For the full experience use a current version of Chrome or Edge.";
+        // Do not stomp on an error already surfaced by the failure-handler above.
+        if (status && status.className.indexOf("error") === -1) {
+          if ("gpu" in navigator) {
+            status.textContent = "WebGPU detected. Starting the GPU renderer…";
+          } else {
+            status.className = "status warn";
+            status.textContent =
+              "WebGPU is unavailable in this browser; falling back to WebGL2. " +
+              "For the full experience use a current version of Chrome or Edge.";
+          }
         }
 
         // Point the view switch at the other view. The public default (no
