@@ -67,10 +67,10 @@ produce v5.0.0.
 - [x] Lane B: intent checker in reticle-extract, oracle tests both directions. done-gate-green, merged. check_intent(doc,cell,spec)->IntentReport + sky130_connection_rules; 10 tests incl. two-direction perturbation proptests (break->open, bridge->short). TODO: wire agent-api CheckIntent (Lane A stub) to this.
 - [x] Lane C: pins and labels through model and io, GDS TEXT round-trip. done-gate-green, merged. GDSII TEXT<->Label import/export + OASIS label subset (v3); 8 tests; anchors collapse to Center through GDS (gds21 presentation fields private), preserved in OASIS.
 - [x] Lane D: SKY130 DRC subset over reticle-drc, coverage table, per-rule fixtures. done-gate-green, merged. sky130_drc_rules() loads 26 cited rules from the toml; 24 tests (9 both-direction); coverage page in the book. toml pinned =1.1.2.
-- [~] Lane E: sky130_fd_sc_hd cell import. in-progress @ lane/1e-cells (INTERRUPTED by session limit). Committed: fetch script c0babec. Uncommitted in worktree: reticle-io Cargo.toml deps, corpus/sky130/ cells, a throwaway probe_tmp.rs (delete). REMAINING: round-trip test, DRC run, corpus commit + attribution.
-- [~] Lane F: benchmark infrastructure. in-progress @ lane/1f-bench (INTERRUPTED). No commits yet; large uncommitted impl in worktree: src/{checkers,loader,main,model,results,runner,scripts}.rs, benchmarks/ dir, lib.rs+Cargo.toml. REMAINING: make it compile, tests, just bench-agent recipe, commit.
-- [~] Lane G: demo server. in-progress @ lane/1g-demo (INTERRUPTED). No commits; uncommitted in worktree: src/{error,harness,rate,server,vocab}.rs, lib.rs+Cargo.toml. REMAINING: compile, abuse tests, commit.
-- [~] Lane H: 3D stack SKY130 thicknesses. in-progress @ lane/1h-stack3d (INTERRUPTED). No commits; uncommitted in worktree: pipeline3d.rs, tests/stack3d.rs, Cargo.toml. REMAINING: compile, tests, commit.
+- [x] Lane E: sky130_fd_sc_hd cell import. done-gate-green, merged. Fetched 5 real cells (network worked), committed 3 minimal to corpus/sky130/ with Apache-2.0 NOTICE; round-trip stable (no importer gaps); DRC subset run with honest findings (fill_1 clean; tap_1/inv_1 flag li.5/li.3/poly.8 from bbox-conservative engine + deck approximations, documented, not tape-out-clean).
+- [x] Lane F: benchmark infrastructure. done-gate-green, merged. reticle-bench: loader, ModelClient + deterministic MockModel, runner (monotonic clock), CheckerRegistry (rect_present/drc_clean/intent, two-way tested), results writer + markdown summary, bin + `just bench-agent`; 3 tier-1 sample tasks; 26 tests.
+- [x] Lane G: demo server. done-gate-green, merged. axum submit/status/cancel enforcing every LimitConfig field (429 rate, 409 per-IP, 503 global, 400 prompt/vocab, budget->cancel); Harness trait + MockHarness + CancelToken; 24 tests incl. 8 abuse tests.
+- [~] Lane H: 3D stack SKY130 thicknesses. in-progress @ lane/1h-stack3d (resuming after the session-limit interruption).
 
 ## Wave 2: composition (three batches)
 
