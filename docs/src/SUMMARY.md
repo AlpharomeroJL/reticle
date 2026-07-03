@@ -29,5 +29,6 @@
 
 - [Performance methodology](performance.md)
 - [User guide](user-guide.md)
+- [Productivity editing](productivity.md)
 - [Deployment](deployment.md)
 - [Contributing](contributing.md)
