@@ -1,0 +1,6 @@
+id = "t4_refine_li1_grow"
+tier = 4
+prompt = "Create a cell named top and place a single li1 (67/20) rectangle covering at least 60000 square database units."
+technology = "sky130.tech"
+checker = "layer_area:layer=67/20,min_area=200000"
+refinement = "Refinement: the li1 region is too small. Grow the li1 (67/20) rectangle so its area is at least 200000 square database units."

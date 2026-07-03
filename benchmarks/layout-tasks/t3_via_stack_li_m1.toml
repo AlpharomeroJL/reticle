@@ -1,0 +1,5 @@
+id = "t3_via_stack_li_m1"
+tier = 3
+prompt = "Create a cell named top and build a via stack centered at (500,500) that connects li1 (67/20) to met1 (68/20) through an mcon (67/44) cut: a square cut on mcon with an li1 enclosure below and a met1 enclosure above, so li1 and met1 are joined on one net and each encloses the cut by at least 30 database units."
+technology = "sky130.tech"
+checker = "contact_stack:via=67/44,bottom=67/20,top=68/20,min_enclosure=30"

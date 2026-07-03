@@ -14,15 +14,43 @@ tested**, so a task cannot pass by luck or by a checker that always returns true
 the test proves the checker accepts the intended solution and rejects a
 deliberately perturbed one.
 
-The suite (`manifest.toml`, version 0.3.0) has **63 tasks across five tiers**:
+The suite (`manifest.toml`, version 0.4.0) has **75 tasks across five tiers**:
 
 | Tier | Focus | Examples |
 | ---- | ----- | -------- |
 | 1 | Primitive placement and legality | place a met1 rectangle, clear the min width and min area rules |
 | 2 | Structured geometry | contact stacks, via chains, comb structures |
-| 3 | Larger structured geometry and connectivity intent | guard rings, multi-net intent |
-| 4 | Compound cells | cells composed of several checked features |
+| 3 | Larger structured geometry, connectivity intent, and Wave-3 tool ops | guard rings, multi-net intent, boolean unions/intersections/differences, arrays with pitch, via stacks |
+| 4 | Compound cells and iterative refinement | cells composed of several checked features, tasks with a scripted follow-up constraint |
 | 5 | Real SKY130 PDK | named periphery rules (m1.1, m1.4, m2.4, li.5, ct.1, licon.1, via.1a) and the measured geometry of the `sky130_fd_sc_hd` tap and fill cells |
+
+### Wave-3 task families (v0.4.0)
+
+Version 0.4.0 adds 12 tasks that exercise the Wave-3 command surface
+(`boolean_combine`, `align_shapes`, `distribute_shapes`, `offset_shapes`,
+`build_via_stack`):
+
+- **Boolean-op constructions** (3, tier 3): union, intersection, and difference of
+  the same two overlapping met1 squares. The `boolean_result` checker pins which op
+  ran by the result area written to met2 (150000 vs 30000 vs 60000 DBU²) and requires
+  the met1 inputs to be consumed, so "drew the wrong op" or "left the inputs behind"
+  both fail.
+- **Array-with-pitch** (3, tier 3): a row, a column, and a grid placed at a stated
+  pitch. The `array_pitch` checker verifies both the instance count and the actual
+  column/row step, so an array at the wrong pitch is rejected even with the right
+  count.
+- **Via-stack** (3, tier 3): a `build_via_stack` cut bridging met1/met2, li1/met1,
+  and poly/li1. The `contact_stack` checker verifies the stack joins both conductors
+  on one net and each encloses the cut by a minimum margin.
+- **Iterative-refinement** (3, tier 4): an initial prompt plus a scripted
+  `refinement` follow-up ("make it larger", "add a second shape"). The refinement-aware
+  runner folds the follow-up into the model's feedback *between* iterations through the
+  `reticle-agent` refinement seam (`RefinementSource` / `run_agent_task_refined`), so
+  the model reacts on the next proposal without the session being restarted; the
+  checker enforces the tightened, post-refinement bar.
+
+The `refinement` field is additive on `BenchTask` (`#[serde(default)]`), so task TOML
+written before it existed still parses unchanged.
 
 ## The propose-verify-correct loop
 
@@ -60,7 +88,7 @@ never conflated.
 ## Current result: the mock machinery baseline
 
 The run below used the **deterministic `MockModel`** (no `ANTHROPIC_API_KEY` was
-set). It exercises the whole pipeline end to end for all 63 tasks: every task
+set). It exercises the whole pipeline end to end for all 75 tasks: every task
 loads, runs through the loop, is graded by its two-way-tested checker, and is
 recorded.
 
@@ -68,20 +96,20 @@ recorded.
 | ---- | ----- | ------ | ------------ | --------------- |
 | 1 | 9 | 3 | 33% | 1.22 |
 | 2 | 11 | 0 | 0% | 1.00 |
-| 3 | 25 | 0 | 0% | 1.00 |
-| 4 | 8 | 0 | 0% | 1.00 |
+| 3 | 34 | 0 | 0% | 1.00 |
+| 4 | 11 | 0 | 0% | 1.00 |
 | 5 | 10 | 0 | 0% | 1.00 |
-| all | 63 | 3 | 5% | 1.03 |
+| all | 75 | 3 | 4% | 1.03 |
 
 This is a **machinery baseline, not a measure of a language model's layout
 ability.** The `MockModel` is scripted to solve only the three sample tasks
 (`t1_place_met1_rect`, `t1_drc_clean_met1`, `t1_intent_connect`) that exist to
-prove the harness end to end; it has no scripted solution for the other 60
+prove the harness end to end; it has no scripted solution for the other 72
 authored tasks, so it fails them by construction. A real model run (with a key)
 is what produces a meaningful success rate across the authored tasks; those
 numbers will be recorded here, labeled with the model id, when a keyed run is
-performed. Publishing the 5% mock figure as if it were a model score would be
-dishonest, so it is labeled as what it is: proof that all 63 tasks and their
+performed. Publishing the 4% mock figure as if it were a model score would be
+dishonest, so it is labeled as what it is: proof that all 75 tasks and their
 checkers run.
 
 ## Growing the suite
