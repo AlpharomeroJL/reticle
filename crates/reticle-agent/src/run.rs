@@ -149,7 +149,10 @@ impl std::error::Error for LoopError {}
 ///
 /// `context_hook` is called with `(&mut model, &session)` before each proposal so a
 /// document-aware model (like [`AnthropicModel`](crate::AnthropicModel)) can be fed a
-/// snapshot of the current layout; pass a no-op closure for a model that ignores it.
+/// snapshot of the current layout; pass a no-op closure for a model that ignores it. An
+/// unscoped run passes the whole-document [`document_summary`]; a scoped run passes a
+/// region-minimal [`ContextPack`](crate::context_pack::ContextPack) instead, for example
+/// `|m, s| m.set_document_context(pack.assemble(s.document()))`.
 ///
 /// `technology_source` is the technology-file text (empty keeps the session default),
 /// resolved to text by the caller so the loop does no technology IO. `wall_ms` is a
