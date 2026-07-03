@@ -47,6 +47,10 @@
 //! * [`view3d`], the extruded 3D layer-stack window (orbit camera + wgpu glue).
 //! * [`xsection`], cut-line cross-sections (interval math + elevation panel).
 //! * [`demo`], the built-in hierarchical demo document.
+//! * [`usecases`], the four bundled worked use-case scenarios offered from the
+//!   Start screen (inspect a SKY130 cell, find and fix a violation, watch the
+//!   agent, build with the new tools), each preparing a starting document or the
+//!   replay theater.
 //! * [`app`], the [`eframe::App`] implementation that draws it all.
 //!
 //! The public [`App`] type is the frozen Wave 0 contract; it is now a real
@@ -88,6 +92,7 @@ pub mod snap;
 pub mod store;
 pub mod tech_editor;
 pub mod tool;
+pub mod usecases;
 pub mod view3d;
 pub mod viewexport;
 pub mod viewports;
