@@ -177,7 +177,10 @@ graph TD
 ```
 
 See `docs/PLAN.md` for the crate responsibilities and `docs/decisions/` for the
-architecture decision records. The full book is under `docs/`.
+architecture decision records. The full book is under `docs/`. New to the editor?
+The app opens on a Start screen with four [worked use cases](docs/src/use-cases.md):
+inspect a SKY130 cell, find and fix a violation, watch the agent work, and build
+with the new tools.
 
 ## Quickstart
 
