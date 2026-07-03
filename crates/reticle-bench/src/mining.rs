@@ -18,12 +18,24 @@
 //! Runs sharing a signature form a [`Cluster`]; a cluster of at least
 //! [`MiningOptions::min_cluster_size`] runs marks a recurring failure mode
 //! that is a candidate for a new benchmark task.
+//!
+//! [`draft_candidates`] turns each cluster into a [`CandidateFile`]: a full
+//! runnable task (id `cand_` plus the signature slug, a drafted prompt, and a
+//! checker chosen from the signature) together with full provenance (the
+//! signature and every source run) and a two-way test vector pair: a `good`
+//! document the checker must accept and a `bad` document, reconstructed from a
+//! representative failing transcript, that it must reject. [`write_candidates`]
+//! writes one TOML per candidate under a suite's `candidates/` directory;
+//! drafts are never added to the live manifest by this module.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use reticle_agent_api::{AgentCommand, AgentResponse, Outcome, Transcript};
+use reticle_extract::IntentSpec;
+use serde::{Deserialize, Serialize};
 
-use crate::{ResultRecord, Tier};
+use crate::{BenchTask, ResultRecord, Tier};
 
 /// One finished run offered to the miner.
 ///
@@ -346,16 +358,444 @@ fn intent_violation(transcript: &Transcript) -> IntentViolationKind {
     kind
 }
 
+/// One rectangle of a two-way test vector: a layer written `layer/datatype`
+/// (for example `68/20`) and the corners as `[min_x, min_y, max_x, max_y]` in
+/// database units.
+///
+/// Vectors carry rectangles only; a transcript's paths and polygons are not
+/// reconstructed. That keeps candidate files small and the promotion check
+/// simple, at the cost of dropping non-rectangle evidence from the bad vector.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct VectorRect {
+    /// The layer, written `layer/datatype`.
+    pub layer: String,
+    /// The rectangle corners: `[min_x, min_y, max_x, max_y]`.
+    pub rect: [i32; 4],
+}
+
+/// The two-way test vectors a candidate must pass to be promoted: the
+/// compiled checker has to accept the `good` document and reject the `bad`
+/// one.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub struct TwoWay {
+    /// Rectangles of a document the checker must accept.
+    #[serde(default)]
+    pub good: Vec<VectorRect>,
+    /// Rectangles of a document the checker must reject (reconstructed from a
+    /// representative failing transcript; empty when the failing run drew no
+    /// rectangles).
+    #[serde(default)]
+    pub bad: Vec<VectorRect>,
+}
+
+/// One source run in a candidate's provenance: the tier plus every
+/// [`ResultRecord`] field, flattened so the TOML stays a plain table.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct SourceRun {
+    /// The tier the source task ran at.
+    pub tier: u8,
+    /// The task that was run.
+    pub task_id: String,
+    /// The model identifier (or `mock`).
+    pub model: String,
+    /// The suite version the task came from.
+    pub suite_version: String,
+    /// Whether the checker passed.
+    pub success: bool,
+    /// How many propose-verify-correct iterations were used.
+    pub iterations: u32,
+    /// DRC violations in the model's first proposal.
+    pub first_proposal_violations: u32,
+    /// DRC violations in the final document.
+    pub final_violations: u32,
+    /// Wall-clock time for the whole task, in milliseconds.
+    pub wall_ms: u64,
+}
+
+impl SourceRun {
+    /// The provenance row for one mined run.
+    fn of(run: &MinedRun) -> Self {
+        Self {
+            tier: run.tier.0,
+            task_id: run.record.task_id.clone(),
+            model: run.record.model.clone(),
+            suite_version: run.record.suite_version.clone(),
+            success: run.record.success,
+            iterations: run.record.iterations,
+            first_proposal_violations: run.record.first_proposal_violations,
+            final_violations: run.record.final_violations,
+            wall_ms: run.record.wall_ms,
+        }
+    }
+}
+
+/// The full provenance of a drafted candidate: where it came from and why.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Provenance {
+    /// The one-line signature key ([`Signature::key`]) of the cluster.
+    pub signature: String,
+    /// The persistent DRC rule ids, in sorted order.
+    pub drc_rules: Vec<String>,
+    /// The geometric-pattern class token ([`PatternClass::as_str`]).
+    pub pattern: String,
+    /// The intent-violation token ([`IntentViolationKind::as_str`]).
+    pub intent_violation: String,
+    /// Every source run in the cluster, in scan input order.
+    pub source_runs: Vec<SourceRun>,
+}
+
+/// A drafted candidate task: the runnable task fields (a superset of a
+/// [`BenchTask`] file) plus provenance and the two-way promotion vectors.
+///
+/// Serialized as one TOML file per candidate under a suite's `candidates/`
+/// directory; [`CandidateFile::task`] projects out the plain task for the
+/// checker registry and for promotion.
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct CandidateFile {
+    /// Candidate id (also the file stem), `cand_` plus the signature slug.
+    pub id: String,
+    /// Draft difficulty tier: the highest tier among the source runs.
+    pub tier: Tier,
+    /// The drafted natural-language prompt.
+    pub prompt: String,
+    /// Path, relative to the suite root, of the technology file.
+    pub technology: String,
+    /// The checker the drafted task would run under.
+    pub checker: String,
+    /// Serialized connectivity intent spec, for intent-checked candidates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent: Option<String>,
+    /// Where the candidate came from.
+    pub provenance: Provenance,
+    /// The vectors the promotion gate verifies.
+    pub two_way: TwoWay,
+}
+
+impl CandidateFile {
+    /// The plain [`BenchTask`] this candidate would become when promoted.
+    #[must_use]
+    pub fn task(&self) -> BenchTask {
+        BenchTask {
+            id: self.id.clone(),
+            tier: self.tier,
+            prompt: self.prompt.clone(),
+            technology: self.technology.clone(),
+            checker: self.checker.clone(),
+            intent: self.intent.clone(),
+        }
+    }
+}
+
+/// Drafts one [`CandidateFile`] per cluster.
+///
+/// `clusters` must come from [`scan`] over the same `runs` slice (members are
+/// indices into it). Per cluster: the id is `cand_` plus the signature slug,
+/// the tier is the highest source tier, the prompt is templated from the
+/// signature and the source task ids, and the checker is chosen from the
+/// signature:
+///
+/// - persistent DRC rules draft `drc_clean` (the promoted task asks for the
+///   same geometry class, clean);
+/// - an intent violation drafts `intent`, reusing the spec of the last
+///   `check_intent` command in the representative transcript;
+/// - a no-geometry pattern drafts `rect_present` (the model must draw at
+///   all);
+/// - anything else (high-iteration passes) drafts `drc_clean`.
+///
+/// The bad vector replays the representative (first) member's rectangles; the
+/// good vector is the canonical clean met1 rectangle, or per-net terminal
+/// covers for intent candidates (empty when the spec spans layers, leaving
+/// the draft unpromotable until edited by hand).
+#[must_use]
+pub fn draft_candidates(
+    runs: &[MinedRun],
+    clusters: &[Cluster],
+    options: &MiningOptions,
+) -> Vec<CandidateFile> {
+    let mut candidates = Vec::with_capacity(clusters.len());
+    for cluster in clusters {
+        let members: Vec<&MinedRun> = cluster
+            .members
+            .iter()
+            .filter_map(|&index| runs.get(index))
+            .collect();
+        let Some(representative) = members.first() else {
+            continue;
+        };
+        let signature = &cluster.signature;
+        let sources: BTreeSet<String> = members
+            .iter()
+            .map(|run| run.record.task_id.clone())
+            .collect();
+        let tier = members.iter().map(|run| run.tier.0).max().unwrap_or(1);
+        let (checker, intent, good) = draft_checker(signature, representative);
+        let bad = replay_rects(&representative.transcript);
+        candidates.push(CandidateFile {
+            id: format!("cand_{}", signature.slug()),
+            tier: Tier(tier),
+            prompt: draft_prompt(signature, &sources),
+            technology: options.technology.clone(),
+            checker,
+            intent,
+            provenance: Provenance {
+                signature: signature.key(),
+                drc_rules: signature.drc_rules.iter().cloned().collect(),
+                pattern: signature.pattern.as_str().to_owned(),
+                intent_violation: signature.intent.as_str().to_owned(),
+                source_runs: members.iter().map(|run| SourceRun::of(run)).collect(),
+            },
+            two_way: TwoWay { good, bad },
+        });
+    }
+    candidates
+}
+
+/// The checker name, optional intent spec, and good vector for a signature
+/// (the drafting rules documented on [`draft_candidates`]).
+fn draft_checker(
+    signature: &Signature,
+    representative: &MinedRun,
+) -> (String, Option<String>, Vec<VectorRect>) {
+    if !signature.drc_rules.is_empty() {
+        return ("drc_clean".to_owned(), None, canonical_clean());
+    }
+    if signature.intent != IntentViolationKind::None {
+        let source = intent_source(&representative.transcript);
+        let good = source.as_deref().map(intent_good_rects).unwrap_or_default();
+        return ("intent".to_owned(), source, good);
+    }
+    if signature.pattern == PatternClass::NoGeometry {
+        return ("rect_present".to_owned(), None, canonical_clean());
+    }
+    ("drc_clean".to_owned(), None, canonical_clean())
+}
+
+/// The canonical known-good vector: a 500x500 met1 rectangle at the origin,
+/// which is clean under the built-in SKY130 rule subset and satisfies the
+/// default `rect_present` layer.
+fn canonical_clean() -> Vec<VectorRect> {
+    vec![VectorRect {
+        layer: layer_token(68, 20),
+        rect: [0, 0, 500, 500],
+    }]
+}
+
+/// A layer written in the `layer/datatype` vector form.
+fn layer_token(layer: u16, datatype: u16) -> String {
+    format!("{layer}/{datatype}")
+}
+
+/// The drafted prompt for a cluster: templated from the signature and the
+/// sorted source task ids, so a given cluster always drafts the same prompt.
+fn draft_prompt(signature: &Signature, sources: &BTreeSet<String>) -> String {
+    let sources_list = sources.iter().cloned().collect::<Vec<_>>().join(", ");
+    let pattern = signature.pattern.as_str();
+    if !signature.drc_rules.is_empty() {
+        let rules = signature
+            .drc_rules
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        return format!(
+            "Create a cell named top and rebuild the {pattern} geometry that mined runs of \
+             {sources_list} never got clean: rule(s) {rules} stayed violated through every \
+             correction attempt. Draw the same class of geometry so the final layout passes DRC."
+        );
+    }
+    if signature.intent != IntentViolationKind::None {
+        let kind = signature.intent.as_str();
+        return format!(
+            "Create a cell named top and rebuild the {pattern} geometry that mined runs of \
+             {sources_list} left with an unsatisfied connectivity intent ({kind} in the final \
+             check). Connect every terminal of the intent spec so the check reports no opens \
+             and no shorts."
+        );
+    }
+    if signature.pattern == PatternClass::NoGeometry {
+        return format!(
+            "Mined runs of {sources_list} produced no geometry at all. Create a cell named top \
+             and place at least one met1 rectangle (layer 68/20) large enough to satisfy the \
+             checker."
+        );
+    }
+    format!(
+        "Create a cell named top and redo the {pattern} geometry that mined runs of \
+         {sources_list} only completed after several corrections. Produce the same class of \
+         geometry with the final layout DRC-clean."
+    )
+}
+
+/// Reconstructs the rectangles standing at the end of a transcript: every
+/// successfully applied `add_rect`, minus those removed by a successful
+/// `delete_shapes` that names their recorded element ids. Paths, polygons,
+/// and bulk imports are not reconstructed.
+fn replay_rects(transcript: &Transcript) -> Vec<VectorRect> {
+    let mut shapes: Vec<(Option<u64>, VectorRect)> = Vec::new();
+    for record in &transcript.records {
+        match &record.command {
+            AgentCommand::AddRect { layer, rect, .. } => {
+                let Outcome::Ok(AgentResponse::Ok { affected, .. }) = &record.outcome else {
+                    continue;
+                };
+                let id = affected.first().map(|element| element.0);
+                shapes.push((
+                    id,
+                    VectorRect {
+                        layer: layer_token(layer.layer, layer.datatype),
+                        rect: [rect.min.x, rect.min.y, rect.max.x, rect.max.y],
+                    },
+                ));
+            }
+            AgentCommand::DeleteShapes { ids } => {
+                if matches!(record.outcome, Outcome::Ok(_)) {
+                    let dead: BTreeSet<u64> = ids.iter().map(|element| element.0).collect();
+                    shapes.retain(|(id, _)| id.is_none_or(|held| !dead.contains(&held)));
+                }
+            }
+            _ => {}
+        }
+    }
+    shapes.into_iter().map(|(_, rect)| rect).collect()
+}
+
+/// The intent spec of the *last* `check_intent` command in the transcript,
+/// verbatim, if any.
+fn intent_source(transcript: &Transcript) -> Option<String> {
+    let mut source = None;
+    for record in &transcript.records {
+        if let AgentCommand::CheckIntent { intent, .. } = &record.command {
+            source = Some(intent.clone());
+        }
+    }
+    source
+}
+
+/// A generic known-good vector for an intent spec: one rectangle per net
+/// covering the union bounding box of that net's terminals, which joins them
+/// when they all sit on one layer. Returns an empty vector (leaving the
+/// candidate unpromotable) when the spec does not parse or any net spans
+/// layers, since a single-layer cover cannot connect those.
+fn intent_good_rects(intent_json: &str) -> Vec<VectorRect> {
+    let Ok(spec) = serde_json::from_str::<IntentSpec>(intent_json) else {
+        return Vec::new();
+    };
+    let mut rects = Vec::new();
+    for net in &spec.nets {
+        let Some(first) = net.terminals.first() else {
+            continue;
+        };
+        let layer = first.layer;
+        if net.terminals.iter().any(|terminal| terminal.layer != layer) {
+            return Vec::new();
+        }
+        let mut bounds = first.region;
+        for terminal in &net.terminals {
+            bounds.min.x = bounds.min.x.min(terminal.region.min.x);
+            bounds.min.y = bounds.min.y.min(terminal.region.min.y);
+            bounds.max.x = bounds.max.x.max(terminal.region.max.x);
+            bounds.max.y = bounds.max.y.max(terminal.region.max.y);
+        }
+        rects.push(VectorRect {
+            layer: layer_token(layer.layer, layer.datatype),
+            rect: [bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y],
+        });
+    }
+    rects
+}
+
+/// A failure drafting or writing candidate files.
+#[derive(Debug)]
+pub enum MiningError {
+    /// A directory could not be created or a file could not be written.
+    Io {
+        /// The path that failed.
+        path: PathBuf,
+        /// The underlying error.
+        source: std::io::Error,
+    },
+    /// A candidate could not be serialized to TOML.
+    Serialize {
+        /// The candidate id that failed.
+        id: String,
+        /// The serializer's message.
+        message: String,
+    },
+}
+
+impl std::fmt::Display for MiningError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MiningError::Io { path, source } => write!(f, "writing {}: {source}", path.display()),
+            MiningError::Serialize { id, message } => {
+                write!(f, "serializing candidate `{id}`: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for MiningError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            MiningError::Io { source, .. } => Some(source),
+            MiningError::Serialize { .. } => None,
+        }
+    }
+}
+
+/// The comment header prepended to every written candidate file.
+const CANDIDATE_HEADER: &str = "# Mined candidate task (draft). Not part of the live suite until \
+                                promoted with\n# `just bench-promote <id>`; promotion requires \
+                                the two-way vectors below to pass\n# (good accepted, bad \
+                                rejected) and bumps the suite manifest version.\n\n";
+
+/// Writes one `<id>.toml` per candidate into `dir` (typically a suite's
+/// `candidates/` directory), creating it if needed, and returns the written
+/// paths in input order. The live suite manifest is never touched.
+///
+/// # Errors
+///
+/// Returns a [`MiningError`] if the directory cannot be created, a candidate
+/// cannot be serialized, or a file cannot be written.
+pub fn write_candidates(
+    dir: &Path,
+    candidates: &[CandidateFile],
+) -> Result<Vec<PathBuf>, MiningError> {
+    std::fs::create_dir_all(dir).map_err(|source| MiningError::Io {
+        path: dir.to_path_buf(),
+        source,
+    })?;
+    let mut paths = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        let body = toml::to_string(candidate).map_err(|e| MiningError::Serialize {
+            id: candidate.id.clone(),
+            message: e.to_string(),
+        })?;
+        let path = dir.join(format!("{}.toml", candidate.id));
+        std::fs::write(&path, format!("{CANDIDATE_HEADER}{body}")).map_err(|source| {
+            MiningError::Io {
+                path: path.clone(),
+                source,
+            }
+        })?;
+        paths.push(path);
+    }
+    Ok(paths)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        Cluster, IntentViolationKind, MinedRun, MiningOptions, PatternClass, Signature, scan,
+        CandidateFile, Cluster, IntentViolationKind, MinedRun, MiningOptions, PatternClass,
+        Signature, VectorRect, draft_candidates, scan, write_candidates,
     };
     use crate::{ResultRecord, Tier};
     use reticle_agent_api::args::{LayerArg, PointArg, RectArg};
     use reticle_agent_api::{
         AgentCommand, AgentResponse, CommandRecord, ElementId, Outcome, Transcript,
     };
+    use reticle_extract::{IntentNet, IntentSpec, Terminal};
+    use reticle_geometry::{LayerId, Point, Rect};
 
     /// A transcript record with deterministic metadata around `command`.
     fn cmd(seq: u64, command: AgentCommand, outcome: Outcome) -> CommandRecord {
@@ -684,6 +1124,268 @@ mod tests {
                 .slug()
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        );
+    }
+
+    // ----- drafting ---------------------------------------------------------
+
+    /// The synthetic corpus behind the committed sample candidate: two failed
+    /// rectangle runs, tiers 1 and 2, that never clear `m1.1`.
+    fn sample_corpus() -> Vec<MinedRun> {
+        vec![
+            failed_rect_run("t1_min_width_met1", 1, "m1.1"),
+            failed_rect_run("t2_legal_spacing_met1", 2, "m1.1"),
+        ]
+    }
+
+    /// A unique temp directory under the OS temp root, created fresh per call.
+    fn tempdir() -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("reticle-bench-mining-{}-{n}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create tempdir");
+        dir
+    }
+
+    #[test]
+    fn draft_builds_drc_candidate_with_full_provenance() {
+        let corpus = sample_corpus();
+        let options = MiningOptions::default();
+        let clusters = scan(&corpus, &options);
+        let candidates = draft_candidates(&corpus, &clusters, &options);
+        assert_eq!(candidates.len(), 1);
+        let candidate = &candidates[0];
+        assert_eq!(candidate.id, "cand_m1_1_rect_only");
+        assert_eq!(candidate.tier, Tier(2), "tier is the max source tier");
+        assert_eq!(candidate.checker, "drc_clean");
+        assert!(candidate.intent.is_none());
+        assert_eq!(candidate.technology, "sky130.tech");
+        assert!(candidate.prompt.contains("m1.1"));
+        assert!(candidate.prompt.contains("t1_min_width_met1"));
+        assert!(candidate.prompt.contains("t2_legal_spacing_met1"));
+        assert_eq!(
+            candidate.provenance.signature,
+            "drc=m1.1|pattern=rect_only|intent=none"
+        );
+        assert_eq!(candidate.provenance.drc_rules, vec!["m1.1".to_owned()]);
+        assert_eq!(candidate.provenance.pattern, "rect_only");
+        assert_eq!(candidate.provenance.source_runs.len(), 2);
+        assert_eq!(
+            candidate.provenance.source_runs[0].task_id,
+            "t1_min_width_met1"
+        );
+        assert_eq!(candidate.provenance.source_runs[0].tier, 1);
+        assert!(!candidate.provenance.source_runs[0].success);
+        // Good: the canonical clean met1 rect. Bad: the representative's rects.
+        assert_eq!(
+            candidate.two_way.good,
+            vec![VectorRect {
+                layer: "68/20".into(),
+                rect: [0, 0, 500, 500],
+            }]
+        );
+        assert_eq!(candidate.two_way.bad.len(), 2);
+        assert_eq!(candidate.two_way.bad[0].rect, [0, 0, 100, 100]);
+        assert_eq!(candidate.two_way.bad[1].rect, [0, 200, 100, 300]);
+    }
+
+    #[test]
+    fn replay_honors_recorded_deletes() {
+        let run = run_of(
+            "t1_fixup",
+            1,
+            false,
+            2,
+            vec![
+                cmd(0, add_rect((68, 20), (0, 0), (100, 100)), ok_mutation(&[1])),
+                cmd(
+                    1,
+                    AgentCommand::DeleteShapes {
+                        ids: vec![ElementId(1)],
+                    },
+                    ok_mutation(&[1]),
+                ),
+                cmd(2, add_rect((68, 20), (0, 0), (90, 90)), ok_mutation(&[2])),
+                drc_report(3, &["m1.1"]),
+            ],
+        );
+        let options = MiningOptions {
+            min_cluster_size: 1,
+            ..MiningOptions::default()
+        };
+        let clusters = scan(std::slice::from_ref(&run), &options);
+        let candidates = draft_candidates(std::slice::from_ref(&run), &clusters, &options);
+        assert_eq!(
+            candidates[0].two_way.bad,
+            vec![VectorRect {
+                layer: "68/20".into(),
+                rect: [0, 0, 90, 90],
+            }],
+            "the deleted first rectangle must not survive into the bad vector"
+        );
+    }
+
+    /// A two-terminal single-net intent spec on `layer`, terminals at the
+    /// corners used by the intent drafting tests.
+    fn two_terminal_spec(layer_a: LayerId, layer_b: LayerId) -> String {
+        let spec = IntentSpec {
+            nets: vec![IntentNet {
+                name: "n".into(),
+                terminals: vec![
+                    Terminal {
+                        name: "a".into(),
+                        layer: layer_a,
+                        region: Rect::new(Point::new(0, 0), Point::new(10, 10)),
+                    },
+                    Terminal {
+                        name: "b".into(),
+                        layer: layer_b,
+                        region: Rect::new(Point::new(490, 290), Point::new(500, 300)),
+                    },
+                ],
+            }],
+            forbidden: vec![],
+        };
+        serde_json::to_string(&spec).expect("serialize spec")
+    }
+
+    /// An intent run: one rectangle drawn, then a `check_intent` carrying
+    /// `spec` whose report leaves one open.
+    fn open_intent_run(task_id: &str, spec: &str) -> MinedRun {
+        run_of(
+            task_id,
+            3,
+            false,
+            4,
+            vec![
+                cmd(0, add_rect((68, 20), (0, 0), (10, 10)), ok_mutation(&[1])),
+                cmd(
+                    1,
+                    AgentCommand::CheckIntent {
+                        cell: "top".into(),
+                        intent: spec.to_owned(),
+                    },
+                    data(serde_json::json!({
+                        "opens": [{ "net": "n", "detail": "terminal b unreached" }],
+                        "shorts": [],
+                    })),
+                ),
+            ],
+        )
+    }
+
+    #[test]
+    fn intent_candidate_reuses_spec_and_covers_terminals() {
+        let met1 = LayerId::new(68, 20);
+        let spec = two_terminal_spec(met1, met1);
+        let run = open_intent_run("t3_intent_met1_wire", &spec);
+        let options = MiningOptions {
+            min_cluster_size: 1,
+            ..MiningOptions::default()
+        };
+        let clusters = scan(std::slice::from_ref(&run), &options);
+        let candidates = draft_candidates(std::slice::from_ref(&run), &clusters, &options);
+        let candidate = &candidates[0];
+        assert_eq!(candidate.id, "cand_rect_only_open");
+        assert_eq!(candidate.checker, "intent");
+        assert_eq!(candidate.intent.as_deref(), Some(spec.as_str()));
+        // The good vector covers the union bounding box of the net terminals.
+        assert_eq!(
+            candidate.two_way.good,
+            vec![VectorRect {
+                layer: "68/20".into(),
+                rect: [0, 0, 500, 300],
+            }]
+        );
+        assert_eq!(
+            candidate.two_way.bad.len(),
+            1,
+            "the drawn rect is the bad vector"
+        );
+    }
+
+    #[test]
+    fn intent_spec_spanning_layers_gets_no_good_vector() {
+        let spec = two_terminal_spec(LayerId::new(68, 20), LayerId::new(69, 20));
+        let run = open_intent_run("t3_intent_layer_jog", &spec);
+        let options = MiningOptions {
+            min_cluster_size: 1,
+            ..MiningOptions::default()
+        };
+        let clusters = scan(std::slice::from_ref(&run), &options);
+        let candidates = draft_candidates(std::slice::from_ref(&run), &clusters, &options);
+        assert!(
+            candidates[0].two_way.good.is_empty(),
+            "a single-layer cover cannot join terminals on two layers"
+        );
+    }
+
+    #[test]
+    fn no_geometry_candidate_asks_for_rect_present() {
+        let run = run_of(
+            "t1_silent",
+            1,
+            false,
+            1,
+            vec![cmd(
+                0,
+                AgentCommand::CreateCell { name: "top".into() },
+                ok_mutation(&[]),
+            )],
+        );
+        let options = MiningOptions {
+            min_cluster_size: 1,
+            ..MiningOptions::default()
+        };
+        let clusters = scan(std::slice::from_ref(&run), &options);
+        let candidates = draft_candidates(std::slice::from_ref(&run), &clusters, &options);
+        let candidate = &candidates[0];
+        assert_eq!(candidate.checker, "rect_present");
+        assert!(candidate.two_way.bad.is_empty());
+        assert_eq!(candidate.two_way.good.len(), 1);
+    }
+
+    #[test]
+    fn write_candidates_emits_parseable_toml() {
+        let corpus = sample_corpus();
+        let options = MiningOptions::default();
+        let candidates = draft_candidates(&corpus, &scan(&corpus, &options), &options);
+        let dir = tempdir();
+        let paths = write_candidates(&dir, &candidates).expect("write candidates");
+        assert_eq!(paths.len(), 1);
+        assert!(paths[0].ends_with("cand_m1_1_rect_only.toml"));
+        let text = std::fs::read_to_string(&paths[0]).expect("read back");
+        assert!(text.starts_with("# Mined candidate task (draft)"));
+        let parsed: CandidateFile = toml::from_str(&text).expect("reparse");
+        assert_eq!(&parsed, &candidates[0]);
+    }
+
+    #[test]
+    fn committed_sample_candidate_matches_the_drafter() {
+        let corpus = sample_corpus();
+        let options = MiningOptions::default();
+        let candidates = draft_candidates(&corpus, &scan(&corpus, &options), &options);
+        assert_eq!(candidates.len(), 1);
+        let dir = tempdir();
+        let paths = write_candidates(&dir, &candidates).expect("write candidates");
+        let generated = std::fs::read_to_string(&paths[0]).expect("read generated");
+
+        let committed = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../benchmarks/layout-tasks/candidates/cand_m1_1_rect_only.toml");
+        if std::env::var_os("RETICLE_BLESS_SAMPLE").is_some() {
+            if let Some(parent) = committed.parent() {
+                std::fs::create_dir_all(parent).expect("create candidates dir");
+            }
+            std::fs::write(&committed, &generated).expect("bless the committed sample");
+        }
+        let text = std::fs::read_to_string(&committed).expect("read the committed sample");
+        assert_eq!(
+            text.replace("\r\n", "\n"),
+            generated.replace("\r\n", "\n"),
+            "the committed sample candidate drifted from the drafter; \
+             regenerate it with RETICLE_BLESS_SAMPLE=1"
         );
     }
 }
