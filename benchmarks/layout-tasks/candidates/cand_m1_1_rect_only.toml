@@ -1,0 +1,49 @@
+# Mined candidate task (draft). Not part of the live suite until promoted with
+# `just bench-promote <id>`; promotion requires the two-way vectors below to pass
+# (good accepted, bad rejected) and bumps the suite manifest version.
+
+id = "cand_m1_1_rect_only"
+tier = 2
+prompt = "Create a cell named top and rebuild the rect_only geometry that mined runs of t1_min_width_met1, t2_legal_spacing_met1 never got clean: rule(s) m1.1 stayed violated through every correction attempt. Draw the same class of geometry so the final layout passes DRC."
+technology = "sky130.tech"
+checker = "drc_clean"
+
+[provenance]
+signature = "drc=m1.1|pattern=rect_only|intent=none"
+drc_rules = ["m1.1"]
+pattern = "rect_only"
+intent_violation = "none"
+
+[[provenance.source_runs]]
+tier = 1
+task_id = "t1_min_width_met1"
+model = "mock"
+suite_version = "0.2.0"
+success = false
+iterations = 4
+first_proposal_violations = 2
+final_violations = 1
+wall_ms = 5
+
+[[provenance.source_runs]]
+tier = 2
+task_id = "t2_legal_spacing_met1"
+model = "mock"
+suite_version = "0.2.0"
+success = false
+iterations = 4
+first_proposal_violations = 2
+final_violations = 1
+wall_ms = 5
+
+[[two_way.good]]
+layer = "68/20"
+rect = [0, 0, 500, 500]
+
+[[two_way.bad]]
+layer = "68/20"
+rect = [0, 0, 100, 100]
+
+[[two_way.bad]]
+layer = "68/20"
+rect = [0, 200, 100, 300]
