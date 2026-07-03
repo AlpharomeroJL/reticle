@@ -1558,6 +1558,10 @@ mod tests {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir =
             std::env::temp_dir().join(format!("reticle-bench-mining-{}-{n}", std::process::id()));
+        // The OS reuses process ids over a ci run, and these dirs are not cleaned
+        // up, so a later test can inherit a prior one's manifest and task files.
+        // Clear any stale directory first so every test starts from an empty one.
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create tempdir");
         dir
     }
