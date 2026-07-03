@@ -1,0 +1,860 @@
+   Compiling serde v1.0.228
+   Compiling httparse v1.10.1
+   Compiling reticle-proto v5.0.0 (D:\dev\reticle\crates\reticle-proto)
+   Compiling http v1.4.2
+   Compiling clap v4.6.1
+   Compiling reticle-geometry v5.0.0 (D:\dev\reticle\crates\reticle-geometry)
+   Compiling serde_yaml v0.8.26
+   Compiling toml v0.5.11
+   Compiling chrono v0.4.45
+   Compiling yrs v0.23.5
+   Compiling ureq-proto v0.6.0
+   Compiling reticle-model v5.0.0 (D:\dev\reticle\crates\reticle-model)
+   Compiling reticle-index v5.0.0 (D:\dev\reticle\crates\reticle-index)
+   Compiling ureq v3.3.0
+   Compiling layout21utils v0.2.0
+   Compiling gds21 v0.2.0
+   Compiling reticle-drc v5.0.0 (D:\dev\reticle\crates\reticle-drc)
+   Compiling reticle-render v5.0.0 (D:\dev\reticle\crates\reticle-render)
+   Compiling reticle-route v5.0.0 (D:\dev\reticle\crates\reticle-route)
+   Compiling reticle-extract v5.0.0 (D:\dev\reticle\crates\reticle-extract)
+   Compiling reticle-io v5.0.0 (D:\dev\reticle\crates\reticle-io)
+   Compiling reticle-agent-api v5.0.0 (D:\dev\reticle\crates\reticle-agent-api)
+   Compiling reticle-sync v5.0.0 (D:\dev\reticle\crates\reticle-sync)
+   Compiling reticle-bench v5.0.0 (D:\dev\reticle\crates\reticle-bench)
+   Compiling reticle-agent v5.0.0 (D:\dev\reticle\crates\reticle-agent)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 19.37s
+     Running `D:\dev\reticle-target\debug\reticle-agent.exe --backend ollama --suite benchmarks/layout-tasks --results-dir benchmarks/results/gpt-oss-16k --quantization MXFP4`
+task:        t1_place_met1_rect
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     87702
+artifacts:
+  transcript scratch/agent-runs\t1_place_met1_rect.transcript.jsonl
+  gds        scratch/agent-runs\t1_place_met1_rect.gds
+  png        scratch/agent-runs\t1_place_met1_rect.png
+  result     scratch/agent-runs\t1_place_met1_rect.result.json
+task:        t1_drc_clean_met1
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     9025
+artifacts:
+  transcript scratch/agent-runs\t1_drc_clean_met1.transcript.jsonl
+  gds        scratch/agent-runs\t1_drc_clean_met1.gds
+  png        scratch/agent-runs\t1_drc_clean_met1.png
+  result     scratch/agent-runs\t1_drc_clean_met1.result.json
+task:        t1_intent_connect
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  4
+violations:  first=0 final=4
+wall_ms:     122989
+artifacts:
+  transcript scratch/agent-runs\t1_intent_connect.transcript.jsonl
+  gds        scratch/agent-runs\t1_intent_connect.gds
+  png        scratch/agent-runs\t1_intent_connect.png
+  result     scratch/agent-runs\t1_intent_connect.result.json
+task:        t1_place_li1_rect
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     4478
+artifacts:
+  transcript scratch/agent-runs\t1_place_li1_rect.transcript.jsonl
+  gds        scratch/agent-runs\t1_place_li1_rect.gds
+  png        scratch/agent-runs\t1_place_li1_rect.png
+  result     scratch/agent-runs\t1_place_li1_rect.result.json
+task:        t1_place_met2_rect
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     4048
+artifacts:
+  transcript scratch/agent-runs\t1_place_met2_rect.transcript.jsonl
+  gds        scratch/agent-runs\t1_place_met2_rect.gds
+  png        scratch/agent-runs\t1_place_met2_rect.png
+  result     scratch/agent-runs\t1_place_met2_rect.result.json
+task:        t1_place_poly_rect
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     5420
+artifacts:
+  transcript scratch/agent-runs\t1_place_poly_rect.transcript.jsonl
+  gds        scratch/agent-runs\t1_place_poly_rect.gds
+  png        scratch/agent-runs\t1_place_poly_rect.png
+  result     scratch/agent-runs\t1_place_poly_rect.result.json
+task:        t1_min_width_met1
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     7499
+artifacts:
+  transcript scratch/agent-runs\t1_min_width_met1.transcript.jsonl
+  gds        scratch/agent-runs\t1_min_width_met1.gds
+  png        scratch/agent-runs\t1_min_width_met1.png
+  result     scratch/agent-runs\t1_min_width_met1.result.json
+task:        t1_min_area_met1
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  2
+violations:  first=0 final=0
+wall_ms:     14623
+artifacts:
+  transcript scratch/agent-runs\t1_min_area_met1.transcript.jsonl
+  gds        scratch/agent-runs\t1_min_area_met1.gds
+  png        scratch/agent-runs\t1_min_area_met1.png
+  result     scratch/agent-runs\t1_min_area_met1.result.json
+task:        t1_min_area_li1
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  2
+violations:  first=0 final=0
+wall_ms:     21775
+artifacts:
+  transcript scratch/agent-runs\t1_min_area_li1.transcript.jsonl
+  gds        scratch/agent-runs\t1_min_area_li1.gds
+  png        scratch/agent-runs\t1_min_area_li1.png
+  result     scratch/agent-runs\t1_min_area_li1.result.json
+task:        t2_legal_spacing_met1
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     9711
+artifacts:
+  transcript scratch/agent-runs\t2_legal_spacing_met1.transcript.jsonl
+  gds        scratch/agent-runs\t2_legal_spacing_met1.gds
+  png        scratch/agent-runs\t2_legal_spacing_met1.png
+  result     scratch/agent-runs\t2_legal_spacing_met1.result.json
+task:        t2_legal_spacing_met2
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     11845
+artifacts:
+  transcript scratch/agent-runs\t2_legal_spacing_met2.transcript.jsonl
+  gds        scratch/agent-runs\t2_legal_spacing_met2.gds
+  png        scratch/agent-runs\t2_legal_spacing_met2.png
+  result     scratch/agent-runs\t2_legal_spacing_met2.result.json
+task:        t2_two_met1_shapes
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  2
+violations:  first=0 final=5
+wall_ms:     35226
+artifacts:
+  transcript scratch/agent-runs\t2_two_met1_shapes.transcript.jsonl
+  gds        scratch/agent-runs\t2_two_met1_shapes.gds
+  png        scratch/agent-runs\t2_two_met1_shapes.png
+  result     scratch/agent-runs\t2_two_met1_shapes.result.json
+task:        t2_three_li1_shapes
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  2
+violations:  first=0 final=0
+wall_ms:     14062
+artifacts:
+  transcript scratch/agent-runs\t2_three_li1_shapes.transcript.jsonl
+  gds        scratch/agent-runs\t2_three_li1_shapes.gds
+  png        scratch/agent-runs\t2_three_li1_shapes.png
+  result     scratch/agent-runs\t2_three_li1_shapes.result.json
+task:        t2_licon_size
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=1 final=1
+wall_ms:     6047
+artifacts:
+  transcript scratch/agent-runs\t2_licon_size.transcript.jsonl
+  gds        scratch/agent-runs\t2_licon_size.gds
+  png        scratch/agent-runs\t2_licon_size.png
+  result     scratch/agent-runs\t2_licon_size.result.json
+task:        t2_via_size
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=1 final=1
+wall_ms:     5042
+artifacts:
+  transcript scratch/agent-runs\t2_via_size.transcript.jsonl
+  gds        scratch/agent-runs\t2_via_size.gds
+  png        scratch/agent-runs\t2_via_size.png
+  result     scratch/agent-runs\t2_via_size.result.json
+task:        t2_met3_min_width
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     5750
+artifacts:
+  transcript scratch/agent-runs\t2_met3_min_width.transcript.jsonl
+  gds        scratch/agent-runs\t2_met3_min_width.gds
+  png        scratch/agent-runs\t2_met3_min_width.png
+  result     scratch/agent-runs\t2_met3_min_width.result.json
+task:        t2_poly_over_diff
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  4
+violations:  first=1 final=4
+wall_ms:     96039
+artifacts:
+  transcript scratch/agent-runs\t2_poly_over_diff.transcript.jsonl
+  gds        scratch/agent-runs\t2_poly_over_diff.gds
+  png        scratch/agent-runs\t2_poly_over_diff.png
+  result     scratch/agent-runs\t2_poly_over_diff.result.json
+task:        t2_met1_area_pin
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  2
+violations:  first=0 final=0
+wall_ms:     30163
+artifacts:
+  transcript scratch/agent-runs\t2_met1_area_pin.transcript.jsonl
+  gds        scratch/agent-runs\t2_met1_area_pin.gds
+  png        scratch/agent-runs\t2_met1_area_pin.png
+  result     scratch/agent-runs\t2_met1_area_pin.result.json
+task:        t2_contact_li1_met1
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     13053
+artifacts:
+  transcript scratch/agent-runs\t2_contact_li1_met1.transcript.jsonl
+  gds        scratch/agent-runs\t2_contact_li1_met1.gds
+  png        scratch/agent-runs\t2_contact_li1_met1.png
+  result     scratch/agent-runs\t2_contact_li1_met1.result.json
+task:        t2_contact_met1_met2
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  2
+violations:  first=0 final=1
+wall_ms:     34012
+artifacts:
+  transcript scratch/agent-runs\t2_contact_met1_met2.transcript.jsonl
+  gds        scratch/agent-runs\t2_contact_met1_met2.gds
+  png        scratch/agent-runs\t2_contact_met1_met2.png
+  result     scratch/agent-runs\t2_contact_met1_met2.result.json
+task:        t3_contact_met1_met2_enc
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  2
+violations:  first=4 final=0
+wall_ms:     58052
+artifacts:
+  transcript scratch/agent-runs\t3_contact_met1_met2_enc.transcript.jsonl
+  gds        scratch/agent-runs\t3_contact_met1_met2_enc.gds
+  png        scratch/agent-runs\t3_contact_met1_met2_enc.png
+  result     scratch/agent-runs\t3_contact_met1_met2_enc.result.json
+task:        t3_contact_poly_li1
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=1 final=1
+wall_ms:     9953
+artifacts:
+  transcript scratch/agent-runs\t3_contact_poly_li1.transcript.jsonl
+  gds        scratch/agent-runs\t3_contact_poly_li1.gds
+  png        scratch/agent-runs\t3_contact_poly_li1.png
+  result     scratch/agent-runs\t3_contact_poly_li1.result.json
+task:        t3_contact_diff_li1
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=1 final=1
+wall_ms:     17479
+artifacts:
+  transcript scratch/agent-runs\t3_contact_diff_li1.transcript.jsonl
+  gds        scratch/agent-runs\t3_contact_diff_li1.gds
+  png        scratch/agent-runs\t3_contact_diff_li1.png
+  result     scratch/agent-runs\t3_contact_diff_li1.result.json
+task:        t3_via_chain_4
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  2
+violations:  first=0 final=8
+wall_ms:     84473
+artifacts:
+  transcript scratch/agent-runs\t3_via_chain_4.transcript.jsonl
+  gds        scratch/agent-runs\t3_via_chain_4.gds
+  png        scratch/agent-runs\t3_via_chain_4.png
+  result     scratch/agent-runs\t3_via_chain_4.result.json
+task:        t3_via_chain_8
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     141900
+artifacts:
+  transcript scratch/agent-runs\t3_via_chain_8.transcript.jsonl
+  gds        scratch/agent-runs\t3_via_chain_8.gds
+  png        (skipped: no cell to render)
+  result     scratch/agent-runs\t3_via_chain_8.result.json
+task:        t3_via_chain_mcon_4
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  4
+violations:  first=0 final=0
+wall_ms:     140014
+artifacts:
+  transcript scratch/agent-runs\t3_via_chain_mcon_4.transcript.jsonl
+  gds        scratch/agent-runs\t3_via_chain_mcon_4.gds
+  png        scratch/agent-runs\t3_via_chain_mcon_4.png
+  result     scratch/agent-runs\t3_via_chain_mcon_4.result.json
+task:        t3_via_chain_via2_4
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  3
+violations:  first=4 final=4
+wall_ms:     246979
+artifacts:
+  transcript scratch/agent-runs\t3_via_chain_via2_4.transcript.jsonl
+  gds        scratch/agent-runs\t3_via_chain_via2_4.gds
+  png        scratch/agent-runs\t3_via_chain_via2_4.png
+  result     scratch/agent-runs\t3_via_chain_via2_4.result.json
+task:        t3_comb_met1_2
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  2
+violations:  first=0 final=19
+wall_ms:     68587
+artifacts:
+  transcript scratch/agent-runs\t3_comb_met1_2.transcript.jsonl
+  gds        scratch/agent-runs\t3_comb_met1_2.gds
+  png        scratch/agent-runs\t3_comb_met1_2.png
+  result     scratch/agent-runs\t3_comb_met1_2.result.json
+task:        t3_comb_met1_4
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  2
+violations:  first=0 final=57
+wall_ms:     73327
+artifacts:
+  transcript scratch/agent-runs\t3_comb_met1_4.transcript.jsonl
+  gds        scratch/agent-runs\t3_comb_met1_4.gds
+  png        scratch/agent-runs\t3_comb_met1_4.png
+  result     scratch/agent-runs\t3_comb_met1_4.result.json
+task:        t3_comb_li1_3
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  3
+violations:  first=0 final=29
+wall_ms:     109826
+artifacts:
+  transcript scratch/agent-runs\t3_comb_li1_3.transcript.jsonl
+  gds        scratch/agent-runs\t3_comb_li1_3.gds
+  png        scratch/agent-runs\t3_comb_li1_3.png
+  result     scratch/agent-runs\t3_comb_li1_3.result.json
+task:        t3_guard_ring_li1
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=9 final=9
+wall_ms:     13194
+artifacts:
+  transcript scratch/agent-runs\t3_guard_ring_li1.transcript.jsonl
+  gds        scratch/agent-runs\t3_guard_ring_li1.gds
+  png        scratch/agent-runs\t3_guard_ring_li1.png
+  result     scratch/agent-runs\t3_guard_ring_li1.result.json
+task:        t3_guard_ring_met1
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  4
+violations:  first=1 final=2
+wall_ms:     94086
+artifacts:
+  transcript scratch/agent-runs\t3_guard_ring_met1.transcript.jsonl
+  gds        scratch/agent-runs\t3_guard_ring_met1.gds
+  png        scratch/agent-runs\t3_guard_ring_met1.png
+  result     scratch/agent-runs\t3_guard_ring_met1.result.json
+task:        t3_guard_ring_nwell
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     20891
+artifacts:
+  transcript scratch/agent-runs\t3_guard_ring_nwell.transcript.jsonl
+  gds        scratch/agent-runs\t3_guard_ring_nwell.gds
+  png        scratch/agent-runs\t3_guard_ring_nwell.png
+  result     scratch/agent-runs\t3_guard_ring_nwell.result.json
+task:        t3_intent_met1_wire
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=2 final=2
+wall_ms:     10088
+artifacts:
+  transcript scratch/agent-runs\t3_intent_met1_wire.transcript.jsonl
+  gds        scratch/agent-runs\t3_intent_met1_wire.gds
+  png        scratch/agent-runs\t3_intent_met1_wire.png
+  result     scratch/agent-runs\t3_intent_met1_wire.result.json
+task:        t3_intent_met1_ell
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  3
+violations:  first=0 final=2
+wall_ms:     39150
+artifacts:
+  transcript scratch/agent-runs\t3_intent_met1_ell.transcript.jsonl
+  gds        scratch/agent-runs\t3_intent_met1_ell.gds
+  png        scratch/agent-runs\t3_intent_met1_ell.png
+  result     scratch/agent-runs\t3_intent_met1_ell.result.json
+task:        t3_intent_two_nets
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  2
+violations:  first=0 final=4
+wall_ms:     24307
+artifacts:
+  transcript scratch/agent-runs\t3_intent_two_nets.transcript.jsonl
+  gds        scratch/agent-runs\t3_intent_two_nets.gds
+  png        scratch/agent-runs\t3_intent_two_nets.png
+  result     scratch/agent-runs\t3_intent_two_nets.result.json
+task:        t3_intent_layer_jog
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  4
+violations:  first=0 final=8
+wall_ms:     126848
+artifacts:
+  transcript scratch/agent-runs\t3_intent_layer_jog.transcript.jsonl
+  gds        scratch/agent-runs\t3_intent_layer_jog.gds
+  png        scratch/agent-runs\t3_intent_layer_jog.png
+  result     scratch/agent-runs\t3_intent_layer_jog.result.json
+task:        t3_intent_tee
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  3
+violations:  first=0 final=4
+wall_ms:     92348
+artifacts:
+  transcript scratch/agent-runs\t3_intent_tee.transcript.jsonl
+  gds        scratch/agent-runs\t3_intent_tee.gds
+  png        scratch/agent-runs\t3_intent_tee.png
+  result     scratch/agent-runs\t3_intent_tee.result.json
+task:        t3_intent_stack_poly_met1
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     62150
+artifacts:
+  transcript scratch/agent-runs\t3_intent_stack_poly_met1.transcript.jsonl
+  gds        scratch/agent-runs\t3_intent_stack_poly_met1.gds
+  png        scratch/agent-runs\t3_intent_stack_poly_met1.png
+  result     scratch/agent-runs\t3_intent_stack_poly_met1.result.json
+task:        t3_intent_power_ground
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  4
+violations:  first=0 final=0
+wall_ms:     61358
+artifacts:
+  transcript scratch/agent-runs\t3_intent_power_ground.transcript.jsonl
+  gds        scratch/agent-runs\t3_intent_power_ground.gds
+  png        scratch/agent-runs\t3_intent_power_ground.png
+  result     scratch/agent-runs\t3_intent_power_ground.result.json
+task:        t3_intent_met2_wire
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=1 final=1
+wall_ms:     7004
+artifacts:
+  transcript scratch/agent-runs\t3_intent_met2_wire.transcript.jsonl
+  gds        scratch/agent-runs\t3_intent_met2_wire.gds
+  png        scratch/agent-runs\t3_intent_met2_wire.png
+  result     scratch/agent-runs\t3_intent_met2_wire.result.json
+task:        t3_intent_met2_met3_jog
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     116004
+artifacts:
+  transcript scratch/agent-runs\t3_intent_met2_met3_jog.transcript.jsonl
+  gds        scratch/agent-runs\t3_intent_met2_met3_jog.gds
+  png        (skipped: no cell to render)
+  result     scratch/agent-runs\t3_intent_met2_met3_jog.result.json
+task:        t3_intent_bus2
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  2
+violations:  first=0 final=5
+wall_ms:     49117
+artifacts:
+  transcript scratch/agent-runs\t3_intent_bus2.transcript.jsonl
+  gds        scratch/agent-runs\t3_intent_bus2.gds
+  png        scratch/agent-runs\t3_intent_bus2.png
+  result     scratch/agent-runs\t3_intent_bus2.result.json
+task:        t3_intent_crossover
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  3
+violations:  first=0 final=3
+wall_ms:     60248
+artifacts:
+  transcript scratch/agent-runs\t3_intent_crossover.transcript.jsonl
+  gds        scratch/agent-runs\t3_intent_crossover.gds
+  png        scratch/agent-runs\t3_intent_crossover.png
+  result     scratch/agent-runs\t3_intent_crossover.result.json
+task:        t3_intent_daisy4
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  4
+violations:  first=0 final=8
+wall_ms:     75852
+artifacts:
+  transcript scratch/agent-runs\t3_intent_daisy4.transcript.jsonl
+  gds        scratch/agent-runs\t3_intent_daisy4.gds
+  png        scratch/agent-runs\t3_intent_daisy4.png
+  result     scratch/agent-runs\t3_intent_daisy4.result.json
+task:        t4_compound_pair
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     15908
+artifacts:
+  transcript scratch/agent-runs\t4_compound_pair.transcript.jsonl
+  gds        scratch/agent-runs\t4_compound_pair.gds
+  png        (skipped: no cell to render)
+  result     scratch/agent-runs\t4_compound_pair.result.json
+task:        t4_compound_row4
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     32531
+artifacts:
+  transcript scratch/agent-runs\t4_compound_row4.transcript.jsonl
+  gds        scratch/agent-runs\t4_compound_row4.gds
+  png        (skipped: no cell to render)
+  result     scratch/agent-runs\t4_compound_row4.result.json
+task:        t4_compound_row4_shapes
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     31917
+artifacts:
+  transcript scratch/agent-runs\t4_compound_row4_shapes.transcript.jsonl
+  gds        scratch/agent-runs\t4_compound_row4_shapes.gds
+  png        (skipped: no cell to render)
+  result     scratch/agent-runs\t4_compound_row4_shapes.result.json
+task:        t4_compound_grid
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     28973
+artifacts:
+  transcript scratch/agent-runs\t4_compound_grid.transcript.jsonl
+  gds        scratch/agent-runs\t4_compound_grid.gds
+  png        (skipped: no cell to render)
+  result     scratch/agent-runs\t4_compound_grid.result.json
+task:        t4_compound_two_leaves
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     25113
+artifacts:
+  transcript scratch/agent-runs\t4_compound_two_leaves.transcript.jsonl
+  gds        scratch/agent-runs\t4_compound_two_leaves.gds
+  png        (skipped: no cell to render)
+  result     scratch/agent-runs\t4_compound_two_leaves.result.json
+task:        t4_compound_connected_pair
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     62202
+artifacts:
+  transcript scratch/agent-runs\t4_compound_connected_pair.transcript.jsonl
+  gds        scratch/agent-runs\t4_compound_connected_pair.gds
+  png        (skipped: no cell to render)
+  result     scratch/agent-runs\t4_compound_connected_pair.result.json
+task:        t4_compound_bus_join
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  3
+violations:  first=0 final=1
+wall_ms:     39747
+artifacts:
+  transcript scratch/agent-runs\t4_compound_bus_join.transcript.jsonl
+  gds        scratch/agent-runs\t4_compound_bus_join.gds
+  png        scratch/agent-runs\t4_compound_bus_join.png
+  result     scratch/agent-runs\t4_compound_bus_join.result.json
+task:        t4_compound_power_grid
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  2
+violations:  first=0 final=4
+wall_ms:     24699
+artifacts:
+  transcript scratch/agent-runs\t4_compound_power_grid.transcript.jsonl
+  gds        scratch/agent-runs\t4_compound_power_grid.gds
+  png        scratch/agent-runs\t4_compound_power_grid.png
+  result     scratch/agent-runs\t4_compound_power_grid.result.json
+task:        t5_met1_min_wire
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     23106
+artifacts:
+  transcript scratch/agent-runs\t5_met1_min_wire.transcript.jsonl
+  gds        scratch/agent-runs\t5_met1_min_wire.gds
+  png        scratch/agent-runs\t5_met1_min_wire.png
+  result     scratch/agent-runs\t5_met1_min_wire.result.json
+task:        t5_fill_rail_pair
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     25711
+artifacts:
+  transcript scratch/agent-runs\t5_fill_rail_pair.transcript.jsonl
+  gds        scratch/agent-runs\t5_fill_rail_pair.gds
+  png        scratch/agent-runs\t5_fill_rail_pair.png
+  result     scratch/agent-runs\t5_fill_rail_pair.result.json
+task:        t5_mcon_stack_m1_enc
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=2 final=2
+wall_ms:     20220
+artifacts:
+  transcript scratch/agent-runs\t5_mcon_stack_m1_enc.transcript.jsonl
+  gds        scratch/agent-runs\t5_mcon_stack_m1_enc.gds
+  png        scratch/agent-runs\t5_mcon_stack_m1_enc.png
+  result     scratch/agent-runs\t5_mcon_stack_m1_enc.result.json
+task:        t5_licon_tap_li1_enc
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     24548
+artifacts:
+  transcript scratch/agent-runs\t5_licon_tap_li1_enc.transcript.jsonl
+  gds        scratch/agent-runs\t5_licon_tap_li1_enc.gds
+  png        scratch/agent-runs\t5_licon_tap_li1_enc.png
+  result     scratch/agent-runs\t5_licon_tap_li1_enc.result.json
+task:        t5_mcon_rail_chain_8
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     111287
+artifacts:
+  transcript scratch/agent-runs\t5_mcon_rail_chain_8.transcript.jsonl
+  gds        scratch/agent-runs\t5_mcon_rail_chain_8.gds
+  png        scratch/agent-runs\t5_mcon_rail_chain_8.png
+  result     scratch/agent-runs\t5_mcon_rail_chain_8.result.json
+task:        t5_via1_stitch_6
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     143758
+artifacts:
+  transcript scratch/agent-runs\t5_via1_stitch_6.transcript.jsonl
+  gds        scratch/agent-runs\t5_via1_stitch_6.gds
+  png        (skipped: no cell to render)
+  result     scratch/agent-runs\t5_via1_stitch_6.result.json
+task:        t5_route_min_pitch_pair
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     27170
+artifacts:
+  transcript scratch/agent-runs\t5_route_min_pitch_pair.transcript.jsonl
+  gds        scratch/agent-runs\t5_route_min_pitch_pair.gds
+  png        scratch/agent-runs\t5_route_min_pitch_pair.png
+  result     scratch/agent-runs\t5_route_min_pitch_pair.result.json
+task:        t5_route_cell_escape
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  2
+violations:  first=0 final=4
+wall_ms:     132360
+artifacts:
+  transcript scratch/agent-runs\t5_route_cell_escape.transcript.jsonl
+  gds        scratch/agent-runs\t5_route_cell_escape.gds
+  png        scratch/agent-runs\t5_route_cell_escape.png
+  result     scratch/agent-runs\t5_route_cell_escape.result.json
+task:        t5_tap_cell_core
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      PASS
+iterations:  2
+violations:  first=0 final=0
+wall_ms:     41093
+artifacts:
+  transcript scratch/agent-runs\t5_tap_cell_core.transcript.jsonl
+  gds        scratch/agent-runs\t5_tap_cell_core.gds
+  png        scratch/agent-runs\t5_tap_cell_core.png
+  result     scratch/agent-runs\t5_tap_cell_core.result.json
+task:        t5_fill_tile_row
+backend:     ollama
+model:       gpt-oss:16k
+quantization: MXFP4
+result:      FAIL
+iterations:  1
+violations:  first=0 final=0
+wall_ms:     126162
+artifacts:
+  transcript scratch/agent-runs\t5_fill_tile_row.transcript.jsonl
+  gds        scratch/agent-runs\t5_fill_tile_row.gds
+  png        (skipped: no cell to render)
+  result     scratch/agent-runs\t5_fill_tile_row.result.json
+# Benchmark results: 0.3.0
+
+| Tier | Backend | Tasks | Passed | Success rate | Mean iterations | First violations | Final violations |
+| ---- | ------- | ----- | ------ | ------------ | --------------- | ---------------- | ---------------- |
+| 1 | ollama (MXFP4) | 9 | 9 | 100% | 1.56 | 0 | 4 |
+| 2 | ollama (MXFP4) | 11 | 10 | 91% | 1.64 | 3 | 12 |
+| 3 | ollama (MXFP4) | 25 | 15 | 60% | 2.24 | 23 | 167 |
+| 4 | ollama (MXFP4) | 8 | 2 | 25% | 1.38 | 0 | 5 |
+| 5 | ollama (MXFP4) | 10 | 6 | 60% | 1.20 | 2 | 6 |
+| all | ollama (MXFP4) | 63 | 42 | 67% | 1.76 | 28 | 194 |
+
+Wrote 63 record(s) to benchmarks/results/gpt-oss-16k\suite-ollama.json
+error: process didn't exit successfully: `D:\dev\reticle-target\debug\reticle-agent.exe --backend ollama --suite benchmarks/layout-tasks --results-dir benchmarks/results/gpt-oss-16k --quantization MXFP4` (exit code: 1)
+GPTOSS_BENCH_EXIT=1
