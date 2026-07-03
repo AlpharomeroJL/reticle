@@ -559,4 +559,38 @@ mod tests {
         assert!(approx(got[0].start, 0.0));
         assert!((got[0].end - diag).abs() < 1e-2, "end {}", got[0].end);
     }
+
+    /// The committed SKY130 technology file: 1000 DBU per micron, so every
+    /// stack nanometer is exactly one world unit.
+    const SKY130: &str = include_str!("../../../tech/sky130.tech");
+
+    #[test]
+    fn sky130_cut_across_met1_and_met2_lands_in_their_z_bands() {
+        let tech = reticle_io::parse_technology(SKY130).expect("committed sky130.tech parses");
+        let met1 = LayerId::new(68, 20);
+        let met2 = LayerId::new(69, 20);
+        // Two overlapping straps: met1 runs x 0..3000 DBU, met2 x 2000..5000.
+        let shapes = [
+            rect_shape(met1, 0, -200, 3000, 200),
+            rect_shape(met2, 2000, -200, 5000, 200),
+        ];
+        let spans = layer_spans(&tech, &shapes);
+        // A cut from x = -1000 to x = 6000 along y = 0 crosses both straps.
+        let got = cross_section(&shapes, &spans, Point::new(-1000, 0), Point::new(6000, 0));
+        assert_eq!(got.len(), 2, "one interval per metal: {got:?}");
+
+        // Sorted by slab bottom: met1 first, at its physical band from the
+        // `stack 68 20 1376 360` directive; met2 above from `stack 69 20 2006
+        // 360`. Distances are measured from the cut start, not x coordinates.
+        assert_eq!(got[0].layer, met1);
+        assert!(approx(got[0].z_bottom, 1376.0) && approx(got[0].z_top, 1736.0));
+        assert!(approx(got[0].start, 1000.0) && approx(got[0].end, 4000.0));
+        assert_eq!(got[1].layer, met2);
+        assert!(approx(got[1].z_bottom, 2006.0) && approx(got[1].z_top, 2366.0));
+        assert!(approx(got[1].start, 3000.0) && approx(got[1].end, 6000.0));
+
+        // Where the straps overlap in plan view (x 2000..3000) the metals stay
+        // separated in elevation: met1's top sits below met2's bottom.
+        assert!(got[0].z_top < got[1].z_bottom, "real stack keeps a gap");
+    }
 }
