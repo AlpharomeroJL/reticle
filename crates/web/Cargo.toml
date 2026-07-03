@@ -19,5 +19,12 @@ workspace = true
 reticle-app = { workspace = true }
 eframe = "0.35.0"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement"] }
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Location",
+    "UrlSearchParams",
+] }
 console_error_panic_hook = "0.1"
