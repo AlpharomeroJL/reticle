@@ -5,7 +5,8 @@ what is genuinely implemented and tested, what is partial, and what is claimed b
 not yet built. It is written to be checked, not believed, every claim below has a
 command you can run yourself (see [How to verify each claim](#how-to-verify-each-claim-yourself)).
 
-- **Date of audit:** 2026-07-01
+- **Date of audit:** 2026-07-01 for the v3/v4 baseline below; the v5.0.0 agent layer
+  was audited 2026-07-03 (see [v5.0.0 progress](#v500-progress-the-agent-layer-audited-2026-07-03)).
 - **Machine:** NVIDIA GeForce RTX 4060 Ti 16 GB, Windows 11, Rust 1.94.1 stable
 - **Gate:** `just ci`, fmt, clippy (`-D warnings`, pedantic), nextest, doctests, doc
   build (`-D warnings`), wasm build, `cargo-deny`, `typos`. Green.
@@ -101,6 +102,85 @@ a headless run cannot perform; correctness is otherwise covered by the golden-im
 offscreen paths plus the fps harness.
 
 The v3.0.0 Section 16 audit below remains accurate for the v3.0.0 baseline.
+
+## v5.0.0 progress (the agent layer, audited 2026-07-03)
+
+v5.0.0 adds an agent layer on top of the v4.0.0 engine. This pass audited it with the
+same skepticism as the v3 and v4 audits. Everything below is committed, gate-green
+(`just ci` plus `just e2e`), and honest about its limits.
+
+- **Machine and gate:** same host (RTX 4060 Ti, Windows 11, Rust 1.94.1). `just ci`
+  (check-style, fmt, clippy `-D warnings`, nextest, doctests, doc build `-D warnings`,
+  wasm build, `cargo-deny`, typos) is green, and `just e2e` (Playwright) is a second
+  gate. Test functions across the workspace: **775** (up from 291 at v4).
+- **No stubs.** Zero `todo!`/`unimplemented!` in shipped code. The two `unreachable!`
+  in `reticle-mcp/src/context.rs` are defensive invariant assertions (`parse_render_args`
+  always builds a `RenderPng`; `render_png` is a known tool), not unimplemented paths.
+  `unsafe`: one, the documented mmap in `reticle-index` (unchanged from v4). `#[ignore]`:
+  three, all legitimate (two corpus-regeneration utilities, one test gated on fetched
+  SKY130 cells that are not committed); none is a hidden failure. No AI attribution and a
+  single author across all history; no leaked secret in the working tree or full git
+  history (`just check-keys -History`).
+
+### What the agent layer really is
+
+- **reticle-agent-api** DONE. A serde-serializable `AgentCommand` enum of 25 engine
+  operations, a `Session` with a stable element-id allocator, and replayable transcripts
+  with a `document_hash`. 32 tests including id-tracking and robustness proptests. Builds
+  for wasm32 (render_png degrades to a clean error, now_ms returns 0).
+- **reticle-agent** DONE. The propose-verify-correct loop verified by the SKY130 DRC
+  subset plus intent; the `AnthropicModel` client (key from env only, redacted from every
+  artifact and proven absent by the key scan); the `AgentCollaborator` bridge that mirrors
+  edits onto the CRDT as atomic steps. Convergence and loop tests pass.
+- **reticle-mcp** DONE. 25 command tools plus 3 context tools over hand-rolled stdio
+  JSON-RPC, generated from the frozen command types; a subprocess test drives and asserts
+  all 28.
+- **reticle-bench** DONE. 63 graded tasks across five tiers, each with a two-way-tested
+  checker; the deterministic mock runner; failure mining and `just bench-promote`. A
+  committed test replay-verifies every task's transcript and asserts the suite is
+  deterministic across runs.
+- **reticle-demo and reticle-demo-server** DONE. The rate-limited service (every
+  `LimitConfig` field enforced, 8 in-process abuse tests) plus a composition binary that
+  runs the real harness behind it and streams each step to a relay room. Live-wiring
+  integration tests decode the CRDT frames a watcher receives and prove server-side
+  cancel; an abuse probe against the running binary confirmed 400, 409, and 429.
+- **reticle-app** DONE (native); PARTIAL (wasm). The agent panel, live DRC overlay, and
+  replay theater are implemented and tested on native. On wasm the start-view seam and
+  index framing are in place but the in-page replay-theater window is native-only today
+  (35 cfg gates entangle it with fs-based session persistence), so the public browser
+  bundle opens to the editor, not the theater. Documented in `docs/src/deployment.md` and
+  ADR 0026; un-gating it for wasm is a follow-up. The agent story on the web is the
+  `agent.gif` and the demo server.
+
+### Honest limitations (v5)
+
+1. **The benchmark result is a mock baseline.** With no `ANTHROPIC_API_KEY` in this
+   environment, the 63-task suite ran against the deterministic mock, which solves only
+   the three scripted sample tasks (3/63). That validates the machinery end to end for
+   all 63 tasks; it is not a measure of a language model's layout ability, and it is
+   labeled as such in `docs/src/benchmarks.md`. A keyed run against the real model is a
+   follow-up.
+2. **The scale-proof DRC and extract numbers include the report.** The 4.19M-leaf
+   pipeline import (37 ms / 7.5 MB) and render (809 ms / 594 MB) are clean; the DRC
+   (11.0 s) and extract (12.2 s) rows are whole-pipeline times dominated by emitting a
+   per-item text report for millions of items, not the core algorithm (isolated in the
+   criterion sections). Stated plainly in PERF.md.
+3. **The wasm replay theater** is native-only today, as above: a documented follow-up.
+4. **Fuzzing still does not run on this Windows/MSVC host** (v4 limitation, unchanged);
+   parser and boolean robustness is covered by proptests in the gate.
+
+### How to verify (v5), from `D:\dev\reticle` (PowerShell)
+
+```powershell
+just ci                  # the whole gate, green
+just e2e                 # Playwright: the webgl2 gate plus a webgpu-flagged run
+just bench-agent         # the 63-task suite against the mock (3/63, labeled a baseline)
+just demo-up             # the rate-limited demo server (offline scripted agent, no key)
+just check-keys -History # no leaked secret in the tree or the full history
+cargo nextest run -p reticle-demo-server   # live-wiring, server-side cancel, abuse tests
+cargo nextest run -p reticle-bench         # replay-hash determinism over every transcript
+git log --format='%an <%ae>' | Sort-Object -Unique   # one author, no AI attribution
+```
 
 ## Section 16 (definition of done), item by item
 
