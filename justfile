@@ -89,6 +89,13 @@ bench:
 bench-agent *args:
     cargo run -p reticle-bench -- {{args}}
 
+# Promote a mined candidate task (benchmarks/layout-tasks/candidates/<id>.toml)
+# into the live suite. Refuses unless the candidate's checker passes its
+# two-way vectors (accepts the good document, rejects the bad one); on success
+# the manifest gains the task and its minor version is bumped.
+bench-promote id *args:
+    cargo run -p reticle-bench -- promote {{id}} {{args}}
+
 perf-check:
     cargo run -p xtask --release -- perf-check
 

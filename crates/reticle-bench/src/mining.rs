@@ -27,15 +27,26 @@
 //! representative failing transcript, that it must reject. [`write_candidates`]
 //! writes one TOML per candidate under a suite's `candidates/` directory;
 //! drafts are never added to the live manifest by this module.
+//!
+//! [`promote_candidate`] is the gate behind `just bench-promote <id>`: it
+//! recompiles the candidate's checker, runs the two-way vectors
+//! ([`verify_two_way`]), refuses a double promotion, and only then writes the
+//! plain task file into the suite and rewrites the manifest with the id
+//! appended and the minor version bumped. The manifest edit is surgical (it
+//! preserves comments and formatting) and the edited text is reparsed before
+//! anything is written, so a bad edit refuses instead of corrupting the suite.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use reticle_agent_api::{AgentCommand, AgentResponse, Outcome, Transcript};
 use reticle_extract::IntentSpec;
+use reticle_geometry::{LayerId, Point, Rect};
+use reticle_model::{Cell, Document, DrawShape, ShapeKind};
 use serde::{Deserialize, Serialize};
 
-use crate::{BenchTask, ResultRecord, Tier};
+use crate::loader::MANIFEST_FILE;
+use crate::{BenchTask, CheckResult, CheckerRegistry, ResultRecord, SuiteManifest, Tier};
 
 /// One finished run offered to the miner.
 ///
@@ -783,6 +794,406 @@ pub fn write_candidates(
     Ok(paths)
 }
 
+// ---------------------------------------------------------------------------
+// Promotion: candidates enter the live suite only through the two-way gate.
+// ---------------------------------------------------------------------------
+
+/// Why a candidate could not be promoted.
+///
+/// The refusal variants ([`is_refusal`](PromoteError::is_refusal)) mean the
+/// candidate is not fit for the suite; the others are setup or IO failures
+/// around the gate.
+#[derive(Debug)]
+pub enum PromoteError {
+    /// The candidate file could not be read or parsed, its declared id did
+    /// not match, or a vector was malformed.
+    Candidate {
+        /// What went wrong.
+        detail: String,
+    },
+    /// Refusal: the candidate's checker did not compile or is unknown.
+    Checker {
+        /// The compile error.
+        detail: String,
+    },
+    /// Refusal: the checker rejected the good vector, so the drafted task is
+    /// not known to be satisfiable.
+    GoodVectorRejected {
+        /// The checker's failure reasons.
+        detail: String,
+    },
+    /// Refusal: the checker accepted the bad vector, so it does not actually
+    /// capture the mined failure mode.
+    BadVectorAccepted,
+    /// Refusal: the id is already in the manifest, or a task file with that
+    /// name already exists in the suite.
+    AlreadyInSuite {
+        /// The offending id.
+        id: String,
+    },
+    /// The suite manifest could not be read, edited, or reparsed.
+    Manifest {
+        /// What went wrong.
+        detail: String,
+    },
+    /// A promoted file could not be written.
+    Io {
+        /// The path that failed.
+        path: PathBuf,
+        /// The underlying error.
+        source: std::io::Error,
+    },
+}
+
+impl PromoteError {
+    /// True when the gate refused the candidate itself (checker missing,
+    /// two-way vectors failing, or double promotion), as opposed to a setup
+    /// or IO failure around the gate.
+    #[must_use]
+    pub fn is_refusal(&self) -> bool {
+        matches!(
+            self,
+            PromoteError::Checker { .. }
+                | PromoteError::GoodVectorRejected { .. }
+                | PromoteError::BadVectorAccepted
+                | PromoteError::AlreadyInSuite { .. }
+        )
+    }
+}
+
+impl std::fmt::Display for PromoteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PromoteError::Candidate { detail } => write!(f, "candidate: {detail}"),
+            PromoteError::Checker { detail } => {
+                write!(f, "the candidate's checker did not compile: {detail}")
+            }
+            PromoteError::GoodVectorRejected { detail } => {
+                write!(
+                    f,
+                    "two-way gate: the checker rejected the good vector: {detail}"
+                )
+            }
+            PromoteError::BadVectorAccepted => write!(
+                f,
+                "two-way gate: the checker accepted the bad vector, so it does not capture \
+                 the mined failure"
+            ),
+            PromoteError::AlreadyInSuite { id } => {
+                write!(f, "task `{id}` is already in the suite")
+            }
+            PromoteError::Manifest { detail } => write!(f, "manifest: {detail}"),
+            PromoteError::Io { path, source } => {
+                write!(f, "writing {}: {source}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for PromoteError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            PromoteError::Io { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+/// A [`PromoteError::Manifest`] with the given detail.
+fn manifest_err(detail: impl Into<String>) -> PromoteError {
+    PromoteError::Manifest {
+        detail: detail.into(),
+    }
+}
+
+/// A successful promotion: what was written where.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Promotion {
+    /// The promoted task id.
+    pub id: String,
+    /// The bumped suite version now in the manifest.
+    pub new_version: String,
+    /// The task file written into the suite directory.
+    pub task_path: PathBuf,
+    /// The manifest file that was rewritten.
+    pub manifest_path: PathBuf,
+}
+
+/// Runs a candidate's two-way vectors against its own compiled checker: the
+/// good document must pass and the bad document must fail.
+///
+/// This is the promotion gate's core. It compiles the checker exactly the way
+/// the runner would ([`CheckerRegistry::for_task`]), so a candidate that
+/// passes here runs unchanged in the suite.
+///
+/// # Errors
+///
+/// Returns [`PromoteError::Checker`] when the checker does not compile,
+/// [`PromoteError::Candidate`] when a vector rectangle is malformed,
+/// [`PromoteError::GoodVectorRejected`] when the good document fails the
+/// check, or [`PromoteError::BadVectorAccepted`] when the bad document passes.
+pub fn verify_two_way(candidate: &CandidateFile) -> Result<(), PromoteError> {
+    let task = candidate.task();
+    let registry =
+        CheckerRegistry::for_task(&task).map_err(|detail| PromoteError::Checker { detail })?;
+    let checker = registry
+        .get(&task.checker)
+        .ok_or_else(|| PromoteError::Checker {
+            detail: format!("no checker named `{}`", task.checker),
+        })?;
+    let transcript = Transcript::default();
+
+    let good = document_from(&candidate.two_way.good)?;
+    if let CheckResult::Fail(failures) = checker.check(&good, &transcript) {
+        let reasons: Vec<String> = failures.into_iter().map(|failure| failure.reason).collect();
+        return Err(PromoteError::GoodVectorRejected {
+            detail: reasons.join("; "),
+        });
+    }
+
+    let bad = document_from(&candidate.two_way.bad)?;
+    if checker.check(&bad, &transcript).is_pass() {
+        return Err(PromoteError::BadVectorAccepted);
+    }
+    Ok(())
+}
+
+/// Materializes a vector's rectangles into a one-cell document named `top`,
+/// the shape every built-in checker inspects.
+fn document_from(rects: &[VectorRect]) -> Result<Document, PromoteError> {
+    let mut cell = Cell::new("top");
+    for shape in rects {
+        let layer = parse_layer_token(&shape.layer).ok_or_else(|| PromoteError::Candidate {
+            detail: format!(
+                "malformed vector layer `{}` (expected `layer/datatype`)",
+                shape.layer
+            ),
+        })?;
+        let [min_x, min_y, max_x, max_y] = shape.rect;
+        cell.shapes.push(DrawShape::new(
+            layer,
+            ShapeKind::Rect(Rect::new(
+                Point::new(min_x, min_y),
+                Point::new(max_x, max_y),
+            )),
+        ));
+    }
+    let mut doc = Document::new();
+    doc.insert_cell(cell);
+    Ok(doc)
+}
+
+/// Parses the `layer/datatype` vector form back into a [`LayerId`].
+fn parse_layer_token(token: &str) -> Option<LayerId> {
+    let (layer, datatype) = token.split_once('/')?;
+    Some(LayerId::new(
+        layer.trim().parse().ok()?,
+        datatype.trim().parse().ok()?,
+    ))
+}
+
+/// Promotes candidate `id` from `candidates_dir` into the live suite at
+/// `suite_dir`, but only if the candidate passes [`verify_two_way`] and is
+/// not already in the suite.
+///
+/// On success the plain task file `<id>.toml` is written into the suite
+/// directory (the candidate file stays behind as the provenance record), the
+/// manifest gains the id at the end of its task list, and the manifest's
+/// minor version is bumped (`0.2.0` becomes `0.3.0`). The task file is
+/// re-loaded through [`crate::load_task`] before the manifest is touched, so
+/// a failure at any step leaves the suite as it was.
+///
+/// # Errors
+///
+/// Returns the [`verify_two_way`] refusals, [`PromoteError::AlreadyInSuite`]
+/// on a double promotion, [`PromoteError::Candidate`] when the candidate file
+/// is unreadable or inconsistent, [`PromoteError::Manifest`] when the
+/// manifest cannot be read or safely edited, or [`PromoteError::Io`] when a
+/// file cannot be written.
+pub fn promote_candidate(
+    suite_dir: &Path,
+    candidates_dir: &Path,
+    id: &str,
+) -> Result<Promotion, PromoteError> {
+    let candidate = load_candidate(candidates_dir, id)?;
+    verify_two_way(&candidate)?;
+
+    // Refuse a double promotion before any write.
+    let manifest_path = suite_dir.join(MANIFEST_FILE);
+    let manifest_text = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| manifest_err(format!("reading {}: {e}", manifest_path.display())))?;
+    let manifest: SuiteManifest = toml::from_str(&manifest_text)
+        .map_err(|e| manifest_err(format!("parsing {}: {e}", manifest_path.display())))?;
+    if manifest.tasks.iter().any(|task| task == id) {
+        return Err(PromoteError::AlreadyInSuite { id: id.to_owned() });
+    }
+    let task_path = suite_dir.join(format!("{id}.toml"));
+    if task_path.exists() {
+        return Err(PromoteError::AlreadyInSuite { id: id.to_owned() });
+    }
+
+    let (new_manifest_text, new_version) = edited_manifest(&manifest_text, id)?;
+
+    // Write the task file first and prove it loads; only then commit the
+    // manifest, so a failure part-way leaves the live suite untouched.
+    let body = toml::to_string(&candidate.task()).map_err(|e| PromoteError::Candidate {
+        detail: format!("serializing task `{id}`: {e}"),
+    })?;
+    let header = format!(
+        "# Promoted from mined candidate `{id}`; see candidates/{id}.toml for provenance.\n"
+    );
+    std::fs::write(&task_path, format!("{header}{body}")).map_err(|source| PromoteError::Io {
+        path: task_path.clone(),
+        source,
+    })?;
+    if let Err(e) = crate::load_task(&task_path) {
+        let _ = std::fs::remove_file(&task_path);
+        return Err(PromoteError::Candidate {
+            detail: format!("promoted task failed to load back: {e}"),
+        });
+    }
+    if let Err(source) = std::fs::write(&manifest_path, new_manifest_text) {
+        let _ = std::fs::remove_file(&task_path);
+        return Err(PromoteError::Io {
+            path: manifest_path.clone(),
+            source,
+        });
+    }
+    Ok(Promotion {
+        id: id.to_owned(),
+        new_version,
+        task_path,
+        manifest_path,
+    })
+}
+
+/// Reads and validates `candidates_dir/<id>.toml`: it must parse as a
+/// [`CandidateFile`] and declare the same id as its file stem.
+fn load_candidate(candidates_dir: &Path, id: &str) -> Result<CandidateFile, PromoteError> {
+    let path = candidates_dir.join(format!("{id}.toml"));
+    let text = std::fs::read_to_string(&path).map_err(|e| PromoteError::Candidate {
+        detail: format!("reading {}: {e}", path.display()),
+    })?;
+    let candidate: CandidateFile = toml::from_str(&text).map_err(|e| PromoteError::Candidate {
+        detail: format!("parsing {}: {e}", path.display()),
+    })?;
+    if candidate.id == id {
+        Ok(candidate)
+    } else {
+        Err(PromoteError::Candidate {
+            detail: format!(
+                "candidate file {} declares id `{}`, expected `{id}`",
+                path.display(),
+                candidate.id
+            ),
+        })
+    }
+}
+
+/// Produces the promoted manifest text and the new version: the version
+/// line's minor component is bumped and `id` is appended to the `tasks`
+/// array, all by surgical string edits that preserve comments and formatting.
+/// The edited text is reparsed and checked before it is returned.
+fn edited_manifest(text: &str, id: &str) -> Result<(String, String), PromoteError> {
+    let (bumped, new_version) = bump_version_line(text)?;
+    let with_task = insert_task_entry(&bumped, id)?;
+    let manifest: SuiteManifest = toml::from_str(&with_task)
+        .map_err(|e| manifest_err(format!("edited manifest no longer parses: {e}")))?;
+    if manifest.version != new_version || !manifest.tasks.iter().any(|task| task == id) {
+        return Err(manifest_err(
+            "edited manifest did not carry the expected changes",
+        ));
+    }
+    Ok((with_task, new_version))
+}
+
+/// Rewrites the first `version = "..."` line with the minor component bumped
+/// and the patch reset, returning the new text and the new version.
+fn bump_version_line(text: &str) -> Result<(String, String), PromoteError> {
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut new_version: Option<String> = None;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if new_version.is_none()
+            && let Some(rest) = trimmed.strip_prefix("version")
+            && rest.trim_start().starts_with('=')
+        {
+            let Some(open) = line.find('"') else {
+                return Err(manifest_err("version line has no opening quote"));
+            };
+            let value_start = open + 1;
+            let Some(len) = line[value_start..].find('"') else {
+                return Err(manifest_err("version line has no closing quote"));
+            };
+            let old = &line[value_start..value_start + len];
+            let bumped = bump_minor(old)
+                .ok_or_else(|| manifest_err(format!("version `{old}` is not MAJOR.MINOR.PATCH")))?;
+            out.push_str(&line[..value_start]);
+            out.push_str(&bumped);
+            out.push_str(&line[value_start + len..]);
+            new_version = Some(bumped);
+            continue;
+        }
+        out.push_str(line);
+    }
+    match new_version {
+        Some(version) => Ok((out, version)),
+        None => Err(manifest_err("no version line found")),
+    }
+}
+
+/// Appends `"id",` as the last entry of the `tasks = [...]` array, adding a
+/// separating comma when the current last entry lacks a trailing one.
+///
+/// Task ids contain no `]`, so the first `]` after the array opens closes it.
+fn insert_task_entry(text: &str, id: &str) -> Result<String, PromoteError> {
+    let mut tasks_offset: Option<usize> = None;
+    let mut offset = 0_usize;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("tasks")
+            && rest.trim_start().starts_with('=')
+        {
+            tasks_offset = Some(offset);
+            break;
+        }
+        offset += line.len();
+    }
+    let Some(tasks_offset) = tasks_offset else {
+        return Err(manifest_err("no tasks array found"));
+    };
+    let Some(open) = text[tasks_offset..].find('[').map(|i| tasks_offset + i) else {
+        return Err(manifest_err("tasks array has no opening bracket"));
+    };
+    let Some(close) = text[open..].find(']').map(|i| open + i) else {
+        return Err(manifest_err("tasks array has no closing bracket"));
+    };
+
+    let inner = text[open + 1..close].trim_end();
+    let mut new_inner = inner.to_owned();
+    if !inner.trim_start().is_empty() && !inner.ends_with(',') {
+        new_inner.push(',');
+    }
+    new_inner.push_str("\n    \"");
+    new_inner.push_str(id);
+    new_inner.push_str("\",\n");
+    Ok(format!("{}{}{}", &text[..=open], new_inner, &text[close..]))
+}
+
+/// Bumps `MAJOR.MINOR.PATCH` to `MAJOR.MINOR+1.0`; `None` when the version is
+/// not three dot-separated integers.
+fn bump_minor(version: &str) -> Option<String> {
+    let mut parts = version.split('.');
+    let major: u64 = parts.next()?.parse().ok()?;
+    let minor: u64 = parts.next()?.parse().ok()?;
+    let _patch: u64 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let next_minor = minor + 1;
+    Some(format!("{major}.{next_minor}.0"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1387,5 +1798,80 @@ mod tests {
             "the committed sample candidate drifted from the drafter; \
              regenerate it with RETICLE_BLESS_SAMPLE=1"
         );
+    }
+
+    // ----- promotion plumbing ------------------------------------------------
+
+    #[test]
+    fn bump_minor_resets_patch() {
+        assert_eq!(super::bump_minor("0.2.0").as_deref(), Some("0.3.0"));
+        assert_eq!(super::bump_minor("1.9.7").as_deref(), Some("1.10.0"));
+        assert!(super::bump_minor("0.2").is_none());
+        assert!(super::bump_minor("0.2.x").is_none());
+        assert!(super::bump_minor("0.2.0.1").is_none());
+    }
+
+    /// A small manifest in the live suite's style: header comment, trailing
+    /// commas.
+    const MANIFEST_WITH_COMMENTS: &str = "# Suite header comment that must survive edits.\n\
+        # Bump `version` when tasks change.\n\
+        version = \"0.2.0\"\n\
+        tasks = [\n    \"t1_existing\",\n]\n";
+
+    #[test]
+    fn edited_manifest_bumps_and_appends_preserving_comments() {
+        let (text, version) =
+            super::edited_manifest(MANIFEST_WITH_COMMENTS, "cand_new").expect("edit");
+        assert_eq!(version, "0.3.0");
+        assert!(text.starts_with("# Suite header comment"));
+        assert!(text.contains("# Bump `version` when tasks change."));
+        assert!(text.contains("version = \"0.3.0\""));
+        let manifest: crate::SuiteManifest = toml::from_str(&text).expect("reparse");
+        assert_eq!(
+            manifest.tasks,
+            vec!["t1_existing".to_owned(), "cand_new".to_owned()],
+            "the new id lands at the end of the task list"
+        );
+    }
+
+    #[test]
+    fn edited_manifest_handles_missing_trailing_comma_and_empty_list() {
+        let no_comma = "version = \"0.1.0\"\ntasks = [\n    \"t1_existing\"\n]\n";
+        let (text, _) = super::edited_manifest(no_comma, "cand_new").expect("edit");
+        let manifest: crate::SuiteManifest = toml::from_str(&text).expect("reparse");
+        assert_eq!(manifest.tasks, vec!["t1_existing", "cand_new"]);
+
+        let empty = "version = \"0.1.0\"\ntasks = []\n";
+        let (text, version) = super::edited_manifest(empty, "cand_new").expect("edit");
+        assert_eq!(version, "0.2.0");
+        let manifest: crate::SuiteManifest = toml::from_str(&text).expect("reparse");
+        assert_eq!(manifest.tasks, vec!["cand_new"]);
+    }
+
+    #[test]
+    fn edited_manifest_rejects_malformed_input() {
+        assert!(
+            super::edited_manifest("tasks = []\n", "x").is_err(),
+            "no version"
+        );
+        assert!(
+            super::edited_manifest("version = \"0.1.0\"\n", "x").is_err(),
+            "no tasks array"
+        );
+        assert!(
+            super::edited_manifest("version = \"latest\"\ntasks = []\n", "x").is_err(),
+            "unbumpable version"
+        );
+    }
+
+    #[test]
+    fn verify_two_way_rejects_malformed_vector_layer() {
+        let corpus = sample_corpus();
+        let options = MiningOptions::default();
+        let mut candidates = draft_candidates(&corpus, &scan(&corpus, &options), &options);
+        candidates[0].two_way.good[0].layer = "met1".into();
+        let err = super::verify_two_way(&candidates[0]).expect_err("malformed layer");
+        assert!(matches!(err, super::PromoteError::Candidate { .. }));
+        assert!(!err.is_refusal(), "a malformed file is not a gate refusal");
     }
 }
