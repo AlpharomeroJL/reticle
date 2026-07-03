@@ -226,11 +226,26 @@ git/file integration are limit-safe; only Claude subagents consume the limit.
 now has drawing/vertex editing, boolean/transform ops, productivity tools, snapping
 and guides, layer/tech editing, search/selection depth, view/export, and agent UX.**
 
-## Wave 3: agent capability expansion (parallel, up to 6 lanes) [not-started]
+## Wave 3: agent capability expansion (6 lanes, batched)
 
-- [ ] 3A richer tool surface (Wave 2 caps as agent tools); 3B scoped sessions and
-  context packs; 3C iterative refinement protocol; 3D agent planning transparency;
-  3E failure-mining upgrade; 3F benchmark expansion (12 new tasks, suite -> 75).
+Targets the agent layer (reticle-agent-api/agent/mcp/bench), not reticle-app.
+Contract map established (AgentCommand + apply.rs, the drive() loop with 3C/3D
+seams, MCP tools.rs, the checker registry, reticle-geometry primitives 3A reuses).
+Hotspots: apply.rs (3A) and run.rs (3B hook, 3C feedback, 3D plan). ADR 0031
+authorizes 3A's AgentCommand additions.
+Batch 1 = 3A tool surface, 3B scoped context, 3C refinement, 3D planning (all
+reticle-agent-layer). Batch 2 = 3E failure-mining, 3F benchmark expansion (needs
+3A's new commands, so after Batch 1).
+
+- [~] Batch 1 in-progress (worktrees v6-3a-tools/3b-scoped/3c-refine/3d-plan off
+  main d155100): 3A new AgentCommands (boolean/align/offset/via-stack) via
+  reticle-geometry + MCP tools; 3B minimal context packs (region+rule, token
+  savings measured); 3C mid-session refinement folded into the loop feedback; 3D
+  structured plan step per iteration stored in the transcript and rendered in the
+  panel. Each with tests + mdbook notes.
+- [ ] Batch 2: 3E mine the local-model runs, cluster by the new tool surface,
+  promote two-way-tested checkers, bump suite version; 3F +12 tasks (suite -> 75)
+  for boolean/array/via-stack/refinement, re-run both local models.
 
 ## Wave 4: guided experience and presentation (parallel, 3 lanes) [not-started]
 
