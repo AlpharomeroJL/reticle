@@ -259,9 +259,9 @@ planning transparency, tool-surface mining, and the 75-task suite all merged and
 gate-green.** Orchestrator step in progress: 75-task re-run on gpt-oss:16k then
 qwen2.5-coder:16k (v0.4.0), results to benchmarks/results/v0.4.0/.
 
-## Wave 4: guided experience and presentation (3 lanes) [in-progress]
+## Wave 4: guided experience and presentation (3 lanes) [DONE]
 
-- [~] 4A embedded first-run tour (reticle-app tour.rs, native+wasm); 4B worked use
+- [x] 4A embedded first-run tour (reticle-app tour.rs, native+wasm); 4B worked use
   cases + Start screen (4 scenarios) + use-cases.md; 4C credibility chapters
   (positioning/benchmark/sky130) + README overhaul. Orchestrator does the media
   regen (hero + GIFs) and the final two-model 75-task benchmark table at
