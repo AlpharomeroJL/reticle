@@ -12,6 +12,7 @@
 use crate::camera::ViewCamera;
 use crate::grid::GridSettings;
 use crate::tool::Tool;
+use crate::viewexport::Theme;
 use reticle_geometry::{LayerId, Point};
 
 /// A serializable snapshot of the app's view and UI state.
@@ -33,6 +34,8 @@ pub struct SessionState {
     pub grid_step: i32,
     /// The `(layer, datatype)` pairs of layers the user has hidden.
     pub hidden_layers: Vec<(u16, u16)>,
+    /// The active egui theme (dark by default).
+    pub theme: Theme,
 }
 
 impl Default for SessionState {
@@ -46,17 +49,19 @@ impl Default for SessionState {
             snap_enabled: true,
             grid_step: 100,
             hidden_layers: Vec::new(),
+            theme: Theme::Dark,
         }
     }
 }
 
 impl SessionState {
-    /// Builds a snapshot from the live camera, tool, grid, and hidden-layer set.
+    /// Builds a snapshot from the live camera, tool, grid, theme, and hidden layers.
     #[must_use]
     pub fn capture(
         camera: &ViewCamera,
         tool: Tool,
         grid: GridSettings,
+        theme: Theme,
         hidden: &[LayerId],
     ) -> Self {
         let center = camera.center();
@@ -69,7 +74,14 @@ impl SessionState {
             snap_enabled: grid.snap_enabled,
             grid_step: grid.base_step_dbu,
             hidden_layers: hidden.iter().map(|l| (l.layer, l.datatype)).collect(),
+            theme,
         }
+    }
+
+    /// The theme described by this snapshot.
+    #[must_use]
+    pub fn theme(&self) -> Theme {
+        self.theme
     }
 
     /// The camera described by this snapshot.
@@ -109,7 +121,7 @@ impl SessionState {
             .map(|(l, d)| format!("{l}/{d}"))
             .collect();
         format!(
-            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\nhidden={}\n",
+            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nhidden={}\n",
             self.center_x,
             self.center_y,
             self.pixels_per_dbu,
@@ -117,6 +129,7 @@ impl SessionState {
             self.grid_visible,
             self.snap_enabled,
             self.grid_step,
+            self.theme.tag(),
             hidden.join(",")
         )
     }
@@ -161,6 +174,7 @@ impl SessionState {
                         s.grid_step = v;
                     }
                 }
+                "theme" => s.theme = Theme::from_tag(value),
                 "hidden" => s.hidden_layers = parse_hidden(value),
                 _ => {}
             }
@@ -278,6 +292,7 @@ mod tests {
             snap_enabled: true,
             grid_step: 250,
             hidden_layers: vec![(4, 0), (5, 0)],
+            theme: Theme::Light,
         }
     }
 
@@ -292,11 +307,12 @@ mod tests {
     fn capture_and_restore_camera() {
         let cam = ViewCamera::new(Point::new(700, 900), 4.0);
         let grid = GridSettings::default();
-        let s = SessionState::capture(&cam, Tool::Pan, grid, &[LayerId::new(3, 0)]);
+        let s = SessionState::capture(&cam, Tool::Pan, grid, Theme::Light, &[LayerId::new(3, 0)]);
         let restored = s.camera();
         assert_eq!(restored.center(), Point::new(700, 900));
         assert!((restored.pixels_per_dbu() - 4.0).abs() < 1e-9);
         assert_eq!(s.tool, Tool::Pan);
+        assert_eq!(s.theme(), Theme::Light);
         assert_eq!(s.hidden_layers(), vec![LayerId::new(3, 0)]);
     }
 
