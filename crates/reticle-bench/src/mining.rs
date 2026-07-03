@@ -1874,4 +1874,163 @@ mod tests {
         assert!(matches!(err, super::PromoteError::Candidate { .. }));
         assert!(!err.is_refusal(), "a malformed file is not a gate refusal");
     }
+
+    // ----- the promotion gate, end to end ------------------------------------
+
+    /// A minimal existing suite task, so a promoted suite still loads whole.
+    const EXISTING_TASK: &str = "id = \"t1_existing\"\ntier = 1\nprompt = \"p\"\n\
+        technology = \"sky130.tech\"\nchecker = \"rect_present\"\n";
+
+    /// A run that issued no drawing command at all (the model went silent).
+    fn silent_run(task_id: &str) -> MinedRun {
+        run_of(
+            task_id,
+            1,
+            false,
+            1,
+            vec![cmd(
+                0,
+                AgentCommand::CreateCell { name: "top".into() },
+                ok_mutation(&[]),
+            )],
+        )
+    }
+
+    /// A temp suite (commented manifest at 0.2.0 plus one existing task) with
+    /// the sample corpus drafted into its `candidates/` directory. Returns the
+    /// suite dir, the candidates dir, and the drafted candidate.
+    fn suite_with_sample_candidate() -> (std::path::PathBuf, std::path::PathBuf, CandidateFile) {
+        let corpus = sample_corpus();
+        let options = MiningOptions::default();
+        let candidates = draft_candidates(&corpus, &scan(&corpus, &options), &options);
+        let suite = tempdir();
+        std::fs::write(suite.join("manifest.toml"), MANIFEST_WITH_COMMENTS)
+            .expect("write manifest");
+        std::fs::write(suite.join("t1_existing.toml"), EXISTING_TASK).expect("write existing");
+        let candidates_dir = suite.join("candidates");
+        write_candidates(&candidates_dir, &candidates).expect("write candidates");
+        let candidate = candidates.into_iter().next().expect("one candidate");
+        (suite, candidates_dir, candidate)
+    }
+
+    #[test]
+    fn end_to_end_pipeline_scans_drafts_writes_and_promotes() {
+        // Synthetic corpus: two m1.1 failures, two silent failures, one clean
+        // pass. The pass is never mined; the failures form two clusters.
+        let mut corpus = sample_corpus();
+        corpus.push(silent_run("t1_silent_a"));
+        corpus.push(silent_run("t1_silent_b"));
+        corpus.push(run_of(
+            "t1_ok",
+            1,
+            true,
+            1,
+            vec![cmd(
+                0,
+                add_rect((68, 20), (0, 0), (500, 500)),
+                ok_mutation(&[1]),
+            )],
+        ));
+        let options = MiningOptions::default();
+        let clusters = scan(&corpus, &options);
+        assert_eq!(clusters.len(), 2, "two recurring signatures");
+        let candidates = draft_candidates(&corpus, &clusters, &options);
+        let ids: Vec<&str> = candidates.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["cand_no_geometry", "cand_m1_1_rect_only"]);
+
+        let suite = tempdir();
+        std::fs::write(suite.join("manifest.toml"), MANIFEST_WITH_COMMENTS)
+            .expect("write manifest");
+        std::fs::write(suite.join("t1_existing.toml"), EXISTING_TASK).expect("write existing");
+        let candidates_dir = suite.join("candidates");
+        write_candidates(&candidates_dir, &candidates).expect("write candidates");
+
+        let first = super::promote_candidate(&suite, &candidates_dir, "cand_m1_1_rect_only")
+            .expect("the drc candidate passes its two-way gate");
+        assert_eq!(first.new_version, "0.3.0");
+        let second = super::promote_candidate(&suite, &candidates_dir, "cand_no_geometry")
+            .expect("the rect_present candidate passes its two-way gate");
+        assert_eq!(second.new_version, "0.4.0", "each promotion bumps again");
+
+        // The grown suite still loads whole, in manifest order, and the
+        // candidate files stay behind as provenance records.
+        let (manifest, tasks) = crate::load_suite(&suite).expect("promoted suite loads");
+        assert_eq!(manifest.version, "0.4.0");
+        assert_eq!(
+            manifest.tasks,
+            vec!["t1_existing", "cand_m1_1_rect_only", "cand_no_geometry"]
+        );
+        assert_eq!(tasks.len(), 3);
+        assert_eq!(tasks[1].checker, "drc_clean");
+        assert_eq!(tasks[2].checker, "rect_present");
+        assert!(candidates_dir.join("cand_m1_1_rect_only.toml").exists());
+    }
+
+    #[test]
+    fn promote_refuses_when_the_good_vector_fails() {
+        let (suite, candidates_dir, mut candidate) = suite_with_sample_candidate();
+        // A 100x100 met1 rect violates min width and area, so `drc_clean`
+        // rejects the supposed known-good document.
+        candidate.two_way.good = vec![VectorRect {
+            layer: "68/20".into(),
+            rect: [0, 0, 100, 100],
+        }];
+        write_candidates(&candidates_dir, std::slice::from_ref(&candidate)).expect("rewrite");
+
+        let before = std::fs::read_to_string(suite.join("manifest.toml")).expect("manifest");
+        let err = super::promote_candidate(&suite, &candidates_dir, &candidate.id)
+            .expect_err("must refuse");
+        assert!(matches!(
+            err,
+            super::PromoteError::GoodVectorRejected { .. }
+        ));
+        assert!(err.is_refusal());
+        let after = std::fs::read_to_string(suite.join("manifest.toml")).expect("manifest");
+        assert_eq!(before, after, "a refusal leaves the manifest untouched");
+        assert!(
+            !suite.join(format!("{}.toml", candidate.id)).exists(),
+            "a refusal writes no task file"
+        );
+    }
+
+    #[test]
+    fn promote_refuses_when_the_bad_vector_passes() {
+        let (suite, candidates_dir, mut candidate) = suite_with_sample_candidate();
+        // A clean 500x500 met1 rect passes `drc_clean`, so the checker no
+        // longer captures the mined failure mode.
+        candidate.two_way.bad = vec![VectorRect {
+            layer: "68/20".into(),
+            rect: [0, 0, 500, 500],
+        }];
+        write_candidates(&candidates_dir, std::slice::from_ref(&candidate)).expect("rewrite");
+
+        let err = super::promote_candidate(&suite, &candidates_dir, &candidate.id)
+            .expect_err("must refuse");
+        assert!(matches!(err, super::PromoteError::BadVectorAccepted));
+        assert!(err.is_refusal());
+        assert!(!suite.join(format!("{}.toml", candidate.id)).exists());
+    }
+
+    #[test]
+    fn promote_refuses_an_unknown_checker() {
+        let (suite, candidates_dir, mut candidate) = suite_with_sample_candidate();
+        candidate.checker = "no_such_checker".into();
+        write_candidates(&candidates_dir, std::slice::from_ref(&candidate)).expect("rewrite");
+
+        let err = super::promote_candidate(&suite, &candidates_dir, &candidate.id)
+            .expect_err("must refuse");
+        assert!(matches!(err, super::PromoteError::Checker { .. }));
+        assert!(err.is_refusal());
+    }
+
+    #[test]
+    fn promote_refuses_double_promotion() {
+        let (suite, candidates_dir, candidate) = suite_with_sample_candidate();
+        super::promote_candidate(&suite, &candidates_dir, &candidate.id)
+            .expect("first promotion passes");
+        let err = super::promote_candidate(&suite, &candidates_dir, &candidate.id)
+            .expect_err("second promotion must refuse");
+        assert!(matches!(err, super::PromoteError::AlreadyInSuite { .. }));
+        assert!(err.is_refusal());
+    }
 }
