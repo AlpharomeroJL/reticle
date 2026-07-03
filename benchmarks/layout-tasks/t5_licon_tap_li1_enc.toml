@@ -1,0 +1,7 @@
+# Tier-5 contact stack on real rules: a substrate-tap style licon1 cut at the
+# fixed licon.1 size with the li.5 li1 enclosure, bridging diff up to li1.
+id = "t5_licon_tap_li1_enc"
+tier = 5
+prompt = "Create a cell named top and build a SKY130 substrate-tap style contact: a diff (65/20) pad connected up to an li1 (67/20) pad through one licon1 (66/44) cut at the fixed licon.1 size of 0.17um (170 dbu). Rule li.5 requires li1 to enclose the licon by at least 0.080um (80 dbu) on every side; give the diff pad the same margin so both conductors enclose the cut."
+technology = "sky130.tech"
+checker = "contact_stack:via=66/44,bottom=65/20,top=67/20,min_enclosure=80"

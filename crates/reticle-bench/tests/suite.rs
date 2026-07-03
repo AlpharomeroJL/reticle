@@ -7,9 +7,10 @@
 //! string is malformed or whose intent JSON does not parse fails here, before any
 //! model runs it.
 //!
-//! It deliberately does *not* run the model: solving the 50 tasks against a live or
-//! mock model is the runner/model lane's concern. Loading plus checker dispatch is
-//! what this lane guarantees.
+//! It deliberately does *not* run the model: solving the 60 authored tasks against a
+//! live or mock model is the runner/model lane's concern. Loading plus checker
+//! dispatch is what this suite test guarantees; `tier5_solvability.rs` additionally
+//! proves each tier-5 task is satisfiable by correct SKY130 geometry.
 
 use std::path::PathBuf;
 
@@ -32,10 +33,10 @@ fn load() -> (reticle_bench::SuiteManifest, Vec<BenchTask>) {
 #[test]
 fn suite_loads_and_is_versioned() {
     let (manifest, tasks) = load();
-    assert_eq!(manifest.version, "0.2.0", "suite version bumped to 0.2.0");
-    // 3 sample tasks + 50 authored tasks.
-    assert_eq!(manifest.tasks.len(), 53, "manifest lists every task");
-    assert_eq!(tasks.len(), 53, "every listed task loaded");
+    assert_eq!(manifest.version, "0.3.0", "suite version bumped to 0.3.0");
+    // 3 sample tasks + 50 tier 1-4 tasks + 10 tier-5 tasks.
+    assert_eq!(manifest.tasks.len(), 63, "manifest lists every task");
+    assert_eq!(tasks.len(), 63, "every listed task loaded");
 }
 
 #[test]
@@ -75,20 +76,57 @@ fn every_task_has_a_prompt_and_known_technology() {
 }
 
 #[test]
-fn tier_coverage_spans_one_through_four() {
+fn tier_coverage_spans_one_through_five() {
     let (_manifest, tasks) = load();
     let count = |tier: u8| tasks.iter().filter(|t| t.tier == Tier(tier)).count();
-    // Every tier 1..=4 is represented; the authored set is weighted toward the
-    // structured and connectivity tiers.
+    // Every tier 1..=5 is represented; the authored set is weighted toward the
+    // structured and connectivity tiers, with a real-SKY130 tier-5 group on top.
     assert!(count(1) >= 6, "tier 1 present (got {})", count(1));
     assert!(count(2) >= 10, "tier 2 present (got {})", count(2));
     assert!(count(3) >= 20, "tier 3 present (got {})", count(3));
     assert!(count(4) >= 8, "tier 4 present (got {})", count(4));
-    // No task lands outside 1..=4.
+    assert!(count(5) >= 10, "tier 5 present (got {})", count(5));
+    // No task lands outside 1..=5.
     assert!(
-        tasks.iter().all(|t| (1..=4).contains(&t.tier.0)),
-        "all tasks are in tiers 1 through 4"
+        tasks.iter().all(|t| (1..=5).contains(&t.tier.0)),
+        "all tasks are in tiers 1 through 5"
     );
+}
+
+#[test]
+fn tier5_tasks_are_the_real_sky130_group() {
+    let (_manifest, tasks) = load();
+    let tier5: Vec<&BenchTask> = tasks.iter().filter(|t| t.tier == Tier(5)).collect();
+    assert_eq!(tier5.len(), 10, "the tier-5 group has exactly 10 tasks");
+    for task in &tier5 {
+        // Naming convention ties the id to the tier, like every other tier group.
+        assert!(
+            task.id.starts_with("t5_"),
+            "tier-5 task `{}` must carry the t5_ prefix",
+            task.id
+        );
+        // Tier 5 is the real-SKY130 tier: every prompt cites at least one real
+        // periphery rule id or a real sky130_fd_sc_hd cell, so the task is
+        // grounded in the PDK rather than in made-up numbers.
+        let real_references = [
+            "m1.1",
+            "m1.2",
+            "m1.4",
+            "m1.6",
+            "m2.1",
+            "m2.4",
+            "li.5",
+            "ct.1",
+            "licon.1",
+            "via.1a",
+            "sky130_fd_sc_hd",
+        ];
+        assert!(
+            real_references.iter().any(|r| task.prompt.contains(r)),
+            "tier-5 task `{}` must cite a real SKY130 rule or cell",
+            task.id
+        );
+    }
 }
 
 #[test]
