@@ -106,3 +106,74 @@ server. Un-gating the theater for wasm is a follow-up.
 ## Frozen-surface manifest (recorded at Wave 0 merge)
 
 Not yet frozen.
+
+# Reticle v6.0.0 run tracker
+
+Extends the tracker above for the v6.0.0 packet (fix the front door, local
+benchmark, full feature expansion, guided experience). Orchestration follows
+[ADR 0028](decisions/0028-v6-subagent-worktree-orchestration.md): lanes run as
+background subagents in isolated git worktrees on `lane/v6-<id>` branches, each
+with its own `CARGO_TARGET_DIR`; the main session merges at wave boundaries,
+re-runs `just ci` on main, and performs the outward-facing deploy and the live
+Ollama benchmark runs itself. Same honesty rules: measured or honestly-labeled
+numbers only, no AI attribution, no backdating, no em-dashes.
+
+MANDATORY isolation rule (from the Wave 1 shared-tree incident,
+[ADR 0030](decisions/0030-orchestrator-creates-lane-worktrees.md)): the
+orchestrator creates each lane's worktree itself before spawning, every time,
+with `git worktree add ..\reticle-lanes\<lane> -b lane/<lane> main`, and the
+subagent's first instruction is that its working directory is
+`D:\dev\reticle-lanes\<lane>` (cd there immediately, never edit, build, or run git
+outside it) with `CARGO_TARGET_DIR=D:\dev\reticle-target-<lane>`. Isolation is
+never delegated to an Agent-call parameter. The main tree at `D:\dev\reticle` is
+reserved for the orchestrator and integration merges only.
+
+Environment verified at run start: Ollama reachable at `http://localhost:11434`
+with `gpt-oss:16k` and `qwen2.5-coder:16k` (both tool-capable). The deployed
+gh-pages `index.html` imports assets at absolute root (`/web-<hash>.js`) while the
+site serves under `/reticle/`, so the live page hangs on "Loading the replay
+theater" (root cause confirmed by fetching the live URL).
+
+## Wave 1: fix the front door (must be green before any fan-out)
+
+- [~] Lane 1A: Pages deploy at root cause. wip recovered @ lane/v6-1a-pages
+  (commit e424a1b). DONE in wip: `trunk build --release --public-url /reticle/`
+  encoded in `just deploy-pages` + `scripts/deploy-pages.ps1`, `just smoke-pages` +
+  `scripts/smoke-pages.ps1`, visible-error-not-infinite-spinner in index.html,
+  overlay ordering in web/src/main.rs. NOT YET DONE: un-gate the replay theater for
+  wasm via a storage abstraction; the Playwright gh-pages subpath project; verify
+  `just deploy-pages` emits `/reticle/`-prefixed assets. Resuming in worktree.
+  Orchestrator does the redeploy and live verification.
+- [~] Lane 1B: Ollama OpenAI-compatible benchmark backend. wip recovered @
+  lane/v6-1b-ollama (commit 88024e5). DONE in wip: `ResultRecord`
+  backend/quantization label (ADR 0029, orchestrator-authorized) and runner/results
+  wiring. NOT YET DONE: the `OllamaModel` module (ollama.rs) itself, OpenAI tools
+  schema on the propose-verify-correct loop, transcript-window summarization near
+  16k, recorded-response fake tests. Resuming in worktree. The full 63-task run on
+  both local models is the orchestrator's integration step.
+- [ ] Wave 1 merge gate: `just ci`, `just e2e`, `just smoke-pages` against the
+  live redeployed site.
+
+## Wave 2: editor and UI feature expansion (parallel, 8 lanes) [not-started]
+
+- [ ] 2A drawing and vertex editing; 2B boolean/transform ops in UI; 2C
+  productivity editing (copy/cut/paste/array/via-stack); 2D snapping and guides;
+  2E layer and technology editing UI; 2F search and selection depth; 2G view and
+  export polish (light theme, bookmarks, PNG/SVG export, mono print); 2H in-app
+  agent UX upgrades. Each ships tests and its mdbook section.
+
+## Wave 3: agent capability expansion (parallel, up to 6 lanes) [not-started]
+
+- [ ] 3A richer tool surface (Wave 2 caps as agent tools); 3B scoped sessions and
+  context packs; 3C iterative refinement protocol; 3D agent planning transparency;
+  3E failure-mining upgrade; 3F benchmark expansion (12 new tasks, suite -> 75).
+
+## Wave 4: guided experience and presentation (parallel, 3 lanes) [not-started]
+
+- [ ] 4A embedded first-run tour; 4B worked use cases + use-cases chapter; 4C
+  credibility chapters (positioning/benchmark/sky130) + README overhaul.
+
+## Wave 5: QA gauntlet, audit, release (serial) [not-started]
+
+- [ ] Full gauntlet; skeptical STATUS re-audit; tag and release v6.0.0; final
+  summary with the working demo URL and the by-model, by-suite-version tables.
