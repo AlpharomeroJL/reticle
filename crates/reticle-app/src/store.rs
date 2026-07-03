@@ -6,7 +6,7 @@
 //! * Native reads a `*.transcript.jsonl` file the user points at, from the
 //!   filesystem ([`FsSessionStore`]).
 //! * wasm has no filesystem, so the web build carries a real transcript compiled
-//!   into the binary and plays that ([`BundledSessionStore`]).
+//!   into the binary and plays that (`BundledSessionStore`).
 //!
 //! Both implement [`SessionStore`], so the app opens the theater through one trait
 //! and the platform difference stays here instead of spreading `cfg` gates through

@@ -52,10 +52,10 @@
 //! # Context window and summarization
 //!
 //! The binding constraint for a local model is a small context window (16k tokens with
-//! the tool schema plus a growing transcript). [`ConversationBuffer`] accumulates the
+//! the tool schema plus a growing transcript). `ConversationBuffer` accumulates the
 //! running messages and, when the estimated token count nears the window, compacts the
 //! older iterations into a single short summary message while keeping the latest
-//! iteration verbatim. See [`summarize_transcript`] for the policy.
+//! iteration verbatim. See `summarize_transcript` for the policy.
 
 use std::cell::RefCell;
 
@@ -84,7 +84,7 @@ pub const ENV_MODEL_NAME: &str = "RETICLE_MODEL_NAME";
 /// Environment variable holding an optional API key for endpoints that require one.
 pub const ENV_API_KEY: &str = "RETICLE_MODEL_API_KEY";
 
-/// The default token threshold at which [`ConversationBuffer`] compacts older
+/// The default token threshold at which `ConversationBuffer` compacts older
 /// iterations. Chosen to leave headroom under a 16k-token window once the tool schema
 /// and the reply are accounted for.
 pub const DEFAULT_SUMMARIZE_THRESHOLD_TOKENS: usize = 12_000;
