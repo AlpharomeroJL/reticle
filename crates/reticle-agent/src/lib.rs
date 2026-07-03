@@ -18,6 +18,10 @@
 //!   [`Debug`](std::fmt::Debug) / [`Display`](std::fmt::Display) / serialize path, plus
 //!   a text scrubber.
 //! - [`run`]: the propose-verify-correct loop and the four-artifact writer.
+//! - [`collab`]: the [`AgentCollaborator`] bridge that mirrors the agent's edits onto
+//!   the `reticle-sync` CRDT under [`AGENT_ACTOR`](reticle_agent_api::AGENT_ACTOR) as
+//!   atomic per-step transactions, and publishes cursor/selection presence plus an
+//!   [`AgentStatus`](reticle_agent_api::AgentStatus) over the awareness layer.
 //!
 //! # Reuse of `reticle-bench`
 //!
@@ -28,10 +32,12 @@
 //! [`ResultRecord`](reticle_bench::ResultRecord) plus its JSON writer. `reticle-bench`
 //! itself is left unmodified.
 
+pub mod collab;
 pub mod model;
 pub mod redact;
 pub mod run;
 
+pub use collab::{AgentCollaborator, Pacing, StepReport};
 pub use model::{AnthropicModel, BuildError, DEFAULT_BASE_URL, DEFAULT_MODEL, HttpTransport};
 pub use redact::{ApiKey, REDACTED};
 pub use run::{Artifacts, LoopOptions, RunOutcome, run_agent_task};
