@@ -65,6 +65,7 @@ pub mod layers;
 pub mod measure;
 pub mod minimap;
 pub mod netlight;
+pub mod ops;
 pub mod replay;
 pub mod selection;
 pub mod session;
