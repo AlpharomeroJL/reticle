@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-6120515e.js";
+            window.path_to_searchindex_js = "searchindex-0df54dcb.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-96561552.js"></script>
+        <script src="toc-0f76cbb2.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -443,6 +443,10 @@ of leaf shapes at 60 fps through cell culling and LOD. Measured numbers are in t
 spacing, enclosure, extension, notch, area, density, and angle constraints, each
 expressed as a rule over one or two layers with a threshold. Because the rule set
 is data, a new process is a new technology file rather than a new build.</p>
+<p>A built-in deck for SKY130 ships with the crate: <code>sky130_drc_rules()</code> loads the
+committed subset of the SkyWater periphery rules. It is a subset and passing it
+is not tape-out clean; see <a href="#sky130-rule-coverage">SKY130 rule coverage</a> for
+exactly which rule ids are checked and which whole rule families are not.</p>
 <h2 id="how-checks-run"><a class="header" href="#how-checks-run">How checks run</a></h2>
 <p>A check evaluates each rule against the geometry using the spatial index to find
 candidate pairs, and the geometry booleans and offsetting to test spacing and
@@ -457,6 +461,86 @@ overlay stays live as you draw.</p>
 <p>The engine is checked against a naive reference implementation that tests every
 rule the slow, obvious way over randomized inputs, so the fast path cannot silently
 disagree with the specification.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="sky130-rule-coverage"><a class="header" href="#sky130-rule-coverage">SKY130 rule coverage</a></h1>
+<p>This deck is a SUBSET of the SKY130 design rules: passing it is NOT tape-out
+clean, and it does not cover antenna, density, latch-up, or most implant and
+well rules. It exists so the editor, the agent harness, and the benchmark
+suite can check the everyday geometry mistakes (too narrow, too close, too
+small, under-enclosed, short endcap) against real, cited SKY130 values, not so
+a design can be signed off.</p>
+<p>The rules live in <code>tech/sky130-drc-subset.toml</code>, transcribed from the
+<a href="https://skywater-pdk.readthedocs.io/en/main/rules/periphery.html">SkyWater SKY130 periphery rules</a>
+for the digital metal stack. <code>reticle_drc::sky130_drc_rules()</code> embeds that file
+at compile time and returns it as engine rules ready for <code>DrcEngine::new</code>; see
+<a href="#design-rule-checking">Design-rule checking</a> for how the engine evaluates each kind. Values
+are database units (1 dbu = 1 nm); areas are dbu squared.</p>
+<h2 id="checked-rules"><a class="header" href="#checked-rules">Checked rules</a></h2>
+<p>Layer names follow <code>tech/sky130.tech</code> (GDS <code>layer/datatype</code>).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Rule id</th><th>Kind</th><th>Layer(s)</th><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>li.1</code></td><td>width</td><td>li1 (67/20)</td><td>170 (0.17 um)</td><td>Min width of li1</td></tr>
+<tr><td><code>li.3</code></td><td>spacing</td><td>li1 (67/20)</td><td>170 (0.17 um)</td><td>Min li1 to li1 spacing</td></tr>
+<tr><td><code>li.5</code></td><td>enclosure</td><td>licon1 (66/44) in li1 (67/20)</td><td>80 (0.08 um)</td><td>licon1 enclosed by li1</td></tr>
+<tr><td><code>li.6</code></td><td>area</td><td>li1 (67/20)</td><td>56100 (0.0561 um²)</td><td>Min li1 area</td></tr>
+<tr><td><code>m1.1</code></td><td>width</td><td>met1 (68/20)</td><td>140 (0.14 um)</td><td>Min width of met1</td></tr>
+<tr><td><code>m1.2</code></td><td>spacing</td><td>met1 (68/20)</td><td>140 (0.14 um)</td><td>Min met1 to met1 spacing</td></tr>
+<tr><td><code>m1.4</code></td><td>enclosure</td><td>mcon (67/44) in met1 (68/20)</td><td>30 (0.03 um)</td><td>mcon enclosed by met1</td></tr>
+<tr><td><code>m1.6</code></td><td>area</td><td>met1 (68/20)</td><td>83000 (0.083 um²)</td><td>Min met1 area</td></tr>
+<tr><td><code>m2.1</code></td><td>width</td><td>met2 (69/20)</td><td>140 (0.14 um)</td><td>Min width of met2</td></tr>
+<tr><td><code>m2.2</code></td><td>spacing</td><td>met2 (69/20)</td><td>140 (0.14 um)</td><td>Min met2 to met2 spacing</td></tr>
+<tr><td><code>m2.4</code></td><td>enclosure</td><td>via (68/44) in met2 (69/20)</td><td>55 (0.055 um)</td><td>via enclosed by met2</td></tr>
+<tr><td><code>m3.1</code></td><td>width</td><td>met3 (70/20)</td><td>300 (0.3 um)</td><td>Min width of met3</td></tr>
+<tr><td><code>m3.2</code></td><td>spacing</td><td>met3 (70/20)</td><td>300 (0.3 um)</td><td>Min met3 to met3 spacing</td></tr>
+<tr><td><code>m4.1</code></td><td>width</td><td>met4 (71/20)</td><td>300 (0.3 um)</td><td>Min width of met4</td></tr>
+<tr><td><code>m4.2</code></td><td>spacing</td><td>met4 (71/20)</td><td>300 (0.3 um)</td><td>Min met4 to met4 spacing</td></tr>
+<tr><td><code>m5.1</code></td><td>width</td><td>met5 (72/20)</td><td>1600 (1.6 um)</td><td>Min width of met5</td></tr>
+<tr><td><code>m5.2</code></td><td>spacing</td><td>met5 (72/20)</td><td>1600 (1.6 um)</td><td>Min met5 to met5 spacing</td></tr>
+<tr><td><code>poly.1a</code></td><td>width</td><td>poly (66/20)</td><td>150 (0.15 um)</td><td>Min width of poly</td></tr>
+<tr><td><code>poly.2</code></td><td>spacing</td><td>poly (66/20)</td><td>210 (0.21 um)</td><td>Min poly to poly spacing</td></tr>
+<tr><td><code>poly.8</code></td><td>extension</td><td>poly (66/20) past diff (65/20)</td><td>130 (0.13 um)</td><td>Poly endcap past diff</td></tr>
+<tr><td><code>difftap.1</code></td><td>width</td><td>diff (65/20)</td><td>150 (0.15 um)</td><td>Min width of diff or tap</td></tr>
+<tr><td><code>difftap.3</code></td><td>spacing</td><td>diff (65/20)</td><td>270 (0.27 um)</td><td>Min diff to diff spacing</td></tr>
+<tr><td><code>licon.1</code></td><td>width</td><td>licon1 (66/44)</td><td>170 (0.17 um)</td><td>licon1 size, as min width</td></tr>
+<tr><td><code>ct.1</code></td><td>width</td><td>mcon (67/44)</td><td>170 (0.17 um)</td><td>mcon size, as min width</td></tr>
+<tr><td><code>via.1a</code></td><td>width</td><td>via (68/44)</td><td>150 (0.15 um)</td><td>via size, as min width</td></tr>
+<tr><td><code>via2.1a</code></td><td>width</td><td>via2 (69/44)</td><td>200 (0.2 um)</td><td>via2 size, as min width</td></tr>
+</tbody>
+</table>
+</div>
+<p>26 rules: 12 width, 8 spacing, 3 enclosure, 2 area, 1 extension. The loader’s
+tests pin this count and the per-kind distribution, so the table above and the
+committed data cannot drift apart silently.</p>
+<h2 id="not-covered"><a class="header" href="#not-covered">Not covered</a></h2>
+<p>Everything not in the table, including but not limited to:</p>
+<ul>
+<li><strong>Antenna rules.</strong> No charge-accumulation checks at all.</li>
+<li><strong>Density rules.</strong> No metal fill or min/max density windows (the engine has a
+density check, but this deck defines none).</li>
+<li><strong>Latch-up and well rules.</strong> No nwell spacing/width, no tap distance rules
+(<code>tap.*</code>, <code>nwell.*</code>), no butting rules.</li>
+<li><strong>Implant and marker layers.</strong> <code>nsdm</code>/<code>psdm</code>/<code>npc</code> and friends are in the
+layer map but carry no rules here; most implant enclosure/spacing rules
+(<code>nsd.*</code>, <code>psd.*</code>, <code>npc.*</code>) are absent.</li>
+<li><strong>Most contact/via rules.</strong> Sizes are encoded as min width only (the real
+rules are exact-size), and only three enclosure directions are present; end-of-line,
+differential enclosure (<code>m1.5</code>, <code>m2.5</code>), array spacing, and licon-on-poly vs
+licon-on-diff distinctions are absent.</li>
+<li><strong>Transistor-level rules.</strong> Gate spacing to licon, diff extension past poly
+(<code>difftap.2</code>, <code>poly.7</code>), and everything hvi/hv related.</li>
+<li><strong>Resistors, capacitors, SRAM, sealring, pad</strong> special-case rules.</li>
+</ul>
+<p>Two engine caveats also apply (see <a href="#design-rule-checking">Design-rule checking</a>): shapes are
+reduced to axis-aligned bounding boxes, which is exact for rectangles but
+conservative (may over-report, never under-report) for polygons and paths; and
+same-layer spacing treats touching or overlapping shapes as merged rather than
+as violations.</p>
+<p>If a layout must be manufacturable, run the full SkyWater deck in a sign-off
+tool. This subset is a fast, honest first filter, nothing more.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="routing"><a class="header" href="#routing">Routing</a></h1>
 <p><code>reticle-route</code> connects nets across the layout while respecting obstacles and
@@ -531,6 +615,184 @@ interchangeable.</p>
 scripts shows the common tasks: generating a parameterized cell, sweeping a rule
 threshold, batch-checking a directory of layouts, and scripting an export pipeline.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="agent-api-and-harness"><a class="header" href="#agent-api-and-harness">Agent API and harness</a></h1>
+<p>Reticle exposes its whole editing engine as a small, serializable command surface,
+so a program (or a language model) can build and check layouts through the same
+operations a human uses. On top of that surface sits a propose-verify-correct
+harness that drives a model against objective checks, writes a replayable
+transcript, and can mirror its edits onto the live collaboration document.</p>
+<h2 id="the-command-surface-reticle-agent-api"><a class="header" href="#the-command-surface-reticle-agent-api">The command surface (<code>reticle-agent-api</code>)</a></h2>
+<p><a href="https://docs.rs/reticle-agent-api"><code>AgentCommand</code></a> is a tagged, serde-serializable
+enum of 25 operations over the engine: create a cell, add a rectangle, polygon, or
+path, add a label or pin, transform or delete shapes, set the technology, run DRC,
+check a connectivity intent, extract nets, compare against a netlist, export GDS or
+OASIS, and render a region to PNG. A [<code>Session</code>] owns an editable document and a
+stable element-id allocator, so a command that adds geometry returns an
+[<code>ElementId</code>] that later commands and the transcript can refer to even across
+deletions (ADR 0018).</p>
+<p>Every command applied to a session is recorded as a [<code>CommandRecord</code>] in a
+[<code>Transcript</code>], and the model’s document has a [<code>document_hash</code>]. Replaying a
+transcript reproduces that hash exactly, so a run is deterministic and auditable:
+the <code>verify_replay</code> path recomputes the hash and rejects a tampered transcript.</p>
+<h2 id="the-propose-verify-correct-loop-reticle-agent"><a class="header" href="#the-propose-verify-correct-loop-reticle-agent">The propose-verify-correct loop (<code>reticle-agent</code>)</a></h2>
+<pre class="mermaid">flowchart LR
+    M[Model] --&gt;|AgentCommands| A[Apply to Session]
+    A --&gt; V{Verify: DRC + intent}
+    V --&gt;|clean| D[Done, write artifacts]
+    V --&gt;|violations| F[Feed violations back]
+    F --&gt; M
+</pre>
+
+<p>The harness asks a [<code>ModelClient</code>] for a batch of commands, applies them to a private
+session, and verifies the result with the SKY130 DRC subset plus, where a task
+carries an intent spec, the connectivity checker. Violations become correcting
+context for the next proposal, up to an iteration bound. Success is defined by the
+checker, not by the model’s say-so, and a failure is recorded as a failure, never
+retro-edited to a pass. Each run writes four artifacts: the transcript, the final
+GDS, a rendered PNG, and a result record.</p>
+<p>The model is either the real <code>AnthropicModel</code> (an Anthropic-compatible endpoint; the
+API key is read from the environment only and never printed, serialized, or written
+to an artifact) or the deterministic <code>MockModel</code> used offline and in tests.</p>
+<h2 id="live-collaboration-reticle-agentcollab"><a class="header" href="#live-collaboration-reticle-agentcollab">Live collaboration (<code>reticle-agent::collab</code>)</a></h2>
+<p>An [<code>AgentCollaborator</code>] mirrors each agent step onto the <code>reticle-sync</code> CRDT under a
+distinct actor id, as one atomic transaction per step, so a human peer watching the
+room never sees a half-drawn step and can edit alongside the agent (ADR 0022). The
+same transcript the harness writes is what the in-app replay theater plays back
+through a live session.</p>
+<h2 id="where-it-runs"><a class="header" href="#where-it-runs">Where it runs</a></h2>
+<ul>
+<li><code>reticle-mcp</code> exposes this command surface to a model over the Model Context
+Protocol; see <a href="#mcp-server">the MCP chapter</a>.</li>
+<li><code>reticle-demo-server</code> runs the loop behind a rate-limited public endpoint and
+streams each step to a watchable room; see <a href="#deployment">Deployment</a>.</li>
+<li>The <a href="#agent-benchmark-suite">benchmark suite</a> scores the loop across 63 graded tasks.</li>
+</ul>
+<p>See ADRs <a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0018-agent-api-layering-and-element-ids.md">0018</a>,
+<a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0021-intent-types-in-extract.md">0021</a>,
+and <a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0022-agent-crdt-collaborator-bridge.md">0022</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="mcp-server"><a class="header" href="#mcp-server">MCP server</a></h1>
+<p><code>reticle-mcp</code> exposes the frozen agent command surface to a language model over the
+<a href="https://modelcontextprotocol.io">Model Context Protocol</a>, so a model host can drive
+Reticle with the same operations the <a href="#agent-api-and-harness">agent harness</a> uses, without any
+custom glue.</p>
+<h2 id="tools-from-the-frozen-surface"><a class="header" href="#tools-from-the-frozen-surface">Tools from the frozen surface</a></h2>
+<p>Every <a href="#agent-api-and-harness"><code>AgentCommand</code></a> variant becomes one MCP <em>tool</em> with a JSON input
+schema and a model-facing description, generated from the frozen types rather than
+hand-maintained, so the tool set cannot drift from what the engine actually accepts.
+That is 25 command tools (create a cell, add a rectangle, run DRC, check intent,
+export, render, and so on) plus three read-only <em>context</em> tools the model uses to
+observe state before it acts:</p>
+<ul>
+<li><code>get_technology_rules</code> the active technology’s layers and DRC rules;</li>
+<li><code>get_document_summary</code> the current cells, shape counts, and top cells;</li>
+<li><code>get_render_region</code> a PNG of a region, so the model can look at what it has drawn.</li>
+</ul>
+<h2 id="transport"><a class="header" href="#transport">Transport</a></h2>
+<p>The server speaks newline-delimited JSON-RPC 2.0 on stdin and stdout, matching the
+MCP stdio transport, and is hand-rolled over <code>serde_json</code> rather than pulling in an
+MCP framework, keeping the dependency surface small and the behavior explicit (ADR
+0005). A per-session command budget bounds how many mutating tools a session may
+apply; once exhausted, further command tools are rejected, so a host cannot drive an
+unbounded number of edits.</p>
+<h2 id="running-it"><a class="header" href="#running-it">Running it</a></h2>
+<p>The <code>reticle-mcp</code> binary is a stdio server: a model host launches it and speaks
+JSON-RPC over the pipe. It is registered alongside the project’s <code>reticle-dev</code>
+development server in <code>.mcp.json</code>. An integration test drives all 28 tools over a
+real stdio subprocess and asserts each one, so the wire contract is covered end to
+end.</p>
+<p>See ADR <a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0005-rust-mcp-servers.md">0005</a>
+and the <a href="#agent-api-and-harness">agent chapter</a> for the command surface these tools mirror.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="agent-benchmark-suite"><a class="header" href="#agent-benchmark-suite">Agent benchmark suite</a></h1>
+<p>The benchmark suite measures whether a model, driven through the Reticle agent API,
+can turn a natural-language layout instruction into geometry that passes an
+objective check. It is a fixed, versioned set of tasks with machine-graded
+checkers, so a run produces a comparable, reproducible score rather than a vibe.</p>
+<h2 id="what-a-task-is"><a class="header" href="#what-a-task-is">What a task is</a></h2>
+<p>Each task is a TOML file under <code>benchmarks/layout-tasks/</code> naming a prompt, the
+technology, and a checker with its parameters. The checker is the oracle: it
+accepts a correct document and rejects a broken one. Every checker is <strong>two-way
+tested</strong>, so a task cannot pass by luck or by a checker that always returns true;
+the test proves the checker accepts the intended solution and rejects a
+deliberately perturbed one.</p>
+<p>The suite (<code>manifest.toml</code>, version 0.3.0) has <strong>63 tasks across five tiers</strong>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tier</th><th>Focus</th><th>Examples</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td>Primitive placement and legality</td><td>place a met1 rectangle, clear the min width and min area rules</td></tr>
+<tr><td>2</td><td>Structured geometry</td><td>contact stacks, via chains, comb structures</td></tr>
+<tr><td>3</td><td>Larger structured geometry and connectivity intent</td><td>guard rings, multi-net intent</td></tr>
+<tr><td>4</td><td>Compound cells</td><td>cells composed of several checked features</td></tr>
+<tr><td>5</td><td>Real SKY130 PDK</td><td>named periphery rules (m1.1, m1.4, m2.4, li.5, ct.1, licon.1, via.1a) and the measured geometry of the <code>sky130_fd_sc_hd</code> tap and fill cells</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="the-propose-verify-correct-loop"><a class="header" href="#the-propose-verify-correct-loop">The propose-verify-correct loop</a></h2>
+<p>A run drives each task through the same loop the <code>reticle-agent</code> harness uses:</p>
+<pre class="mermaid">flowchart LR
+    P[Model proposes edits] --&gt; A[Apply to the session]
+    A --&gt; V[Verify: DRC subset plus intent]
+    V --&gt;|clean| D[Pass, record result]
+    V --&gt;|violations| F[Feed violations back]
+    F --&gt; P
+</pre>
+
+<p>The verifier is the SKY130 DRC subset plus, where a task carries an intent spec,
+the connectivity checker. Violations are fed back as correcting context for the
+next proposal, up to an iteration bound. The result of each task is recorded as a
+JSON record (<code>task_id</code>, <code>model</code>, <code>success</code>, <code>iterations</code>, first and final
+violation counts, wall time) and rolled up into a Markdown summary.</p>
+<h2 id="running-it-1"><a class="header" href="#running-it-1">Running it</a></h2>
+<pre><code>just bench-agent                     # the whole suite
+just bench-agent --tier 5            # one tier
+just bench-agent --task t1_place_met1_rect
+</code></pre>
+<p>The model is chosen by the environment. The deterministic <code>MockModel</code> is the
+offline default and needs no key or network; the real <code>AnthropicModel</code> (in
+<code>reticle-agent</code>) runs the same tasks against a live model when <code>ANTHROPIC_API_KEY</code>
+is set. Every result record carries the <code>model</code> field so mock and live runs are
+never conflated.</p>
+<h2 id="current-result-the-mock-machinery-baseline"><a class="header" href="#current-result-the-mock-machinery-baseline">Current result: the mock machinery baseline</a></h2>
+<p>The run below used the <strong>deterministic <code>MockModel</code></strong> (no <code>ANTHROPIC_API_KEY</code> was
+set). It exercises the whole pipeline end to end for all 63 tasks: every task
+loads, runs through the loop, is graded by its two-way-tested checker, and is
+recorded.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tier</th><th>Tasks</th><th>Passed</th><th>Success rate</th><th>Mean iterations</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td>9</td><td>3</td><td>33%</td><td>1.22</td></tr>
+<tr><td>2</td><td>11</td><td>0</td><td>0%</td><td>1.00</td></tr>
+<tr><td>3</td><td>25</td><td>0</td><td>0%</td><td>1.00</td></tr>
+<tr><td>4</td><td>8</td><td>0</td><td>0%</td><td>1.00</td></tr>
+<tr><td>5</td><td>10</td><td>0</td><td>0%</td><td>1.00</td></tr>
+<tr><td>all</td><td>63</td><td>3</td><td>5%</td><td>1.03</td></tr>
+</tbody>
+</table>
+</div>
+<p>This is a <strong>machinery baseline, not a measure of a language model’s layout
+ability.</strong> The <code>MockModel</code> is scripted to solve only the three sample tasks
+(<code>t1_place_met1_rect</code>, <code>t1_drc_clean_met1</code>, <code>t1_intent_connect</code>) that exist to
+prove the harness end to end; it has no scripted solution for the other 60
+authored tasks, so it fails them by construction. A real model run (with a key)
+is what produces a meaningful success rate across the authored tasks; those
+numbers will be recorded here, labeled with the model id, when a keyed run is
+performed. Publishing the 5% mock figure as if it were a model score would be
+dishonest, so it is labeled as what it is: proof that all 63 tasks and their
+checkers run.</p>
+<h2 id="growing-the-suite"><a class="header" href="#growing-the-suite">Growing the suite</a></h2>
+<p>Failure mining (<code>reticle-bench</code>’s <code>mining</code> module) turns real run failures into
+candidate tasks with provenance and two-way vectors; <code>just bench-promote &lt;id&gt;</code>
+admits a candidate into the live suite only if its checker passes those vectors,
+and bumps the manifest version. So the suite grows from observed failures without
+ever admitting a checker that cannot both accept and reject.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="performance-methodology"><a class="header" href="#performance-methodology">Performance methodology</a></h1>
 <p>Every performance claim in Reticle is a measured number, not an aspiration. This
 chapter describes how the numbers are produced so they can be reproduced and
@@ -586,6 +848,165 @@ history.</p>
 browser to zoom to each violation in turn. Route selected nets, and inspect the
 congestion and length report. Highlight a net to trace its connectivity across the
 layout.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="deployment"><a class="header" href="#deployment">Deployment</a></h1>
+<p>This chapter covers running the public demo: the rate-limited demo server, the
+collaboration relay a spectator watches, the browser bundle, and the release-time
+secret scan. It is written for a small VPS behind a reverse proxy.</p>
+<p>The demo server is <code>reticle-demo-server</code>, a composition binary (ADR 0024) that
+brings up three things in one process:</p>
+<ul>
+<li>the rate-limited HTTP service from <code>reticle-demo</code> (<code>POST /submit</code>,
+<code>GET /status/{id}</code>, <code>POST /cancel</code>);</li>
+<li>an in-process <code>reticle-server</code> collaboration relay, so a visitor can watch the
+room each session draws into;</li>
+<li>a harness: the real <code>reticle-agent</code> propose-verify-correct loop when a key is
+present, otherwise a deterministic offline scripted loop (ADR 0025).</li>
+</ul>
+<p>Run it locally with <code>just demo-up</code>.</p>
+<h2 id="the-server-cannot-be-started-unbounded"><a class="header" href="#the-server-cannot-be-started-unbounded">The server cannot be started unbounded</a></h2>
+<p>The service is built from a <code>reticle_demo::LimitConfig</code>, and there is no
+constructor that omits it: <code>DemoServer::new(LimitConfig)</code> and
+<code>DemoServer::with_harness(LimitConfig, harness)</code> both take the limits by value.
+The type is defined in <code>crates/reticle-demo/src/limits.rs</code>, and every field is
+enforced on the wire (the enforcement is covered by the abuse tests in
+<code>crates/reticle-demo/tests/abuse.rs</code>). This is the point of the demo: it is safe
+to expose to the open internet because it physically cannot run without limits.</p>
+<h2 id="the-mandatory-limits-and-why-each-matters"><a class="header" href="#the-mandatory-limits-and-why-each-matters">The mandatory limits and why each matters</a></h2>
+<p><code>reticle-demo-server</code> builds a non-permissive <code>LimitConfig</code> (see
+<code>demo_limits()</code> in <code>crates/reticle-demo-server/src/config.rs</code>). The values, and
+what each protects against:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Value</th><th>On breach</th><th>Why it matters</th></tr>
+</thead>
+<tbody>
+<tr><td><code>per_ip_rate_per_min</code></td><td>6</td><td><code>429</code></td><td>Caps how fast one source IP can submit, so a single visitor cannot flood the queue.</td></tr>
+<tr><td><code>per_ip_concurrency</code></td><td>1</td><td><code>409</code></td><td>One live session per IP, so one visitor cannot hold multiple agent loops at once.</td></tr>
+<tr><td><code>global_concurrency</code></td><td>4</td><td><code>503</code></td><td>A hard ceiling on concurrent agent loops across the whole server, bounding CPU, memory, and (with a real key) model spend.</td></tr>
+<tr><td><code>token_budget</code></td><td>100000</td><td>session cancelled</td><td>A runaway loop is cancelled before it can burn tokens.</td></tr>
+<tr><td><code>command_budget</code></td><td>200</td><td>session cancelled</td><td>Bounds how many edits one session can issue, so a loop cannot grow a document without limit.</td></tr>
+<tr><td><code>max_prompt_len</code></td><td>400 chars</td><td><code>400</code></td><td>Bounds the input a visitor can submit.</td></tr>
+<tr><td><code>allowed_vocabulary</code></td><td>task words</td><td><code>400</code></td><td>A prompt straying off the layout task vocabulary is rejected before it reaches a model, so the demo cannot be used as a general-purpose model proxy.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The order of checks matters: cheap input validation (length, then vocabulary)
+runs before any stateful counter is touched, so a malformed prompt never consumes
+a rate token or a concurrency slot.</p>
+<p>Tune these for the host. A larger VPS can raise <code>global_concurrency</code>; a
+cost-sensitive deployment can lower <code>token_budget</code>. Keep <code>allowed_vocabulary</code>
+non-empty in any public deployment so the proxy-abuse guard stays on.</p>
+<h2 id="the-api-key-is-never-baked-into-the-image"><a class="header" href="#the-api-key-is-never-baked-into-the-image">The API key is never baked into the image</a></h2>
+<p>The Anthropic API key is read only from the <code>ANTHROPIC_API_KEY</code> environment
+variable, by <code>reticle_agent::AnthropicModel::from_env</code>. It is held in an <code>ApiKey</code>
+wrapper that never prints, serializes, or logs the clear value, and it reaches the
+wire only as the <code>x-api-key</code> header. It is never written to a file, a transcript,
+or an artifact.</p>
+<p>Consequences for deployment:</p>
+<ul>
+<li><strong>Do not</strong> put the key in the <code>Dockerfile</code>, an image layer, a committed <code>.env</code>,
+or a compose file checked into git. Provide it at run time only.</li>
+<li>With Docker: <code>-e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY"</code> (read from the host
+environment), or a Docker/Compose secret mounted into the environment at start.</li>
+<li>With systemd: an <code>EnvironmentFile=</code> that is <code>chmod 600</code>, root-owned, and outside
+the repo.</li>
+<li>Without a key, the server still runs: it uses the offline scripted harness, so
+<code>just demo-up</code> and a keyless container both work with no network.</li>
+</ul>
+<p>Before every release, run the secret scan (<code>just check-keys</code>) to prove no key or
+other credential has been committed anywhere in the tree. It scans for the
+<code>sk-ant-</code> prefix, generic <code>api_key</code>/<code>secret</code>/<code>token</code> assignments, and long
+high-entropy strings, and exits non-zero on a hit. Pass <code>-History</code> to also scan
+the full git history.</p>
+<h2 id="running-with-docker"><a class="header" href="#running-with-docker">Running with Docker</a></h2>
+<p>The repository ships a multi-stage <code>Dockerfile</code> that builds the binary in release
+and runs it as a non-root user (<code>reticle</code>, uid 10001). It links rustls (no OpenSSL
+system dependency) and uses the vendored <code>protoc</code> (ADR 0008), so the runtime image
+is a slim Debian with only <code>ca-certificates</code> added (needed for the outbound HTTPS
+call to the Anthropic API when a key is set).</p>
+<pre><code class="language-sh"># Build from the repo root (the build context).
+docker build -t reticle-demo .
+
+# Offline (no key): the scripted harness runs.
+docker run --rm -p 3040:3040 -p 3041:3041 -e HOST=0.0.0.0 reticle-demo
+
+# Live model: the key comes from the host environment, never from the image.
+docker run --rm -p 3040:3040 -p 3041:3041 -e HOST=0.0.0.0 \
+    -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" reticle-demo
+</code></pre>
+<p>The container binds <code>HOST=0.0.0.0</code> inside, and the host maps ports 3040 (the demo
+service) and 3041 (the relay). Override <code>PORT</code> and <code>RETICLE_RELAY_ADDR</code> to change
+them.</p>
+<h2 id="behind-a-reverse-proxy"><a class="header" href="#behind-a-reverse-proxy">Behind a reverse proxy</a></h2>
+<p>Terminate TLS at a reverse proxy (nginx, Caddy, or Traefik) and forward to the
+demo service. The relay is a WebSocket endpoint (<code>GET /ws/{room}</code>), so the proxy
+must pass the upgrade headers for that path.</p>
+<p>The service reads the real client IP from the <code>x-demo-client-ip</code> request header
+when present (the header a trusted front proxy sets), falling back to the peer
+address; this is <code>reticle_demo::CLIENT_IP_HEADER</code>. Set that header at the proxy to
+the true client address so per-IP limits apply to real clients rather than to the
+proxy. Do not expose the header to untrusted clients directly, or a client could
+spoof its source IP; only a trusted proxy should set it.</p>
+<p>A minimal nginx sketch (TLS omitted for brevity):</p>
+<pre><code class="language-nginx"># Demo HTTP service.
+location /api/ {
+    proxy_pass http://127.0.0.1:3040/;
+    proxy_set_header x-demo-client-ip $remote_addr;
+}
+
+# Collaboration relay (WebSocket upgrade).
+location /ws/ {
+    proxy_pass http://127.0.0.1:3041;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+</code></pre>
+<h2 id="resource-ceilings"><a class="header" href="#resource-ceilings">Resource ceilings</a></h2>
+<p>The limits above bound the demo’s own work, but set OS and container ceilings too
+so a bug or an unusually heavy session cannot take down the host:</p>
+<ul>
+<li><strong>Memory</strong>: cap the container (for example <code>docker run --memory=1g</code>). Each agent
+loop holds a small in-memory document and CRDT; the relay keeps an in-memory log
+per room (see the <code>reticle-server</code> room notes), so restart the process
+periodically or run behind an orchestrator that recycles it if rooms accumulate.</li>
+<li><strong>CPU</strong>: cap CPU (for example <code>--cpus=2</code>). <code>global_concurrency</code> already bounds
+how many loops run at once; the CPU cap is a backstop.</li>
+<li><strong>Disk</strong>: the demo server writes no artifacts (unlike the batch CLI), so its
+disk use is negligible; still, cap logs.</li>
+<li><strong>Network egress</strong>: with a key, the only outbound traffic is to
+<code>api.anthropic.com</code>. An egress allowlist to that host is a reasonable hardening
+step.</li>
+</ul>
+<h2 id="publishing-the-browser-bundle-to-github-pages"><a class="header" href="#publishing-the-browser-bundle-to-github-pages">Publishing the browser bundle to GitHub Pages</a></h2>
+<p>The public link is the <code>crates/web</code> Trunk bundle, which mounts <code>reticle-app</code>. The
+web entry point reads a <code>?view=</code> query parameter and defaults a public visitor to
+the replay theater (ADR 0026): the theater plays a recorded agent transcript back
+through a live session, so a visitor sees motion and DRC overlays with no key and
+no setup. The <code>index.html</code> frames the theater with an always-visible link to the
+full editor (<code>?view=editor</code>) and back.</p>
+<p>The theater window itself is native-only today; on the wasm bundle the start view
+is selected at the entry point and the framing is in place, while the in-page
+theater window lands once the theater modules are un-gated for wasm (they are
+model-free; this is tracked as <code>TODO(wave3)</code> in <code>crates/reticle-app/src/lib.rs</code>).
+The native desktop app opens the theater fully via
+<code>App::with_start_view(StartView::ReplayTheater)</code>.</p>
+<p>The release step (Wave 3) publishes the bundle to <code>gh-pages</code>:</p>
+<pre><code class="language-sh"># Build the optimized wasm bundle.
+just web-build           # -&gt; crates/web/dist
+
+# Build the book.
+just book                # -&gt; docs/book
+
+# Publish dist/ (and the book) to the gh-pages branch, then enable Pages to serve
+# from that branch. This project uses no GitHub Actions; the release skill builds
+# the site locally and pushes the branch.
+</code></pre>
+<p>The published <code>index.html</code> and the web entry point default a public visitor to the
+replay theater view (with the editor one click away). Nothing about the browser
+bundle needs a key: the theater replays a committed scripted transcript.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="contributing"><a class="header" href="#contributing">Contributing</a></h1>
 <h2 id="the-build-gate"><a class="header" href="#the-build-gate">The build gate</a></h2>
