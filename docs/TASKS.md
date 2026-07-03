@@ -276,3 +276,13 @@ qwen2.5-coder:16k (v0.4.0), results to benchmarks/results/v0.4.0/.
 
 - [ ] Full gauntlet; skeptical STATUS re-audit; tag and release v6.0.0; final
   summary with the working demo URL and the by-model, by-suite-version tables.
+
+**v6.0.0 SHIPPED.** Wave 5 done: gauntlet green (`just ci` 1098 test fns, `just e2e`
+3 passed + `just e2e-subpath` 1 passed, `just check-keys -History` clean, single
+author, no AI attribution); STATUS v6.0.0 final re-audit written; version bumped to
+6.0.0; git-cliff CHANGELOG (2026-07-03); tag v6.0.0 pushed; GitHub release (not
+draft) with 4 host binaries; gh-pages redeployed with the v6 bundle (web-adb9e44f)
+and book, `just smoke-pages` PASS on the live site. Working demo:
+https://alpharomerojl.github.io/reticle/ . Two-model 75-task v0.4.0 local benchmark:
+gpt-oss:16k MXFP4 50/75 = 67%; qwen2.5-coder:16k Q4_K_M 25/75 = 33%. Repository
+visibility unchanged.
