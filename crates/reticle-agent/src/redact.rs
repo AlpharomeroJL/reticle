@@ -37,6 +37,17 @@ impl ApiKey {
         Self::from_env_value(std::env::var("ANTHROPIC_API_KEY").ok())
     }
 
+    /// Reads the key from an arbitrarily named environment variable, returning `None`
+    /// when the variable is unset or empty.
+    ///
+    /// Used by the OpenAI-compatible backend, whose optional key lives in
+    /// `RETICLE_MODEL_API_KEY` rather than `ANTHROPIC_API_KEY`. Same environment-only
+    /// discipline as [`from_env`](Self::from_env): there is no file or flag path.
+    #[must_use]
+    pub fn from_env_named(name: &str) -> Option<Self> {
+        Self::from_env_value(std::env::var(name).ok())
+    }
+
     /// Builds a key from an already-read environment value: `Some` non-empty string
     /// becomes a key, everything else is `None`.
     ///

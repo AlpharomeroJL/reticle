@@ -95,6 +95,19 @@ bench:
 bench-agent *args:
     cargo run -p reticle-bench -- {{args}}
 
+# Run the whole agent suite against a LOCAL OpenAI-compatible model (Ollama).
+# Configure the model from the environment first, then invoke:
+#   $env:RETICLE_MODEL_NAME='gpt-oss:16k'; just bench-agent-ollama
+# Optional env: RETICLE_MODEL_BASE_URL (default http://localhost:11434/v1),
+# RETICLE_MODEL_API_KEY (only if your endpoint needs a key). Pass through extra
+# flags to scope or annotate, e.g. `just bench-agent-ollama --tier 1` or
+# `just bench-agent-ollama --quantization Q4_K_M`. Writes an aggregate results
+# JSON under scratch/agent-suite-results and prints a Markdown summary.
+# NOTE: hits a real local model (GPU load; non-deterministic proposals) and is
+# NOT part of `just ci`.
+bench-agent-ollama *args:
+    cargo run -p reticle-agent -- --backend ollama --suite benchmarks/layout-tasks {{args}}
+
 # Promote a mined candidate task (benchmarks/layout-tasks/candidates/<id>.toml)
 # into the live suite. Refuses unless the candidate's checker passes its
 # two-way vectors (accepts the good document, rejects the bad one); on success
