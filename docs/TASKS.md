@@ -128,6 +128,19 @@ outside it) with `CARGO_TARGET_DIR=D:\dev\reticle-target-<lane>`. Isolation is
 never delegated to an Agent-call parameter. The main tree at `D:\dev\reticle` is
 reserved for the orchestrator and integration merges only.
 
+Mandatory lane procedure (use for every lane from now on):
+1. `just lane <name>` creates the worktree `D:/dev/reticle-lanes/<name>` and the
+   branch `lane/<name>` off main.
+2. Spawn the subagent whose FIRST instruction is: "cd D:\dev\reticle-lanes\<name>;
+   set `$env:CARGO_TARGET_DIR='D:\dev\reticle-target-<name>'`; never edit, build,
+   or run git outside this directory."
+3. Integrate at the wave boundary: merge `lane/<name>` into main, re-run `just ci`.
+4. `just lane-done <name>` removes the worktree and deletes the branch.
+
+Before a wave fans out, run `git worktree list` and `git branch --list 'lane/*'`
+and prune stale entries (merged old branches with `git branch -d`) so the wave
+starts from a clean registry.
+
 Environment verified at run start: Ollama reachable at `http://localhost:11434`
 with `gpt-oss:16k` and `qwen2.5-coder:16k` (both tool-capable). The deployed
 gh-pages `index.html` imports assets at absolute root (`/web-<hash>.js`) while the
