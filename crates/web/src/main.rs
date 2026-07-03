@@ -10,7 +10,9 @@
 //! A public visitor lands on the replay theater by default (ADR 0026); the page URL
 //! selects the view via a `?view=` query parameter: `?view=editor` opens the full
 //! editor, `?view=replay` (or an absent parameter, the published default) opens the
-//! replay theater. The choice is passed to [`reticle_app::App::with_start_view`].
+//! replay theater. The choice is passed to `reticle_app::App::with_start_view`
+//! (not an intra-doc link: `reticle-app` is a wasm-only dependency of this crate,
+//! so the symbol is out of scope when the workspace docs build on the host).
 
 /// wasm entry point: start the egui app on the `#reticle-canvas` element.
 #[cfg(target_arch = "wasm32")]
@@ -48,10 +50,10 @@ fn main() {
     });
 }
 
-/// Reads the `?view=` query parameter and maps it to a [`reticle_app::StartView`].
+/// Reads the `?view=` query parameter and maps it to a `reticle_app::StartView`.
 ///
-/// An absent parameter defaults to [`reticle_app::StartView::ReplayTheater`], so the
-/// published public bundle opens to the theater; `?view=editor` opens the editor.
+/// An absent parameter defaults to `StartView::ReplayTheater`, so the published
+/// public bundle opens to the theater; `?view=editor` opens the editor.
 #[cfg(target_arch = "wasm32")]
 fn start_view_from_url() -> reticle_app::StartView {
     use reticle_app::StartView;
