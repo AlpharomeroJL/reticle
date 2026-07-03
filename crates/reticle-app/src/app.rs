@@ -1747,8 +1747,48 @@ impl App {
                     ui.monospace(line);
                 }
             });
+        self.agent_plan_section(ui);
         self.agent_conversation(ui);
         self.agent_history_section(ui);
+    }
+
+    /// Draws the agent's plan: the stated per-iteration intent (goal, intended
+    /// tools, expected checks) derived by the harness before each proposal.
+    ///
+    /// This renders [`AgentPanelState::plan`](crate::agent_panel::AgentPanelState::plan),
+    /// which rides on the run's transcript. It is transparency narration for the
+    /// viewer and material for failure mining, not a binding contract: nothing here
+    /// asserts the iteration used exactly these tools or that the checks passed.
+    /// Empty for a run whose transcript carried no plan (for example one recorded
+    /// before the plan log existed).
+    fn agent_plan_section(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.strong("Plan");
+        egui::ScrollArea::vertical()
+            .max_height(120.0)
+            .auto_shrink([false, false])
+            .id_salt("agent_plan")
+            .show(ui, |ui| {
+                let plan = self.agent.plan();
+                if plan.is_empty() {
+                    ui.label("No plan yet (the harness emits one step per iteration).");
+                }
+                for (i, step) in plan.iter().enumerate() {
+                    let tools = if step.intended_tools.is_empty() {
+                        "(none)".to_owned()
+                    } else {
+                        step.intended_tools.join(", ")
+                    };
+                    let checks = if step.expected_checks.is_empty() {
+                        "(none)".to_owned()
+                    } else {
+                        step.expected_checks.join(", ")
+                    };
+                    ui.monospace(format!("iter {i}: {}", step.goal));
+                    ui.monospace(format!("    tools: {tools}"));
+                    ui.monospace(format!("    checks: {checks}"));
+                }
+            });
     }
 
     /// Draws conversation mode: the running dialogue plus a follow-up input.

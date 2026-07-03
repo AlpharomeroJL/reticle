@@ -24,7 +24,7 @@
 
 use std::path::{Path, PathBuf};
 
-use reticle_agent_api::{AgentCommand, AgentResponse, Session, Transcript};
+use reticle_agent_api::{AgentCommand, AgentResponse, PlanStep, Session, Transcript};
 use reticle_bench::model::{Context, ModelClient};
 use reticle_bench::{BenchTask, CheckFailure, CheckResult, Checker, CheckerRegistry, ResultRecord};
 
@@ -218,7 +218,8 @@ pub fn run_agent_task<M: ModelClient>(
         quantization: provenance.quantization.clone(),
     };
 
-    let (artifacts, render_note) = write_artifacts(task, &session, &record, out_dir)?;
+    let (artifacts, render_note) =
+        write_artifacts(task, &session, &loop_result.plan, &record, out_dir)?;
     Ok(RunOutcome {
         record,
         artifacts,
@@ -232,6 +233,9 @@ struct LoopResult {
     iterations: u32,
     first_proposal_violations: u32,
     final_violations: u32,
+    /// The per-iteration planning narration, in iteration order. Stored in the
+    /// written [`Transcript`] as an additive, replay-neutral parallel log.
+    plan: Vec<PlanStep>,
 }
 
 /// The propose-verify-correct core: ask, apply (within budget), verify, feed back.
@@ -250,6 +254,7 @@ fn drive<M: ModelClient>(
     let mut feedback: Vec<String> = Vec::new();
     let mut prev_violations = 0_u32;
     let mut commands_applied = 0_u32;
+    let mut plan: Vec<PlanStep> = Vec::new();
 
     while iterations < options.max_iterations {
         // Give the model the current layout before it proposes.
@@ -261,6 +266,12 @@ fn drive<M: ModelClient>(
             feedback: feedback.clone(),
         };
         let commands = model.propose(&task.id, &task.prompt, &context);
+
+        // Emit this iteration's plan step from the task and the just-proposed batch,
+        // before the commands are applied. This is narration for the agent panel and
+        // material for failure mining, not a binding contract (see `PlanStep`); it is
+        // recorded even for the empty-proposal iteration that ends the loop below.
+        plan.push(plan_step_for(task, &commands));
 
         // An empty proposal after the first iteration means the model has nothing left
         // to try; stop rather than spinning.
@@ -286,7 +297,9 @@ fn drive<M: ModelClient>(
         final_violations = violations;
         prev_violations = violations;
 
-        match checker.check(session.document(), &snapshot_transcript(session)) {
+        // The checker verifies the document and command history; the plan log is
+        // panel narration and is not part of the check, so pass an empty plan here.
+        match checker.check(session.document(), &snapshot_transcript(session, &[])) {
             CheckResult::Pass => {
                 success = true;
                 break;
@@ -310,14 +323,61 @@ fn drive<M: ModelClient>(
         iterations,
         first_proposal_violations,
         final_violations,
+        plan,
     }
 }
 
+/// Derives one iteration's [`PlanStep`] from the task and the batch the model just
+/// proposed.
+///
+/// The derivation is deterministic and cheap: the goal names the task by its stable
+/// `id` and checker, the intended tools are the `op` names of the proposed commands
+/// in order, and the expected checks are the always-on `drc` oracle plus the task's
+/// own checker. Nothing here is a promise the iteration will keep; it records stated
+/// intent so the panel can show it and a later pass can compare it against the
+/// recorded outcome.
+///
+/// The goal is built from the task **id and checker**, never the free-text
+/// [`prompt`](BenchTask::prompt): the plan rides on the written transcript, and the
+/// transcript's structural invariant is that it carries only the task's public
+/// identifiers, not the prompt (which could embed a secret). Both the id and the
+/// checker name already appear in the run's public artifacts.
+fn plan_step_for(task: &BenchTask, commands: &[AgentCommand]) -> PlanStep {
+    PlanStep {
+        goal: format!("task {} (checker {})", task.id, task.checker),
+        intended_tools: commands.iter().map(command_op_name).collect(),
+        expected_checks: vec!["drc".to_owned(), task.checker.clone()],
+    }
+}
+
+/// The `op` tag of a command (for example `create_cell`, `add_rect`), read from its
+/// frozen serde encoding.
+///
+/// [`AgentCommand`] is `#[non_exhaustive]` and serializes with an `op` field
+/// (`#[serde(tag = "op")]`), so pulling the tag from the serialized form names every
+/// present and future variant without an exhaustive match here. Serialization is
+/// infallible for these commands; the `unknown` fallback is a defensive last resort.
+fn command_op_name(command: &AgentCommand) -> String {
+    serde_json::to_value(command)
+        .ok()
+        .and_then(|v| {
+            v.get("op")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
 /// Builds a [`Transcript`] from the session's records and current document hash.
-fn snapshot_transcript(session: &Session) -> Transcript {
+///
+/// The `plan` is the harness's per-iteration planning narration, stored alongside the
+/// records as an additive, replay-neutral log; pass an empty slice where no plan
+/// applies (for example the per-iteration checker call, which ignores the plan).
+fn snapshot_transcript(session: &Session, plan: &[PlanStep]) -> Transcript {
     Transcript {
         records: session.transcript().to_vec(),
         final_hash: reticle_model::document_hash(session.document()),
+        plan: plan.to_vec(),
     }
 }
 
@@ -390,6 +450,7 @@ pub fn document_summary(session: &Session) -> String {
 fn write_artifacts(
     task: &BenchTask,
     session: &Session,
+    plan: &[PlanStep],
     record: &ResultRecord,
     out_dir: &Path,
 ) -> Result<(Artifacts, String), LoopError> {
@@ -400,7 +461,7 @@ fn write_artifacts(
 
     // 1. Transcript as JSONL.
     let transcript_path = out_dir.join(format!("{}.transcript.jsonl", task.id));
-    write_transcript_jsonl(session, &transcript_path)?;
+    write_transcript_jsonl(session, plan, &transcript_path)?;
 
     // 2. Final GDS. Export on a clone so the live transcript is untouched.
     let gds_path = out_dir.join(format!("{}.gds", task.id));
@@ -474,8 +535,18 @@ fn write_artifacts(
 }
 
 /// Writes the session's command records to `path`, one JSON object per line, followed
-/// by a final line carrying the document hash (so a reader can verify a replay).
-fn write_transcript_jsonl(session: &Session, path: &Path) -> Result<(), LoopError> {
+/// by a final line carrying the document hash (so a reader can verify a replay) and
+/// the per-iteration plan log.
+///
+/// The plan rides on the trailer object as a `plan` array rather than as its own lines
+/// so the per-command lines are untouched: an existing reader that scans only the
+/// command lines (or reads `final_hash` from the trailer) is unaffected, and a plan-
+/// aware reader picks the plan up from the same trailer.
+fn write_transcript_jsonl(
+    session: &Session,
+    plan: &[PlanStep],
+    path: &Path,
+) -> Result<(), LoopError> {
     use std::fmt::Write as _;
     let mut out = String::new();
     for record in session.transcript() {
@@ -486,12 +557,12 @@ fn write_transcript_jsonl(session: &Session, path: &Path) -> Result<(), LoopErro
         out.push_str(&line);
         out.push('\n');
     }
-    // Trailer: the final document hash the replay must reproduce.
-    let _ = writeln!(
-        out,
-        "{}",
-        serde_json::json!({ "final_hash": reticle_model::document_hash(session.document()) })
-    );
+    // Trailer: the final document hash the replay must reproduce, plus the plan log.
+    let trailer = serde_json::json!({
+        "final_hash": reticle_model::document_hash(session.document()),
+        "plan": plan,
+    });
+    let _ = writeln!(out, "{trailer}");
     std::fs::write(path, out).map_err(|e| LoopError::Artifact {
         path: path.to_path_buf(),
         detail: e.to_string(),
@@ -660,6 +731,90 @@ mod tests {
         let text = std::fs::read_to_string(&outcome.artifacts.transcript).unwrap();
         let command_lines = text.lines().filter(|l| l.contains("\"op\"")).count();
         assert_eq!(command_lines, 2, "command budget must cap applied commands");
+        cleanup(&out_dir);
+    }
+
+    #[test]
+    fn plan_step_for_derives_goal_tools_and_checks() {
+        use super::{command_op_name, plan_step_for};
+        let commands = vec![
+            AgentCommand::CreateCell { name: "top".into() },
+            met1_rect(500),
+        ];
+        let step = plan_step_for(&drc_task(), &commands);
+        // The goal names the task by id and checker, never the free-text prompt.
+        assert_eq!(step.goal, "task t1_drc (checker drc_clean)");
+        assert!(
+            !step.goal.contains("Draw a clean met1"),
+            "the goal must not embed the prompt"
+        );
+        // Intended tools are the proposed commands' op names, in order.
+        assert_eq!(step.intended_tools, ["create_cell", "add_rect"]);
+        // Expected checks are the always-on drc oracle plus the task's checker.
+        assert_eq!(step.expected_checks, ["drc", "drc_clean"]);
+        // The op-name helper reads the serde `op` tag.
+        assert_eq!(command_op_name(&AgentCommand::ListLayers), "list_layers");
+    }
+
+    #[test]
+    fn transcript_stores_one_plan_step_per_iteration() {
+        // Two iterations: the first proposes the bad (too-narrow) shape so the check
+        // fails, the second proposes the good one so it passes. The plan log must hold
+        // one step per iteration, each with the task goal and checks.
+        let model = MockModel::new().with_script(
+            "t1_drc",
+            vec![
+                vec![
+                    AgentCommand::CreateCell { name: "top".into() },
+                    met1_rect(100),
+                ],
+                vec![
+                    AgentCommand::DeleteShapes {
+                        ids: vec![reticle_agent_api::ElementId(1)],
+                    },
+                    met1_rect(500),
+                ],
+            ],
+        );
+        let mut model = model;
+        let out_dir = unique_dir("plan");
+        let outcome = run_agent_task(
+            &drc_task(),
+            &mut model,
+            &CheckerRegistry::default(),
+            "",
+            "0.1.0",
+            LoopOptions::default(),
+            &out_dir,
+            0,
+            &crate::run::Provenance::new("mock"),
+            |_, _| {},
+        )
+        .expect("run");
+        assert!(outcome.record.success, "second proposal is clean");
+
+        // The plan rides on the JSONL trailer line as a `plan` array; it must have one
+        // entry per iteration, and re-parsing the whole transcript (records + trailer)
+        // yields a Transcript whose plan round-trips.
+        let text = std::fs::read_to_string(&outcome.artifacts.transcript).unwrap();
+        let trailer: serde_json::Value =
+            serde_json::from_str(text.lines().last().expect("trailer line")).unwrap();
+        let plan = trailer["plan"].as_array().expect("plan array");
+        assert_eq!(plan.len(), 2, "one plan step per iteration");
+        assert_eq!(plan[0]["goal"], "task t1_drc (checker drc_clean)");
+        assert_eq!(
+            plan[0]["intended_tools"],
+            serde_json::json!(["create_cell", "add_rect"])
+        );
+        assert_eq!(
+            plan[1]["intended_tools"],
+            serde_json::json!(["delete_shapes", "add_rect"]),
+            "second iteration deleted the bad shape then drew the corrected rect"
+        );
+        assert_eq!(
+            plan[0]["expected_checks"],
+            serde_json::json!(["drc", "drc_clean"])
+        );
         cleanup(&out_dir);
     }
 

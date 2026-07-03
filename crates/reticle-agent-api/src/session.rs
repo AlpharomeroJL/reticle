@@ -233,6 +233,9 @@ impl Session {
         let transcript = crate::Transcript {
             records: self.transcript.clone(),
             final_hash: reticle_model::document_hash(self.document()),
+            // A session snapshot persists the command history, not the agent harness's
+            // per-iteration plan; the plan log is empty here.
+            plan: Vec::new(),
         };
         serde_json::json!({ "transcript": transcript })
     }

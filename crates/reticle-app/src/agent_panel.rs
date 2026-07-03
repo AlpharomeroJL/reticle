@@ -23,8 +23,8 @@
 
 use reticle_agent_api::args::{LayerArg, PointArg, RectArg};
 use reticle_agent_api::{
-    AgentCommand, AgentResponse, AgentStatus, CommandRecord, Outcome, Session, Transcript,
-    transcript_of,
+    AgentCommand, AgentResponse, AgentStatus, CommandRecord, Outcome, PlanStep, Session,
+    Transcript, transcript_of,
 };
 use reticle_geometry::{LayerId, Point, Rect};
 use reticle_model::{RuleKind, Violation};
@@ -127,6 +127,7 @@ pub struct AgentPanelState {
     seconds_per_step: f32,
     acc: f32,
     transcript: Option<Transcript>,
+    plan: Vec<PlanStep>,
     conversation: Vec<ConversationEntry>,
     followups: Vec<String>,
 }
@@ -153,6 +154,7 @@ impl AgentPanelState {
             seconds_per_step: DEFAULT_STEP_PERIOD,
             acc: 0.0,
             transcript: None,
+            plan: Vec::new(),
             conversation: Vec::new(),
             followups: Vec::new(),
         }
@@ -191,6 +193,11 @@ impl AgentPanelState {
         self.push_line("run started".to_owned());
         self.latest = None;
         self.cursor = None;
+        // The plan log rides on the transcript (`Transcript::plan`); surface it so the
+        // panel can render the agent's stated per-iteration intent next to the run.
+        self.plan = transcript
+            .as_ref()
+            .map_or_else(Vec::new, |t| t.plan.clone());
         self.transcript = transcript;
         self.conversation.clear();
         self.followups.clear();
@@ -370,6 +377,17 @@ impl AgentPanelState {
         self.transcript.as_ref()
     }
 
+    /// The agent's per-iteration plan for the current (or last) run, oldest first.
+    ///
+    /// Each [`PlanStep`] is the stated intent at the top of one iteration (goal,
+    /// intended tools, expected checks); it is narration for the viewer, not a binding
+    /// contract on what the iteration did. Empty when the backing transcript carried no
+    /// plan (for example a transcript recorded before the plan log existed).
+    #[must_use]
+    pub fn plan(&self) -> &[PlanStep] {
+        &self.plan
+    }
+
     /// Overrides the pacing (seconds between steps), clamped to at least 10 ms.
     pub fn set_step_period(&mut self, seconds: f32) {
         self.seconds_per_step = seconds.max(0.01);
@@ -447,7 +465,27 @@ pub fn scripted_run(prompt: &str) -> (Transcript, Vec<AgentStep>) {
         cell: AGENT_CELL.to_owned(),
     });
 
-    let transcript = transcript_of(&session);
+    let mut transcript = transcript_of(&session);
+    // Attach a two-step plan matching the script's two propose-verify iterations, so
+    // the panel's plan section has real content without a live harness. This mirrors
+    // what the `reticle-agent` harness derives per iteration (goal, intended tools,
+    // expected checks); it is narration for the viewer, not a binding contract.
+    transcript.plan = vec![
+        PlanStep {
+            goal: prompt.to_owned(),
+            intended_tools: vec!["add_rect".to_owned(), "run_drc".to_owned()],
+            expected_checks: vec!["drc".to_owned()],
+        },
+        PlanStep {
+            goal: prompt.to_owned(),
+            intended_tools: vec![
+                "delete_shapes".to_owned(),
+                "add_rect".to_owned(),
+                "run_drc".to_owned(),
+            ],
+            expected_checks: vec!["drc".to_owned()],
+        },
+    ];
     let mut feed = vec![AgentStep {
         narration: format!("prompt: {prompt}"),
         status: AgentStatus {
@@ -934,6 +972,47 @@ mod tests {
             Rect::new(Point::new(10, 20), Point::new(70, 2020))
         );
         assert!(v.message.contains("min width"));
+    }
+
+    #[test]
+    fn scripted_run_attaches_a_plan_and_panel_holds_it() {
+        // The scripted run carries a two-step plan (one per propose-verify iteration);
+        // starting a run must surface it on the panel state.
+        let (transcript, _) = scripted_run("plan me a wire");
+        assert_eq!(transcript.plan.len(), 2, "two scripted iterations");
+        let mut panel = AgentPanelState::new();
+        panel.prompt = "plan me a wire".to_owned();
+        panel.start();
+        let plan = panel.plan();
+        assert_eq!(plan.len(), 2, "panel holds the plan from the transcript");
+        assert_eq!(plan[0].goal, "plan me a wire");
+        assert!(plan[0].intended_tools.contains(&"run_drc".to_owned()));
+        assert_eq!(plan[0].expected_checks, ["drc"]);
+        // The correcting iteration lists the delete then the redraw.
+        assert_eq!(
+            plan[1].intended_tools,
+            ["delete_shapes", "add_rect", "run_drc"]
+        );
+    }
+
+    #[test]
+    fn start_from_transcript_surfaces_its_plan() {
+        let (transcript, _) = scripted_run("carry the plan");
+        let mut panel = AgentPanelState::new();
+        panel.start_from_transcript(&transcript);
+        assert_eq!(panel.plan().len(), transcript.plan.len());
+        assert_eq!(panel.plan(), transcript.plan.as_slice());
+    }
+
+    #[test]
+    fn plan_is_empty_for_a_planless_transcript() {
+        // A transcript with no plan (e.g. one recorded before the plan log existed)
+        // leaves the panel's plan empty rather than panicking.
+        let mut transcript = scripted_run("no plan").0;
+        transcript.plan.clear();
+        let mut panel = AgentPanelState::new();
+        panel.start_from_transcript(&transcript);
+        assert!(panel.plan().is_empty());
     }
 
     #[test]
