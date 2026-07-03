@@ -252,6 +252,7 @@ checker = "rect_present"
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let dir =
             std::env::temp_dir().join(format!("reticle-bench-loader-{}-{n}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create tempdir");
         dir
     }

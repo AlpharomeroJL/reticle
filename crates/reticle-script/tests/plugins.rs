@@ -36,6 +36,7 @@ fn runs_worked_examples() {
 #[test]
 fn plugin_dir_runs_in_sorted_order() {
     let tmp = std::env::temp_dir().join(format!("reticle-script-plugins-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).expect("create temp plugin dir");
 
     // Written out of order; must execute 10, then 20, then 30.
