@@ -110,6 +110,21 @@ web-build:
 web-serve:
     cd crates/web; trunk serve index.html
 
+# ---------------------------------------------------------------------------
+# End-to-end browser tests (Playwright), its own gate.
+# ---------------------------------------------------------------------------
+# Builds the Trunk demo bundle, then drives it in headless Chromium. Two
+# projects: `webgl2` is the hard gate (WebGPU is hidden so wgpu takes its WebGL2
+# fallback, and the app must boot and render); `webgpu` launches with the
+# WebGPU-enabling flags and asserts the WebGPU path where a real adapter exists,
+# skipping those checks honestly where it does not (Playwright's headless
+# Chromium ships without WebGPU). See e2e/README.md and ADR 0027.
+e2e:
+    cd crates/web; trunk build index.html
+    npm --prefix e2e install
+    cd e2e; npx playwright install chromium
+    cd e2e; npx playwright test
+
 book:
     mdbook build docs
 
