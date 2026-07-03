@@ -213,8 +213,18 @@ git/file integration are limit-safe; only Claude subagents consume the limit.
   App::snap_world seam, drawing routes through it). app.rs hotspot conflicts
   reconciled by union (one hunk needed a manual brace close for run_ops). Each
   shipped tests and its mdbook chapter.
-- [ ] 2E layer/technology editing UI; 2F search and selection depth; 2G view and
-  export polish; 2H in-app agent UX upgrades (Batch 2, next).
+- [x] Batch 2 DONE-gate-green, merged (0a3637e 2H, c8e2e16 2G, ff474d5 2F, 4f9d898
+  2E; full just ci GREEN, 1007 tests). 2E layer manager upgrade + technology editor
+  (added reticle-io write_technology round-trip and EditableDocument::set_technology,
+  multi-crate); 2F filter-language query bar + saved sets + outline tree; 2G theme
+  switching + bookmarks + PNG/SVG export; 2H agent conversation mode + history
+  browser + fix-violation Wave-3B seam. app.rs union-merged (one brace-split fix for
+  the tech_editor/restore_selection_set seam). Integration fixes: a pre-existing
+  demo-server slot-release race made non-flaky, and two typos in the new chapters.
+
+**Wave 2 complete: all 8 lanes (2A-2H) merged and gate-green, pushed. The editor
+now has drawing/vertex editing, boolean/transform ops, productivity tools, snapping
+and guides, layer/tech editing, search/selection depth, view/export, and agent UX.**
 
 ## Wave 3: agent capability expansion (parallel, up to 6 lanes) [not-started]
 

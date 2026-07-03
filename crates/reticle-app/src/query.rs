@@ -353,7 +353,7 @@ fn parse_metric(metric: Metric, rest: &str, token: &str) -> Result<Predicate, Pa
 
 /// Splits a comparator off the front of `rest`, returning the operator and the
 /// remaining (numeric) text. The two-character operators are tried first so `<=`
-/// is not mis-read as `<` followed by `=`.
+/// is not misread as `<` followed by `=`.
 fn split_comparator(rest: &str) -> Option<(Comparator, &str)> {
     for (sym, cmp) in [
         ("<=", Comparator::Le),
