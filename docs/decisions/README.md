@@ -36,3 +36,4 @@ superseded decision is marked and linked to its replacement.
 | [0028](0028-v6-subagent-worktree-orchestration.md) | v6.0.0 run: subagent worktree lanes, a thin integration agent |
 | [0029](0029-result-record-backend-label.md) | ResultRecord gains a backend and quantization label |
 | [0030](0030-orchestrator-creates-lane-worktrees.md) | Lane worktrees are created by the orchestrator before spawning |
+| [0031](0031-wave3-agent-command-expansion.md) | Wave 3 expands the AgentCommand surface for the Wave 2 tools |
