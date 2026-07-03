@@ -41,6 +41,7 @@ use crate::query::{LayerLookup, Query};
 use crate::replay::ReplayTheater;
 use crate::selection::{self, Selection};
 use crate::snap::{self, Guide, SnapHint, SnapState};
+use crate::tech_editor::TechEditorState;
 use crate::tool::{Tool, ToolState};
 use crate::viewports::{self, Split, Viewports};
 /// A transient status message shown in the bottom bar.
@@ -209,6 +210,10 @@ pub struct App {
     /// The search / selection-depth panel: filter query bar, saved selection
     /// sets, select-similar, and the cell/instance outline tree.
     search: SearchState,
+    /// The technology-editor panel state: the draft technology being edited, its
+    /// validation errors, and the tech-file round-trip text (see
+    /// [`crate::tech_editor`]).
+    tech_editor: TechEditorState,
 
     /// The rebindable shortcut map every key press resolves through.
     keymap: Keymap,
@@ -385,6 +390,7 @@ impl App {
                 outline,
                 ..SearchState::default()
             },
+            tech_editor: TechEditorState::new(),
             keymap: load_keymap(),
             keymap_open: false,
             rebinding: None,
@@ -1013,6 +1019,18 @@ impl App {
             self.selection.set(indices);
             self.status.set(format!("Restored '{name}' ({n} shape(s))"));
         }
+    }
+    /// Draws the technology-editor panel and the upgraded layer manager at the end
+    /// of the right panel. Delegates to [`crate::tech_editor::show`] with the three
+    /// disjoint app fields it needs (its own state, the history, and the layer
+    /// table); borrowing them as separate fields here keeps a single call site.
+    fn tech_editor_panel(&mut self, ui: &mut egui::Ui) {
+        crate::tech_editor::show(
+            &mut self.tech_editor,
+            &mut self.history,
+            &mut self.layer_state,
+            ui,
+        );
     }
 
     /// Draws the right-hand undo-history panel: stack depths and step buttons.
@@ -4198,6 +4216,7 @@ impl eframe::App for App {
                         self.view_export_panel(ui);
                         self.search_panel(ui);
                         ui.separator();
+                        self.tech_editor_panel(ui);
                     });
             });
         egui::CentralPanel::default().show(ui, |ui| {

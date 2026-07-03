@@ -34,5 +34,6 @@
 - [Performance methodology](performance.md)
 - [User guide](user-guide.md)
 - [Productivity editing](productivity.md)
+- [Layer and technology editing](layer-tech-editing.md)
 - [Deployment](deployment.md)
 - [Contributing](contributing.md)

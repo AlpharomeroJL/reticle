@@ -34,6 +34,8 @@
 //!   step/play/pause/speed playback machine over a live session.
 //! * [`store`], the transcript storage seam: filesystem on native, a bundled
 //!   transcript on wasm, so the theater opens on both.
+//! * [`tech_editor`], the upgraded layer manager (reorder, recolor, fill style,
+//!   solo) and the technology editor that validates and round-trips the tech file.
 //! * [`netlight`], cached connectivity extraction for net highlighting.
 //! * [`productivity`], clipboard/duplicate/array/move-delta/via-stack editing logic
 //!   behind the productivity side panel, every edit undo-integrated.
@@ -84,6 +86,7 @@ pub mod session;
 pub mod share;
 pub mod snap;
 pub mod store;
+pub mod tech_editor;
 pub mod tool;
 pub mod view3d;
 pub mod viewexport;
