@@ -1,7 +1,7 @@
 //! Full-loop integration tests against `reticle-bench`'s deterministic `MockModel`.
 //!
-//! These drive the whole propose-verify-correct harness through its public surface —
-//! [`run_agent_task`] plus [`MockModel`] — with no live API (the tests never touch the
+//! These drive the whole propose-verify-correct harness through its public surface,
+//! [`run_agent_task`] plus [`MockModel`], with no live API (the tests never touch the
 //! network and `ANTHROPIC_API_KEY` is irrelevant here). They prove:
 //!
 //! - the loop converges on a mock task and writes the four artifacts;
@@ -195,7 +195,7 @@ fn failing_mock_task_is_recorded_as_failure() {
 fn transcript_is_jsonl_and_carries_no_injected_secret() {
     // Drive a run whose task prompt embeds a sentinel "secret" and whose commands never
     // contain it. The transcript records only commands and outcomes, so the sentinel
-    // must not appear anywhere in the written transcript — the structural property that
+    // must not appear anywhere in the written transcript, the structural property that
     // keeps an API key out of it.
     const SENTINEL: &str = "sk-ant-SENTINEL-MUST-NOT-APPEAR";
     let mut task = drc_task();
