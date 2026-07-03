@@ -33,3 +33,6 @@ superseded decision is marked and linked to its replacement.
 | [0025](0025-real-demo-harness-streams-steps.md) | The real demo harness streams atomic steps to the relay |
 | [0026](0026-pages-opens-to-replay-theater.md) | The public Pages bundle opens to the replay theater |
 | [0027](0027-e2e-webgl2-gate-webgpu-attempted.md) | Playwright e2e: WebGL2 hard gate, WebGPU attempted and skipped honestly headless |
+| [0028](0028-v6-subagent-worktree-orchestration.md) | v6.0.0 run: subagent worktree lanes, a thin integration agent |
+| [0029](0029-result-record-backend-label.md) | ResultRecord gains a backend and quantization label |
+| [0030](0030-orchestrator-creates-lane-worktrees.md) | Lane worktrees are created by the orchestrator before spawning |
