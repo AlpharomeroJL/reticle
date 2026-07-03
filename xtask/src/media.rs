@@ -68,6 +68,9 @@ pub fn capture(out_dir: &Path, only: Option<&str>) -> std::io::Result<bool> {
     if wants("collab") {
         capture_collab(&ctx, &mut renderer, out_dir)?;
     }
+    if wants("agent") {
+        capture_agent(&ctx, &mut renderer, out_dir)?;
+    }
     Ok(true)
 }
 
@@ -380,6 +383,123 @@ fn capture_drc(
     }
     save_png(&out_dir.join("drc.png"), &rgba, STILL)?;
     eprintln!("wrote {}", out_dir.join("drc.png").display());
+    Ok(())
+}
+
+/// Renders the agent replay theater offscreen into `agent.gif` plus a final still
+/// `agent.png`. It replays the same scripted propose-verify-correct transcript the
+/// in-app replay theater plays (`reticle_app::agent_panel::scripted_run`), stepping
+/// through it record by record: the geometry appears as the agent draws it, live
+/// DRC violation markers flash when a verify step finds violations, a top strip
+/// shows the verify state (red for violations, green once clean and verified), and
+/// a bottom bar tracks progress. This is the flagship "watch the agent work" asset.
+fn capture_agent(
+    ctx: &WgpuContext,
+    renderer: &mut WgpuRenderer,
+    out_dir: &Path,
+) -> std::io::Result<()> {
+    use reticle_app::agent_panel::scripted_run;
+    use reticle_app::replay::ReplayTheater;
+
+    let (transcript, _feed) = scripted_run("agent draws a clean metal wire");
+    let mut theater = ReplayTheater::new();
+    theater.load_transcript(transcript);
+    let (_, total) = theater.progress();
+    if total == 0 {
+        eprintln!("agent replay: empty transcript, skipping");
+        return Ok(());
+    }
+
+    // Frame on the final (fullest) state so every shape appears within a fixed view.
+    theater.seek(total);
+    let Some(final_cell) = theater.render_cell() else {
+        eprintln!("agent replay: no render cell, skipping");
+        return Ok(());
+    };
+    let bbox = document_bounds(theater.document(), &final_cell);
+    let camera = frame_camera(bbox, STILL, 0.82);
+
+    let frames_dir = out_dir.join("frames");
+    std::fs::create_dir_all(&frames_dir)?;
+    let (w, h) = (STILL.0 as f32, STILL.1 as f32);
+    let mut frames: Vec<PathBuf> = Vec::new();
+    let mut last_rgba: Option<Vec<u8>> = None;
+    // The still is the most illustrative frame: the one where the verify step has
+    // flagged the most violations (the "agent caught a DRC problem" moment). Falls
+    // back to the final clean frame when no frame carries a violation.
+    let mut still_rgba: Option<Vec<u8>> = None;
+    let mut still_violations = 0usize;
+
+    for pos in 1..=total {
+        theater.seek(pos);
+        // Skip the pre-geometry records (SetTechnology, CreateCell): render only
+        // once there is a cell with shapes to show.
+        let Some(cell) = theater.render_cell() else {
+            continue;
+        };
+        let violations = theater.last_violations().to_vec();
+        let verified = theater.has_verified();
+        let mut rgba =
+            renderer.render_document_offscreen(ctx, theater.document(), &cell, &camera, STILL);
+
+        let map = WorldMap::new(&camera, STILL);
+        let mut canvas = Canvas::new(&mut rgba, STILL);
+        for v in &violations {
+            let (x0, y0, x1, y1) = map.rect_to_px(v.location);
+            canvas.fill_rect(x0, y0, x1, y1, [255, 45, 85, 64]);
+            canvas.stroke_rect(
+                x0 - 3.0,
+                y0 - 3.0,
+                x1 + 3.0,
+                y1 + 3.0,
+                3.0,
+                [255, 45, 85, 255],
+            );
+            canvas.stroke_rect(x0, y0, x1, y1, 1.0, [255, 255, 255, 220]);
+        }
+        // Verify-state strip along the top edge.
+        let strip = if !violations.is_empty() {
+            [255, 69, 58, 255]
+        } else if verified {
+            [48, 209, 88, 255]
+        } else {
+            [120, 122, 132, 220]
+        };
+        canvas.fill_rect(0.0, 0.0, w, 8.0, strip);
+        // Progress bar along the bottom edge.
+        canvas.fill_rect(0.0, h - 8.0, w, h, [38, 42, 52, 255]);
+        canvas.fill_rect(
+            0.0,
+            h - 8.0,
+            w * (pos as f32 / total as f32),
+            h,
+            [90, 200, 250, 255],
+        );
+
+        let path = frames_dir.join(format!("agent_{pos:04}.png"));
+        save_png(&path, &rgba, STILL)?;
+        frames.push(path);
+        if violations.len() >= still_violations.max(1) {
+            still_violations = violations.len();
+            still_rgba = Some(rgba.clone());
+        }
+        last_rgba = Some(rgba);
+    }
+
+    if frames.is_empty() {
+        eprintln!("agent replay: no renderable frames, skipping");
+        return Ok(());
+    }
+    assemble_gif(&frames, &out_dir.join("agent.gif"));
+    eprintln!("wrote {}", out_dir.join("agent.gif").display());
+    if let Some(rgba) = still_rgba.or(last_rgba) {
+        save_png(&out_dir.join("agent.png"), &rgba, STILL)?;
+        eprintln!(
+            "wrote {} ({} violations shown)",
+            out_dir.join("agent.png").display(),
+            still_violations
+        );
+    }
     Ok(())
 }
 
