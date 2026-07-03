@@ -9,13 +9,20 @@ transcript, and can mirror its edits onto the live collaboration document.
 ## The command surface (`reticle-agent-api`)
 
 [`AgentCommand`](https://docs.rs/reticle-agent-api) is a tagged, serde-serializable
-enum of 25 operations over the engine: create a cell, add a rectangle, polygon, or
+enum of 30 operations over the engine: create a cell, add a rectangle, polygon, or
 path, add a label or pin, transform or delete shapes, set the technology, run DRC,
 check a connectivity intent, extract nets, compare against a netlist, export GDS or
 OASIS, and render a region to PNG. A [`Session`] owns an editable document and a
 stable element-id allocator, so a command that adds geometry returns an
 [`ElementId`] that later commands and the transcript can refer to even across
 deletions (ADR 0018).
+
+Five of those operations lift the in-app editor's productivity actions to the
+command surface (ADR 0031): `BooleanCombine` (union, intersection, difference, or xor
+over a set of shapes, onto a target layer), `AlignShapes`, `DistributeShapes`,
+`OffsetShapes` (grow or shrink), and `BuildViaStack` (a cut plus enclosures sized
+from the technology's enclosure rules). They run on the same `reticle-geometry`
+primitives as the editor, so agent-built and hand-built geometry match exactly.
 
 Every command applied to a session is recorded as a [`CommandRecord`] in a
 [`Transcript`], and the model's document has a [`document_hash`]. Replaying a

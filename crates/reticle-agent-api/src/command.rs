@@ -8,7 +8,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ElementId;
-use crate::args::{EndcapArg, LayerArg, PointArg, RectArg, TransformArg};
+use crate::args::{
+    AlignArg, AxisArg, BooleanOpArg, EndcapArg, LayerArg, PointArg, RectArg, TransformArg,
+};
 
 /// A single serializable command over the engine, tagged by its `op`.
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -182,5 +184,65 @@ pub enum AgentCommand {
     LoadSession {
         /// The serialized session snapshot.
         snapshot: String,
+    },
+    /// Combine a set of shapes with a planar boolean, writing the result polygons
+    /// to a target layer in the same cell. The input shapes are consumed
+    /// (deleted). Rectangles and polygons participate; paths are skipped.
+    BooleanCombine {
+        /// The cell holding the input shapes and receiving the result.
+        cell: String,
+        /// Which boolean to apply (union, intersection, difference, xor). Named
+        /// `bool_op` rather than `op` because `op` is the enum's serde tag.
+        bool_op: BooleanOpArg,
+        /// The input shapes, addressed by id. At least two are required.
+        ids: Vec<ElementId>,
+        /// The layer and datatype the result polygons are written to.
+        layer: LayerArg,
+    },
+    /// Align a set of shapes within their combined bounding box (for example, all
+    /// left edges to the leftmost edge). Each shape keeps its id.
+    AlignShapes {
+        /// The shapes to align, addressed by id. At least two are required.
+        ids: Vec<ElementId>,
+        /// Which alignment to apply.
+        align: AlignArg,
+    },
+    /// Distribute a set of shapes so the gaps between adjacent shapes are equal
+    /// along an axis. The two extreme shapes stay put; the inner shapes move.
+    /// Each shape keeps its id.
+    DistributeShapes {
+        /// The shapes to distribute, addressed by id. At least three are required.
+        ids: Vec<ElementId>,
+        /// The axis along which gaps are equalized.
+        axis: AxisArg,
+    },
+    /// Offset (grow for a positive delta, shrink for a negative delta) each shape
+    /// by `delta` database units. Each shape's offset result replaces it on the
+    /// same layer, keeping its id. Rectangles and polygons participate; paths are
+    /// skipped.
+    OffsetShapes {
+        /// The shapes to offset, addressed by id.
+        ids: Vec<ElementId>,
+        /// The offset amount in database units (positive grows, negative shrinks).
+        delta: i32,
+    },
+    /// Build a via stack centered at a point: a square cut on the cut layer, plus
+    /// an enclosure rectangle on each of a lower and upper layer sized from the
+    /// technology's enclosure rules. Returns the three new shape ids.
+    BuildViaStack {
+        /// The cell that gains the via stack.
+        cell: String,
+        /// The lower routing layer to enclose the cut on.
+        lower_layer: LayerArg,
+        /// The upper routing layer to enclose the cut on.
+        upper_layer: LayerArg,
+        /// The cut/via layer the square cut is drawn on.
+        cut_layer: LayerArg,
+        /// The center of the via stack, in database units.
+        center: PointArg,
+        /// The side length of the square cut, in database units (must be positive).
+        cut_size: i32,
+        /// The enclosure margin (DBU) to use for a layer with no enclosure rule.
+        default_enclosure: i32,
     },
 }

@@ -253,6 +253,75 @@ fn stdio_server_drives_a_full_session() {
     );
     assert!(h.ok_payload(&compare)["equivalent"].is_boolean());
 
+    // ----- Wave 2 editor ops (boolean, align, distribute, offset, via) -----
+    // A dedicated cell keeps these ids clean and independent of the export path.
+    h.call("create_cell", json!({ "name": "ops" }));
+    let add_ops_rect = |h: &mut Harness, x0: i64, y0: i64, x1: i64, y1: i64| -> u64 {
+        let r = h.call(
+            "add_rect",
+            json!({ "cell": "ops", "layer": { "layer": 68, "datatype": 20 },
+                    "rect": { "min": { "x": x0, "y": y0 }, "max": { "x": x1, "y": y1 } } }),
+        );
+        h.ok_payload(&r)["affected"][0].as_u64().unwrap()
+    };
+
+    // boolean_combine: union of two overlapping rects into one shape on layer 68.
+    let u1 = add_ops_rect(&mut h, 0, 0, 100, 100);
+    let u2 = add_ops_rect(&mut h, 50, 0, 150, 100);
+    let combined = h.call(
+        "boolean_combine",
+        json!({ "cell": "ops", "bool_op": "union", "ids": [u1, u2],
+                "layer": { "layer": 68, "datatype": 20 } }),
+    );
+    assert_eq!(
+        h.ok_payload(&combined)["affected"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "union yields one shape"
+    );
+
+    // offset_shapes: grow the union result by 10 DBU (it keeps its id).
+    let union_id = h.ok_payload(&combined)["affected"][0].as_u64().unwrap();
+    let grown = h.call("offset_shapes", json!({ "ids": [union_id], "delta": 10 }));
+    assert_eq!(h.ok_payload(&grown)["affected"], json!([union_id]));
+
+    // align_shapes + distribute_shapes over three fresh rects.
+    let a1 = add_ops_rect(&mut h, 0, 500, 10, 510);
+    let a2 = add_ops_rect(&mut h, 200, 600, 210, 610);
+    let a3 = add_ops_rect(&mut h, 400, 700, 410, 710);
+    let aligned = h.call(
+        "align_shapes",
+        json!({ "ids": [a1, a2, a3], "align": "bottom" }),
+    );
+    assert_eq!(
+        h.ok_payload(&aligned)["affected"],
+        json!([a1, a2, a3]),
+        "align keeps the ids"
+    );
+    let distributed = h.call(
+        "distribute_shapes",
+        json!({ "ids": [a1, a2, a3], "axis": "horizontal" }),
+    );
+    assert_eq!(h.ok_payload(&distributed)["affected"], json!([a1, a2, a3]));
+
+    // build_via_stack: cut plus two enclosures (default margins, no via rule).
+    let via = h.call(
+        "build_via_stack",
+        json!({ "cell": "ops",
+                "lower_layer": { "layer": 68, "datatype": 20 },
+                "upper_layer": { "layer": 68, "datatype": 16 },
+                "cut_layer": { "layer": 66, "datatype": 44 },
+                "center": { "x": 1000, "y": 1000 }, "cut_size": 40,
+                "default_enclosure": 10 }),
+    );
+    assert_eq!(
+        h.ok_payload(&via)["affected"].as_array().unwrap().len(),
+        3,
+        "via stack is cut plus two enclosures"
+    );
+
     // ----- export GDS / OASIS, round-trip import ---------------------------
     let gds = h.call("export_gds", json!({}));
     let gds_payload = h.ok_payload(&gds);

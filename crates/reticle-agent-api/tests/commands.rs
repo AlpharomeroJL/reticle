@@ -5,7 +5,9 @@
 //! and asserts the response shape, the revision behaviour, and the stable-id
 //! semantics. These complement the property test in `proptest_commands.rs`.
 
-use reticle_agent_api::args::{LayerArg, OrientationArg, PointArg, RectArg, TransformArg};
+use reticle_agent_api::args::{
+    AlignArg, AxisArg, BooleanOpArg, LayerArg, OrientationArg, PointArg, RectArg, TransformArg,
+};
 use reticle_agent_api::{
     AgentCommand, AgentResponse, CommandResult, ElementId, ErrorCode, Session, replay,
     transcript_of, verify_replay,
@@ -726,4 +728,434 @@ fn build_program() -> Vec<AgentCommand> {
             row_pitch: 0,
         },
     ]
+}
+
+// ===== Wave 2 editor ops (boolean, align, distribute, offset, via) ==========
+
+/// Adds a rect to `cell` on layer 1 and returns its stable id.
+fn add_rect_id(s: &mut Session, cell: &str, x0: i32, y0: i32, x1: i32, y1: i32) -> ElementId {
+    let ids = affected(s.apply(AgentCommand::AddRect {
+        cell: cell.into(),
+        layer: layer(1, 0),
+        rect: rect(x0, y0, x1, y1),
+    }));
+    ids[0]
+}
+
+/// A technology with a via cut layer (3/0) enclosed by met1 (1/0) by 20 and by
+/// met2 (2/0) by 30, for the via-stack tests. The enclosure rule form is
+/// `rule enclosure <outer> <outer_dt> <inner> <inner_dt> <value>`.
+const VIA_TECH: &str = "\
+technology via_test
+dbu_per_micron 1000
+layer 1 0 met1 4488FFFF
+layer 2 0 met2 88FF44FF
+layer 3 0 via 000000FF
+rule enclosure 1 0 3 0 20
+rule enclosure 2 0 3 0 30
+";
+
+/// Returns the bounding boxes of every shape currently in `cell`, each as
+/// `(min_x, min_y, max_x, max_y)`.
+fn shape_bboxes(s: &mut Session, cell: &str) -> Vec<(i64, i64, i64, i64)> {
+    let v = data(s.apply(AgentCommand::QueryShapes {
+        cell: cell.into(),
+        layer: None,
+        region: None,
+    }));
+    v["shapes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|sh| {
+            let b = &sh["bbox"];
+            (
+                b["min"]["x"].as_i64().unwrap(),
+                b["min"]["y"].as_i64().unwrap(),
+                b["max"]["x"].as_i64().unwrap(),
+                b["max"]["y"].as_i64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn boolean_union_merges_two_overlapping_rects_into_one_shape() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let a = add_rect_id(&mut s, "top", 0, 0, 100, 100);
+    let b = add_rect_id(&mut s, "top", 50, 0, 150, 100);
+
+    let out = affected(s.apply(AgentCommand::BooleanCombine {
+        cell: "top".into(),
+        bool_op: BooleanOpArg::Union,
+        ids: vec![a, b],
+        layer: layer(1, 0),
+    }));
+    assert_eq!(
+        out.len(),
+        1,
+        "the union of two overlapping rects is one shape"
+    );
+    // Inputs consumed, one result remains, spanning the combined 0..150 x 0..100.
+    let boxes = shape_bboxes(&mut s, "top");
+    assert_eq!(boxes.len(), 1);
+    assert_eq!(boxes[0], (0, 0, 150, 100));
+}
+
+#[test]
+fn boolean_intersection_keeps_only_the_overlap() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let a = add_rect_id(&mut s, "top", 0, 0, 100, 100);
+    let b = add_rect_id(&mut s, "top", 50, 0, 150, 100);
+
+    s.apply(AgentCommand::BooleanCombine {
+        cell: "top".into(),
+        bool_op: BooleanOpArg::Intersection,
+        ids: vec![a, b],
+        layer: layer(1, 0),
+    })
+    .expect("intersection ok");
+    let boxes = shape_bboxes(&mut s, "top");
+    assert_eq!(boxes.len(), 1);
+    // The overlap is the 50..100 x 0..100 strip.
+    assert_eq!(boxes[0], (50, 0, 100, 100));
+}
+
+#[test]
+fn boolean_difference_subtracts_the_second_from_the_first() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let a = add_rect_id(&mut s, "top", 0, 0, 100, 100);
+    let b = add_rect_id(&mut s, "top", 50, 0, 150, 100);
+
+    s.apply(AgentCommand::BooleanCombine {
+        cell: "top".into(),
+        bool_op: BooleanOpArg::Difference,
+        ids: vec![a, b],
+        layer: layer(1, 0),
+    })
+    .expect("difference ok");
+    let boxes = shape_bboxes(&mut s, "top");
+    assert_eq!(boxes.len(), 1);
+    // A minus B leaves the left 0..50 x 0..100 strip.
+    assert_eq!(boxes[0], (0, 0, 50, 100));
+}
+
+#[test]
+fn boolean_writes_result_to_the_target_layer() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let a = add_rect_id(&mut s, "top", 0, 0, 100, 100);
+    let b = add_rect_id(&mut s, "top", 50, 0, 150, 100);
+    // Result requested on a different layer (7/0) than the inputs (1/0).
+    s.apply(AgentCommand::BooleanCombine {
+        cell: "top".into(),
+        bool_op: BooleanOpArg::Union,
+        ids: vec![a, b],
+        layer: layer(7, 0),
+    })
+    .expect("union ok");
+    let v = data(s.apply(AgentCommand::QueryShapes {
+        cell: "top".into(),
+        layer: Some(layer(7, 0)),
+        region: None,
+    }));
+    assert_eq!(
+        v["shapes"].as_array().unwrap().len(),
+        1,
+        "result is on layer 7"
+    );
+}
+
+#[test]
+fn boolean_needs_two_shapes_and_rejects_non_shapes() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let a = add_rect_id(&mut s, "top", 0, 0, 100, 100);
+
+    // A single shape is rejected before any geometry runs.
+    let err = s
+        .apply(AgentCommand::BooleanCombine {
+            cell: "top".into(),
+            bool_op: BooleanOpArg::Union,
+            ids: vec![a],
+            layer: layer(1, 0),
+        })
+        .expect_err("one shape rejected");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+
+    // An unknown id maps to NoSuchElement.
+    let err = s
+        .apply(AgentCommand::BooleanCombine {
+            cell: "top".into(),
+            bool_op: BooleanOpArg::Union,
+            ids: vec![a, ElementId(9999)],
+            layer: layer(1, 0),
+        })
+        .expect_err("unknown id rejected");
+    assert_eq!(err.code, ErrorCode::NoSuchElement);
+}
+
+#[test]
+fn boolean_rejects_shapes_from_a_different_cell() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    s.apply(AgentCommand::CreateCell {
+        name: "other".into(),
+    })
+    .unwrap();
+    let a = add_rect_id(&mut s, "top", 0, 0, 100, 100);
+    let b = add_rect_id(&mut s, "other", 0, 0, 100, 100);
+    let err = s
+        .apply(AgentCommand::BooleanCombine {
+            cell: "top".into(),
+            bool_op: BooleanOpArg::Union,
+            ids: vec![a, b],
+            layer: layer(1, 0),
+        })
+        .expect_err("cross-cell selection rejected");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+}
+
+#[test]
+fn align_left_moves_shapes_to_the_leftmost_edge() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let a = add_rect_id(&mut s, "top", 0, 0, 10, 10);
+    let b = add_rect_id(&mut s, "top", 100, 100, 110, 110);
+
+    s.apply(AgentCommand::AlignShapes {
+        ids: vec![a, b],
+        align: AlignArg::Left,
+    })
+    .expect("align left ok");
+    // Both shapes now share the leftmost edge x=0.
+    let boxes = shape_bboxes(&mut s, "top");
+    assert!(
+        boxes.iter().all(|b| b.0 == 0),
+        "all left edges at x=0: {boxes:?}"
+    );
+    assert_eq!(boxes.len(), 2, "no shapes lost");
+}
+
+#[test]
+fn align_keeps_ids_stable() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let a = add_rect_id(&mut s, "top", 0, 0, 10, 10);
+    let b = add_rect_id(&mut s, "top", 100, 100, 110, 110);
+    let out = affected(s.apply(AgentCommand::AlignShapes {
+        ids: vec![a, b],
+        align: AlignArg::Top,
+    }));
+    assert_eq!(out, vec![a, b], "align returns the same ids it was given");
+    // The moved id still resolves: a transform in place on b keeps addressing it.
+    let moved = affected(s.apply(AgentCommand::TransformShapes {
+        ids: vec![b],
+        transform: TransformArg::default(),
+    }));
+    assert_eq!(moved, vec![b]);
+}
+
+#[test]
+fn distribute_equalizes_the_gaps_between_three_shapes() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    // Three 10-wide shapes; the middle one is off-center so it must move.
+    let a = add_rect_id(&mut s, "top", 0, 0, 10, 10);
+    let mid = add_rect_id(&mut s, "top", 30, 0, 40, 10);
+    let c = add_rect_id(&mut s, "top", 100, 0, 110, 10);
+
+    s.apply(AgentCommand::DistributeShapes {
+        ids: vec![a, mid, c],
+        axis: AxisArg::Horizontal,
+    })
+    .expect("distribute ok");
+    // Extremes stay at 0..10 and 100..110; total shape extent is 30, span is 110,
+    // so each of the two gaps is (110 - 30) / 2 = 40, putting the middle at 50..60.
+    let mut boxes = shape_bboxes(&mut s, "top");
+    boxes.sort_unstable();
+    assert_eq!(boxes[0], (0, 0, 10, 10));
+    assert_eq!(boxes[1], (50, 0, 60, 10), "middle respaced to equal gaps");
+    assert_eq!(boxes[2], (100, 0, 110, 10));
+}
+
+#[test]
+fn distribute_needs_three_shapes() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let a = add_rect_id(&mut s, "top", 0, 0, 10, 10);
+    let b = add_rect_id(&mut s, "top", 100, 0, 110, 10);
+    let err = s
+        .apply(AgentCommand::DistributeShapes {
+            ids: vec![a, b],
+            axis: AxisArg::Horizontal,
+        })
+        .expect_err("two shapes rejected");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+}
+
+#[test]
+fn offset_grow_increases_a_rect_bounding_box() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let a = add_rect_id(&mut s, "top", 0, 0, 100, 100);
+    let out = affected(s.apply(AgentCommand::OffsetShapes {
+        ids: vec![a],
+        delta: 10,
+    }));
+    assert_eq!(out, vec![a], "the offset shape keeps its id");
+    let boxes = shape_bboxes(&mut s, "top");
+    assert_eq!(boxes.len(), 1);
+    // A 10-DBU grow expands every side: -10..110 on both axes.
+    assert_eq!(boxes[0], (-10, -10, 110, 110));
+}
+
+#[test]
+fn offset_shrink_reduces_a_rect_and_can_erase_it() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let a = add_rect_id(&mut s, "top", 0, 0, 100, 100);
+    // Shrink by 20: the box becomes 20..80 on both axes.
+    s.apply(AgentCommand::OffsetShapes {
+        ids: vec![a],
+        delta: -20,
+    })
+    .expect("shrink ok");
+    let boxes = shape_bboxes(&mut s, "top");
+    assert_eq!(boxes.len(), 1);
+    assert_eq!(boxes[0], (20, 20, 80, 80));
+
+    // A second shape shrunk past its own size collapses to nothing and is removed.
+    let b = add_rect_id(&mut s, "top", 200, 200, 210, 210);
+    s.apply(AgentCommand::OffsetShapes {
+        ids: vec![b],
+        delta: -100,
+    })
+    .expect("collapse ok");
+    // Only the first (still-present) shape remains.
+    assert_eq!(shape_bboxes(&mut s, "top").len(), 1);
+}
+
+#[test]
+fn offset_zero_is_a_noop() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let a = add_rect_id(&mut s, "top", 0, 0, 100, 100);
+    let out = affected(s.apply(AgentCommand::OffsetShapes {
+        ids: vec![a],
+        delta: 0,
+    }));
+    assert_eq!(out, vec![a]);
+    assert_eq!(shape_bboxes(&mut s, "top"), vec![(0, 0, 100, 100)]);
+}
+
+#[test]
+fn via_stack_sizes_enclosures_from_technology_rules() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::SetTechnology {
+        source: VIA_TECH.into(),
+    })
+    .unwrap();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let out = affected(s.apply(AgentCommand::BuildViaStack {
+        cell: "top".into(),
+        lower_layer: layer(1, 0),
+        upper_layer: layer(2, 0),
+        cut_layer: layer(3, 0),
+        center: PointArg { x: 0, y: 0 },
+        cut_size: 40,
+        default_enclosure: 5,
+    }));
+    assert_eq!(out.len(), 3, "cut plus two enclosures");
+    // Cut is 40 wide centered at origin: -20..20. Lower enclosure grows by the
+    // met1 rule (20) to -40..40; upper by the met2 rule (30) to -50..50.
+    let boxes = shape_bboxes(&mut s, "top");
+    assert!(boxes.contains(&(-20, -20, 20, 20)), "cut: {boxes:?}");
+    assert!(
+        boxes.contains(&(-40, -40, 40, 40)),
+        "lower enclosure: {boxes:?}"
+    );
+    assert!(
+        boxes.contains(&(-50, -50, 50, 50)),
+        "upper enclosure: {boxes:?}"
+    );
+}
+
+#[test]
+fn via_stack_falls_back_to_default_enclosure_without_a_rule() {
+    let mut s = Session::new();
+    // No technology rules at all: both enclosures use the default margin.
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    s.apply(AgentCommand::BuildViaStack {
+        cell: "top".into(),
+        lower_layer: layer(1, 0),
+        upper_layer: layer(2, 0),
+        cut_layer: layer(3, 0),
+        center: PointArg { x: 0, y: 0 },
+        cut_size: 40,
+        default_enclosure: 15,
+    })
+    .expect("via stack ok");
+    let boxes = shape_bboxes(&mut s, "top");
+    // Cut -20..20; both enclosures grow by the default 15 to -35..35.
+    assert!(boxes.contains(&(-20, -20, 20, 20)));
+    assert_eq!(
+        boxes.iter().filter(|b| **b == (-35, -35, 35, 35)).count(),
+        2,
+        "both enclosures use the default margin: {boxes:?}"
+    );
+}
+
+#[test]
+fn via_stack_rejects_a_nonpositive_cut() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let err = s
+        .apply(AgentCommand::BuildViaStack {
+            cell: "top".into(),
+            lower_layer: layer(1, 0),
+            upper_layer: layer(2, 0),
+            cut_layer: layer(3, 0),
+            center: PointArg { x: 0, y: 0 },
+            cut_size: 0,
+            default_enclosure: 5,
+        })
+        .expect_err("zero cut rejected");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+}
+
+#[test]
+fn via_stack_on_missing_cell_errors() {
+    let mut s = Session::new();
+    let err = s
+        .apply(AgentCommand::BuildViaStack {
+            cell: "nope".into(),
+            lower_layer: layer(1, 0),
+            upper_layer: layer(2, 0),
+            cut_layer: layer(3, 0),
+            center: PointArg { x: 0, y: 0 },
+            cut_size: 40,
+            default_enclosure: 5,
+        })
+        .expect_err("missing cell rejected");
+    assert_eq!(err.code, ErrorCode::NoSuchCell);
 }

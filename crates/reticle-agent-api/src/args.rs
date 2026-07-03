@@ -34,6 +34,52 @@ pub struct LayerArg {
     pub datatype: u16,
 }
 
+/// A planar boolean operation over two polygon sets.
+///
+/// The serde mirror of [`reticle_geometry::BooleanOp`], carried on the wire so the
+/// command surface need not import the geometry enum. The `op` field of a
+/// [`BooleanCombine`](crate::AgentCommand::BooleanCombine) command selects one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BooleanOpArg {
+    /// The union `A ∪ B` (merge the shapes into one region).
+    Union,
+    /// The intersection `A ∩ B` (keep only the common region).
+    Intersection,
+    /// The difference `A \ B` (subtract the later shapes from the first).
+    Difference,
+    /// The symmetric difference `A △ B` (region covered an odd number of times).
+    Xor,
+}
+
+/// How to align a set of shapes within their combined bounding box.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AlignArg {
+    /// Line up left edges to the leftmost edge.
+    Left,
+    /// Line up right edges to the rightmost edge.
+    Right,
+    /// Center horizontally on the selection's center.
+    CenterX,
+    /// Line up top edges to the topmost edge.
+    Top,
+    /// Line up bottom edges to the bottommost edge.
+    Bottom,
+    /// Center vertically on the selection's center.
+    CenterY,
+}
+
+/// The axis along which shapes are distributed to equalize their gaps.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisArg {
+    /// Equalize horizontal (left-to-right) gaps.
+    Horizontal,
+    /// Equalize vertical (top-to-bottom) gaps.
+    Vertical,
+}
+
 /// A path end-cap style.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
