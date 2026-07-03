@@ -81,6 +81,7 @@ pub mod snap;
 pub mod store;
 pub mod tool;
 pub mod view3d;
+pub mod viewexport;
 pub mod viewports;
 pub mod xsection;
 

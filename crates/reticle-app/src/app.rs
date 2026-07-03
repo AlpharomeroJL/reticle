@@ -201,6 +201,12 @@ pub struct App {
     /// selects this from the page URL so a public visitor lands on the theater
     /// (ADR 0026).
     start_view: StartView,
+
+    /// View and export polish: the egui theme, per-document camera bookmarks, the
+    /// export scope/format, and the print-style monochrome toggle. The theme is
+    /// applied to the egui `Visuals` each frame and the whole struct persists with
+    /// the session view state (see [`crate::viewexport`]).
+    view_export: crate::viewexport::ViewExport,
 }
 
 /// The view the app opens into.
@@ -348,6 +354,7 @@ impl App {
             cursor_world: None,
             frame_meter: FrameMeter::default(),
             start_view,
+            view_export: crate::viewexport::ViewExport::new(),
         }
     }
 
@@ -1790,6 +1797,223 @@ impl App {
             ui.ctx().copy_text(link);
             self.status.set("Share link copied");
         }
+    }
+
+    /// Draws the view and export section: theme toggle, camera bookmarks, and the
+    /// export controls (scope, format, monochrome, and the run button).
+    ///
+    /// The theme choice is applied to the egui visuals at the top of
+    /// [`eframe::App::ui`]; here the button only flips the stored
+    /// [`crate::viewexport::Theme`]. Bookmarks capture the live camera center and
+    /// zoom and restore it in place. Export runs SVG or PNG over the whole view or
+    /// the current selection, optionally in the print-style monochrome mode (see
+    /// [`crate::viewexport`] and [`App::run_export`]).
+    fn view_export_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("View and export");
+
+        // Theme toggle.
+        ui.horizontal(|ui| {
+            ui.label(format!("Theme: {}", self.view_export.theme.label()));
+            if ui.button("Toggle theme").clicked() {
+                let now = self.view_export.toggle_theme();
+                self.status.set(format!("Theme: {}", now.label()));
+            }
+        });
+
+        ui.separator();
+
+        // Camera bookmarks.
+        ui.label("View bookmarks");
+        ui.horizontal(|ui| {
+            ui.text_edit_singleline(&mut self.view_export.name_input);
+            if ui.button("Save view").clicked() {
+                let center = self.camera.center();
+                let ppd = self.camera.pixels_per_dbu();
+                let name = self.view_export.name_input.clone();
+                let stored = self.view_export.add_bookmark(&name, center, ppd);
+                self.view_export.name_input.clear();
+                self.status.set(format!("Saved view '{stored}'"));
+            }
+        });
+        // Jump to or remove a saved view. Collect an action first so the immutable
+        // borrow of the bookmark list ends before we mutate the camera or the list.
+        let mut jump_to: Option<(Point, f64, String)> = None;
+        let mut remove: Option<usize> = None;
+        for (i, bm) in self.view_export.bookmarks.iter().enumerate() {
+            ui.horizontal(|ui| {
+                if ui.button(&bm.name).clicked() {
+                    jump_to = Some((bm.center(), bm.pixels_per_dbu(), bm.name.clone()));
+                }
+                if ui.small_button("x").clicked() {
+                    remove = Some(i);
+                }
+            });
+        }
+        if let Some((center, ppd, name)) = jump_to {
+            self.camera = ViewCamera::new(center, ppd);
+            self.status.set(format!("Jumped to '{name}'"));
+        }
+        if let Some(i) = remove {
+            self.view_export.remove_bookmark(i);
+        }
+
+        ui.separator();
+
+        // Export controls.
+        ui.label("Export");
+        ui.horizontal(|ui| {
+            ui.label("Scope:");
+            ui.radio_value(
+                &mut self.view_export.scope,
+                crate::viewexport::ExportScope::View,
+                crate::viewexport::ExportScope::View.label(),
+            );
+            ui.radio_value(
+                &mut self.view_export.scope,
+                crate::viewexport::ExportScope::Selection,
+                crate::viewexport::ExportScope::Selection.label(),
+            );
+        });
+        ui.horizontal(|ui| {
+            ui.label("Format:");
+            ui.radio_value(
+                &mut self.view_export.format,
+                crate::viewexport::ExportFormat::Svg,
+                crate::viewexport::ExportFormat::Svg.label(),
+            );
+            ui.radio_value(
+                &mut self.view_export.format,
+                crate::viewexport::ExportFormat::Png,
+                crate::viewexport::ExportFormat::Png.label(),
+            );
+        });
+        ui.checkbox(&mut self.view_export.monochrome, "Monochrome (print) mode");
+        if ui.button("Export").clicked() {
+            self.run_export();
+        }
+    }
+
+    /// The shapes covered by the current export scope, cloned out of the scene.
+    ///
+    /// [`ExportScope::View`](crate::viewexport::ExportScope::View) is every shape in
+    /// the flattened scene; [`ExportScope::Selection`](crate::viewexport::ExportScope::Selection)
+    /// is only the current selection. Cloning ends the borrow of
+    /// `self.scene`/`self.selection` before
+    /// the export writes anything.
+    fn export_shapes(&self) -> Vec<DrawShape> {
+        match self.view_export.scope {
+            crate::viewexport::ExportScope::View => self.scene.shapes().to_vec(),
+            crate::viewexport::ExportScope::Selection => self.selected_scene_shapes(),
+        }
+    }
+
+    /// Builds a layer to colour lookup for export from the live layer table.
+    ///
+    /// Snapshots the colour of every layer used by `shapes` into an owned map so the
+    /// returned [`LayerPaint`](crate::viewexport::LayerPaint) closure does not borrow
+    /// `self`, which lets the export helpers take the shapes and the paint at once.
+    fn export_paint(&self, shapes: &[DrawShape]) -> impl Fn(LayerId) -> (u8, u8, u8, u8) + use<> {
+        let mut map: std::collections::HashMap<LayerId, (u8, u8, u8, u8)> =
+            std::collections::HashMap::new();
+        for s in shapes {
+            map.entry(s.layer)
+                .or_insert_with(|| self.layer_color(s.layer));
+        }
+        move |layer: LayerId| map.get(&layer).copied().unwrap_or((160, 160, 160, 190))
+    }
+
+    /// Runs the configured export (scope, format, monochrome) and reports the result.
+    ///
+    /// SVG is generated purely from the shape list and written as text. PNG of the
+    /// whole view reuses the native offscreen GPU renderer for a pixel-accurate,
+    /// full-colour frame (skipped with a status note when no GPU is present, and a
+    /// native-only path: on the web it reports that PNG export is native-only). PNG
+    /// of a selection, or any monochrome PNG, uses the pure rasterizer so it works
+    /// without a GPU. Output files land in the working directory (native); on the
+    /// web only the SVG path produces bytes, offered as a status line.
+    fn run_export(&mut self) {
+        use crate::viewexport::{ExportFormat, ExportScope};
+        let shapes = self.export_shapes();
+        if matches!(self.view_export.scope, ExportScope::Selection) && shapes.is_empty() {
+            self.status.set("Nothing selected to export");
+            return;
+        }
+        let mono = self.view_export.monochrome;
+        // Output pixel size: the current canvas, or a sensible default.
+        let (w, h) = self.view_export.last_canvas.map_or((1024, 768), |s| {
+            (s.width.max(16.0) as u32, s.height.max(16.0) as u32)
+        });
+        match self.view_export.format {
+            ExportFormat::Svg => {
+                let bounds = crate::viewexport::shapes_bounds(&shapes);
+                let paint = self.export_paint(&shapes);
+                let svg = crate::viewexport::shapes_to_svg(&shapes, bounds, w, h, &paint, mono);
+                match self.write_export_text("reticle-export.svg", &svg) {
+                    Ok(msg) => self.status.set(msg),
+                    Err(e) => self.status.set(format!("SVG export failed: {e}")),
+                }
+            }
+            ExportFormat::Png => self.export_png_scoped(&shapes, w, h, mono),
+        }
+    }
+
+    /// Writes exported text (SVG) to `name` in the working directory (native).
+    ///
+    /// On the web there is no filesystem, so this reports the byte count instead of
+    /// writing, keeping the call site uniform.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[allow(clippy::unused_self)]
+    fn write_export_text(&self, name: &str, text: &str) -> std::io::Result<String> {
+        let path = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(name);
+        std::fs::write(&path, text)?;
+        Ok(format!("Exported {}", path.display()))
+    }
+
+    /// Web stub: report the generated size rather than writing to a filesystem.
+    #[cfg(target_arch = "wasm32")]
+    #[allow(clippy::unused_self)]
+    fn write_export_text(&self, _name: &str, text: &str) -> std::io::Result<String> {
+        Ok(format!("Generated {} bytes of SVG", text.len()))
+    }
+
+    /// Exports `shapes` to PNG, choosing the GPU or the pure rasterizer path.
+    ///
+    /// A full-colour view export uses the native offscreen GPU renderer (pixel
+    /// accurate, matching the canvas). A selection export or any monochrome export
+    /// uses the pure [`rasterize`](crate::viewexport::rasterize) filler so it needs
+    /// no GPU and honours the print mode. Both feed the crate's dependency-free PNG
+    /// encoder.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn export_png_scoped(&mut self, shapes: &[DrawShape], w: u32, h: u32, mono: bool) {
+        use crate::viewexport::ExportScope;
+        // The GPU path renders the whole document at the current camera in full
+        // colour; it cannot restrict to a selection or recolour to monochrome, so
+        // those fall through to the rasterizer.
+        let use_gpu = matches!(self.view_export.scope, ExportScope::View) && !mono;
+        if use_gpu {
+            self.export_png(self.view_export.last_canvas);
+            return;
+        }
+        let bounds = crate::viewexport::shapes_bounds(shapes);
+        let paint = self.export_paint(shapes);
+        let ras = crate::viewexport::rasterize(shapes, bounds, w, h, &paint, mono);
+        let bytes = crate::app::png::encode_rgba(ras.width, ras.height, &ras.pixels);
+        let path = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join("reticle-export.png");
+        match std::fs::write(&path, bytes) {
+            Ok(()) => self.status.set(format!("Exported {}", path.display())),
+            Err(e) => self.status.set(format!("PNG export failed: {e}")),
+        }
+    }
+
+    /// Web stub: PNG export is native-only (no filesystem, no blocking GPU context).
+    #[cfg(target_arch = "wasm32")]
+    #[allow(clippy::unused_self)]
+    fn export_png_scoped(&mut self, _shapes: &[DrawShape], _w: u32, _h: u32, _mono: bool) {
+        self.status.set("PNG export is native-only");
     }
 
     /// Draws the snap and guides settings section.
@@ -3485,6 +3709,13 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Apply the chosen theme to the egui visuals for this frame (dark by
+        // default; the view/export panel toggles it). Setting it every frame keeps
+        // the visuals in sync after a toggle or a restored session.
+        ctx.set_visuals(match self.view_export.theme {
+            crate::viewexport::Theme::Dark => egui::Visuals::dark(),
+            crate::viewexport::Theme::Light => egui::Visuals::light(),
+        });
         self.handle_shortcuts(&ctx);
 
         // Sample this frame's duration for the status-bar fps readout. `stable_dt`
@@ -3548,11 +3779,16 @@ impl eframe::App for App {
                         self.ops_panel(ui);
                         self.productivity_panel(ui);
                         self.snap_panel(ui);
+                        ui.separator();
+                        self.view_export_panel(ui);
                     });
             });
         egui::CentralPanel::default().show(ui, |ui| {
             canvas_screen = Some(self.canvas(ui, gpu_format));
         });
+        // Cache the canvas rect so next frame's view/export panel can frame the
+        // current view (the panel draws before the canvas is measured).
+        self.view_export.last_canvas = canvas_screen;
 
         self.palette_window(&ctx, canvas_screen);
         self.view3d.show(
@@ -3592,6 +3828,7 @@ impl eframe::App for App {
                 &self.camera,
                 self.tools.active(),
                 self.grid,
+                self.view_export.theme,
                 &hidden,
             );
             let _ = crate::session::save(&state);
