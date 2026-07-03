@@ -8,6 +8,7 @@
 - [Geometry](geometry.md)
 - [Spatial indexing](indexing.md)
 - [Document model](model.md)
+- [Drawing and vertex editing](draw.md)
 - [File formats](io.md)
 - [Rendering and scale](rendering.md)
 - [Design-rule checking](drc.md)

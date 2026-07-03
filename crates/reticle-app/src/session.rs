@@ -176,6 +176,10 @@ fn tool_tag(tool: Tool) -> &'static str {
         Tool::Pan => "pan",
         Tool::Measure => "measure",
         Tool::CutLine => "cutline",
+        Tool::DrawRect => "drawrect",
+        Tool::DrawPolygon => "drawpolygon",
+        Tool::DrawPath => "drawpath",
+        Tool::EditVertex => "editvertex",
     }
 }
 
@@ -185,6 +189,10 @@ fn tool_from_tag(tag: &str) -> Tool {
         "pan" => Tool::Pan,
         "measure" => Tool::Measure,
         "cutline" => Tool::CutLine,
+        "drawrect" => Tool::DrawRect,
+        "drawpolygon" => Tool::DrawPolygon,
+        "drawpath" => Tool::DrawPath,
+        "editvertex" => Tool::EditVertex,
         _ => Tool::Select,
     }
 }
