@@ -42,6 +42,8 @@
 //! * [`inspector`], the read-only properties summary of the selection.
 //! * [`fps`], the rolling frame-time meter behind the status-bar fps readout.
 //! * [`session`], view/UI session save/restore (native file IO).
+//! * [`tour`], the pure, egui-free first-run tour state machine (ordered steps,
+//!   next/skip/finish, first-run-once, and the optional Wave 2 chapter).
 //! * [`share`], the share-this-session relay room-link format.
 //! * [`viewports`], the multi-pane split layout, hit-testing, and camera swaps.
 //! * [`view3d`], the extruded 3D layer-stack window (orbit camera + wgpu glue).
@@ -88,6 +90,7 @@ pub mod snap;
 pub mod store;
 pub mod tech_editor;
 pub mod tool;
+pub mod tour;
 pub mod view3d;
 pub mod viewexport;
 pub mod viewports;
