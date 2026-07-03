@@ -14,6 +14,10 @@
 //!   the model's tool-use / JSON output into [`AgentCommand`](reticle_agent_api::AgentCommand)s.
 //!   The API key is read from the environment only and never printed, serialized, or
 //!   written to any artifact (see [`redact`]).
+//! - [`ollama`]: [`OllamaModel`], the same [`ModelClient`](reticle_bench::ModelClient)
+//!   contract against an OpenAI-compatible Chat Completions endpoint (Ollama by default),
+//!   with the same `emit_commands` tool contract and a context-window summarization
+//!   policy for small local models. Its optional key uses the same [`redact`] discipline.
 //! - [`redact`]: the [`ApiKey`] wrapper that hides the secret from every
 //!   [`Debug`](std::fmt::Debug) / [`Display`](std::fmt::Display) / serialize path, plus
 //!   a text scrubber.
@@ -29,15 +33,22 @@
 //! its [`ModelClient`](reticle_bench::ModelClient) trait and [`Context`](reticle_bench::model::Context),
 //! the [`Checker`](reticle_bench::Checker) / [`CheckResult`](reticle_bench::CheckResult)
 //! contract and [`CheckerRegistry`](reticle_bench::CheckerRegistry), and the
-//! [`ResultRecord`](reticle_bench::ResultRecord) plus its JSON writer. `reticle-bench`
-//! itself is left unmodified.
+//! [`ResultRecord`](reticle_bench::ResultRecord) plus its JSON writer. The one amendment
+//! to `reticle-bench` is the `backend`/`quantization` provenance added to
+//! [`ResultRecord`](reticle_bench::ResultRecord) so mock, local, and frontier runs are
+//! never conflated (authorized by ADR 0029).
 
 pub mod collab;
 pub mod model;
+pub mod ollama;
 pub mod redact;
 pub mod run;
 
 pub use collab::{AgentCollaborator, Pacing, StepReport};
 pub use model::{AnthropicModel, BuildError, DEFAULT_BASE_URL, DEFAULT_MODEL, HttpTransport};
+pub use ollama::{
+    BuildError as OllamaBuildError, DEFAULT_OLLAMA_BASE_URL, DEFAULT_SUMMARIZE_THRESHOLD_TOKENS,
+    OllamaModel,
+};
 pub use redact::{ApiKey, REDACTED};
-pub use run::{Artifacts, LoopOptions, RunOutcome, run_agent_task};
+pub use run::{Artifacts, LoopOptions, Provenance, RunOutcome, run_agent_task};

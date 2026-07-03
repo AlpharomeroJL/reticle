@@ -8,7 +8,7 @@
 //! The summary needs each record's tier, which the record does not carry, so the
 //! caller pairs every record with the [`Tier`] it ran at.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -82,7 +82,11 @@ pub fn write_records(
 }
 
 /// Aggregated statistics for one tier (or the whole run).
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+///
+/// Also records the distinct backend and quantization labels of the folded records, so
+/// the Markdown report can show provenance and a mixed-provenance rollup is never
+/// silently flattened to one label.
+#[derive(Clone, PartialEq, Debug, Default)]
 pub struct TierStats {
     /// How many tasks were counted.
     pub total: u32,
@@ -94,6 +98,10 @@ pub struct TierStats {
     pub first_violations_sum: u64,
     /// Sum of final violations across the counted tasks.
     pub final_violations_sum: u64,
+    /// The distinct non-empty backend labels seen (for example `ollama`, `mock`).
+    pub backends: BTreeSet<String>,
+    /// The distinct non-empty quantization labels seen (for example `Q4_K_M`).
+    pub quantizations: BTreeSet<String>,
 }
 
 impl TierStats {
@@ -106,6 +114,14 @@ impl TierStats {
         self.iterations_sum += u64::from(record.iterations);
         self.first_violations_sum += u64::from(record.first_proposal_violations);
         self.final_violations_sum += u64::from(record.final_violations);
+        if !record.backend.is_empty() {
+            self.backends.insert(record.backend.clone());
+        }
+        if let Some(q) = &record.quantization
+            && !q.is_empty()
+        {
+            self.quantizations.insert(q.clone());
+        }
     }
 
     /// The pass fraction in `[0, 1]`, or `0.0` when no tasks were counted.
@@ -125,6 +141,27 @@ impl TierStats {
             0.0
         } else {
             self.iterations_sum as f64 / f64::from(self.total)
+        }
+    }
+
+    /// A compact provenance label for the report cell: the backend(s), with any
+    /// quantization(s) in parentheses. Empty when no backend was recorded (older JSON).
+    #[must_use]
+    pub fn backend_label(&self) -> String {
+        if self.backends.is_empty() {
+            return String::new();
+        }
+        let backends = self.backends.iter().cloned().collect::<Vec<_>>().join(", ");
+        if self.quantizations.is_empty() {
+            backends
+        } else {
+            let quants = self
+                .quantizations
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{backends} ({quants})")
         }
     }
 }
@@ -164,23 +201,25 @@ impl Summary {
         // `write!`, so the Result is discarded deliberately.
         let _ = write!(out, "# Benchmark results: {title}\n\n");
         out.push_str(
-            "| Tier | Tasks | Passed | Success rate | Mean iterations | First violations | Final violations |\n",
+            "| Tier | Backend | Tasks | Passed | Success rate | Mean iterations | First violations | Final violations |\n",
         );
         out.push_str(
-            "| ---- | ----- | ------ | ------------ | --------------- | ---------------- | ---------------- |\n",
+            "| ---- | ------- | ----- | ------ | ------------ | --------------- | ---------------- | ---------------- |\n",
         );
         for (tier, stats) in &self.per_tier {
-            out.push_str(&row(&format!("{tier}"), *stats));
+            out.push_str(&row(&format!("{tier}"), stats));
         }
-        out.push_str(&row("all", self.overall));
+        out.push_str(&row("all", &self.overall));
         out
     }
 }
 
-/// One Markdown table row for a labeled set of stats.
-fn row(label: &str, stats: TierStats) -> String {
+/// One Markdown table row for a labeled set of stats. The Backend cell carries the
+/// distinct backend(s) and any quantization(s) of the folded records.
+fn row(label: &str, stats: &TierStats) -> String {
     format!(
-        "| {label} | {} | {} | {:.0}% | {:.2} | {} | {} |\n",
+        "| {label} | {} | {} | {} | {:.0}% | {:.2} | {} | {} |\n",
+        stats.backend_label(),
         stats.total,
         stats.passed,
         stats.success_rate() * 100.0,
@@ -206,6 +245,8 @@ mod tests {
             first_proposal_violations: first,
             final_violations: final_v,
             wall_ms: 3,
+            backend: "mock".into(),
+            quantization: None,
         }
     }
 
@@ -239,6 +280,47 @@ mod tests {
         assert!(md.contains("| 1 |"));
         assert!(md.contains("| all |"));
         assert!(md.contains("100%"));
+        // The Backend column header and the record's backend label both appear.
+        assert!(md.contains("| Backend |"), "Backend column header present");
+        assert!(md.contains("mock"), "backend label rendered in a row");
+    }
+
+    #[test]
+    fn markdown_backend_cell_shows_backend_and_quantization() {
+        let mut r = record("a", true, 1, 0, 0);
+        r.backend = "ollama".into();
+        r.quantization = Some("Q4_K_M".into());
+        let md = summarize(&[(Tier(1), r)]).to_markdown("local");
+        assert!(
+            md.contains("ollama (Q4_K_M)"),
+            "the backend cell should carry the quantization in parentheses: {md}"
+        );
+    }
+
+    #[test]
+    fn backend_label_is_empty_for_legacy_records_without_backend() {
+        // A record from before the field existed reads back as backend = "" (serde
+        // default); the report cell is then empty rather than a bogus label.
+        let mut r = record("a", true, 1, 0, 0);
+        r.backend = String::new();
+        r.quantization = None;
+        let summary = summarize(&[(Tier(1), r)]);
+        assert_eq!(summary.overall.backend_label(), "");
+    }
+
+    #[test]
+    fn backend_label_joins_distinct_labels() {
+        // A rollup that mixed backends lists both, never silently flattening to one.
+        let mut a = record("a", true, 1, 0, 0);
+        a.backend = "mock".into();
+        let mut b = record("b", true, 1, 0, 0);
+        b.backend = "ollama".into();
+        let summary = summarize(&[(Tier(1), a), (Tier(1), b)]);
+        let label = summary.per_tier.get(&1).expect("tier 1").backend_label();
+        assert!(
+            label.contains("mock") && label.contains("ollama"),
+            "{label}"
+        );
     }
 
     #[test]

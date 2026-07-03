@@ -18,7 +18,7 @@
 
 use std::path::Path;
 
-use reticle_agent::{LoopOptions, run_agent_task};
+use reticle_agent::{LoopOptions, Provenance, run_agent_task};
 use reticle_agent_api::AgentCommand;
 use reticle_agent_api::args::{LayerArg, PointArg, RectArg};
 use reticle_bench::model::MockModel;
@@ -89,6 +89,7 @@ fn loop_converges_and_writes_four_artifacts() {
         LoopOptions::default(),
         &dir,
         0,
+        &Provenance::new("mock"),
         |_, _| {},
     )
     .expect("run");
@@ -137,6 +138,7 @@ fn propose_verify_correct_cycle_reaches_clean() {
         LoopOptions::default(),
         &dir,
         0,
+        &Provenance::new("mock"),
         |_, _| {},
     )
     .expect("run");
@@ -174,6 +176,7 @@ fn failing_mock_task_is_recorded_as_failure() {
         LoopOptions::default(),
         &dir,
         0,
+        &Provenance::new("mock"),
         |_, _| {},
     )
     .expect("run");
@@ -218,6 +221,7 @@ fn transcript_is_jsonl_and_carries_no_injected_secret() {
         LoopOptions::default(),
         &dir,
         0,
+        &Provenance::new("mock"),
         // Even feeding the "secret" into the model as document context must not leak it
         // to the transcript: the hook drives the model, not the transcript.
         |_, _| {},

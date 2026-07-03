@@ -1304,6 +1304,8 @@ mod tests {
                 first_proposal_violations: 2,
                 final_violations: u32::from(!success),
                 wall_ms: 5,
+                backend: "mock".into(),
+                quantization: None,
             },
             transcript: Transcript {
                 records,

@@ -269,17 +269,21 @@ impl std::fmt::Display for BuildError {
 
 impl std::error::Error for BuildError {}
 
-/// The HTTP seam: POST a JSON body with the API key header, return the response body.
+/// The HTTP seam: POST a JSON body with an auth header, return the response body.
 ///
-/// Abstracted so tests drive the model with a scripted response and no network, and
-/// so the blocking `ureq` client stays isolated behind one call.
+/// Abstracted so tests drive a model with a scripted response and no network, and so the
+/// blocking `ureq` client stays isolated behind one call. Both the Anthropic backend
+/// ([`AnthropicModel`]) and the OpenAI-compatible backend
+/// ([`OllamaModel`](crate::ollama::OllamaModel)) share this trait; each supplies a
+/// transport that places `api_key` in the header its API expects.
 pub trait HttpTransport {
-    /// POSTs `body` as JSON to `url` with the Anthropic auth and version headers, and
-    /// returns the response body text.
+    /// POSTs `body` as JSON to `url` with the appropriate auth header, and returns the
+    /// response body text.
     ///
-    /// `api_key` is the clear key; implementations must place it in the `x-api-key`
-    /// header only and never log it. On any failure, return a human-readable message
-    /// (the caller scrubs the key from it before surfacing).
+    /// `api_key` is the clear key (or an empty string when the endpoint needs none);
+    /// implementations must place it in the auth header their API expects and never log
+    /// it. On any failure, return a human-readable message (the caller scrubs the key
+    /// from it before surfacing).
     ///
     /// # Errors
     ///
@@ -293,7 +297,8 @@ pub trait HttpTransport {
     ) -> Result<String, String>;
 }
 
-/// The real transport: a blocking `ureq` request.
+/// The real Anthropic transport: a blocking `ureq` request with the `x-api-key` and
+/// `anthropic-version` headers.
 struct UreqTransport;
 
 impl HttpTransport for UreqTransport {
@@ -319,6 +324,48 @@ impl HttpTransport for UreqTransport {
             Err(e) => Err(format!("HTTP request failed: {e}")),
         }
     }
+}
+
+/// The real OpenAI-compatible transport: a blocking `ureq` request that sets
+/// `Authorization: Bearer <key>` when a key is present and omits it otherwise (Ollama
+/// needs no key).
+///
+/// Constructed via [`openai_ureq_transport`] so the [`ollama`](crate::ollama) module
+/// gets the real transport without this type being part of the public surface.
+struct OpenAiUreqTransport;
+
+impl HttpTransport for OpenAiUreqTransport {
+    fn post_json(
+        &self,
+        url: &str,
+        api_key: &str,
+        body: &serde_json::Value,
+    ) -> Result<String, String> {
+        let mut request = ureq::post(url).header("content-type", "application/json");
+        // Only attach the Authorization header when a key was actually provided; a
+        // keyless local server (Ollama) rejects or ignores an empty bearer.
+        if !api_key.is_empty() {
+            request = request.header("authorization", &format!("Bearer {api_key}"));
+        }
+        match request.send_json(body) {
+            Ok(mut resp) => resp
+                .body_mut()
+                .read_to_string()
+                .map_err(|e| format!("reading response body: {e}")),
+            Err(ureq::Error::StatusCode(code)) => {
+                Err(format!("OpenAI-compatible endpoint returned HTTP {code}"))
+            }
+            Err(e) => Err(format!("HTTP request failed: {e}")),
+        }
+    }
+}
+
+/// The real OpenAI-compatible transport, for the [`ollama`](crate::ollama) backend.
+///
+/// A free function rather than an exported type so [`OpenAiUreqTransport`] stays private
+/// while the sibling module can still construct the production transport.
+pub(crate) fn openai_ureq_transport() -> impl HttpTransport {
+    OpenAiUreqTransport
 }
 
 /// The tool name the model calls to return its command batch.
