@@ -170,6 +170,40 @@ pub struct App {
     cursor_world: Option<Point>,
     /// Rolling frame-time meter behind the status-bar fps readout.
     frame_meter: FrameMeter,
+    /// Which view the app opened into (editor or the replay theater). The web mount
+    /// selects this from the page URL so a public visitor lands on the theater
+    /// (ADR 0026).
+    start_view: StartView,
+}
+
+/// The view the app opens into.
+///
+/// The native launcher and the desktop default use [`StartView::Editor`]. The web
+/// mount reads a `?view=` query parameter and passes [`StartView::ReplayTheater`]
+/// for a public visitor, so the deployed bundle opens to the replay theater rather
+/// than the editor (ADR 0026).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum StartView {
+    /// Open into the interactive editor. The desktop default.
+    #[default]
+    Editor,
+    /// Open into the replay theater, playing the built-in scripted demo run. The
+    /// default for a public web visitor.
+    ReplayTheater,
+}
+
+impl StartView {
+    /// Parses a `view` query value into a [`StartView`].
+    ///
+    /// `replay` (or `theater`) selects [`StartView::ReplayTheater`]; anything else,
+    /// including an absent value, selects [`StartView::Editor`]. Case-insensitive.
+    #[must_use]
+    pub fn from_query_value(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "replay" | "theater" | "theatre" => StartView::ReplayTheater,
+            _ => StartView::Editor,
+        }
+    }
 }
 
 impl Default for App {
@@ -179,12 +213,54 @@ impl Default for App {
 }
 
 impl App {
-    /// Creates the app with the built-in demo document loaded.
+    /// Creates the app with the built-in demo document loaded, opening into the
+    /// editor.
     ///
     /// This is cheap (it builds a small in-memory document and a spatial index) so
     /// it is safe to call from both the native launcher and the web mount point.
     #[must_use]
     pub fn new() -> Self {
+        Self::with_start_view(StartView::Editor)
+    }
+
+    /// Creates the app opening into `start_view`.
+    ///
+    /// [`StartView::Editor`] is the desktop default. [`StartView::ReplayTheater`]
+    /// opens the replay theater and loads the built-in scripted demo run so a public
+    /// web visitor sees the agent draw immediately (ADR 0026). On a native build the
+    /// theater opens on construction; on wasm the theater window is not yet built
+    /// (see the module gating), so the intent is recorded and honoured once the
+    /// theater lands on wasm.
+    #[must_use]
+    pub fn with_start_view(start_view: StartView) -> Self {
+        let mut app = Self::build(start_view);
+        app.apply_start_view();
+        app
+    }
+
+    /// Applies the recorded [`StartView`] to the constructed app.
+    ///
+    /// Native only for the theater path today: it opens the theater window and loads
+    /// the built-in scripted transcript. On wasm this is a no-op beyond recording the
+    /// intent (the theater is `TODO(wave3)` on wasm).
+    fn apply_start_view(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.start_view == StartView::ReplayTheater {
+            // Load the built-in scripted demo run and open the theater on the first
+            // frame, so a visitor lands directly on a playing replay.
+            let (transcript, _feed) = crate::agent_panel::scripted_run("place a clean met1 wire");
+            self.replay.load_transcript(transcript);
+            self.replay_open = true;
+        }
+        // TODO(wave3): the replay theater window is native-only today, so on wasm the
+        // start view is recorded but the theater is not opened. Un-gating the theater
+        // for wasm (it is model-free) makes the public bundle open straight into it.
+    }
+
+    /// Builds the app state opening into `start_view` (without applying the view;
+    /// [`with_start_view`](Self::with_start_view) applies it).
+    #[must_use]
+    fn build(start_view: StartView) -> Self {
         let doc = demo::demo_document();
         let layer_state = LayerState::from_technology(doc.technology());
         let scene = SceneIndex::build(&doc, demo::TOP_CELL);
@@ -239,7 +315,14 @@ impl App {
             status: Status::default(),
             cursor_world: None,
             frame_meter: FrameMeter::default(),
+            start_view,
         }
+    }
+
+    /// The view the app opened into (editor or replay theater).
+    #[must_use]
+    pub fn start_view(&self) -> StartView {
+        self.start_view
     }
 
     /// The renderer (frozen Wave 0 contract accessor).
@@ -2734,6 +2817,46 @@ mod tests {
         assert!(!app.scene.is_empty());
         assert_eq!(app.top_cell, demo::TOP_CELL);
         assert!(app.history.document().cell(demo::TOP_CELL).is_some());
+    }
+
+    #[test]
+    fn start_view_query_parsing() {
+        use super::StartView;
+        assert_eq!(
+            StartView::from_query_value("replay"),
+            StartView::ReplayTheater
+        );
+        assert_eq!(
+            StartView::from_query_value("Theater"),
+            StartView::ReplayTheater
+        );
+        assert_eq!(StartView::from_query_value("editor"), StartView::Editor);
+        // Anything unrecognized (or empty) falls back to the editor.
+        assert_eq!(StartView::from_query_value(""), StartView::Editor);
+        assert_eq!(StartView::from_query_value("nonsense"), StartView::Editor);
+        // The desktop default is the editor.
+        assert_eq!(StartView::default(), StartView::Editor);
+    }
+
+    #[test]
+    fn new_opens_into_the_editor() {
+        let app = App::new();
+        assert_eq!(app.start_view(), super::StartView::Editor);
+        assert!(
+            !app.replay_open,
+            "the editor default does not open the theater"
+        );
+    }
+
+    #[test]
+    fn with_replay_theater_opens_the_theater_with_a_loaded_run() {
+        let app = App::with_start_view(super::StartView::ReplayTheater);
+        assert_eq!(app.start_view(), super::StartView::ReplayTheater);
+        // The theater window opens on construction and the built-in scripted run is
+        // loaded, so a visitor lands on a playable replay.
+        assert!(app.replay_open, "the replay start view opens the theater");
+        let (_, total) = app.replay.progress();
+        assert!(total > 0, "the built-in scripted transcript is loaded");
     }
 
     #[test]

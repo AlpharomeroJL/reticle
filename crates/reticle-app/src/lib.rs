@@ -41,10 +41,11 @@
 //! The public [`App`] type is the frozen Wave 0 contract; it is now a real
 //! `eframe::App` built on the modules above.
 
-// The agent panel and replay theater drive `reticle-agent-api`, which does not
-// compile for wasm32 today (its render command needs the native blocking GPU
-// context), so both modules exist only in native builds; the web build shows a
-// stub panel note instead.
+// The agent panel and replay theater are native-only today. `reticle-agent-api`
+// itself is wasm-buildable (its render command degrades to a clean error on wasm),
+// but the panel and theater window glue still assume the native paths; the web build
+// shows a stub panel note instead. TODO(wave3): un-gate the replay theater for wasm
+// (it is model-free) so the public bundle can open straight into it (ADR 0026).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod agent_panel;
 pub mod app;
@@ -73,4 +74,4 @@ pub mod view3d;
 pub mod viewports;
 pub mod xsection;
 
-pub use app::App;
+pub use app::{App, StartView};
