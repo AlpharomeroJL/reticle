@@ -267,6 +267,54 @@ pub fn command_tools() -> Vec<ToolSpec> {
             ),
             schema: schema::load_session(),
         },
+        ToolSpec {
+            name: "boolean_combine",
+            description: desc(
+                "Combine two or more shapes with a planar boolean \
+                               (union, intersection, difference, xor), writing the \
+                               result to a target layer and deleting the inputs. \
+                               Rectangles and polygons only; paths are skipped. \
+                               Returns the new shape ids.",
+            ),
+            schema: schema::boolean_combine(),
+        },
+        ToolSpec {
+            name: "align_shapes",
+            description: desc(
+                "Align a set of shapes within their combined bounding \
+                               box (left, right, top, bottom, center_x, center_y). \
+                               Each shape keeps its id.",
+            ),
+            schema: schema::align_shapes(),
+        },
+        ToolSpec {
+            name: "distribute_shapes",
+            description: desc(
+                "Distribute three or more shapes so the gaps between \
+                               adjacent shapes are equal along an axis. The extremes \
+                               stay put; inner shapes move. Each keeps its id.",
+            ),
+            schema: schema::distribute_shapes(),
+        },
+        ToolSpec {
+            name: "offset_shapes",
+            description: desc(
+                "Grow (positive delta) or shrink (negative delta) shapes \
+                               by an offset in DBU, replacing each on its own layer. \
+                               Rectangles and polygons only; paths are skipped.",
+            ),
+            schema: schema::offset_shapes(),
+        },
+        ToolSpec {
+            name: "build_via_stack",
+            description: desc(
+                "Build a via stack at a point: a square cut on the cut \
+                               layer plus an enclosure on a lower and an upper layer, \
+                               sized from the technology's enclosure rules (or a \
+                               default). Returns the three new shape ids.",
+            ),
+            schema: schema::build_via_stack(),
+        },
     ]
 }
 
@@ -422,6 +470,26 @@ mod tests {
             ),
             ("save_session", json!({})),
             ("load_session", json!({ "snapshot": "{}" })),
+            (
+                "boolean_combine",
+                json!({ "cell": "top", "bool_op": "union", "ids": [1, 2],
+                                     "layer": { "layer": 68, "datatype": 20 } }),
+            ),
+            ("align_shapes", json!({ "ids": [1, 2], "align": "left" })),
+            (
+                "distribute_shapes",
+                json!({ "ids": [1, 2, 3], "axis": "horizontal" }),
+            ),
+            ("offset_shapes", json!({ "ids": [1], "delta": 10 })),
+            (
+                "build_via_stack",
+                json!({ "cell": "top",
+                                    "lower_layer": { "layer": 68, "datatype": 20 },
+                                    "upper_layer": { "layer": 69, "datatype": 20 },
+                                    "cut_layer": { "layer": 66, "datatype": 44 },
+                                    "center": { "x": 0, "y": 0 }, "cut_size": 40,
+                                    "default_enclosure": 5 }),
+            ),
         ];
         for (name, args) in cases {
             let got =

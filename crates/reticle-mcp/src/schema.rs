@@ -557,3 +557,174 @@ pub fn load_session() -> Value {
         &["snapshot"],
     )
 }
+
+// ===== Wave 2 editor-op schemas =============================================
+
+/// The planar boolean operation enum, as a string.
+fn boolean_op() -> Value {
+    json!({
+        "type": "string",
+        "description": "The planar boolean to apply. `union` merges the shapes; \
+                        `intersection` keeps only their common region; `difference` \
+                        subtracts the later shapes from the first; `xor` keeps the \
+                        region covered an odd number of times.",
+        "enum": ["union", "intersection", "difference", "xor"],
+    })
+}
+
+/// The align-kind enum, as a string.
+fn align_kind() -> Value {
+    json!({
+        "type": "string",
+        "description": "How to align the shapes within their combined bounding box. \
+                        `left`/`right`/`top`/`bottom` line the corresponding edges up \
+                        to the extreme edge; `center_x`/`center_y` center on the \
+                        selection's midline.",
+        "enum": ["left", "right", "center_x", "top", "bottom", "center_y"],
+    })
+}
+
+/// The distribute-axis enum, as a string.
+fn axis() -> Value {
+    json!({
+        "type": "string",
+        "description": "The axis whose gaps are equalized. `horizontal` respaces \
+                        left-to-right; `vertical` respaces top-to-bottom.",
+        "enum": ["horizontal", "vertical"],
+    })
+}
+
+/// `boolean_combine`
+pub fn boolean_combine() -> Value {
+    object(
+        &[
+            (
+                "cell",
+                cell_name("The cell holding the input shapes and receiving the result."),
+            ),
+            ("bool_op", boolean_op()),
+            (
+                "ids",
+                element_ids(
+                    "The input shapes, addressed by id. At least two are required. \
+                     Rectangles and polygons participate; paths are skipped. The \
+                     inputs are deleted and replaced by the result.",
+                ),
+            ),
+            ("layer", {
+                let mut l = layer();
+                l["description"] = json!(
+                    "The layer and datatype the result polygons are written to. May \
+                     differ from the inputs' layers."
+                );
+                l
+            }),
+        ],
+        &["cell", "bool_op", "ids", "layer"],
+    )
+}
+
+/// `align_shapes`
+pub fn align_shapes() -> Value {
+    object(
+        &[
+            (
+                "ids",
+                element_ids(
+                    "The shapes to align, addressed by id. At least two are \
+                     required, and all must be in the same cell. Each keeps its id.",
+                ),
+            ),
+            ("align", align_kind()),
+        ],
+        &["ids", "align"],
+    )
+}
+
+/// `distribute_shapes`
+pub fn distribute_shapes() -> Value {
+    object(
+        &[
+            (
+                "ids",
+                element_ids(
+                    "The shapes to distribute, addressed by id. At least three are \
+                     required, and all must be in the same cell. The two extreme \
+                     shapes stay put; the inner shapes move to equalize the gaps. \
+                     Each keeps its id.",
+                ),
+            ),
+            ("axis", axis()),
+        ],
+        &["ids", "axis"],
+    )
+}
+
+/// `offset_shapes`
+pub fn offset_shapes() -> Value {
+    object(
+        &[
+            (
+                "ids",
+                element_ids(
+                    "The shapes to offset, addressed by id. Rectangles and polygons \
+                     participate; paths are skipped. Each keeps its id (a shrink \
+                     that erases a shape retires its id).",
+                ),
+            ),
+            (
+                "delta",
+                dbu(
+                    "The offset amount in DBU: positive grows the shapes outward, \
+                     negative shrinks them inward.",
+                ),
+            ),
+        ],
+        &["ids", "delta"],
+    )
+}
+
+/// `build_via_stack`
+pub fn build_via_stack() -> Value {
+    object(
+        &[
+            ("cell", cell_name("The cell that gains the via stack.")),
+            ("lower_layer", {
+                let mut l = layer();
+                l["description"] = json!("The lower routing layer to enclose the cut on.");
+                l
+            }),
+            ("upper_layer", {
+                let mut l = layer();
+                l["description"] = json!("The upper routing layer to enclose the cut on.");
+                l
+            }),
+            ("cut_layer", {
+                let mut l = layer();
+                l["description"] = json!("The cut/via layer the square cut is drawn on.");
+                l
+            }),
+            ("center", point("The center of the via stack, in DBU.")),
+            (
+                "cut_size",
+                json!({ "type": "integer", "minimum": 1,
+                        "description": "The side length of the square cut in DBU (positive)." }),
+            ),
+            (
+                "default_enclosure",
+                dbu("The enclosure margin (DBU) to use for a layer that has no \
+                     enclosure rule in the active technology. When a rule exists it \
+                     wins over this default."),
+            ),
+        ],
+        &[
+            "cell",
+            "lower_layer",
+            "upper_layer",
+            "cut_layer",
+            "center",
+            "cut_size",
+            "default_enclosure",
+        ],
+    )
+}
