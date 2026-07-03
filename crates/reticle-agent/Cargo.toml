@@ -13,4 +13,32 @@ categories = ["science", "command-line-utilities"]
 [lints]
 workspace = true
 
+[[bin]]
+name = "reticle-agent"
+path = "src/main.rs"
+
 [dependencies]
+reticle-agent-api = { workspace = true }
+reticle-model = { workspace = true }
+# Geometry primitives (Rect/Point) for framing the render region; DRC engine and
+# SKY130 rule subset for counting violations in the verify step.
+reticle-geometry = { workspace = true }
+reticle-drc = { workspace = true }
+# The harness reuses reticle-bench's ModelClient seam, Checker/CheckResult,
+# CheckerRegistry, ResultRecord, and write_records rather than re-deriving them,
+# and does not modify that crate (another lane owns it).
+reticle-bench = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+# The runner binary's argument parser; version matched to reticle-cli / reticle-bench.
+clap = { version = "4.6.1", features = ["derive"] }
+# A lightweight, pure-Rust blocking HTTP client for the Anthropic-compatible
+# endpoint. Pinned exactly so committed transcripts and the request contract do
+# not drift under a routine `cargo update`. Blocking (no async runtime); rustls
+# by default so no OpenSSL system dependency.
+ureq = { version = "=3.3.0", features = ["json"] }
+
+[dev-dependencies]
+# Geometry primitives and extraction/intent types used only to build documents
+# and intent specs in tests (the library takes geometry through reticle-model).
+reticle-extract = { workspace = true }
