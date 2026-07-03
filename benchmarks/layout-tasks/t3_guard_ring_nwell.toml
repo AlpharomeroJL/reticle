@@ -1,0 +1,5 @@
+id = "t3_guard_ring_nwell"
+tier = 3
+prompt = "Create a cell named top. Draw a closed nwell (64/20) ring enclosing an empty interior region, joined at all four corners."
+technology = "sky130.tech"
+checker = "guard_ring:layer=64/20"

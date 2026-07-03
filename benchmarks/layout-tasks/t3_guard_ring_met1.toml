@@ -1,0 +1,5 @@
+id = "t3_guard_ring_met1"
+tier = 3
+prompt = "Create a cell named top. Draw a closed met1 (68/20) guard ring around an empty interior, with the four sides joined at the corners so it is one continuous net."
+technology = "sky130.tech"
+checker = "guard_ring:layer=68/20"

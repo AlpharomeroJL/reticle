@@ -1,0 +1,6 @@
+id = "t3_intent_power_ground"
+tier = 3
+prompt = "Create a cell named top with a power net vdd (terminals near (0,0) and (500,0) on met1) and a ground net vss (terminals near (0,300) and (500,300) on met1). Route each as one net and keep vdd and vss from shorting."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"vdd","terminals":[{"name":"vdd0","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}},{"name":"vdd1","layer":{"layer":68,"datatype":20},"region":{"min":{"x":480,"y":0},"max":{"x":500,"y":20}}}]},{"name":"vss","terminals":[{"name":"vss0","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":300},"max":{"x":20,"y":320}}},{"name":"vss1","layer":{"layer":68,"datatype":20},"region":{"min":{"x":480,"y":300},"max":{"x":500,"y":320}}}]}],"forbidden":[{"net_a":"vdd","net_b":"vss"}]}'

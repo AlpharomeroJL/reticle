@@ -1,0 +1,5 @@
+id = "t3_contact_diff_li1"
+tier = 3
+prompt = "Create a cell named top. Connect a diff (65/20) rectangle up to li1 (67/20) through a licon1 (66/44) contact where the two overlap."
+technology = "sky130.tech"
+checker = "contact_stack:via=66/44,bottom=65/20,top=67/20"

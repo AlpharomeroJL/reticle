@@ -1,0 +1,6 @@
+id = "t3_intent_tee"
+tier = 3
+prompt = "Create a cell named top and connect three met1 terminals into one net: a near (0,0), b near (400,0), and c near (200,300), forming a tee."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"sig","terminals":[{"name":"a","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}},{"name":"b","layer":{"layer":68,"datatype":20},"region":{"min":{"x":380,"y":0},"max":{"x":400,"y":20}}},{"name":"c","layer":{"layer":68,"datatype":20},"region":{"min":{"x":190,"y":280},"max":{"x":210,"y":300}}}]}],"forbidden":[]}'

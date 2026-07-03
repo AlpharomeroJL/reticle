@@ -1,0 +1,6 @@
+id = "t4_compound_connected_pair"
+tier = 4
+prompt = "Create a leaf cell that exposes a met1 landing near its origin, place two instances of it, and wire them together on met1 so terminal a near (0,0) connects to terminal b near (800,0)."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"sig","terminals":[{"name":"a","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}},{"name":"b","layer":{"layer":68,"datatype":20},"region":{"min":{"x":780,"y":0},"max":{"x":800,"y":20}}}]}],"forbidden":[]}'

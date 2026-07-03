@@ -1,0 +1,5 @@
+id = "t1_min_area_li1"
+tier = 1
+prompt = "Create a cell named top and draw an li1 rectangle whose area is at least 0.0561um^2 (56100 dbu^2) so it passes the li1 minimum-area rule."
+technology = "sky130.tech"
+checker = "layer_area:layer=67/20,min_area=56100"

@@ -1,0 +1,5 @@
+id = "t2_contact_met1_met2"
+tier = 2
+prompt = "Create a cell named top. Stack a met1 (68/20) rectangle and a met2 (69/20) rectangle over the same area and place a via (68/44) where they overlap so the via connects met1 up to met2."
+technology = "sky130.tech"
+checker = "contact_stack:via=68/44"

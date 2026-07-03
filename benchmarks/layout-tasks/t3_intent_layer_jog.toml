@@ -1,0 +1,6 @@
+id = "t3_intent_layer_jog"
+tier = 3
+prompt = "Create a cell named top. Connect terminal a on met1 near (0,0) to terminal b on met2 near (400,0), jogging up from met1 to met2 through a via (68/44)."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"sig","terminals":[{"name":"a","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}},{"name":"b","layer":{"layer":69,"datatype":20},"region":{"min":{"x":380,"y":0},"max":{"x":400,"y":20}}}]}],"forbidden":[]}'

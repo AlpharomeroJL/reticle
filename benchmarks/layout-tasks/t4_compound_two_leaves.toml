@@ -1,0 +1,5 @@
+id = "t4_compound_two_leaves"
+tier = 4
+prompt = "Create two different leaf cells (one with a met1 rectangle, one with an li1 rectangle), then a cell named top that places at least one instance of each, for at least two instances total."
+technology = "sky130.tech"
+checker = "compound_cell:instances=2,min_shapes=2"

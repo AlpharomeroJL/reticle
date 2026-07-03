@@ -1,0 +1,6 @@
+id = "t4_compound_power_grid"
+tier = 4
+prompt = "Create a cell named top that builds a power grid: a vdd met1 net (terminals near (0,0) and (800,0)) and a vss met1 net (terminals near (0,400) and (800,400)), assembled from repeated geometry and kept from shorting."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"vdd","terminals":[{"name":"vdd0","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}},{"name":"vdd1","layer":{"layer":68,"datatype":20},"region":{"min":{"x":780,"y":0},"max":{"x":800,"y":20}}}]},{"name":"vss","terminals":[{"name":"vss0","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":400},"max":{"x":20,"y":420}}},{"name":"vss1","layer":{"layer":68,"datatype":20},"region":{"min":{"x":780,"y":400},"max":{"x":800,"y":420}}}]}],"forbidden":[{"net_a":"vdd","net_b":"vss"}]}'

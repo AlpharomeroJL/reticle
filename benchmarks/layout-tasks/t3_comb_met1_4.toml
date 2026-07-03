@@ -1,0 +1,5 @@
+id = "t3_comb_met1_4"
+tier = 3
+prompt = "Create a cell named top. Draw two interdigitated met1 combs, each a spine with four fingers, kept on two separate nets (no finger of one comb may touch the other)."
+technology = "sky130.tech"
+checker = "comb:layer=68/20,fingers=4"

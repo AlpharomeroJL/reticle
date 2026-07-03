@@ -1,0 +1,5 @@
+id = "t2_contact_li1_met1"
+tier = 2
+prompt = "Create a cell named top. Stack an li1 (67/20) rectangle and a met1 (68/20) rectangle over the same area and drop an mcon (67/44) contact where they overlap so the contact connects li1 up to met1."
+technology = "sky130.tech"
+checker = "contact_stack:via=67/44"

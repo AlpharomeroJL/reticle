@@ -1,0 +1,5 @@
+id = "t3_via_chain_mcon_4"
+tier = 3
+prompt = "Create a cell named top. Connect an li1 plane to a met1 plane with at least four mcon (67/44) contacts, all on the same li1/met1 net."
+technology = "sky130.tech"
+checker = "via_chain:via=67/44,vias=4"
