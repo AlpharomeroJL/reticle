@@ -3,8 +3,7 @@
 //! The propose-verify-correct harness ([`crate::run`]) edits a private
 //! [`Session`](reticle_agent_api::Session). To let a human watch and edit alongside
 //! the agent in real time, [`AgentCollaborator`] mirrors those edits onto a
-//! [`SyncDocument`](reticle_sync::SyncDocument) (a `yrs` CRDT) under the
-//! [`AGENT_ACTOR`](reticle_agent_api::AGENT_ACTOR) identity.
+//! [`SyncDocument`] (a `yrs` CRDT) under the [`AGENT_ACTOR`] identity.
 //!
 //! # What it guarantees
 //!
@@ -16,9 +15,9 @@
 //! * **Presence.** After each step the agent publishes its cursor (the location of
 //!   the last shape it placed) and selection (the ids placed this step) over the
 //!   awareness layer, under [`AGENT_ACTOR`], so a watcher can render them.
-//! * **A status channel.** The agent serializes an
-//!   [`AgentStatus`](reticle_agent_api::AgentStatus) into the awareness status slot
-//!   (again under [`AGENT_ACTOR`]) so a watcher can narrate the loop.
+//! * **A status channel.** The agent serializes an [`AgentStatus`] into the
+//!   awareness status slot (again under [`AGENT_ACTOR`]) so a watcher can narrate the
+//!   loop.
 //! * **Pacing.** A [`Pacing`] setting inserts a delay between steps for a live demo,
 //!   or runs instantly for tests and replay.
 //!
@@ -34,7 +33,8 @@
 //! export, render) and technology/session commands produce no drawing and are not
 //! mirrored. Id-addressed edits (`TransformShapes`, `DeleteShapes`) address the
 //! command surface's [`ElementId`](reticle_agent_api::ElementId)s, which do not map
-//! to CRDT element ids; they are left to a future extension rather than mis-applied.
+//! to CRDT element ids; they are left to a future extension rather than applied
+//! incorrectly.
 
 use std::time::Duration;
 
