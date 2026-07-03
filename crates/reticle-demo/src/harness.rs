@@ -124,6 +124,32 @@ impl SessionHandle {
         guard.iteration = iteration;
         guard.message = message.into();
     }
+
+    /// Reports live progress from a [`Harness`] implemented outside this crate.
+    ///
+    /// Marks the session [`SessionState::Running`] and records the iteration, the
+    /// current verification violation count, and a human-readable status line, all
+    /// under the status lock. The built-in [`MockHarness`] uses the private helpers
+    /// above; the real `reticle-agent`-backed harness (which lives in a separate
+    /// crate) drives the session through this public method and
+    /// [`finish`](Self::finish).
+    pub fn report(&self, iteration: u32, violations: u32, message: impl Into<String>) {
+        let mut guard = self.status.lock().expect("status mutex poisoned");
+        guard.state = SessionState::Running;
+        guard.iteration = iteration;
+        guard.violations = violations;
+        guard.message = message.into();
+    }
+
+    /// Settles the session into a terminal state with a final status line.
+    ///
+    /// The final violation count from the last [`report`](Self::report) is
+    /// preserved. Intended for an out-of-crate [`Harness`] to end a run in
+    /// [`SessionState::Done`], [`SessionState::Cancelled`], or
+    /// [`SessionState::Error`].
+    pub fn finish(&self, state: SessionState, message: impl Into<String>) {
+        self.set_state(state, message);
+    }
 }
 
 /// Drives a session to completion.
