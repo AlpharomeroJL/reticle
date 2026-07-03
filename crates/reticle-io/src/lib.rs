@@ -15,8 +15,9 @@
 //!   rectangles, polygons, paths, and text labels on `(layer, datatype)`, plus
 //!   placements and arrays. It is **not** conformant OASIS; see [`mod@oasis`]
 //!   for the honest scope and gaps.
-//! - [`parse_technology`], a line-oriented technology-file format (resolution,
-//!   layer table, DRC rules). See [`mod@technology`].
+//! - [`parse_technology`] and [`write_technology`], a line-oriented
+//!   technology-file format (resolution, layer table, DRC rules) and its
+//!   canonical serializer. See [`mod@technology`].
 //!
 //! # Errors
 //!
@@ -32,4 +33,4 @@ pub mod technology;
 pub use error::IoError;
 pub use gds::Gds;
 pub use oasis::Oasis;
-pub use technology::parse_technology;
+pub use technology::{parse_technology, write_technology};

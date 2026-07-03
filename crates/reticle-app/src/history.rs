@@ -66,6 +66,19 @@ impl History {
         self.doc.revision()
     }
 
+    /// Replaces the document's [`reticle_model::Technology`] in place and bumps the
+    /// revision so the canvas re-reads.
+    ///
+    /// Technology is not part of the [`Edit`] vocabulary, so this is applied
+    /// directly to the document rather than pushed onto the undo stack: a
+    /// technology change is not undoable, and it leaves the existing shape-edit
+    /// history intact (see [`reticle_model::EditableDocument::set_technology`]).
+    /// The tech editor panel calls this to commit a validated technology back to
+    /// the live document.
+    pub fn set_technology(&mut self, tech: reticle_model::Technology) {
+        self.doc.set_technology(tech);
+    }
+
     /// Applies `edit` as one undo step, pushing it onto the undo stack.
     ///
     /// # Errors
