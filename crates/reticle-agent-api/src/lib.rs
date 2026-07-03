@@ -29,7 +29,7 @@ pub use replay::{replay, transcript_of, verify_replay};
 pub use response::{AgentResponse, Revision};
 pub use session::Session;
 pub use status::{AGENT_ACTOR, AgentStatus};
-pub use transcript::{CommandRecord, Outcome, Transcript};
+pub use transcript::{CommandRecord, Outcome, PlanStep, Transcript};
 
 // The connectivity intent types live in `reticle-extract`, next to the extraction
 // the checker uses, and are re-exported here for callers of the command surface
@@ -132,10 +132,24 @@ mod tests {
         let transcript = Transcript {
             records: vec![record],
             final_hash: 0xDEAD_BEEF,
+            plan: vec![super::PlanStep {
+                goal: "Draw a clean met1 rectangle.".into(),
+                intended_tools: vec!["create_cell".into(), "add_rect".into()],
+                expected_checks: vec!["drc".into(), "drc_clean".into()],
+            }],
         };
         let json = serde_json::to_string(&transcript).expect("serialize");
         let back: Transcript = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(transcript, back);
+        assert_eq!(back.plan.len(), 1);
+        assert_eq!(back.plan[0].intended_tools, ["create_cell", "add_rect"]);
+
+        // A transcript written before the `plan` field existed (no `plan` key) still
+        // deserializes, reading back as an empty plan: the additive change keeps old
+        // transcript JSON valid.
+        let legacy = r#"{"records":[],"final_hash":0}"#;
+        let back: Transcript = serde_json::from_str(legacy).expect("legacy deserialize");
+        assert!(back.plan.is_empty(), "missing plan defaults to empty");
 
         let intent = IntentSpec {
             nets: vec![IntentNet {

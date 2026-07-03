@@ -70,5 +70,8 @@ pub fn transcript_of(session: &Session) -> Transcript {
     Transcript {
         records: session.transcript().to_vec(),
         final_hash: document_hash(session.document()),
+        // A session records commands, not the harness's per-iteration plan; the plan
+        // log is empty here and populated by the agent harness (see `reticle-agent`).
+        plan: Vec::new(),
     }
 }
