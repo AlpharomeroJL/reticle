@@ -1,0 +1,6 @@
+id = "t3_intent_stack_poly_met1"
+tier = 3
+prompt = "Create a cell named top. Connect a poly terminal near (0,0) up to a met1 terminal near (0,0) through the licon1/li1/mcon stack so poly, li1 and met1 form one net."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"sig","terminals":[{"name":"p","layer":{"layer":66,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}},{"name":"m","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}}]}],"forbidden":[]}'

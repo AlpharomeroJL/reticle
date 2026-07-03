@@ -1,0 +1,5 @@
+id = "t2_three_li1_shapes"
+tier = 2
+prompt = "Create a cell named top and place at least three li1 rectangles."
+technology = "sky130.tech"
+checker = "shape_count:layer=67/20,min=3"

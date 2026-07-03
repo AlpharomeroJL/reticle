@@ -1,0 +1,5 @@
+id = "t2_met3_min_width"
+tier = 2
+prompt = "Create a cell named top and draw a met3 rectangle at least 0.30um (300 dbu) wide in both dimensions so it passes the wider met3 minimum-width rule."
+technology = "sky130.tech"
+checker = "drc_clean"

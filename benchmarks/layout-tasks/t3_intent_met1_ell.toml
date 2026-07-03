@@ -1,0 +1,6 @@
+id = "t3_intent_met1_ell"
+tier = 3
+prompt = "Create a cell named top and connect terminal a near (0,0) to terminal b near (400,400) with an L-shaped met1 net (a horizontal segment and a vertical segment that meet)."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"sig","terminals":[{"name":"a","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}},{"name":"b","layer":{"layer":68,"datatype":20},"region":{"min":{"x":380,"y":380},"max":{"x":400,"y":400}}}]}],"forbidden":[]}'

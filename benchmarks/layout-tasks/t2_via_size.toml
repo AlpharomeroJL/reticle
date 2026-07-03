@@ -1,0 +1,5 @@
+id = "t2_via_size"
+tier = 2
+prompt = "Create a cell named top and place a via (layer 68, datatype 44) square exactly 0.15um (150 dbu) on a side, the fixed via size."
+technology = "sky130.tech"
+checker = "drc_clean"

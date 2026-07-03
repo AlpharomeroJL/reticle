@@ -1,10 +1,62 @@
-# Sample layout-tasks suite for the Reticle agent benchmark.
+# Layout-tasks suite for the Reticle agent benchmark (v0.2.0).
 #
-# This is a SAMPLE suite that proves the reticle-bench machinery end to end against
-# the deterministic mock model: one straight placement, one DRC violation that gets
-# corrected, and one connectivity open that gets bridged. The full 60-task suite is
-# authored in a later wave; do not treat passing this as a model capability result.
-#
-# Bump `version` whenever tasks are added or promoted between tiers.
-version = "0.1.0"
-tasks = ["t1_place_met1_rect", "t1_drc_clean_met1", "t1_intent_connect"]
+# The 3 sample tasks prove the machinery end to end against the mock model;
+# the 50 authored tasks span tiers 1-4: primitive placement and legality,
+# structured geometry (contacts, via chains, combs, guard rings),
+# connectivity-intent, and compound cells. Bump `version` when tasks change.
+version = "0.2.0"
+tasks = [
+    "t1_place_met1_rect",
+    "t1_drc_clean_met1",
+    "t1_intent_connect",
+    "t1_place_li1_rect",
+    "t1_place_met2_rect",
+    "t1_place_poly_rect",
+    "t1_min_width_met1",
+    "t1_min_area_met1",
+    "t1_min_area_li1",
+    "t2_legal_spacing_met1",
+    "t2_legal_spacing_met2",
+    "t2_two_met1_shapes",
+    "t2_three_li1_shapes",
+    "t2_licon_size",
+    "t2_via_size",
+    "t2_met3_min_width",
+    "t2_poly_over_diff",
+    "t2_met1_area_pin",
+    "t2_contact_li1_met1",
+    "t2_contact_met1_met2",
+    "t3_contact_met1_met2_enc",
+    "t3_contact_poly_li1",
+    "t3_contact_diff_li1",
+    "t3_via_chain_4",
+    "t3_via_chain_8",
+    "t3_via_chain_mcon_4",
+    "t3_via_chain_via2_4",
+    "t3_comb_met1_2",
+    "t3_comb_met1_4",
+    "t3_comb_li1_3",
+    "t3_guard_ring_li1",
+    "t3_guard_ring_met1",
+    "t3_guard_ring_nwell",
+    "t3_intent_met1_wire",
+    "t3_intent_met1_ell",
+    "t3_intent_two_nets",
+    "t3_intent_layer_jog",
+    "t3_intent_tee",
+    "t3_intent_stack_poly_met1",
+    "t3_intent_power_ground",
+    "t3_intent_met2_wire",
+    "t3_intent_met2_met3_jog",
+    "t3_intent_bus2",
+    "t3_intent_crossover",
+    "t3_intent_daisy4",
+    "t4_compound_pair",
+    "t4_compound_row4",
+    "t4_compound_row4_shapes",
+    "t4_compound_grid",
+    "t4_compound_two_leaves",
+    "t4_compound_connected_pair",
+    "t4_compound_bus_join",
+    "t4_compound_power_grid",
+]

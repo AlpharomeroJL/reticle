@@ -1,0 +1,5 @@
+id = "t3_via_chain_4"
+tier = 3
+prompt = "Create a cell named top. Build a met1-to-met2 connection carrying at least four vias (68/44): draw a met1 plane and a met2 plane over the same region and place four vias where they overlap so all four land on the same net."
+technology = "sky130.tech"
+checker = "via_chain:via=68/44,vias=4"

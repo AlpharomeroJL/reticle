@@ -1,0 +1,5 @@
+id = "t2_licon_size"
+tier = 2
+prompt = "Create a cell named top and place a licon1 (layer 66, datatype 44) contact square exactly 0.17um (170 dbu) on a side, the fixed licon size."
+technology = "sky130.tech"
+checker = "drc_clean"

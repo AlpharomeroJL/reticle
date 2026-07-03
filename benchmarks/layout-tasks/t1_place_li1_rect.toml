@@ -1,0 +1,5 @@
+id = "t1_place_li1_rect"
+tier = 1
+prompt = "Create a cell named top and place a single li1 (layer 67, datatype 20) rectangle in it."
+technology = "sky130.tech"
+checker = "rect_present:layer=67/20"

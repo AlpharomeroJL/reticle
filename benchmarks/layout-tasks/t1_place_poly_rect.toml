@@ -1,0 +1,5 @@
+id = "t1_place_poly_rect"
+tier = 1
+prompt = "Create a cell named top and place a single poly (layer 66, datatype 20) rectangle in it."
+technology = "sky130.tech"
+checker = "rect_present:layer=66/20"

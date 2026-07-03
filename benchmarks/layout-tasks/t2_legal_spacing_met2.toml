@@ -1,0 +1,5 @@
+id = "t2_legal_spacing_met2"
+tier = 2
+prompt = "Create a cell named top and place two met2 rectangles at least 140 dbu wide and separated by at least the 0.14um (140 dbu) met2 spacing so the layout is DRC clean."
+technology = "sky130.tech"
+checker = "drc_clean"
