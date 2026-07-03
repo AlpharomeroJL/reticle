@@ -52,6 +52,57 @@ The model is either the real `AnthropicModel` (an Anthropic-compatible endpoint;
 API key is read from the environment only and never printed, serialized, or written
 to an artifact) or the deterministic `MockModel` used offline and in tests.
 
+## Iterative refinement (mid-session constraints)
+
+A session does not have to be one fixed prompt. A user watching the loop can add a
+new constraint *between* iterations ("make the wire wider", "keep it on met1", "shrink
+the guard ring") and the loop folds it into the very next proposal without tearing the
+run down and starting over. This is the refinement protocol.
+
+```mermaid
+flowchart LR
+    U[User constraint] -->|between iterations| C[Fold into context]
+    V[Checker feedback] --> C
+    C --> M[Model]
+    M -->|AgentCommands| A[Apply]
+    A --> K{Verify}
+    K -->|clean and constraint met| D[Done]
+    K -->|violations| V
+    K -.->|user adds more| U
+```
+
+The mechanism is deliberately small. `run_agent_task_refined` takes a
+`RefinementSource`: a trait whose one method, `drain(iteration)`, returns the
+constraint strings that have arrived since the loop last asked. The loop drains it once
+per iteration, just before it asks the model, and accumulates the constraints. Each
+iteration it builds the model context from the accumulated user constraints followed by
+the checker's own failure reasons, so the model sees both in one place. Because the
+constraints accumulate rather than replace, a constraint added once keeps conditioning
+every later proposal; because the checker still runs every iteration, success is still
+defined by objective verification, not by the model's agreement that it complied.
+
+Three properties make this safe and testable:
+
+- **No restart.** Folding a constraint into the running context is one continuous run:
+  the session, its transcript, and its element ids are never rebuilt. The
+  `refinement_is_folded_in_and_loop_converges_without_restart` test starts a task, injects
+  a widen constraint before the second iteration, and asserts the final layout carries the
+  wider wire while the run stays a single loop.
+- **Bounded on conflict.** A constraint that cannot be satisfied (it conflicts with the
+  task, or asks for something no proposal can reach) does not spin forever: the same
+  `max_iterations` cap applies, and the run is recorded as an honest failure. The
+  `conflicting_refinement_is_bounded_by_max_iterations_not_infinite` test proves the loop
+  stops at the cap rather than looping.
+- **Frozen context type.** The refinements ride in the existing
+  `Context::feedback` channel, so `reticle_bench`'s `Context` type is unchanged. A
+  caller with no mid-session constraints uses `run_agent_task`, which is
+  `run_agent_task_refined` with a `NoRefinements` source and behaves exactly as before.
+
+The source is whatever a caller needs: a channel receiver behind a live UI or HTTP
+endpoint, or a scripted `RefinementFn` closure in a deterministic test. The loop owns no
+channel of its own, so the same code path serves an interactive session and a reproducible
+convergence test on the mock model.
+
 ## Live collaboration (`reticle-agent::collab`)
 
 An [`AgentCollaborator`] mirrors each agent step onto the `reticle-sync` CRDT under a

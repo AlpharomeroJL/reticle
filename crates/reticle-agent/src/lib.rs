@@ -53,4 +53,7 @@ pub use ollama::{
     OllamaModel,
 };
 pub use redact::{ApiKey, REDACTED};
-pub use run::{Artifacts, LoopOptions, Provenance, RunOutcome, run_agent_task};
+pub use run::{
+    Artifacts, LoopOptions, NoRefinements, Provenance, RefinementFn, RefinementSource, RunOutcome,
+    run_agent_task, run_agent_task_refined,
+};
