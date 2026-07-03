@@ -148,19 +148,56 @@ web-serve:
     cd crates/web; trunk serve index.html
 
 # ---------------------------------------------------------------------------
+# GitHub Pages artifact (the public "front door")
+# ---------------------------------------------------------------------------
+# The site is served under the subpath https://alpharomerojl.github.io/reticle/,
+# so Trunk MUST emit assets under `/reticle/` (via --public-url) or the browser
+# fetches them at absolute root and 404s, hanging the page on the spinner.
+#
+# `deploy-pages` builds the release bundle with the subpath baked in, builds the
+# book, assembles the FULL gh-pages artifact into a fresh scratch/pages/ (web
+# bundle + .nojekyll + book/), and asserts the emitted index.html references
+# `/reticle/`-prefixed assets with no bare `/web-` absolute-root reference left.
+# It never touches git; the orchestrator publishes scratch/pages/ to gh-pages.
+# scratch/ is gitignored, so nothing here is committed.
+deploy-pages:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-pages.ps1
+
+# `smoke-pages` is a DEPLOYED-URL check: it fetches the live index.html, extracts
+# every asset it references, and asserts each returns 200 and sits under the
+# `/reticle/` prefix. It only passes after the orchestrator redeploys the correct
+# artifact; against the currently-broken live site it fails and says why. Pass a
+# different base URL as the argument to point it elsewhere.
+smoke-pages base="https://alpharomerojl.github.io/reticle/":
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-pages.ps1 -BaseUrl {{base}}
+
+# ---------------------------------------------------------------------------
 # End-to-end browser tests (Playwright), its own gate.
 # ---------------------------------------------------------------------------
-# Builds the Trunk demo bundle, then drives it in headless Chromium. Two
-# projects: `webgl2` is the hard gate (WebGPU is hidden so wgpu takes its WebGL2
-# fallback, and the app must boot and render); `webgpu` launches with the
-# WebGPU-enabling flags and asserts the WebGPU path where a real adapter exists,
-# skipping those checks honestly where it does not (Playwright's headless
-# Chromium ships without WebGPU). See e2e/README.md and ADR 0027.
+# Builds the Trunk demo bundle (root paths, served at root), then drives it in
+# headless Chromium. Two projects run here: `webgl2` is the hard gate (WebGPU is
+# hidden so wgpu takes its WebGL2 fallback, and the app must boot and render);
+# `webgpu` launches with the WebGPU-enabling flags and asserts the WebGPU path
+# where a real adapter exists, skipping those checks honestly where it does not
+# (Playwright's headless Chromium ships without WebGPU). The `ghpages-subpath`
+# project is excluded here because it needs the `--public-url /reticle/` build;
+# run it via `just e2e-subpath`. See e2e/README.md and ADR 0027.
 e2e:
     cd crates/web; trunk build index.html
     npm --prefix e2e install
     cd e2e; npx playwright install chromium
-    cd e2e; npx playwright test
+    cd e2e; npx playwright test --project=webgl2 --project=webgpu
+
+# gh-pages subpath boot gate. Builds the bundle WITH `--public-url /reticle/`
+# (the deploy shape) and runs the `ghpages-subpath` Playwright project, which
+# serves that bundle under `/reticle/` and asserts the app boots with no 404 on
+# the js/wasm. This is the fail-before-deploy guard for the base-path regression
+# that broke the front door. A root-path build would 404 here, which is the point.
+e2e-subpath:
+    cd crates/web; trunk build index.html --release --public-url /reticle/
+    npm --prefix e2e install
+    cd e2e; npx playwright install chromium
+    cd e2e; npx playwright test --project=ghpages-subpath
 
 book:
     mdbook build docs

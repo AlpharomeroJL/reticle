@@ -20,7 +20,6 @@ use reticle_render::{
 use reticle_sync::SyncDocument;
 use std::sync::Arc;
 
-#[cfg(not(target_arch = "wasm32"))]
 use crate::agent_panel::AgentPanelState;
 use crate::camera::{ScreenRect, ViewCamera};
 use crate::command::{self, Command};
@@ -36,7 +35,6 @@ use crate::labels;
 use crate::layers::{self, LayerState};
 use crate::minimap::MinimapLayout;
 use crate::netlight::{Generation, Netlight};
-#[cfg(not(target_arch = "wasm32"))]
 use crate::replay::ReplayTheater;
 use crate::selection::{self, Selection};
 use crate::tool::{Tool, ToolState};
@@ -119,23 +117,21 @@ pub struct App {
     /// it is refreshed only when [`App::sync_retained`] rebuilds.
     expanded: Arc<ExpandedScene>,
 
-    /// The agent panel: prompt, run state machine, narration, and cursor.
-    /// Native only: `reticle-agent-api` does not compile for wasm32 today.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// The agent panel: prompt, run state machine, narration, and cursor. The
+    /// panel is model-free (it drives a scripted transcript) and builds on wasm.
     agent: AgentPanelState,
-    /// The replay theater's playback state machine (native only, like the
-    /// agent panel: both drive `reticle-agent-api`).
-    #[cfg(not(target_arch = "wasm32"))]
+    /// The replay theater's playback state machine. Model-free, so it runs on
+    /// both native and wasm; its transcript comes from [`store`](crate::store).
     replay: ReplayTheater,
     /// Whether the replay theater window is open.
-    #[cfg(not(target_arch = "wasm32"))]
     replay_open: bool,
-    /// The transcript-path text in the theater's load row.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// The transcript-path text in the theater's load row (native filesystem).
     replay_path: String,
     /// The last theater load error, shown under the load row (empty when none).
-    #[cfg(not(target_arch = "wasm32"))]
     replay_error: String,
+    /// Where the theater reads transcripts from: the filesystem on native, a
+    /// bundled transcript on wasm. Boxed so the field type is the same on both.
+    store: Box<dyn crate::store::SessionStore>,
 
     /// The DRC panel state: the last run's violations and the highlighted one.
     drc: DrcResults,
@@ -226,11 +222,11 @@ impl App {
     /// Creates the app opening into `start_view`.
     ///
     /// [`StartView::Editor`] is the desktop default. [`StartView::ReplayTheater`]
-    /// opens the replay theater and loads the built-in scripted demo run so a public
-    /// web visitor sees the agent draw immediately (ADR 0026). On a native build the
-    /// theater opens on construction; on wasm the theater window is not yet built
-    /// (see the module gating), so the intent is recorded and honoured once the
-    /// theater lands on wasm.
+    /// opens the replay theater and loads the default transcript from the platform
+    /// [`store`](crate::store) so a public web visitor sees the agent draw
+    /// immediately (ADR 0026). The theater is model-free and runs on both native and
+    /// wasm; on wasm it plays a bundled transcript, so the web bundle opens straight
+    /// into a working theater.
     #[must_use]
     pub fn with_start_view(start_view: StartView) -> Self {
         let mut app = Self::build(start_view);
@@ -240,21 +236,18 @@ impl App {
 
     /// Applies the recorded [`StartView`] to the constructed app.
     ///
-    /// Native only for the theater path today: it opens the theater window and loads
-    /// the built-in scripted transcript. On wasm this is a no-op beyond recording the
-    /// intent (the theater is `TODO(wave3)` on wasm).
+    /// For [`StartView::ReplayTheater`] it opens the theater window and loads the
+    /// default transcript from the platform [`store`](crate::store) (the bundled
+    /// transcript on wasm, the scripted run on native), so a public web visitor
+    /// lands directly on a playing replay (ADR 0026). If the store cannot produce a
+    /// transcript, the theater simply opens empty rather than failing.
     fn apply_start_view(&mut self) {
-        #[cfg(not(target_arch = "wasm32"))]
         if self.start_view == StartView::ReplayTheater {
-            // Load the built-in scripted demo run and open the theater on the first
-            // frame, so a visitor lands directly on a playing replay.
-            let (transcript, _feed) = crate::agent_panel::scripted_run("place a clean met1 wire");
-            self.replay.load_transcript(transcript);
+            if let Ok((records, hash)) = self.store.default_transcript() {
+                self.replay.load(records, hash);
+            }
             self.replay_open = true;
         }
-        // TODO(wave3): the replay theater window is native-only today, so on wasm the
-        // start view is recorded but the theater is not opened. Un-gating the theater
-        // for wasm (it is model-free) makes the public bundle open straight into it.
     }
 
     /// Builds the app state opening into `start_view` (without applying the view;
@@ -290,16 +283,12 @@ impl App {
             render_revision: 0,
             visibility_sig: 0,
             expanded,
-            #[cfg(not(target_arch = "wasm32"))]
             agent: AgentPanelState::new(),
-            #[cfg(not(target_arch = "wasm32"))]
             replay: ReplayTheater::new(),
-            #[cfg(not(target_arch = "wasm32"))]
             replay_open: false,
-            #[cfg(not(target_arch = "wasm32"))]
             replay_path: String::new(),
-            #[cfg(not(target_arch = "wasm32"))]
             replay_error: String::new(),
+            store: Box::new(crate::store::default_store()),
             drc: DrcResults::new(),
             zoom_to_selected_violation: false,
             netlight: Netlight::new(),
@@ -862,8 +851,8 @@ impl App {
     ///
     /// The state machine and the narration feed live in [`crate::agent_panel`];
     /// this is glue only. The panel drives a scripted transcript (no model or
-    /// key), so Run always has something honest to narrate.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// key), so Run always has something honest to narrate. Model-free, so it
+    /// runs on wasm too.
     fn agent_section(&mut self, ui: &mut egui::Ui) {
         use crate::agent_panel::RunState;
 
@@ -926,20 +915,12 @@ impl App {
             });
     }
 
-    /// The web build's agent panel stub: the command API is native-only today.
-    #[cfg(target_arch = "wasm32")]
-    fn agent_section(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Agent");
-        ui.label("Agent runs are native-only in this build.");
-    }
-
     /// Installs a verify step's violation list into the DRC panel and overlay.
     ///
     /// Called whenever a running agent feed (or the replay theater) crosses a
     /// `run_drc` record: the list parsed from the recorded response replaces the
     /// panel's stored violations, so the markers on the canvas track the
     /// agent's propose-verify-correct loop in real time.
-    #[cfg(not(target_arch = "wasm32"))]
     fn apply_agent_drc_update(&mut self, violations: Vec<reticle_model::Violation>) {
         let n = violations.len();
         self.drc.set_violations(violations);
@@ -953,7 +934,6 @@ impl App {
     /// Applies a theater seek/step result to the DRC overlay: install the list
     /// the new position implies, or clear the markers when no verify has run
     /// yet at that point of the transcript.
-    #[cfg(not(target_arch = "wasm32"))]
     fn apply_replay_overlay(&mut self, update: Option<Vec<reticle_model::Violation>>) {
         match update {
             Some(v) => self.apply_agent_drc_update(v),
@@ -961,25 +941,30 @@ impl App {
         }
     }
 
-    /// Loads the transcript JSONL named in the theater's path box.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// Loads the transcript named in the theater's path box through the platform
+    /// [`store`](crate::store).
+    ///
+    /// On native this reads the JSONL file at that path. On wasm there is no
+    /// filesystem, so the store returns `Ok(None)` and the theater keeps its
+    /// bundled transcript, explaining that arbitrary paths are native-only.
     fn load_replay_from_path(&mut self) {
-        let path = self.replay_path.trim().to_owned();
-        if path.is_empty() {
-            "Enter a transcript .jsonl path".clone_into(&mut self.replay_error);
-            return;
-        }
-        match std::fs::read_to_string(&path) {
-            Ok(text) => match self.replay.load_jsonl(&text) {
-                Ok(()) => {
-                    self.replay_error.clear();
-                    self.drc.clear();
-                    let (_, total) = self.replay.progress();
-                    self.status.set(format!("Replay: loaded {total} record(s)"));
-                }
-                Err(e) => self.replay_error = format!("Parse failed: {e}"),
-            },
-            Err(e) => self.replay_error = format!("Read failed: {e}"),
+        let reference = self.replay_path.clone();
+        match self.store.load_reference(&reference) {
+            Ok(Some((records, hash))) => {
+                self.replay.load(records, hash);
+                self.replay_error.clear();
+                self.drc.clear();
+                let (_, total) = self.replay.progress();
+                self.status.set(format!("Replay: loaded {total} record(s)"));
+            }
+            Ok(None) => {
+                format!(
+                    "Loading a transcript by path is native-only ({} build). Playing the bundled demo.",
+                    self.store.origin_label()
+                )
+                .clone_into(&mut self.replay_error);
+            }
+            Err(message) => self.replay_error = message,
         }
     }
 
@@ -990,7 +975,6 @@ impl App {
     /// re-executes the transcript against a live engine session, so the canvas
     /// here shows real replayed geometry, and each `run_drc` record it crosses
     /// pushes its recorded violation list into the shared DRC overlay.
-    #[cfg(not(target_arch = "wasm32"))]
     fn replay_window(&mut self, ctx: &egui::Context) {
         if !self.replay_open {
             return;
@@ -1012,7 +996,6 @@ impl App {
     }
 
     /// The theater's load row: a JSONL path, or the built-in scripted demo run.
-    #[cfg(not(target_arch = "wasm32"))]
     fn replay_load_row(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Transcript:");
@@ -1034,7 +1017,6 @@ impl App {
 
     /// The theater's transport row: restart, step back, play/pause, step
     /// forward, and the speed selector.
-    #[cfg(not(target_arch = "wasm32"))]
     fn replay_transport_row(&mut self, ui: &mut egui::Ui) {
         use crate::replay::SPEEDS;
 
@@ -1092,7 +1074,6 @@ impl App {
 
     /// The theater's readouts: progress, shape count, hash verdict, violation
     /// count, and the "now playing" narration line.
-    #[cfg(not(target_arch = "wasm32"))]
     fn replay_readouts(&mut self, ui: &mut egui::Ui) {
         use crate::replay::HashCheck;
 
@@ -1129,7 +1110,6 @@ impl App {
 
     /// Paints the replayed document (and the last verify's violation markers)
     /// into the theater window, letterboxed by a [`crate::replay::FitView`].
-    #[cfg(not(target_arch = "wasm32"))]
     fn replay_canvas(&self, ui: &mut egui::Ui) {
         use crate::replay::{FitView, shapes_bbox};
 
@@ -1210,7 +1190,6 @@ impl App {
 
     /// Draws the agent's cursor: a distinct ringed crosshair plus the agent's
     /// actor name, so it cannot be mistaken for a collaborator's presence dot.
-    #[cfg(not(target_arch = "wasm32"))]
     fn draw_agent_cursor(&self, painter: &egui::Painter, screen: &ScreenRect) {
         if self.agent.state() == crate::agent_panel::RunState::Idle {
             return;
@@ -1540,7 +1519,6 @@ impl App {
             self.draw_minimap(&painter, &screen);
         }
         self.draw_presence(&painter, &screen);
-        #[cfg(not(target_arch = "wasm32"))]
         self.draw_agent_cursor(&painter, &screen);
 
         // Mark the focused pane when split (drawn unclipped so the full border
@@ -2301,7 +2279,6 @@ impl eframe::App for App {
         // crosses hands back the violation list parsed from its `run_drc`
         // response, and installing it in the DRC results updates the panel list
         // and the canvas markers live, mid-run.
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(update) = self.agent.tick(dt) {
             self.apply_agent_drc_update(update);
         }
@@ -2309,7 +2286,6 @@ impl eframe::App for App {
         // Advance replay-theater playback the same way; a playing transcript
         // updates the theater canvas and the DRC overlay as it crosses
         // verifies.
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(update) = self.replay.tick(dt) {
             self.apply_agent_drc_update(update);
         }
@@ -2371,7 +2347,6 @@ impl eframe::App for App {
             &self.layer_state,
         );
         self.keymap_window(&ctx);
-        #[cfg(not(target_arch = "wasm32"))]
         self.replay_window(&ctx);
 
         // Keep animating while dragging/measuring so interaction feels live.

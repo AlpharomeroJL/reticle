@@ -33,11 +33,11 @@ reticle-drc = { workspace = true }
 reticle-extract = { workspace = true }
 
 # The agent panel and the replay theater drive the frozen agent command API
-# (`Session`, `Transcript`, `AgentCommand`). That crate does not compile for
-# wasm32 today: its `render_png` command calls the native-only blocking GPU
-# context in `reticle-render`. Both features are therefore native-only and the
-# corresponding modules are cfg-gated out of the web build.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# (`Session`, `Transcript`, `AgentCommand`). `reticle-agent-api` builds for wasm32
+# (its `render_png` command degrades to a clean error there rather than calling the
+# native-only blocking GPU context), so the replay theater now compiles and runs on
+# the web too: native reads transcripts from the filesystem and wasm plays a bundled
+# transcript (see `crate::store`). Both deps are therefore unconditional.
 reticle-agent-api = { workspace = true }
 serde_json = { workspace = true }
 

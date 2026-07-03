@@ -7,6 +7,8 @@
     "test": "playwright test",
     "test:webgl2": "playwright test --project=webgl2",
     "test:webgpu": "playwright test --project=webgpu",
+    "test:subpath": "playwright test --project=ghpages-subpath",
+    "subpath-check": "node subpath-check.mjs",
     "probe": "node probe-capability.mjs"
   },
   "devDependencies": {
