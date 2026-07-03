@@ -105,6 +105,14 @@ impl AnthropicModel {
         Ok(Self::with_key(key))
     }
 
+    /// Builds a client around an explicit [`ApiKey`], for cross-module tests (the
+    /// key-redaction full-loop test in [`crate::run`]). Test-only.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn for_test(key: ApiKey) -> Self {
+        Self::with_key(key)
+    }
+
     /// Builds a client around an explicit [`ApiKey`] and the real HTTP transport.
     fn with_key(key: ApiKey) -> Self {
         Self {

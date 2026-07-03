@@ -2,11 +2,11 @@
 //!
 //! The one secret this crate handles is the Anthropic API key, read from the
 //! environment (never from a file or a flag). It is held in an [`ApiKey`] whose
-//! [`Debug`] and [`Display`] impls print a fixed placeholder, so a stray
-//! `println!("{key:?}")`, a `serde_json` of a struct that embeds it, or a panic
-//! message can never leak it. [`redact`] additionally scrubs the raw key value
-//! out of any free text (an error string from the HTTP client, a response body)
-//! before it is written anywhere durable.
+//! [`Debug`](std::fmt::Debug) and [`Display`](std::fmt::Display) impls print a fixed
+//! placeholder, so a stray `println!("{key:?}")`, a `serde_json` of a struct that
+//! embeds it, or a panic message can never leak it. [`redact`] additionally scrubs the
+//! raw key value out of any free text (an error string from the HTTP client, a response
+//! body) before it is written anywhere durable.
 
 use std::fmt;
 
@@ -18,9 +18,10 @@ pub const REDACTED: &str = "[REDACTED]";
 ///
 /// Construct it from the environment with [`ApiKey::from_env`]. The inner secret
 /// is reachable only through [`ApiKey::expose`], which the HTTP client calls to
-/// set the `x-api-key` header; every other path ([`Debug`], [`Display`]) yields
-/// [`REDACTED`]. The type is deliberately **not** `Serialize`, so it cannot be
-/// embedded in a transcript or result record even by accident.
+/// set the `x-api-key` header; every other path ([`Debug`](std::fmt::Debug),
+/// [`Display`](std::fmt::Display)) yields [`REDACTED`]. The type is deliberately
+/// **not** `Serialize`, so it cannot be embedded in a transcript or result record even
+/// by accident.
 #[derive(Clone)]
 pub struct ApiKey(String);
 
