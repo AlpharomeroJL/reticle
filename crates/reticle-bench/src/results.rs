@@ -206,6 +206,8 @@ mod tests {
             first_proposal_violations: first,
             final_violations: final_v,
             wall_ms: 3,
+            backend: "mock".into(),
+            quantization: None,
         }
     }
 

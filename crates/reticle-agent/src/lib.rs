@@ -40,4 +40,4 @@ pub mod run;
 pub use collab::{AgentCollaborator, Pacing, StepReport};
 pub use model::{AnthropicModel, BuildError, DEFAULT_BASE_URL, DEFAULT_MODEL, HttpTransport};
 pub use redact::{ApiKey, REDACTED};
-pub use run::{Artifacts, LoopOptions, RunOutcome, run_agent_task};
+pub use run::{Artifacts, LoopOptions, Provenance, RunOutcome, run_agent_task};
