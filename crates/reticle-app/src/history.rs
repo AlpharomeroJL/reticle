@@ -14,9 +14,24 @@ use reticle_model::{Document, DocumentStore, Edit, EditableDocument, Result};
 /// This is the single source of truth for the layout the user edits (as opposed to
 /// the read-only demo the canvas starts from). It owns an [`EditableDocument`] and
 /// forwards edits to it.
+///
+/// # Grouped edits
+///
+/// The underlying [`EditableDocument`] records one undo step per [`Edit`]. A single
+/// user action can be several edits (a boolean removes its inputs and adds one
+/// result), and those must undo together. [`History::apply_group`] applies a batch
+/// as one logical step by remembering how many underlying steps it added; `undo`
+/// and `redo` then move over the whole group at once. Grouping lives here in the
+/// app layer, not in the frozen model `Edit` vocabulary.
 #[derive(Debug)]
 pub struct History {
     doc: EditableDocument,
+    /// Size (in underlying edits) of each logical undo step still on the undo
+    /// stack. A plain [`History::apply`] pushes `1`; [`History::apply_group`] pushes
+    /// the batch length. `undo` pops one entry and steps the store that many times.
+    undo_groups: Vec<usize>,
+    /// The mirror of [`History::undo_groups`] for the redo stack.
+    redo_groups: Vec<usize>,
 }
 
 impl Default for History {
@@ -31,6 +46,8 @@ impl History {
     pub fn new(document: Document) -> Self {
         Self {
             doc: EditableDocument::new(document),
+            undo_groups: Vec::new(),
+            redo_groups: Vec::new(),
         }
     }
 
@@ -49,48 +66,106 @@ impl History {
         self.doc.revision()
     }
 
-    /// Applies `edit`, pushing it onto the undo stack.
+    /// Applies `edit` as one undo step, pushing it onto the undo stack.
     ///
     /// # Errors
     ///
     /// Propagates any [`reticle_model::ModelError`] from the underlying store (for
     /// example an edit that references a missing cell).
     pub fn apply(&mut self, edit: Edit) -> Result<()> {
-        self.doc.apply(edit)
+        self.doc.apply(edit)?;
+        self.undo_groups.push(1);
+        self.redo_groups.clear();
+        Ok(())
     }
 
-    /// Undoes the most recent edit, returning `true` if there was one to undo.
+    /// Applies `edits` in order as a single logical undo step, so one `undo` reverses
+    /// the whole batch (and one `redo` re-applies it). This is how a boolean lands as
+    /// one step: the removals of its inputs plus the addition of its result.
+    ///
+    /// Applies greedily. If some edit in the middle fails, the edits already applied
+    /// stay applied but are demoted to individual undo steps (so the document is
+    /// never left in a half-grouped state), and the error is returned. Callers should
+    /// build batches that cannot partially fail (see the index ordering note on
+    /// [`Edit::RemoveShape`]).
+    ///
+    /// An empty batch is a no-op and records nothing.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the first [`reticle_model::ModelError`] from the underlying store.
+    pub fn apply_group(&mut self, edits: Vec<Edit>) -> Result<()> {
+        if edits.is_empty() {
+            return Ok(());
+        }
+        let mut applied = 0usize;
+        for edit in edits {
+            match self.doc.apply(edit) {
+                Ok(()) => applied += 1,
+                Err(e) => {
+                    // Demote the partial batch to individual steps and surface the
+                    // error; the document reflects exactly the edits that landed.
+                    for _ in 0..applied {
+                        self.undo_groups.push(1);
+                    }
+                    self.redo_groups.clear();
+                    return Err(e);
+                }
+            }
+        }
+        self.undo_groups.push(applied);
+        self.redo_groups.clear();
+        Ok(())
+    }
+
+    /// Undoes the most recent logical step (a whole group), returning `true` if there
+    /// was one to undo.
     pub fn undo(&mut self) -> bool {
-        self.doc.undo()
+        let Some(steps) = self.undo_groups.pop() else {
+            return false;
+        };
+        for _ in 0..steps {
+            self.doc.undo();
+        }
+        self.redo_groups.push(steps);
+        true
     }
 
-    /// Redoes the most recently undone edit, returning `true` if there was one.
+    /// Redoes the most recently undone logical step (a whole group), returning `true`
+    /// if there was one.
     pub fn redo(&mut self) -> bool {
-        self.doc.redo()
+        let Some(steps) = self.redo_groups.pop() else {
+            return false;
+        };
+        for _ in 0..steps {
+            self.doc.redo();
+        }
+        self.undo_groups.push(steps);
+        true
     }
 
-    /// The number of edits currently on the undo stack.
+    /// The number of logical steps currently on the undo stack.
     #[must_use]
     pub fn undo_depth(&self) -> usize {
-        self.doc.undo_depth()
+        self.undo_groups.len()
     }
 
-    /// The number of edits currently on the redo stack.
+    /// The number of logical steps currently on the redo stack.
     #[must_use]
     pub fn redo_depth(&self) -> usize {
-        self.doc.redo_depth()
+        self.redo_groups.len()
     }
 
-    /// Whether there is at least one edit to undo.
+    /// Whether there is at least one step to undo.
     #[must_use]
     pub fn can_undo(&self) -> bool {
-        self.doc.undo_depth() > 0
+        !self.undo_groups.is_empty()
     }
 
-    /// Whether there is at least one edit to redo.
+    /// Whether there is at least one step to redo.
     #[must_use]
     pub fn can_redo(&self) -> bool {
-        self.doc.redo_depth() > 0
+        !self.redo_groups.is_empty()
     }
 }
 
@@ -171,6 +246,52 @@ mod tests {
         assert!(h.document().cell("A").is_some());
         h.undo();
         assert!(h.document().cell("A").is_none());
+    }
+
+    #[test]
+    fn apply_group_is_one_undo_step() {
+        let mut h = History::new(demo::demo_document());
+        let before = h.document().cell(demo::TOP_CELL).unwrap().shapes.len();
+        // Two adds applied as one logical group.
+        h.apply_group(vec![
+            Edit::AddShape {
+                cell: demo::TOP_CELL.to_owned(),
+                shape: shape(),
+            },
+            Edit::AddShape {
+                cell: demo::TOP_CELL.to_owned(),
+                shape: shape(),
+            },
+        ])
+        .unwrap();
+        assert_eq!(
+            h.document().cell(demo::TOP_CELL).unwrap().shapes.len(),
+            before + 2
+        );
+        // One logical step, not two.
+        assert_eq!(h.undo_depth(), 1);
+        // A single undo reverses the whole group.
+        assert!(h.undo());
+        assert_eq!(
+            h.document().cell(demo::TOP_CELL).unwrap().shapes.len(),
+            before
+        );
+        assert_eq!(h.undo_depth(), 0);
+        assert_eq!(h.redo_depth(), 1);
+        // And a single redo re-applies the whole group.
+        assert!(h.redo());
+        assert_eq!(
+            h.document().cell(demo::TOP_CELL).unwrap().shapes.len(),
+            before + 2
+        );
+    }
+
+    #[test]
+    fn empty_group_is_noop() {
+        let mut h = History::new(demo::demo_document());
+        h.apply_group(Vec::new()).unwrap();
+        assert_eq!(h.undo_depth(), 0);
+        assert!(!h.can_undo());
     }
 
     #[test]
