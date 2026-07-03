@@ -3999,8 +3999,12 @@ dependencies = [
 name = "reticle-demo"
 version = "4.0.0"
 dependencies = [
+ "axum",
+ "http-body-util",
  "serde",
  "serde_json",
+ "tokio",
+ "tower",
 ]
 
 [[package]]
