@@ -17,6 +17,10 @@
 - [Collaboration](collaboration.md)
 - [Scripting](scripting.md)
 
+# Automation and agents
+
+- [Agent benchmark suite](benchmarks.md)
+
 # Reference
 
 - [Performance methodology](performance.md)
