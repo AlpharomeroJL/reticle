@@ -67,10 +67,10 @@ produce v5.0.0.
 - [x] Lane B: intent checker in reticle-extract, oracle tests both directions. done-gate-green, merged. check_intent(doc,cell,spec)->IntentReport + sky130_connection_rules; 10 tests incl. two-direction perturbation proptests (break->open, bridge->short). TODO: wire agent-api CheckIntent (Lane A stub) to this.
 - [x] Lane C: pins and labels through model and io, GDS TEXT round-trip. done-gate-green, merged. GDSII TEXT<->Label import/export + OASIS label subset (v3); 8 tests; anchors collapse to Center through GDS (gds21 presentation fields private), preserved in OASIS.
 - [x] Lane D: SKY130 DRC subset over reticle-drc, coverage table, per-rule fixtures. done-gate-green, merged. sky130_drc_rules() loads 26 cited rules from the toml; 24 tests (9 both-direction); coverage page in the book. toml pinned =1.1.2.
-- [~] Lane E: sky130_fd_sc_hd cell import, corpus samples, DRC-clean gate. in-progress @ lane/1e-cells
-- [~] Lane F: benchmark infrastructure, mock model, `just bench-agent`. in-progress @ lane/1f-bench
-- [~] Lane G: demo server with enforced limits, abuse tests. in-progress @ lane/1g-demo
-- [~] Lane H: 3D stack with true SKY130 thicknesses. in-progress @ lane/1h-stack3d
+- [~] Lane E: sky130_fd_sc_hd cell import. in-progress @ lane/1e-cells (INTERRUPTED by session limit). Committed: fetch script c0babec. Uncommitted in worktree: reticle-io Cargo.toml deps, corpus/sky130/ cells, a throwaway probe_tmp.rs (delete). REMAINING: round-trip test, DRC run, corpus commit + attribution.
+- [~] Lane F: benchmark infrastructure. in-progress @ lane/1f-bench (INTERRUPTED). No commits yet; large uncommitted impl in worktree: src/{checkers,loader,main,model,results,runner,scripts}.rs, benchmarks/ dir, lib.rs+Cargo.toml. REMAINING: make it compile, tests, just bench-agent recipe, commit.
+- [~] Lane G: demo server. in-progress @ lane/1g-demo (INTERRUPTED). No commits; uncommitted in worktree: src/{error,harness,rate,server,vocab}.rs, lib.rs+Cargo.toml. REMAINING: compile, abuse tests, commit.
+- [~] Lane H: 3D stack SKY130 thicknesses. in-progress @ lane/1h-stack3d (INTERRUPTED). No commits; uncommitted in worktree: pipeline3d.rs, tests/stack3d.rs, Cargo.toml. REMAINING: compile, tests, commit.
 
 ## Wave 2: composition (three batches)
 
