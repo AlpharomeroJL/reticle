@@ -171,13 +171,40 @@ theater" (root cause confirmed by fetching the live URL).
   https://alpharomerojl.github.io/reticle/ (base and both assets 200 under
   `/reticle/`). Fan-out unblocked. Pages postmortem in docs/STATUS.md.
 
-## Wave 2: editor and UI feature expansion (parallel, 8 lanes) [not-started]
+## Local benchmark (packet step 3, in progress)
 
-- [ ] 2A drawing and vertex editing; 2B boolean/transform ops in UI; 2C
-  productivity editing (copy/cut/paste/array/via-stack); 2D snapping and guides;
-  2E layer and technology editing UI; 2F search and selection depth; 2G view and
-  export polish (light theme, bookmarks, PNG/SVG export, mono print); 2H in-app
-  agent UX upgrades. Each ships tests and its mdbook section.
+- [x] gpt-oss:16k (MXFP4) full 63-task run DONE and committed under
+  benchmarks/results/gpt-oss-16k/. Measured 42/63 = 67% overall (Tier 1 100%,
+  Tier 2 91%, Tier 3 60%, Tier 4 25%, Tier 5 60%; mean 1.76 iterations). Honest
+  local baseline, labeled by backend/model/quantization. Not deterministic;
+  transcript-replay determinism is unaffected (it replays recorded transcripts).
+- [~] qwen2.5-coder:16k (Q4_K_M) comparison run: launched locally (does not use the
+  Anthropic API). Results to benchmarks/results/qwen25-coder-16k/.
+- [ ] Consolidated two-model summary table into the benchmark chapter once both
+  runs are committed.
+
+## Wave 2: editor and UI feature expansion (8 lanes, 4 concurrent)
+
+Batch 1 = 2A draw, 2B boolean/transform, 2C productivity, 2D snapping.
+Batch 2 = 2E layer/tech UI, 2F search/selection, 2G view/export, 2H agent UX.
+reticle-app contract map (App fields, Tool enum, `history.apply(edit)+rebuild_scene`
+undo pattern, Selection/camera/layers/grid APIs, app.rs hotspots) is established;
+each lane owns a new module plus a minimal app.rs edit. Lane gate now includes
+`cargo doc -p reticle-app` (Wave 1 lesson: the crate-scoped gate missed intra-doc
+links). Each lane ships tests and a docs/src mdbook section.
+
+INCIDENT (session limit, 2026-07-03): Batch 1 was dispatched (worktrees
+D:/dev/reticle-lanes/v6-2a..2d exist off main 86d3eed) but all four subagents were
+killed by an Anthropic session/rate limit ("resets 10:30am America/Chicago") after
+a few tool calls each, so they did no real work; the worktrees are empty. Recorded
+recovery: local benchmark work (qwen run) is limit-safe and proceeds; re-dispatch
+Batch 1 into the existing worktrees once the limit resets. Local model runs and all
+git/file integration are limit-safe; only Claude subagents consume the limit.
+
+- [ ] 2A drawing and vertex editing; 2B boolean/transform ops; 2C productivity
+  editing; 2D snapping and guides (Batch 1, re-dispatch pending limit reset).
+- [ ] 2E layer/technology editing UI; 2F search and selection depth; 2G view and
+  export polish; 2H in-app agent UX upgrades (Batch 2).
 
 ## Wave 3: agent capability expansion (parallel, up to 6 lanes) [not-started]
 
