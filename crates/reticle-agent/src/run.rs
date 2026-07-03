@@ -726,6 +726,82 @@ mod tests {
         cleanup(&out_dir);
     }
 
+    /// A transport that returns a fixed `emit_commands` batch, so a full loop can run
+    /// through the real [`AnthropicModel`] without a network. It ignores the request
+    /// (and thus the API key header) entirely.
+    struct CannedTransport(String);
+
+    impl crate::model::HttpTransport for CannedTransport {
+        fn post_json(
+            &self,
+            _url: &str,
+            _api_key: &str,
+            _body: &serde_json::Value,
+        ) -> Result<String, String> {
+            Ok(self.0.clone())
+        }
+    }
+
+    #[test]
+    fn api_key_never_appears_in_any_written_artifact() {
+        use crate::model::AnthropicModel;
+        use crate::redact::ApiKey;
+
+        // A distinctive key that would be unmistakable if it leaked.
+        const KEY: &str = "sk-ant-LEAKTEST-0123456789abcdef";
+        // The model "returns" a clean batch that converges on the first try.
+        let response = serde_json::json!({
+            "content": [ { "type": "tool_use", "name": "emit_commands", "input": {
+                "commands": [
+                    { "op": "create_cell", "name": "top" },
+                    { "op": "add_rect", "cell": "top",
+                      "layer": { "layer": 68, "datatype": 20 },
+                      "rect": { "min": { "x": 0, "y": 0 }, "max": { "x": 500, "y": 500 } } }
+                ]
+            }}]
+        })
+        .to_string();
+
+        let mut model = AnthropicModel::for_test(ApiKey::from_raw(KEY))
+            .with_transport(Box::new(CannedTransport(response)));
+        let out_dir = unique_dir("keyleak");
+        let outcome = run_agent_task(
+            &drc_task(),
+            &mut model,
+            &CheckerRegistry::default(),
+            "",
+            "0.1.0",
+            LoopOptions::default(),
+            &out_dir,
+            0,
+            // Drive the real document-context path the CLI uses.
+            |m, session| m.set_document_context(document_summary(session)),
+        )
+        .expect("run");
+
+        assert!(outcome.record.success, "the canned clean batch should pass");
+
+        // The key must not appear in ANY written artifact: transcript, gds, result.
+        for path in [
+            &outcome.artifacts.transcript,
+            &outcome.artifacts.gds,
+            &outcome.artifacts.result,
+        ] {
+            let bytes = std::fs::read(path).expect("read artifact");
+            let needle = KEY.as_bytes();
+            let leaked = bytes.windows(needle.len()).any(|w| w == needle);
+            assert!(!leaked, "API key leaked into {}", path.display());
+        }
+        if let Some(png) = &outcome.artifacts.png {
+            let bytes = std::fs::read(png).expect("read png");
+            assert!(
+                !bytes.windows(KEY.len()).any(|w| w == KEY.as_bytes()),
+                "API key leaked into the PNG"
+            );
+        }
+        cleanup(&out_dir);
+    }
+
     #[test]
     fn unknown_checker_is_an_error() {
         let task = BenchTask {

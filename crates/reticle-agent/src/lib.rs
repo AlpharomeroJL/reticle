@@ -14,8 +14,9 @@
 //!   the model's tool-use / JSON output into [`AgentCommand`](reticle_agent_api::AgentCommand)s.
 //!   The API key is read from the environment only and never printed, serialized, or
 //!   written to any artifact (see [`redact`]).
-//! - [`redact`]: the [`ApiKey`](redact::ApiKey) wrapper that hides the secret from
-//!   every [`Debug`]/[`Display`]/serialize path, plus a text scrubber.
+//! - [`redact`]: the [`ApiKey`] wrapper that hides the secret from every
+//!   [`Debug`](std::fmt::Debug) / [`Display`](std::fmt::Display) / serialize path, plus
+//!   a text scrubber.
 //! - [`run`]: the propose-verify-correct loop and the four-artifact writer.
 //!
 //! # Reuse of `reticle-bench`
