@@ -25,3 +25,5 @@ LOD = "LOD"
 lod = "lod"
 # Paired integer pixel coordinates (ix, iy) in render tests.
 iy = "iy"
+# RFC 4648 base64 test vector ("" f fo foo foob fooba foobar) in reticle-mcp.
+fo = "fo"
