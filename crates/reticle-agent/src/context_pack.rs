@@ -679,6 +679,7 @@ rule spacing 69 20 140
             technology: "sky130.tech".into(),
             checker: "drc_clean".into(),
             intent: None,
+            refinement: None,
         };
         let out_dir =
             std::env::temp_dir().join(format!("reticle-ctxpack-hook-{}", std::process::id()));

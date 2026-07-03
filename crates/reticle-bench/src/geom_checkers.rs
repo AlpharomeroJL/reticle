@@ -2,11 +2,12 @@
 //! `intent` set.
 //!
 //! These decide *structured* layout tasks: how many shapes on a layer, how much area,
-//! a contact/via stack that actually bridges two conductors, a via chain, an
-//! interdigitated comb, a closed guard ring, and a compound cell that places
-//! sub-cells. Each is built from a [`ParsedChecker`] so the layer, counts, and
-//! thresholds come from the task's `checker` string (see [`crate::params`]); each is
-//! unit-tested in both directions.
+//! the area a planar boolean wrote to a layer (which pins union vs intersection vs
+//! difference), a regular array placed at an expected pitch, a contact/via stack that
+//! actually bridges two conductors, a via chain, an interdigitated comb, a closed guard
+//! ring, and a compound cell that places sub-cells. Each is built from a
+//! [`ParsedChecker`] so the layer, counts, and thresholds come from the task's
+//! `checker` string (see [`crate::params`]); each is unit-tested in both directions.
 //!
 //! # Connectivity
 //!
@@ -72,9 +73,10 @@ fn shapes_on_layer<'a>(
 /// Builds one of the geometric checkers from a parsed checker string, or returns the
 /// parameter error that makes the task fail to compile.
 ///
-/// The recognized names are `shape_count`, `layer_area`, `contact_stack`,
-/// `via_chain`, `comb`, `guard_ring`, and `compound_cell`. An unrecognized name
-/// yields `Ok(None)` so the caller can fall through to the built-in registry.
+/// The recognized names are `shape_count`, `layer_area`, `boolean_result`,
+/// `array_pitch`, `contact_stack`, `via_chain`, `comb`, `guard_ring`, and
+/// `compound_cell`. An unrecognized name yields `Ok(None)` so the caller can fall
+/// through to the built-in registry.
 ///
 /// # Errors
 ///
@@ -84,6 +86,8 @@ pub fn build(parsed: &ParsedChecker) -> Result<Option<Box<dyn Checker>>, ParamEr
     let checker: Box<dyn Checker> = match parsed.name() {
         "shape_count" => Box::new(ShapeCount::from_params(parsed)?),
         "layer_area" => Box::new(LayerArea::from_params(parsed)?),
+        "boolean_result" => Box::new(BooleanResult::from_params(parsed)?),
+        "array_pitch" => Box::new(ArrayPitch::from_params(parsed)?),
         "contact_stack" => Box::new(ContactStack::from_params(parsed)?),
         "via_chain" => Box::new(ViaChain::from_params(parsed)?),
         "comb" => Box::new(Comb::from_params(parsed)?),
@@ -218,6 +222,210 @@ impl Checker for LayerArea {
             ));
         }
         CheckResult::Pass
+    }
+}
+
+// --------------------------------------------------------------------------------
+// boolean_result (a planar boolean wrote its result to a layer)
+// --------------------------------------------------------------------------------
+
+/// Passes iff a planar boolean's result landed on a layer with an area inside an
+/// expected window, and (optionally) the input layer was consumed (left empty).
+///
+/// Parameters (`boolean_result:layer=68/20,min_area=175000,max_area=175000,cleared=69/20`):
+/// `layer` (required, where the result polygons are written), `min_area`/`max_area`
+/// (the inclusive DBU² window the result area must fall in; a union, an intersection,
+/// and a difference of the same two inputs produce three distinct areas, so a tight
+/// window pins which boolean was performed), and `cleared` (optional: a layer that must
+/// hold zero shapes afterward, proving the boolean *consumed* its inputs rather than
+/// leaving them lying beside a copied result).
+///
+/// `boolean_combine` deletes its inputs and writes result polygons to the target layer,
+/// so the discriminating failure mode is "drew the wrong op" (area lands outside the
+/// window) or "did not run a boolean at all" (inputs still present on `cleared`, or no
+/// area on `layer`). Area is summed with the same per-shape area used by
+/// [`LayerArea`], so a polygon result is measured by its shoelace area.
+#[derive(Clone, Copy, Debug)]
+pub struct BooleanResult {
+    /// Layer the boolean result polygons must be on.
+    layer: LayerId,
+    /// Inclusive minimum result area in DBU².
+    min_area: i64,
+    /// Inclusive maximum result area in DBU², if any.
+    max_area: Option<i64>,
+    /// A layer that must be empty afterward (the consumed inputs), if required.
+    cleared: Option<LayerId>,
+}
+
+impl BooleanResult {
+    /// Builds a boolean-result checker from parsed parameters.
+    ///
+    /// # Errors
+    ///
+    /// [`ParamError`] if `layer` is missing/malformed or a bound/`cleared` does not parse.
+    pub fn from_params(p: &ParsedChecker) -> Result<Self, ParamError> {
+        let layer = p.layer("layer")?;
+        let min_area = p.i64_or("min_area", 1)?;
+        let max_area = optional_i64(p, "max_area")?;
+        let cleared = if p.has("cleared") {
+            Some(p.layer("cleared")?)
+        } else {
+            None
+        };
+        Ok(Self {
+            layer,
+            min_area,
+            max_area,
+            cleared,
+        })
+    }
+}
+
+impl Checker for BooleanResult {
+    fn check(&self, doc: &Document, _transcript: &Transcript) -> CheckResult {
+        let Some(cell) = target_cell(doc) else {
+            return fail("document has no cell to check");
+        };
+        let total: i64 = shapes_on_layer(doc, &cell, self.layer)
+            .map(shape_area)
+            .sum();
+        if total < self.min_area {
+            return fail(format!(
+                "boolean result on {}/{} has area {total} < expected minimum {}",
+                self.layer.layer, self.layer.datatype, self.min_area
+            ));
+        }
+        if let Some(max) = self.max_area
+            && total > max
+        {
+            return fail(format!(
+                "boolean result on {}/{} has area {total} > expected maximum {max} \
+                 (the wrong boolean op, or stray input geometry, inflates the area)",
+                self.layer.layer, self.layer.datatype
+            ));
+        }
+        if let Some(cleared) = self.cleared {
+            let remaining = shapes_on_layer(doc, &cell, cleared).count();
+            if remaining > 0 {
+                return fail(format!(
+                    "input layer {}/{} still holds {remaining} shape(s); the boolean did \
+                     not consume its inputs",
+                    cleared.layer, cleared.datatype
+                ));
+            }
+        }
+        CheckResult::Pass
+    }
+}
+
+// --------------------------------------------------------------------------------
+// array_pitch (a regular array placed at an expected pitch)
+// --------------------------------------------------------------------------------
+
+/// Passes iff the target cell holds an array of at least `instances` placements whose
+/// column and row pitch match an expected pitch.
+///
+/// Parameters (`array_pitch:instances=4,pitch=800` or
+/// `array_pitch:instances=6,col_pitch=800,row_pitch=600`): `instances` (required, the
+/// minimum `columns * rows`), and the pitch, given either as one `pitch` applied to
+/// both axes or as separate `col_pitch`/`row_pitch`. A single-axis array (a row) has a
+/// span of one along the other axis, so its pitch on that axis is unconstrained and is
+/// only checked when that axis actually repeats (span > 1).
+///
+/// `place_array` records `columns`, `rows`, `column_pitch`, and `row_pitch` on an
+/// [`ArrayInstance`](reticle_model::ArrayInstance); this reads them back. Unlike
+/// [`CompoundCell`], which only counts placements, this pins the *step*: an array
+/// placed at the wrong pitch (overlapping, or too sparse) is rejected even though it
+/// has the right instance count.
+#[derive(Clone, Copy, Debug)]
+pub struct ArrayPitch {
+    /// Minimum number of placements (`columns * rows`) the array must carry.
+    instances: u32,
+    /// Expected column pitch in DBU, if constrained.
+    col_pitch: Option<i32>,
+    /// Expected row pitch in DBU, if constrained.
+    row_pitch: Option<i32>,
+}
+
+impl ArrayPitch {
+    /// Builds an array-pitch checker from parsed parameters.
+    ///
+    /// A lone `pitch` sets both axes; `col_pitch`/`row_pitch` override per axis.
+    ///
+    /// # Errors
+    ///
+    /// [`ParamError`] if `instances` is missing/malformed or a pitch does not parse.
+    pub fn from_params(p: &ParsedChecker) -> Result<Self, ParamError> {
+        let instances = p.u32("instances")?;
+        let both = optional_i32(p, "pitch")?;
+        let col_pitch = optional_i32(p, "col_pitch")?.or(both);
+        let row_pitch = optional_i32(p, "row_pitch")?.or(both);
+        Ok(Self {
+            instances,
+            col_pitch,
+            row_pitch,
+        })
+    }
+}
+
+impl Checker for ArrayPitch {
+    fn check(&self, doc: &Document, _transcript: &Transcript) -> CheckResult {
+        let Some(cell_name) = target_cell(doc) else {
+            return fail("document has no cell to check");
+        };
+        let Some(cell) = doc.cell(&cell_name) else {
+            return fail("target cell not found");
+        };
+        if cell.arrays.is_empty() {
+            return fail("target cell places no array");
+        }
+        // Accept the cell if *any* array satisfies count and pitch; report the closest
+        // miss otherwise.
+        let mut last_reason = String::from("no array in the target cell meets the count and pitch");
+        for array in &cell.arrays {
+            if array.count() < u64::from(self.instances) {
+                last_reason = format!(
+                    "array places {} instances ({}x{}), expected at least {}",
+                    array.count(),
+                    array.columns,
+                    array.rows,
+                    self.instances
+                );
+                continue;
+            }
+            if let Some(reason) = self.pitch_mismatch(array) {
+                last_reason = reason;
+                continue;
+            }
+            return CheckResult::Pass;
+        }
+        fail(last_reason)
+    }
+}
+
+impl ArrayPitch {
+    /// Returns a mismatch reason if a constrained, actually-repeating axis has the wrong
+    /// pitch, else `None`. A pitch on an axis that does not repeat (span 1) is ignored.
+    fn pitch_mismatch(&self, array: &reticle_model::ArrayInstance) -> Option<String> {
+        if let Some(want) = self.col_pitch
+            && array.columns > 1
+            && i64::from(array.column_pitch) != i64::from(want)
+        {
+            return Some(format!(
+                "array column pitch is {}, expected {want}",
+                array.column_pitch
+            ));
+        }
+        if let Some(want) = self.row_pitch
+            && array.rows > 1
+            && i64::from(array.row_pitch) != i64::from(want)
+        {
+            return Some(format!(
+                "array row pitch is {}, expected {want}",
+                array.row_pitch
+            ));
+        }
+        None
     }
 }
 
@@ -741,6 +949,22 @@ fn optional_i64(p: &ParsedChecker, key: &str) -> Result<Option<i64>, ParamError>
     }
 }
 
+/// Reads an optional `i32` parameter (absent -> `None`).
+///
+/// Parses through the checker string's `i64` accessor and narrows to `i32`, so an
+/// out-of-range value is reported as a malformed parameter rather than silently
+/// wrapping. Pitches and DBU deltas are `i32` on the model side.
+fn optional_i32(p: &ParsedChecker, key: &str) -> Result<Option<i32>, ParamError> {
+    match optional_i64(p, key)? {
+        None => Ok(None),
+        Some(v) => i32::try_from(v).map(Some).map_err(|_| ParamError::Invalid {
+            key: key.to_owned(),
+            value: v.to_string(),
+            expected: "i32",
+        }),
+    }
+}
+
 /// Shorthand for a single-reason failure.
 fn fail(reason: impl Into<String>) -> CheckResult {
     CheckResult::Fail(vec![CheckFailure::new(reason)])
@@ -752,14 +976,26 @@ mod tests {
     use crate::checker::CheckResult;
     use crate::params::ParsedChecker;
     use reticle_agent_api::Transcript;
-    use reticle_geometry::{LayerId, Point, Rect, Transform};
-    use reticle_model::{Cell, Document, DrawShape, Instance, ShapeKind};
+    use reticle_geometry::{LayerId, Point, Polygon, Rect, Transform};
+    use reticle_model::{ArrayInstance, Cell, Document, DrawShape, Instance, ShapeKind};
 
     // SKY130 layers exercised by the tests.
     const MET1: LayerId = LayerId::new(68, 20);
     const MET2: LayerId = LayerId::new(69, 20);
     const VIA1: LayerId = LayerId::new(68, 44);
     const LI1: LayerId = LayerId::new(67, 20);
+
+    /// A polygon shape on `layer` for the rectangle spanning `(x0,y0)-(x1,y1)`, used to
+    /// stand in for a planar boolean's polygon output (booleans write polygons).
+    fn poly_rect(layer: LayerId, x0: i32, y0: i32, x1: i32, y1: i32) -> DrawShape {
+        DrawShape::new(
+            layer,
+            ShapeKind::Polygon(Polygon::from_rect(Rect::new(
+                Point::new(x0, y0),
+                Point::new(x1, y1),
+            ))),
+        )
+    }
 
     /// A rectangle shape on `layer` spanning `(x0,y0)-(x1,y1)`.
     fn rect(layer: LayerId, x0: i32, y0: i32, x1: i32, y1: i32) -> DrawShape {
@@ -840,6 +1076,111 @@ mod tests {
         assert_fail("layer_area:layer=68/20,min_area=83000", &bad);
         // max_area is enforced too: 250000 exceeds a 100000 cap.
         assert_fail("layer_area:layer=68/20,max_area=100000", &good);
+    }
+
+    // ---- boolean_result ---------------------------------------------------------
+
+    #[test]
+    fn boolean_result_two_way() {
+        // Two 300x300 squares overlapping in a 100x300 strip.
+        //   A = [0,300]x[0,300]   B = [200,500]x[0,300]   overlap = [200,300]x[0,300]
+        // Areas: union = 90000 + 90000 - 30000 = 150000; intersection = 30000;
+        //        difference (A - B) = 60000. A boolean writes one polygon on met1 and
+        //        consumes the met2 inputs.
+
+        // Good (union): a 150000-area polygon on met1, met2 cleared.
+        let union = doc_with(vec![poly_rect(MET1, 0, 0, 500, 300)]); // 500*300 = 150000
+        assert_pass(
+            "boolean_result:layer=68/20,min_area=150000,max_area=150000",
+            &union,
+        );
+        assert_pass(
+            "boolean_result:layer=68/20,min_area=150000,max_area=150000,cleared=69/20",
+            &union,
+        );
+
+        // Good (intersection): a 30000-area polygon; a tight window pins the op.
+        let intersection = doc_with(vec![poly_rect(MET1, 200, 0, 300, 300)]); // 100*300
+        assert_pass(
+            "boolean_result:layer=68/20,min_area=30000,max_area=30000",
+            &intersection,
+        );
+        // The union window rejects the intersection result: the wrong op is caught.
+        assert_fail(
+            "boolean_result:layer=68/20,min_area=150000,max_area=150000",
+            &intersection,
+        );
+
+        // Bad: no result geometry at all on the target layer.
+        let empty = doc_with(vec![poly_rect(MET2, 0, 0, 500, 300)]);
+        assert_fail("boolean_result:layer=68/20,min_area=150000", &empty);
+
+        // Bad (inputs not consumed): the right-area result on met1 is present, but a met2
+        // input is still lying around, so `cleared` fails even though the area matches.
+        let not_consumed = doc_with(vec![
+            poly_rect(MET1, 0, 0, 500, 300),
+            rect(MET2, 0, 0, 300, 300),
+        ]);
+        assert_pass(
+            "boolean_result:layer=68/20,min_area=150000,max_area=150000",
+            &not_consumed,
+        );
+        assert_fail(
+            "boolean_result:layer=68/20,min_area=150000,max_area=150000,cleared=69/20",
+            &not_consumed,
+        );
+    }
+
+    // ---- array_pitch ------------------------------------------------------------
+
+    /// A one-cell document whose top cell places a single array of `columns`x`rows`
+    /// instances of an (empty) leaf cell at the given pitches.
+    fn doc_with_array(columns: u32, rows: u32, column_pitch: i32, row_pitch: i32) -> Document {
+        let mut leaf = Cell::new("leaf");
+        leaf.shapes.push(rect(MET1, 0, 0, 200, 200));
+        let mut top = Cell::new("top");
+        top.arrays.push(ArrayInstance {
+            cell: "leaf".into(),
+            transform: Transform::IDENTITY,
+            columns,
+            rows,
+            column_pitch,
+            row_pitch,
+        });
+        let mut doc = Document::new();
+        doc.insert_cell(leaf);
+        doc.insert_cell(top);
+        doc.set_top_cells(vec!["top".into()]);
+        doc
+    }
+
+    #[test]
+    fn array_pitch_two_way() {
+        // Good: a 1x4 row at pitch 800 satisfies instances=4 and the column pitch. The
+        // row axis has span 1, so its pitch is unconstrained.
+        let row4 = doc_with_array(4, 1, 800, 0);
+        assert_pass("array_pitch:instances=4,pitch=800", &row4);
+        assert_pass("array_pitch:instances=4,col_pitch=800", &row4);
+        // Bad: same count, wrong column pitch (500, not 800).
+        let row4_wrong = doc_with_array(4, 1, 500, 0);
+        assert_fail("array_pitch:instances=4,pitch=800", &row4_wrong);
+        // Bad: right pitch but too few instances (a 1x2 row, need 4).
+        let row2 = doc_with_array(2, 1, 800, 0);
+        assert_fail("array_pitch:instances=4,pitch=800", &row2);
+
+        // Good: a 3x2 grid at 800x600 meets instances=6 and both pitches.
+        let grid = doc_with_array(3, 2, 800, 600);
+        assert_pass("array_pitch:instances=6,col_pitch=800,row_pitch=600", &grid);
+        // Bad: the row pitch is wrong (700, not 600), and that axis actually repeats.
+        let grid_wrong_row = doc_with_array(3, 2, 800, 700);
+        assert_fail(
+            "array_pitch:instances=6,col_pitch=800,row_pitch=600",
+            &grid_wrong_row,
+        );
+
+        // Bad: the target cell places no array at all.
+        let no_array = doc_with(vec![rect(MET1, 0, 0, 200, 200)]);
+        assert_fail("array_pitch:instances=4,pitch=800", &no_array);
     }
 
     // ---- contact_stack ----------------------------------------------------------
@@ -1037,5 +1378,8 @@ mod tests {
         assert!(build(&ParsedChecker::parse("shape_count:min=3")).is_err());
         assert!(build(&ParsedChecker::parse("contact_stack")).is_err());
         assert!(build(&ParsedChecker::parse("via_chain:via=68/44")).is_err());
+        // boolean_result needs a result layer; array_pitch needs an instance count.
+        assert!(build(&ParsedChecker::parse("boolean_result:min_area=1000")).is_err());
+        assert!(build(&ParsedChecker::parse("array_pitch:pitch=800")).is_err());
     }
 }

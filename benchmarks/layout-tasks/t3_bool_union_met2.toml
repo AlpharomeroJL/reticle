@@ -1,0 +1,5 @@
+id = "t3_bool_union_met2"
+tier = 3
+prompt = "Create a cell named top. Draw two overlapping met1 (68/20) rectangles: a 300x300 square with its lower-left corner at (0,0) and a second 300x300 square with its lower-left corner at (200,0). Union them into a single shape written to met2 (69/20), consuming the two met1 inputs so the met1 layer is left empty."
+technology = "sky130.tech"
+checker = "boolean_result:layer=69/20,min_area=149000,max_area=151000,cleared=68/20"
