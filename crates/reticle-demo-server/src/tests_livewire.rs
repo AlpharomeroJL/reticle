@@ -178,7 +178,18 @@ async fn demo_server_drives_the_harness_and_cancel_stops_it() {
     // The running session reaches Cancelled server-side.
     let cancelled = poll_until(&server, &submitted.session_id, SessionState::Cancelled).await;
     assert_eq!(cancelled.state, SessionState::Cancelled);
-    assert_eq!(server.state().global_active(), 0, "the slot is released");
+    // The concurrency slot is released when the harness task finishes unwinding
+    // after cancel, which can lag the Cancelled state transition by a scheduler
+    // tick; wait for the release rather than asserting on the exact instant.
+    let mut released = false;
+    for _ in 0..40 {
+        if server.state().global_active() == 0 {
+            released = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(released, "the slot is released after cancel");
 }
 
 /// Drives the composed router with one in-process request.
