@@ -37,6 +37,7 @@ use crate::minimap::MinimapLayout;
 use crate::netlight::{Generation, Netlight};
 use crate::replay::ReplayTheater;
 use crate::selection::{self, Selection};
+use crate::snap::{self, Guide, SnapHint, SnapState};
 use crate::tool::{Tool, ToolState};
 use crate::viewports::{self, Split, Viewports};
 /// A transient status message shown in the bottom bar.
@@ -85,6 +86,15 @@ pub struct App {
     selection: Selection,
     /// Grid, snapping, and ruler settings.
     grid: GridSettings,
+    /// Geometry-snap settings and the user guides, plus the last frame's snap hint
+    /// so the canvas can draw the snap indicator where the cursor caught geometry.
+    snap: SnapState,
+    /// The snap indicator to draw this frame, recomputed each hover from the cursor
+    /// (see [`App::snap_world`]). `None` when the cursor caught nothing.
+    snap_hint: Option<SnapHint>,
+    /// An in-progress guide drag: the axis being pulled from a ruler. `Some` from
+    /// the press inside a ruler bar until the pointer is released on the canvas.
+    dragging_guide: Option<crate::snap::Axis>,
     /// Whether the canvas text-label overlay (cell names, selection captions, live
     /// dimensions) is drawn.
     labels_visible: bool,
@@ -202,6 +212,12 @@ impl StartView {
     }
 }
 
+/// The thickness, in screen pixels, of the top and left ruler bars.
+///
+/// Shared by the ruler drawing and the guide-drag hit-test so a drag that begins
+/// inside a bar lines up exactly with the painted ruler.
+const RULER_BAR: f32 = 18.0;
+
 impl Default for App {
     fn default() -> Self {
         Self::new()
@@ -273,6 +289,9 @@ impl App {
             layer_state,
             selection: Selection::new(),
             grid: GridSettings::default(),
+            snap: SnapState::default(),
+            snap_hint: None,
+            dragging_guide: None,
             labels_visible: true,
             minimap_visible: true,
             viewports: Viewports::new(),
@@ -1246,6 +1265,73 @@ impl App {
         }
     }
 
+    /// Draws the snap and guides settings section.
+    ///
+    /// Surfaces the grid and snap toggles (grid on/off, snap-to-grid,
+    /// snap-to-geometry, snap-to-guides), the grid spacing and snap radius, and the
+    /// list of user guides with per-guide remove buttons plus add and clear
+    /// actions. Grid facts live on [`crate::grid::GridSettings`] and the rest on
+    /// [`crate::snap::SnapState`]; this panel edits both in place.
+    fn snap_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Snap and guides");
+        ui.checkbox(&mut self.grid.visible, "Show grid");
+        ui.checkbox(&mut self.grid.snap_enabled, "Snap to grid");
+        ui.checkbox(&mut self.snap.geometry_enabled, "Snap to geometry");
+        ui.checkbox(&mut self.snap.guide_enabled, "Snap to guides");
+
+        ui.horizontal(|ui| {
+            ui.label("Grid spacing (DBU):");
+            ui.add(egui::DragValue::new(&mut self.grid.base_step_dbu).range(1..=1_000_000));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Snap radius (px):");
+            ui.add(
+                egui::Slider::new(
+                    &mut self.snap.radius_px,
+                    snap::MIN_RADIUS_PX..=snap::MAX_RADIUS_PX,
+                )
+                .integer(),
+            );
+        });
+
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label(format!("Guides: {}", self.snap.guides.len()));
+            if ui.button("Add H").clicked() {
+                let y = self.camera.center().y;
+                self.snap.add_guide(Guide::horizontal(y));
+                self.status.set(format!("Guide y = {y}"));
+            }
+            if ui.button("Add V").clicked() {
+                let x = self.camera.center().x;
+                self.snap.add_guide(Guide::vertical(x));
+                self.status.set(format!("Guide x = {x}"));
+            }
+            if ui.button("Clear").clicked() {
+                self.snap.clear_guides();
+            }
+        });
+        ui.label("Drag from a ruler to add a guide.");
+
+        // The guide to delete after the loop, so the list is not mutated mid-walk.
+        let mut remove: Option<usize> = None;
+        for (i, g) in self.snap.guides.iter().enumerate() {
+            ui.horizontal(|ui| {
+                let text = match g.axis {
+                    snap::Axis::Horizontal => format!("y = {}", g.coord),
+                    snap::Axis::Vertical => format!("x = {}", g.coord),
+                };
+                ui.monospace(text);
+                if ui.small_button("x").clicked() {
+                    remove = Some(i);
+                }
+            });
+        }
+        if let Some(i) = remove {
+            self.snap.remove_guide(i);
+        }
+    }
+
     /// Draws the properties inspector section for the current selection.
     fn inspector_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Properties");
@@ -1484,6 +1570,7 @@ impl App {
             self.process_canvas_input(ui.ctx(), &response, &screen);
         } else {
             self.cursor_world = None;
+            self.snap_hint = None;
         }
 
         // Draw grid + rulers under the geometry.
@@ -1510,8 +1597,12 @@ impl App {
         self.draw_net_highlight(&painter, &screen, viewport);
         self.draw_drc_markers(&painter, &screen);
 
+        // User guides under the ruler bars, then the rulers cover their ends.
+        self.draw_guides(&painter, &screen);
         self.draw_rulers(&painter, &screen);
         self.draw_measure(&painter, &screen);
+        // The snap indicator rides on top so it is never hidden by geometry.
+        self.draw_snap_indicator(&painter, &screen);
         if self.labels_visible {
             self.draw_labels(&painter, &screen);
         }
@@ -1597,12 +1688,24 @@ impl App {
         response: &egui::Response,
         screen: &ScreenRect,
     ) {
-        // Track the cursor world position (snapped) for the status bar.
+        // Track the cursor world position (snapped) for the status bar, and stash
+        // the snap hint so the canvas can draw the snap indicator this frame.
         if let Some(pos) = response.hover_pos() {
             let raw = self.camera.screen_to_world(screen, pos.x, pos.y);
-            self.cursor_world = Some(self.grid.snap(raw));
+            let (snapped, hint) = self.snap_world(raw);
+            self.cursor_world = Some(snapped);
+            self.snap_hint = hint;
         } else {
             self.cursor_world = None;
+            self.snap_hint = None;
+        }
+
+        // Guide drag: a drag that begins inside a ruler bar pulls out a guide line.
+        // While such a drag is live it owns the pointer, so no tool acts on it; on
+        // release the guide is dropped at the cursor (grid-snapped). Handled before
+        // every tool so the ruler always wins the gesture.
+        if self.handle_guide_drag(response, screen) {
+            return;
         }
 
         // Minimap navigation: a click or drag inside the panel recenters the view
@@ -1642,7 +1745,7 @@ impl App {
                     && let Some(pos) = response.interact_pointer_pos()
                 {
                     let raw = self.camera.screen_to_world(screen, pos.x, pos.y);
-                    let world = self.grid.snap(raw);
+                    let (world, _) = self.snap_world(raw);
                     let dpm = self.dbu_per_micron();
                     if let Some(m) = self.tools.measure_click(world, dpm) {
                         self.status.set(format!(
@@ -1659,7 +1762,7 @@ impl App {
                     && let Some(pos) = response.interact_pointer_pos()
                 {
                     let raw = self.camera.screen_to_world(screen, pos.x, pos.y);
-                    let world = self.grid.snap(raw);
+                    let (world, _) = self.snap_world(raw);
                     if let Some((a, b)) = self.tools.cutline_click(world) {
                         self.status
                             .set(format!("Cut ({}, {}) -> ({}, {})", a.x, a.y, b.x, b.y));
@@ -1731,6 +1834,61 @@ impl App {
         let current = response.hover_pos()?;
         let delta = response.drag_delta();
         Some(Pos2::new(current.x - delta.x, current.y - delta.y))
+    }
+
+    /// The guide axis a screen point sits over, if it is inside a ruler bar.
+    ///
+    /// A press inside the top bar (but past the top-left corner square) starts a
+    /// horizontal guide; a press inside the left bar starts a vertical one. The
+    /// shared corner square belongs to neither, so a drag from it starts no guide.
+    fn ruler_axis_at(screen: &ScreenRect, x: f32, y: f32) -> Option<snap::Axis> {
+        let in_top = y >= screen.top && y < screen.top + RULER_BAR;
+        let in_left = x >= screen.left && x < screen.left + RULER_BAR;
+        if in_left && y >= screen.top + RULER_BAR {
+            Some(snap::Axis::Vertical)
+        } else if in_top && x >= screen.left + RULER_BAR {
+            Some(snap::Axis::Horizontal)
+        } else {
+            None
+        }
+    }
+
+    /// Handles pulling a guide off a ruler; returns whether it consumed the input.
+    ///
+    /// Starting a drag inside a ruler bar arms a guide drag ([`App::dragging_guide`])
+    /// and consumes every event until release, so no tool sees the gesture. On
+    /// release the guide is committed at the grid-snapped release coordinate.
+    fn handle_guide_drag(&mut self, response: &egui::Response, screen: &ScreenRect) -> bool {
+        if response.drag_started()
+            && let Some(pos) = response.interact_pointer_pos()
+            && let Some(axis) = Self::ruler_axis_at(screen, pos.x, pos.y)
+        {
+            self.dragging_guide = Some(axis);
+            return true;
+        }
+        let Some(axis) = self.dragging_guide else {
+            return false;
+        };
+        if response.drag_stopped() {
+            if let Some(pos) = response.hover_pos().or_else(|| Self::drag_origin(response)) {
+                let world = self
+                    .grid
+                    .snap(self.camera.screen_to_world(screen, pos.x, pos.y));
+                let guide = match axis {
+                    snap::Axis::Horizontal => Guide::horizontal(world.y),
+                    snap::Axis::Vertical => Guide::vertical(world.x),
+                };
+                self.snap.add_guide(guide);
+                self.status.set(match axis {
+                    snap::Axis::Horizontal => format!("Guide y = {}", world.y),
+                    snap::Axis::Vertical => format!("Guide x = {}", world.x),
+                });
+            }
+            self.dragging_guide = None;
+        }
+        // Owns the pointer for the whole drag (dragged, stopped, or the idle frame
+        // between arming and the first motion).
+        true
     }
 
     /// Draws the background grid lines within the canvas.
@@ -1986,7 +2144,7 @@ impl App {
 
     /// Draws top/left rulers with tick marks and DBU labels.
     fn draw_rulers(&self, painter: &egui::Painter, screen: &ScreenRect) {
-        let bar = 18.0;
+        let bar = RULER_BAR;
         let bg = Color32::from_rgb(24, 27, 33);
         let top_bar = EguiRect::from_min_size(
             Pos2::new(screen.left, screen.top),
@@ -2040,6 +2198,82 @@ impl App {
                 label,
             );
         }
+    }
+
+    /// Draws the user guide lines across the canvas.
+    ///
+    /// Horizontal guides span the full width at their world `y`; vertical guides
+    /// span the full height at their world `x`. Guides off screen are skipped. A
+    /// guide being actively dragged has no committed line yet, so nothing special is
+    /// drawn for it here; it appears once released.
+    fn draw_guides(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        let stroke = Stroke::new(1.0, Color32::from_rgb(80, 200, 220));
+        for g in &self.snap.guides {
+            match g.axis {
+                snap::Axis::Horizontal => {
+                    let (_, sy) = self.camera.world_to_screen(screen, Point::new(0, g.coord));
+                    if sy >= screen.top && sy <= screen.top + screen.height {
+                        painter.line_segment(
+                            [
+                                Pos2::new(screen.left, sy),
+                                Pos2::new(screen.left + screen.width, sy),
+                            ],
+                            stroke,
+                        );
+                    }
+                }
+                snap::Axis::Vertical => {
+                    let (sx, _) = self.camera.world_to_screen(screen, Point::new(g.coord, 0));
+                    if sx >= screen.left && sx <= screen.left + screen.width {
+                        painter.line_segment(
+                            [
+                                Pos2::new(sx, screen.top),
+                                Pos2::new(sx, screen.top + screen.height),
+                            ],
+                            stroke,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Draws the snap indicator at the point the cursor caught this frame.
+    ///
+    /// A small diamond marks the snapped point, colored by the kind of feature it
+    /// hit, with a short caption naming the kind. Nothing is drawn when the cursor
+    /// caught neither geometry nor a guide this frame.
+    fn draw_snap_indicator(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        let Some(hint) = self.snap_hint else {
+            return;
+        };
+        let color = match hint.kind {
+            snap::SnapKind::Vertex => Color32::from_rgb(120, 230, 140),
+            snap::SnapKind::Midpoint => Color32::from_rgb(230, 200, 110),
+            snap::SnapKind::Center => Color32::from_rgb(220, 140, 220),
+            snap::SnapKind::Edge => Color32::from_rgb(120, 190, 240),
+            snap::SnapKind::Guide => Color32::from_rgb(80, 200, 220),
+        };
+        let c = self.world_pos_to_screen(screen, hint.point);
+        // A diamond (a rotated square) drawn as four segments around the point.
+        let r = 5.0;
+        let pts = [
+            Pos2::new(c.x, c.y - r),
+            Pos2::new(c.x + r, c.y),
+            Pos2::new(c.x, c.y + r),
+            Pos2::new(c.x - r, c.y),
+        ];
+        let stroke = Stroke::new(1.5, color);
+        for i in 0..pts.len() {
+            painter.line_segment([pts[i], pts[(i + 1) % pts.len()]], stroke);
+        }
+        painter.text(
+            Pos2::new(c.x + r + 3.0, c.y - r - 2.0),
+            Align2::LEFT_BOTTOM,
+            hint.kind.label(),
+            FontId::monospace(10.0),
+            color,
+        );
     }
 
     /// Draws the in-progress or completed measurement overlay.
@@ -2249,6 +2483,51 @@ impl App {
             })
     }
 
+    /// Snaps a raw world point, trying geometry and guides first, then the grid.
+    ///
+    /// This is the single snap seam the canvas routes through. It gathers snap
+    /// candidates from the visible shapes within the snap radius of `raw`, asks
+    /// [`crate::snap::best_snap`] for the nearest vertex, edge, midpoint, center, or
+    /// guide, and returns that point plus a [`SnapHint`] for drawing the indicator.
+    /// When nothing is in range it falls back to [`crate::grid::GridSettings::snap`]
+    /// (the on-grid point) and returns no hint. The returned point is what any tool
+    /// should place; the hint drives only the on-canvas snap indicator.
+    ///
+    /// Lane 2A's drawing tools currently place at `self.grid.snap(raw)`; at
+    /// integration they should place at the point this returns so drawn geometry
+    /// snaps to existing geometry and guides too.
+    fn snap_world(&self, raw: Point) -> (Point, Option<SnapHint>) {
+        let radius_dbu = self.snap.radius_dbu(self.camera.pixels_per_dbu());
+        if self.snap.geometry_enabled || self.snap.guide_enabled {
+            let candidates = self.snap_candidates_near(raw, radius_dbu);
+            if let Some(hint) = snap::best_snap(&self.snap, raw, radius_dbu, candidates) {
+                return (hint.point, Some(hint));
+            }
+        }
+        (self.grid.snap(raw), None)
+    }
+
+    /// Collects the snap candidates from visible shapes whose bounding box lies
+    /// within `radius_dbu` of `raw`.
+    ///
+    /// The probe rectangle is `raw` expanded by the radius, so only geometry that
+    /// could plausibly catch the cursor is walked. Shapes on hidden layers are
+    /// skipped so an invisible layer never steals a snap.
+    fn snap_candidates_near(&self, raw: Point, radius_dbu: i64) -> Vec<snap::SnapCandidate> {
+        let r = i32::try_from(radius_dbu).unwrap_or(i32::MAX);
+        let probe = Rect::new(raw.translate(-r, -r), raw.translate(r, r));
+        let shapes = self.scene.shapes();
+        let mut out = Vec::new();
+        for idx in self.scene.query(probe) {
+            let shape = &shapes[idx];
+            if !self.layer_state.is_visible(shape.layer) {
+                continue;
+            }
+            out.extend(snap::shape_candidates(shape));
+        }
+        out
+    }
+
     /// Converts a world point to an egui screen position.
     fn world_pos_to_screen(&self, screen: &ScreenRect, p: Point) -> Pos2 {
         let (x, y) = self.camera.world_to_screen(screen, p);
@@ -2325,6 +2604,8 @@ impl eframe::App for App {
                         self.agent_section(ui);
                         ui.separator();
                         self.share_section(ui);
+                        ui.separator();
+                        self.snap_panel(ui);
                     });
             });
         egui::CentralPanel::default().show(ui, |ui| {

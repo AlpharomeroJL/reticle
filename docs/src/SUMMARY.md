@@ -10,6 +10,7 @@
 - [Document model](model.md)
 - [File formats](io.md)
 - [Rendering and scale](rendering.md)
+- [Snapping and guides](snapping.md)
 - [Design-rule checking](drc.md)
   - [SKY130 rule coverage](sky130-drc-coverage.md)
 - [Routing](routing.md)
