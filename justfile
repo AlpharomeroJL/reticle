@@ -82,6 +82,13 @@ machete:
 bench:
     cargo bench --workspace
 
+# Run the agent benchmark suite against the deterministic mock model. With no
+# args this runs the whole sample suite under benchmarks/layout-tasks; pass
+# through flags to scope it, e.g. `just bench-agent --tier 1` or
+# `just bench-agent --task t1_place_met1_rect`.
+bench-agent *args:
+    cargo run -p reticle-bench -- {{args}}
+
 perf-check:
     cargo run -p xtask --release -- perf-check
 

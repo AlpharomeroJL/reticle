@@ -1,0 +1,6 @@
+# Tier-1 placement: draw a met1 rectangle. Passes iff a rect exists on met1 (68/20).
+id = "t1_place_met1_rect"
+tier = 1
+prompt = "Create a cell named top and place a met1 (layer 68, datatype 20) rectangle in it."
+technology = "sky130.tech"
+checker = "rect_present"
