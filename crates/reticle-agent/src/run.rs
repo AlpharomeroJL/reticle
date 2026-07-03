@@ -47,6 +47,71 @@ impl Default for LoopOptions {
     }
 }
 
+/// A source of mid-session user refinement constraints for the loop.
+///
+/// An iterative refinement session lets the user add new constraints *between*
+/// iterations without restarting the run: "make the wire wider", "keep it on met1",
+/// and so on. The loop drains this source once per iteration, just before it asks the
+/// model, and folds whatever strings it yields into the model's [`Context::feedback`]
+/// alongside the checker's own failure reasons. The model therefore sees the new
+/// constraint on the very next proposal, the checker re-runs, and the session
+/// converges without being torn down and rebuilt (see the agent chapter for the
+/// protocol).
+///
+/// The one required method, [`drain`](RefinementSource::drain), returns the
+/// constraints that have arrived since it was last called (an empty vector when none
+/// have). A caller backed by a channel drains the receiver; a scripted test yields a
+/// pre-set batch on a chosen iteration. The loop owns no channel of its own, so this
+/// works the same for a live UI, an HTTP endpoint, or a deterministic test.
+pub trait RefinementSource {
+    /// The refinement constraints that have arrived since the previous call, in the
+    /// order the user supplied them. Returns an empty vector when there is nothing new.
+    ///
+    /// `iteration` is the zero-based index of the iteration about to run, so a source
+    /// can schedule a scripted constraint for a specific point in the sequence; a
+    /// channel-backed source ignores it and just drains what is queued.
+    fn drain(&mut self, iteration: u32) -> Vec<String>;
+}
+
+/// A [`RefinementSource`] that never yields a constraint: the loop runs exactly as it
+/// did before refinements existed. Used by [`run_agent_task`] and any caller that has
+/// no mid-session constraints to inject.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoRefinements;
+
+impl RefinementSource for NoRefinements {
+    fn drain(&mut self, _iteration: u32) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// A [`RefinementSource`] adapting any `FnMut(u32) -> Vec<String>` closure, so a caller
+/// can supply refinements inline without defining a type. The closure is invoked once
+/// per iteration with the iteration index and returns the constraints new since the
+/// last call.
+pub struct RefinementFn<F>(pub F)
+where
+    F: FnMut(u32) -> Vec<String>;
+
+// A closure has no meaningful Debug, so print an opaque placeholder rather than derive.
+impl<F> std::fmt::Debug for RefinementFn<F>
+where
+    F: FnMut(u32) -> Vec<String>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RefinementFn").field(&"<closure>").finish()
+    }
+}
+
+impl<F> RefinementSource for RefinementFn<F>
+where
+    F: FnMut(u32) -> Vec<String>,
+{
+    fn drain(&mut self, iteration: u32) -> Vec<String> {
+        (self.0)(iteration)
+    }
+}
+
 /// Which backend produced a run, stamped onto the [`ResultRecord`].
 ///
 /// Keeps a mock run, a local (Ollama) run, and a frontier (`anthropic`) run distinct in
@@ -160,6 +225,10 @@ impl std::error::Error for LoopError {}
 /// stamped straight onto the [`ResultRecord`] so a mock, a local, and a frontier run are
 /// never conflated.
 ///
+/// This runs with no mid-session refinements; it is
+/// [`run_agent_task_refined`] with a [`NoRefinements`] source. Use the refined form to
+/// fold user constraints in between iterations without restarting the loop.
+///
 /// # Errors
 ///
 /// Returns [`LoopError::Technology`] or [`LoopError::UnknownChecker`] on a setup
@@ -176,7 +245,53 @@ pub fn run_agent_task<M: ModelClient>(
     out_dir: &Path,
     wall_ms: u64,
     provenance: &Provenance,
+    context_hook: impl FnMut(&mut M, &Session),
+) -> Result<RunOutcome, LoopError> {
+    run_agent_task_refined(
+        task,
+        model,
+        registry,
+        technology_source,
+        suite_version,
+        options,
+        out_dir,
+        wall_ms,
+        provenance,
+        context_hook,
+        NoRefinements,
+    )
+}
+
+/// Like [`run_agent_task`], but folds mid-session user refinement constraints into the
+/// loop as they arrive, without restarting the run.
+///
+/// `refinements` is drained once per iteration, just before the model is asked; each
+/// yielded constraint string is added to the model's [`Context::feedback`] alongside
+/// the checker's own failure reasons, so the model reacts to it on the next proposal
+/// and the checker re-runs against the amended target. Pass [`NoRefinements`] for the
+/// original behavior, or a [`RefinementFn`] / custom [`RefinementSource`] to supply
+/// constraints from a channel, a UI, or a script. Constraints accumulate across
+/// iterations, so a constraint injected on iteration 1 still conditions iteration 3.
+///
+/// Every other argument behaves exactly as in [`run_agent_task`].
+///
+/// # Errors
+///
+/// Same as [`run_agent_task`]: a setup or artifact-write failure; a failed check is not
+/// an error.
+#[allow(clippy::too_many_arguments)]
+pub fn run_agent_task_refined<M: ModelClient>(
+    task: &BenchTask,
+    model: &mut M,
+    registry: &CheckerRegistry,
+    technology_source: &str,
+    suite_version: &str,
+    options: LoopOptions,
+    out_dir: &Path,
+    wall_ms: u64,
+    provenance: &Provenance,
     mut context_hook: impl FnMut(&mut M, &Session),
+    mut refinements: impl RefinementSource,
 ) -> Result<RunOutcome, LoopError> {
     let checker = registry
         .get(&task.checker)
@@ -202,6 +317,7 @@ pub fn run_agent_task<M: ModelClient>(
         &mut session,
         options,
         &mut context_hook,
+        &mut refinements,
     );
 
     // Write the four artifacts regardless of pass/fail; a failure is recorded honestly.
@@ -235,6 +351,13 @@ struct LoopResult {
 }
 
 /// The propose-verify-correct core: ask, apply (within budget), verify, feed back.
+///
+/// `refinements` is drained once per iteration and its constraints accumulate in
+/// `user_constraints`, which is folded into every subsequent [`Context::feedback`]
+/// ahead of the checker's own reasons. That is how a mid-session user constraint reaches
+/// the model without restarting the loop: the checker still re-runs each iteration, and
+/// the bounded iteration count still applies, so a constraint that conflicts with the
+/// task cannot spin forever (it is capped by `options.max_iterations`).
 fn drive<M: ModelClient>(
     task: &BenchTask,
     model: &mut M,
@@ -242,23 +365,39 @@ fn drive<M: ModelClient>(
     session: &mut Session,
     options: LoopOptions,
     context_hook: &mut impl FnMut(&mut M, &Session),
+    refinements: &mut impl RefinementSource,
 ) -> LoopResult {
     let mut iterations = 0_u32;
     let mut first_proposal_violations = 0_u32;
     let mut final_violations = 0_u32;
     let mut success = false;
     let mut feedback: Vec<String> = Vec::new();
+    // User refinement constraints, accumulated across iterations. Unlike `feedback`
+    // (which the checker replaces each iteration), these persist: a constraint injected
+    // once keeps conditioning every later proposal.
+    let mut user_constraints: Vec<String> = Vec::new();
     let mut prev_violations = 0_u32;
     let mut commands_applied = 0_u32;
 
     while iterations < options.max_iterations {
+        // Fold in any user constraints that arrived since the previous iteration, before
+        // building the context, so the model sees them on this very proposal.
+        user_constraints.extend(refinements.drain(iterations));
+
         // Give the model the current layout before it proposes.
         context_hook(model, session);
 
+        // The model sees the accumulated user constraints first, then the checker's
+        // failure reasons from the previous attempt. Combining them here (rather than in
+        // a new Context field) keeps `reticle_bench::model::Context` frozen.
         let context = Context {
             iteration: iterations,
             prev_violations,
-            feedback: feedback.clone(),
+            feedback: user_constraints
+                .iter()
+                .cloned()
+                .chain(feedback.iter().cloned())
+                .collect(),
         };
         let commands = model.propose(&task.id, &task.prompt, &context);
 
@@ -1030,6 +1169,350 @@ mod tests {
         .expect_err("missing checker");
         assert!(matches!(err, super::LoopError::UnknownChecker { .. }));
         cleanup(&out_dir);
+    }
+
+    // ----- refinement-protocol convergence tests -----------------------------
+    //
+    // These prove the mid-session refinement loop: a user constraint that arrives
+    // *between* iterations is folded into the model input (via Context::feedback),
+    // the checker re-runs each iteration, and the session converges without a restart.
+    // A conflicting constraint is bounded by max_iterations rather than spinning.
+
+    use super::{NoRefinements, RefinementFn, RefinementSource, run_agent_task_refined};
+
+    /// A checker that passes iff the target cell holds a met1 rectangle at least
+    /// `min_width` wide. It stands in for a task requirement the *user* tightens
+    /// mid-session ("make the wire wider"): the refinement raises the bar the checker
+    /// enforces, so convergence is observable and deterministic.
+    #[derive(Clone, Copy, Debug)]
+    struct MinWidth {
+        min_width: i64,
+    }
+
+    impl crate::run::Checker for MinWidth {
+        fn check(
+            &self,
+            doc: &reticle_model::Document,
+            _transcript: &reticle_agent_api::Transcript,
+        ) -> crate::run::CheckResult {
+            use reticle_model::ShapeKind;
+            let widest = doc
+                .cells()
+                .flat_map(|cell| cell.shapes.iter())
+                .filter(|s| s.layer.layer == 68 && s.layer.datatype == 20)
+                .filter_map(|s| match &s.kind {
+                    ShapeKind::Rect(r) => Some(r.width()),
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(0);
+            if widest >= self.min_width {
+                crate::run::CheckResult::Pass
+            } else {
+                crate::run::CheckResult::Fail(vec![crate::run::CheckFailure::new(format!(
+                    "widest met1 rect is {widest}, want >= {}",
+                    self.min_width
+                ))])
+            }
+        }
+    }
+
+    /// A registry whose `min_width` checker enforces `min_width`.
+    fn min_width_registry(min_width: i64) -> CheckerRegistry {
+        CheckerRegistry::default().with("min_width", Box::new(MinWidth { min_width }))
+    }
+
+    /// The min-width task fixture, checked by `min_width`.
+    fn min_width_task() -> BenchTask {
+        BenchTask {
+            checker: "min_width".into(),
+            ..drc_task()
+        }
+    }
+
+    /// A deterministic model that reacts to a refinement constraint in the context.
+    ///
+    /// It looks for a `min_width=N` string anywhere in `context.feedback` (which is
+    /// exactly where the loop folds user refinements) and, on the *next* iteration,
+    /// replaces its rectangle with one `N` wide. Before any such constraint arrives it
+    /// draws a default rectangle. This mirrors a real model that widens a wire when the
+    /// user asks, and it proves the loop delivered the constraint without a restart.
+    #[derive(Clone, Debug)]
+    struct RefiningMock {
+        /// Width used until a `min_width=` constraint is seen.
+        default_width: i32,
+        /// The rect element id to delete before drawing the wider one (`1` here, the
+        /// first added shape), so successive proposals do not stack rectangles.
+        rect_id: u64,
+    }
+
+    impl RefiningMock {
+        fn new(default_width: i32) -> Self {
+            Self {
+                default_width,
+                rect_id: 1,
+            }
+        }
+
+        /// Parses the requested minimum width from any `min_width=N` token in feedback,
+        /// taking the largest if several arrived.
+        fn requested_width(context: &Context) -> Option<i32> {
+            context
+                .feedback
+                .iter()
+                .filter_map(|line| line.split("min_width=").nth(1))
+                .filter_map(|rest| {
+                    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                    digits.parse::<i32>().ok()
+                })
+                .max()
+        }
+    }
+
+    impl ModelClient for RefiningMock {
+        // The trait borrows the id from owned state; the mock's is a literal but must
+        // keep the trait's `&str` return (mirrors `MockModel::id`).
+        #[allow(clippy::unnecessary_literal_bound)]
+        fn id(&self) -> &str {
+            "refining-mock"
+        }
+
+        fn propose(
+            &mut self,
+            _task_id: &str,
+            _prompt: &str,
+            context: &Context,
+        ) -> Vec<AgentCommand> {
+            if context.iteration == 0 {
+                // First proposal: create the cell and a default-width rect.
+                return vec![
+                    AgentCommand::CreateCell { name: "top".into() },
+                    met1_rect(self.default_width),
+                ];
+            }
+            match Self::requested_width(context) {
+                // A refinement arrived: delete the old rect and draw the requested width.
+                Some(width) => vec![
+                    AgentCommand::DeleteShapes {
+                        ids: vec![reticle_agent_api::ElementId(self.rect_id)],
+                    },
+                    met1_rect(width),
+                ],
+                // No constraint to act on and nothing already failing: propose nothing,
+                // which the loop reads as "done".
+                None => Vec::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn refinement_source_traits_drain_as_expected() {
+        // NoRefinements yields nothing on every iteration.
+        let mut none = NoRefinements;
+        assert!(none.drain(0).is_empty());
+        assert!(none.drain(7).is_empty());
+
+        // RefinementFn forwards the iteration index and returns the closure's output.
+        let mut seen = Vec::new();
+        let mut src = RefinementFn(|iteration: u32| {
+            if iteration == 1 {
+                vec!["make the wire wider (min_width=800)".to_owned()]
+            } else {
+                Vec::new()
+            }
+        });
+        for i in 0..3 {
+            seen.push(src.drain(i));
+        }
+        assert!(seen[0].is_empty());
+        assert_eq!(seen[1].len(), 1);
+        assert!(seen[2].is_empty());
+    }
+
+    #[test]
+    fn refinement_is_folded_in_and_loop_converges_without_restart() {
+        // The base task only needs a >=140 rect; the model draws a 200-wide rect that
+        // passes on iteration 0. Between iterations 0 and 1 the user tightens the
+        // requirement to 800 ("make the wire wider"); the checker enforces >=800 from the
+        // start, so iteration 0 fails the tightened bar and the injected constraint drives
+        // iteration 1 to a 800-wide rect that passes. No restart: it is one continuous run.
+        let mut model = RefiningMock::new(200);
+        let out_dir = unique_dir("refine-converge");
+        let outcome = run_agent_task_refined(
+            &min_width_task(),
+            &mut model,
+            &min_width_registry(800),
+            "",
+            "0.1.0",
+            LoopOptions::default(),
+            &out_dir,
+            0,
+            &crate::run::Provenance::new("mock"),
+            |_, _| {},
+            // The refinement arrives before iteration 1, not at task start.
+            RefinementFn(|iteration: u32| {
+                if iteration == 1 {
+                    vec!["user: make the wire wider (min_width=800)".to_owned()]
+                } else {
+                    Vec::new()
+                }
+            }),
+        )
+        .expect("run");
+
+        assert!(
+            outcome.record.success,
+            "the loop must converge once the widen refinement is applied"
+        );
+        assert_eq!(
+            outcome.record.iterations, 2,
+            "iteration 0 (too narrow for the tightened bar) then 1 (widened) converges"
+        );
+        // The final layout actually carries an 800-wide met1 rect: the constraint was
+        // satisfied, not just declared.
+        let widest = widest_met1_width(&min_width_task(), &out_dir);
+        assert_eq!(
+            widest, 800,
+            "the widened rect is present in the final gds path"
+        );
+        cleanup(&out_dir);
+    }
+
+    #[test]
+    fn refinement_injected_at_start_converges_on_first_iteration() {
+        // A constraint present from iteration 0 (the source yields it immediately) is
+        // folded into the very first proposal's context. The model, seeing min_width=600
+        // on iteration 0, would still draw its default first; the checker fails; the
+        // accumulated constraint then drives iteration 1. This proves the constraint
+        // persists across iterations (it conditions iteration 1 though it arrived at 0).
+        let mut model = RefiningMock::new(200);
+        let out_dir = unique_dir("refine-start");
+        let outcome = run_agent_task_refined(
+            &min_width_task(),
+            &mut model,
+            &min_width_registry(600),
+            "",
+            "0.1.0",
+            LoopOptions::default(),
+            &out_dir,
+            0,
+            &crate::run::Provenance::new("mock"),
+            |_, _| {},
+            RefinementFn(|iteration: u32| {
+                if iteration == 0 {
+                    vec!["min_width=600".to_owned()]
+                } else {
+                    Vec::new()
+                }
+            }),
+        )
+        .expect("run");
+        assert!(
+            outcome.record.success,
+            "converges with the persisted constraint"
+        );
+        assert_eq!(widest_met1_width(&min_width_task(), &out_dir), 600);
+        cleanup(&out_dir);
+    }
+
+    #[test]
+    fn conflicting_refinement_is_bounded_by_max_iterations_not_infinite() {
+        // The user demands a width the model can satisfy, but the checker is set one dbu
+        // higher, so no proposal the model makes can ever pass: the constraint conflicts
+        // with what is achievable. The loop must terminate at max_iterations with a
+        // recorded failure, never spin forever.
+        let mut model = RefiningMock::new(200);
+        let out_dir = unique_dir("refine-conflict");
+        let outcome = run_agent_task_refined(
+            &min_width_task(),
+            &mut model,
+            // Checker wants >= 1001, but the refinement only ever asks for (and the model
+            // only ever draws) 1000: an unsatisfiable pairing.
+            &min_width_registry(1001),
+            "",
+            "0.1.0",
+            LoopOptions {
+                max_iterations: 4,
+                command_budget: 256,
+            },
+            &out_dir,
+            0,
+            &crate::run::Provenance::new("mock"),
+            |_, _| {},
+            // A fresh conflicting constraint every iteration, so the model keeps trying
+            // (never proposes an empty batch) yet can never satisfy the checker.
+            RefinementFn(|_iteration: u32| vec!["min_width=1000".to_owned()]),
+        )
+        .expect("run");
+
+        assert!(
+            !outcome.record.success,
+            "an unsatisfiable refinement must be recorded as a failure"
+        );
+        assert_eq!(
+            outcome.record.iterations, 4,
+            "the loop is bounded by max_iterations, it does not loop forever"
+        );
+        cleanup(&out_dir);
+    }
+
+    #[test]
+    fn no_refinements_matches_the_unrefined_entry_point() {
+        // run_agent_task_refined with NoRefinements is exactly run_agent_task: a clean
+        // first proposal passes on iteration 0.
+        let create = AgentCommand::CreateCell { name: "top".into() };
+        let mut model = MockModel::new().with_script("t1_drc", vec![vec![create, met1_rect(500)]]);
+        let out_dir = unique_dir("no-refine");
+        let outcome = run_agent_task_refined(
+            &drc_task(),
+            &mut model,
+            &CheckerRegistry::default(),
+            "",
+            "0.1.0",
+            LoopOptions::default(),
+            &out_dir,
+            0,
+            &crate::run::Provenance::new("mock"),
+            |_, _| {},
+            NoRefinements,
+        )
+        .expect("run");
+        assert!(outcome.record.success);
+        assert_eq!(outcome.record.iterations, 1);
+        cleanup(&out_dir);
+    }
+
+    /// Reads back the widest met1 rect width from the exported gds path's document by
+    /// replaying the written transcript, so a test can assert the *final* geometry, not
+    /// just the record. Returns `0` if there is no met1 rect.
+    fn widest_met1_width(task: &BenchTask, out_dir: &std::path::Path) -> i64 {
+        use reticle_model::ShapeKind;
+        // Reconstruct the document from the JSONL transcript's command records.
+        let path = out_dir.join(format!("{}.transcript.jsonl", task.id));
+        let text = std::fs::read_to_string(&path).expect("read transcript");
+        let mut session = Session::new();
+        for line in text.lines() {
+            let value: serde_json::Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if let Some(command) = value.get("command")
+                && let Ok(cmd) = serde_json::from_value::<AgentCommand>(command.clone())
+            {
+                let _ = session.apply(cmd);
+            }
+        }
+        session
+            .document()
+            .cells()
+            .flat_map(|cell| cell.shapes.iter())
+            .filter(|s| s.layer.layer == 68 && s.layer.datatype == 20)
+            .filter_map(|s| match &s.kind {
+                ShapeKind::Rect(r) => Some(r.width()),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
     }
 
     /// A unique scratch directory for one test, keyed by name and process id.
