@@ -74,13 +74,13 @@ produce v5.0.0.
 
 ## Wave 2: composition (three batches)
 
-- [~] Lane A: reticle-mcp server, every tool integration-tested over stdio. in-progress @ lane/2a-mcp
-- [~] Lane B: reticle-agent propose-verify-correct harness, mock-model loop tests. in-progress @ lane/2b-agent
-- [~] Lane E: benchmark tiers 1-4, 50 tasks, two-way checker tests. in-progress @ lane/2e-tasks14
-- [ ] Lane F: benchmark tier 5 SKY130, 10 tasks, two-way checker tests. DEFERRED to Batch 2 (depends on Lane E's checker library; reuses it, so cannot run parallel with E without conflict).
-- [ ] Lane C: agent as CRDT collaborator, atomic transactions, presence, convergence tests. not-started
-- [ ] Lane D: agent panel, live DRC overlay, replay theater, share link, WASM build. not-started
-- [ ] Lane G: failure mining, candidates with provenance, `just bench-promote`. not-started
+- [x] Lane A: reticle-mcp server, every tool integration-tested over stdio. done-gate-green, merged. 28 tools (25 command + 3 context) over hand-rolled stdio JSON-RPC; subprocess test drives+asserts all 28; command budget. Post-merge: typos fix.
+- [x] Lane B: reticle-agent propose-verify-correct harness, mock-model loop tests. done-gate-green, merged. AnthropicModel (ureq, tool-use), API key env-only + redacted + proven absent from artifacts; loop with DRC+intent verify; 4 artifacts (transcript/GDS/PNG/result); 28 tests. Post-merge: em-dash + typos + CDLA license fixes.
+- [x] Lane E: benchmark tiers 1-4, 50 tasks, two-way checker tests. done-gate-green, merged. 7 parameterized geom checkers (contact_stack/via_chain/comb/guard_ring/compound_cell/shape_count/layer_area), two-way tested; 50 tasks (manifest v0.2.0); params in the checker string (schema unchanged).
+- [~] Lane F: benchmark tier 5 SKY130, 10 tasks, two-way checker tests. in-progress @ lane/2f-tier5 (reuses E's now-merged checkers).
+- [~] Lane C: agent as CRDT collaborator, atomic transactions, presence, convergence tests. in-progress @ lane/2c-collab
+- [~] Lane D: agent panel, live DRC overlay, replay theater, share link, WASM build. in-progress @ lane/2d-frontend
+- [~] Lane G: failure mining, candidates with provenance, `just bench-promote`. in-progress @ lane/2g-mining
 - [ ] Lane H: `just demo-up`, Dockerfile and VPS docs, Pages replay bundle, key-pattern release check. not-started
 - [ ] Lane I: Playwright e2e suite, `just e2e`, WebGPU and WebGL2 runs. not-started
 
