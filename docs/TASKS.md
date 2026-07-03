@@ -149,23 +149,27 @@ theater" (root cause confirmed by fetching the live URL).
 
 ## Wave 1: fix the front door (must be green before any fan-out)
 
-- [~] Lane 1A: Pages deploy at root cause. wip recovered @ lane/v6-1a-pages
-  (commit e424a1b). DONE in wip: `trunk build --release --public-url /reticle/`
-  encoded in `just deploy-pages` + `scripts/deploy-pages.ps1`, `just smoke-pages` +
-  `scripts/smoke-pages.ps1`, visible-error-not-infinite-spinner in index.html,
-  overlay ordering in web/src/main.rs. NOT YET DONE: un-gate the replay theater for
-  wasm via a storage abstraction; the Playwright gh-pages subpath project; verify
-  `just deploy-pages` emits `/reticle/`-prefixed assets. Resuming in worktree.
-  Orchestrator does the redeploy and live verification.
-- [~] Lane 1B: Ollama OpenAI-compatible benchmark backend. wip recovered @
-  lane/v6-1b-ollama (commit 88024e5). DONE in wip: `ResultRecord`
-  backend/quantization label (ADR 0029, orchestrator-authorized) and runner/results
-  wiring. NOT YET DONE: the `OllamaModel` module (ollama.rs) itself, OpenAI tools
-  schema on the propose-verify-correct loop, transcript-window summarization near
-  16k, recorded-response fake tests. Resuming in worktree. The full 63-task run on
-  both local models is the orchestrator's integration step.
-- [ ] Wave 1 merge gate: `just ci`, `just e2e`, `just smoke-pages` against the
-  live redeployed site.
+- [x] Lane 1A: Pages deploy at root cause. done-gate-green, merged (lane 97bc94b
+  into merge 9f692e3). `just deploy-pages` builds with `--public-url /reticle/` and
+  asserts `/reticle/`-prefixed assets; `just smoke-pages` deployed-URL check;
+  visible-error (no infinite spinner) + WebGPU/WebGL2 capability message; the replay
+  theater un-gated for wasm32 via a `SessionStore` seam (fs native, bundled
+  transcript on web, not stubbed, wasm build green); e2e `ghpages-subpath`
+  Playwright project. 220 lane tests.
+- [x] Lane 1B: Ollama OpenAI-compatible benchmark backend. done-gate-green, merged
+  (lane 378c7fd into merge dc254dc). `OllamaModel` (chat/completions, `emit_commands`
+  tool schema, `tool_calls` plus text-array fallback, key redaction, 16k-window
+  `ConversationBuffer` summarization); `ResultRecord` backend/quantization (ADR 0029);
+  runner `--backend ollama --suite` selection and Backend column; 146 lane tests.
+  Live probe recorded: `gpt-oss:16k` returns native `tool_calls`, `qwen2.5-coder:16k`
+  ignores forced tool_choice and embeds the call in `message.content` (text fallback),
+  both handled and regression-tested. Full 63-task run is the orchestrator's step.
+- [x] Wave 1 merge gate: DONE. `just ci` GREEN on merged main (798 tests; an
+  integration doc-fix demoted private/wasm-cfg intra-doc links, commit 0a49c39);
+  `just e2e` 3 passed 1 skipped and `just e2e-subpath` 1 passed; gh-pages redeployed
+  (ab065e6) and `just smoke-pages` PASS against the live
+  https://alpharomerojl.github.io/reticle/ (base and both assets 200 under
+  `/reticle/`). Fan-out unblocked. Pages postmortem in docs/STATUS.md.
 
 ## Wave 2: editor and UI feature expansion (parallel, 8 lanes) [not-started]
 
