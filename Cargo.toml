@@ -41,7 +41,7 @@ members = [
 exclude = ["tools/reticle-dev-mcp", "tools/crate-docs-mcp", "fuzz"]
 
 [workspace.package]
-version = "5.0.0"
+version = "6.0.0"
 edition = "2024"
 rust-version = "1.94"
 authors = ["Josef Long <Josefdean@protonmail.com>"]
@@ -54,25 +54,25 @@ categories = ["graphics", "rendering", "science"]
 
 [workspace.dependencies]
 # Internal crates. Path-based for local builds; version set enables later publish.
-reticle-geometry = { path = "crates/reticle-geometry", version = "5.0.0" }
-reticle-proto = { path = "crates/reticle-proto", version = "5.0.0" }
-reticle-index = { path = "crates/reticle-index", version = "5.0.0" }
-reticle-io = { path = "crates/reticle-io", version = "5.0.0" }
-reticle-model = { path = "crates/reticle-model", version = "5.0.0" }
-reticle-render = { path = "crates/reticle-render", version = "5.0.0" }
-reticle-drc = { path = "crates/reticle-drc", version = "5.0.0" }
-reticle-route = { path = "crates/reticle-route", version = "5.0.0" }
-reticle-extract = { path = "crates/reticle-extract", version = "5.0.0" }
-reticle-sync = { path = "crates/reticle-sync", version = "5.0.0" }
-reticle-server = { path = "crates/reticle-server", version = "5.0.0" }
-reticle-script = { path = "crates/reticle-script", version = "5.0.0" }
-reticle-app = { path = "crates/reticle-app", version = "5.0.0" }
-reticle-agent-api = { path = "crates/reticle-agent-api", version = "5.0.0" }
-reticle-mcp = { path = "crates/reticle-mcp", version = "5.0.0" }
-reticle-agent = { path = "crates/reticle-agent", version = "5.0.0" }
-reticle-bench = { path = "crates/reticle-bench", version = "5.0.0" }
-reticle-demo = { path = "crates/reticle-demo", version = "5.0.0" }
-reticle-demo-server = { path = "crates/reticle-demo-server", version = "5.0.0" }
+reticle-geometry = { path = "crates/reticle-geometry", version = "6.0.0" }
+reticle-proto = { path = "crates/reticle-proto", version = "6.0.0" }
+reticle-index = { path = "crates/reticle-index", version = "6.0.0" }
+reticle-io = { path = "crates/reticle-io", version = "6.0.0" }
+reticle-model = { path = "crates/reticle-model", version = "6.0.0" }
+reticle-render = { path = "crates/reticle-render", version = "6.0.0" }
+reticle-drc = { path = "crates/reticle-drc", version = "6.0.0" }
+reticle-route = { path = "crates/reticle-route", version = "6.0.0" }
+reticle-extract = { path = "crates/reticle-extract", version = "6.0.0" }
+reticle-sync = { path = "crates/reticle-sync", version = "6.0.0" }
+reticle-server = { path = "crates/reticle-server", version = "6.0.0" }
+reticle-script = { path = "crates/reticle-script", version = "6.0.0" }
+reticle-app = { path = "crates/reticle-app", version = "6.0.0" }
+reticle-agent-api = { path = "crates/reticle-agent-api", version = "6.0.0" }
+reticle-mcp = { path = "crates/reticle-mcp", version = "6.0.0" }
+reticle-agent = { path = "crates/reticle-agent", version = "6.0.0" }
+reticle-bench = { path = "crates/reticle-bench", version = "6.0.0" }
+reticle-demo = { path = "crates/reticle-demo", version = "6.0.0" }
+reticle-demo-server = { path = "crates/reticle-demo-server", version = "6.0.0" }
 
 # Shared external dependencies for the v5 agent, benchmark, and demo crates.
 serde = { version = "1.0.228", features = ["derive"] }
