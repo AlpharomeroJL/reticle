@@ -149,6 +149,29 @@ remote echo on localhost is about 0.79 ms median, roughly 100x under the 100 ms 
 This is the relay-plus-CRDT round trip on one machine; a wide-area deployment adds real
 network latency on top.
 
+## v5.0.0 headless pipeline scale proof (measured 2026-07-03 on this machine)
+
+The headless CLI (`reticle`, release build) processing a deliberately large,
+hierarchical layout end to end. The design is one `xtask gen-layout --shapes 2000000
+--layers 8 --depth 3` output: 4 cells and 1422 bytes on disk that expand to
+**4,194,304 flattened leaf shapes**. Wall time and peak working set are measured per
+process by `scripts/measure-run.ps1` (peak working set polled from the OS high-water
+mark, wall time by a stopwatch around the process), release binaries, same host.
+
+| Stage | Wall time | Peak memory | Note |
+|---|---:|---:|---|
+| Import (parse the hierarchical GDS) | 37 ms | 7.5 MB | Hierarchy stays small: 4.19M effective leaves, but the on-disk and in-memory forms are tiny because the design is cells and arrays, never flattened to import. |
+| Render (flatten, then offscreen to 2560x1440 PNG) | 809 ms | 594 MB | The 4.19M leaves are flattened and drawn to a 2560x1440 image (a 2.4 MB PNG). |
+| DRC (flatten, full-cell check, emit report) | 11.0 s | 1426 MB | Whole pipeline including formatting and emitting the full violation report. The synthetic design is violation-dense (about 2 million min-width violations), so most of this time and memory is the report itself, not the check. The isolated incremental-DRC cost (the interactive path) is 5 to 37 us; see the DRC section above. |
+| Extract (flatten, connectivity, emit report) | 12.2 s | 1075 MB | Finds 4,194,304 single-shape nets (the synthetic shapes are disjoint) and prints one line per net, so this figure too is dominated by emitting a multi-million-line report, not the union-find. |
+
+The honest headline is the first two rows: a 4.19M-leaf hierarchical layout imports
+in 37 ms using 7.5 MB, and flattens and renders offscreen at 2560x1440 in 809 ms
+using 594 MB, on this machine. The DRC and extract rows are whole-pipeline wall times
+that include emitting a per-item text report for millions of items (the CLI is
+verbose by design); the core algorithm costs are isolated in the criterion sections
+above (index build 227 ms per 1M shapes, DRC full pass 643 ms per 1M shapes).
+
 ## Targets (Section 10)
 
 Honest status of each spec target. Two are measured with a hard number; the rest are
