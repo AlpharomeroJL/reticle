@@ -5,7 +5,7 @@
 //! with the [`Transcript`] that produced it and the [`Tier`] it ran at, selects
 //! the ones worth mining (failed outright, or needed
 //! [`MiningOptions::high_iteration_threshold`] or more iterations), and groups
-//! them by a failure [`Signature`] with three components:
+//! them by a failure [`Signature`] with four components:
 //!
 //! - the *persistent DRC rule ids*: the intersection of every DRC report in
 //!   the transcript (the `run_drc` and `get_violations` data payloads), so a
@@ -13,7 +13,12 @@
 //! - a *geometric-pattern class* ([`PatternClass`]) derived from the drawing
 //!   commands the model issued;
 //! - an *intent-violation kind* ([`IntentViolationKind`]) read from the last
-//!   `check_intent` report, if the transcript carries one.
+//!   `check_intent` report, if the transcript carries one;
+//! - a *tool surface* ([`ToolSurface`]): which of the Wave 3 editing commands
+//!   (`boolean_combine`, `align_shapes`, `distribute_shapes`, `offset_shapes`,
+//!   `build_via_stack`) the transcript exercised, so a failure that used one of
+//!   the new tools forms its own cluster instead of hiding inside the
+//!   geometric-pattern class it shares with hand-drawn geometry.
 //!
 //! Runs sharing a signature form a [`Cluster`]; a cluster of at least
 //! [`MiningOptions::min_cluster_size`] runs marks a recurring failure mode
@@ -22,11 +27,22 @@
 //! [`draft_candidates`] turns each cluster into a [`CandidateFile`]: a full
 //! runnable task (id `cand_` plus the signature slug, a drafted prompt, and a
 //! checker chosen from the signature) together with full provenance (the
-//! signature and every source run) and a two-way test vector pair: a `good`
-//! document the checker must accept and a `bad` document, reconstructed from a
-//! representative failing transcript, that it must reject. [`write_candidates`]
-//! writes one TOML per candidate under a suite's `candidates/` directory;
-//! drafts are never added to the live manifest by this module.
+//! signature and every source run, each row carrying its backend and
+//! quantization so a `mock`, local-model, and frontier run are never
+//! conflated) and a two-way test vector pair: a `good` document the checker
+//! must accept and a `bad` document, reconstructed from a representative
+//! failing transcript, that it must reject. [`write_candidates`] writes one
+//! TOML per candidate under a suite's `candidates/` directory; drafts are never
+//! added to the live manifest by this module.
+//!
+//! The committed local-model result sets under `benchmarks/results/` are plain
+//! [`ResultRecord`] arrays with no transcript, so [`mined_runs_from_records`]
+//! lifts them into transcript-less [`MinedRun`]s that still carry the backend,
+//! model, and quantization into a drafted candidate's provenance. A
+//! transcript-less run has an empty [`Signature`] (no DRC rules, no geometry,
+//! no intent, no tool surface), so those runs cluster only by "it failed":
+//! recovering a run's DRC, geometric, intent, and tool-surface signature needs
+//! the transcript the local runner does not yet persist.
 //!
 //! [`promote_candidate`] is the gate behind `just bench-promote <id>`: it
 //! recompiles the candidate's checker, runs the two-way vectors
@@ -62,6 +78,42 @@ pub struct MinedRun {
     pub record: ResultRecord,
     /// The full command transcript of the run.
     pub transcript: Transcript,
+}
+
+/// Lifts committed [`ResultRecord`] rows into transcript-less [`MinedRun`]s so
+/// the plain result arrays under `benchmarks/results/` flow through [`scan`]
+/// and [`draft_candidates`], carrying their backend, model, and quantization
+/// into a drafted candidate's provenance.
+///
+/// The committed local-model result sets store no transcript, so each lifted
+/// run has an empty [`Transcript`] and therefore an empty [`Signature`] (no DRC
+/// rules, no geometry, no intent, no tool surface). Those runs cluster only by
+/// "it failed", not by *why* it failed: recovering the DRC, geometric, intent,
+/// and tool-surface signature requires the command transcript the local runner
+/// does not yet persist. The tier is read from the task-id prefix (`t3_...`
+/// gives [`Tier(3)`](Tier)), falling back to [`Tier(1)`](Tier) when the id does
+/// not start with `t<digit>`.
+#[must_use]
+pub fn mined_runs_from_records(records: &[ResultRecord]) -> Vec<MinedRun> {
+    records
+        .iter()
+        .map(|record| MinedRun {
+            tier: tier_from_task_id(&record.task_id),
+            record: record.clone(),
+            transcript: Transcript::default(),
+        })
+        .collect()
+}
+
+/// Reads the tier from a task id of the form `t<digit>_...`, defaulting to
+/// [`Tier(1)`](Tier) when the id does not carry a leading `t<digit>`.
+fn tier_from_task_id(task_id: &str) -> Tier {
+    task_id
+        .strip_prefix('t')
+        .and_then(|rest| rest.chars().next())
+        .and_then(|c| c.to_digit(10))
+        .and_then(|n| u8::try_from(n).ok())
+        .map_or(Tier(1), Tier)
 }
 
 /// Tunable thresholds for the scanner.
@@ -156,6 +208,109 @@ impl IntentViolationKind {
     }
 }
 
+/// One of the Wave 3 editing commands the tool-surface dimension clusters by.
+///
+/// These are the higher-level operations added to the agent command surface
+/// after the original miner shipped: a failure that used one of them is grouped
+/// apart from hand-drawn geometry that happens to land in the same
+/// [`PatternClass`], so the miner surfaces tool-specific failure clusters
+/// (a botched `boolean_combine`, say, rather than a generic `polygon_heavy`
+/// failure).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum ToolTag {
+    /// A `boolean_combine` command (planar boolean into a result layer).
+    BooleanCombine,
+    /// An `align_shapes` command.
+    AlignShapes,
+    /// A `distribute_shapes` command.
+    DistributeShapes,
+    /// An `offset_shapes` command (grow or shrink).
+    OffsetShapes,
+    /// A `build_via_stack` command.
+    BuildViaStack,
+}
+
+impl ToolTag {
+    /// The tool tag a command carries, or `None` for any command outside the
+    /// Wave 3 tool surface. The tokens match the command's serde `op` tag.
+    #[must_use]
+    fn of_command(command: &AgentCommand) -> Option<Self> {
+        match command {
+            AgentCommand::BooleanCombine { .. } => Some(ToolTag::BooleanCombine),
+            AgentCommand::AlignShapes { .. } => Some(ToolTag::AlignShapes),
+            AgentCommand::DistributeShapes { .. } => Some(ToolTag::DistributeShapes),
+            AgentCommand::OffsetShapes { .. } => Some(ToolTag::OffsetShapes),
+            AgentCommand::BuildViaStack { .. } => Some(ToolTag::BuildViaStack),
+            _ => None,
+        }
+    }
+
+    /// The stable `snake_case` token for this tag (the command's serde `op`),
+    /// used in signature keys, candidate ids, and provenance.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ToolTag::BooleanCombine => "boolean_combine",
+            ToolTag::AlignShapes => "align_shapes",
+            ToolTag::DistributeShapes => "distribute_shapes",
+            ToolTag::OffsetShapes => "offset_shapes",
+            ToolTag::BuildViaStack => "build_via_stack",
+        }
+    }
+}
+
+/// The set of Wave 3 tools a run's transcript exercised.
+///
+/// Wraps a sorted set of [`ToolTag`]s so the clustering dimension is
+/// deterministic and empty-by-default: a transcript that touches none of the
+/// new tools (every task authored before Wave 3, and every transcript-less
+/// run) has an empty surface and keys as `tools=none`, leaving the pre-Wave-3
+/// signatures unchanged.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
+pub struct ToolSurface(pub BTreeSet<ToolTag>);
+
+impl ToolSurface {
+    /// The tool surface of a transcript: every Wave 3 command it issued,
+    /// regardless of the command's outcome (a command the model *tried* is
+    /// evidence of intent to use that tool even if the engine rejected it).
+    #[must_use]
+    pub fn of(transcript: &Transcript) -> Self {
+        let mut tags = BTreeSet::new();
+        for record in &transcript.records {
+            if let Some(tag) = ToolTag::of_command(&record.command) {
+                tags.insert(tag);
+            }
+        }
+        Self(tags)
+    }
+
+    /// Whether the run touched no Wave 3 tool.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The `+`-joined tool tokens in sorted order, or `none` when empty.
+    #[must_use]
+    fn key(&self) -> String {
+        if self.0.is_empty() {
+            "none".to_owned()
+        } else {
+            self.0
+                .iter()
+                .map(|tag| tag.as_str())
+                .collect::<Vec<_>>()
+                .join("+")
+        }
+    }
+
+    /// The tool tokens as owned strings in sorted order (for provenance).
+    #[must_use]
+    fn tokens(&self) -> Vec<String> {
+        self.0.iter().map(|tag| tag.as_str().to_owned()).collect()
+    }
+}
+
 /// A failure signature: the clustering key the scanner groups mined runs by.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Signature {
@@ -167,6 +322,8 @@ pub struct Signature {
     pub pattern: PatternClass,
     /// The intent-violation kind the run ended with.
     pub intent: IntentViolationKind,
+    /// Which Wave 3 tools the run's transcript exercised.
+    pub tools: ToolSurface,
 }
 
 impl Signature {
@@ -177,12 +334,13 @@ impl Signature {
             drc_rules: persistent_rules(&drc_reports(&run.transcript)),
             pattern: pattern_class(&run.transcript),
             intent: intent_violation(&run.transcript),
+            tools: ToolSurface::of(&run.transcript),
         }
     }
 
     /// A human-readable one-line key, stable across runs, for example
-    /// `drc=m1.1+li.3|pattern=rect_only|intent=none` (rules in sorted order,
-    /// `none` when empty).
+    /// `drc=m1.1+li.3|pattern=rect_only|intent=none|tools=none` (rules and
+    /// tools in sorted order, each `none` when empty).
     #[must_use]
     pub fn key(&self) -> String {
         let rules = if self.drc_rules.is_empty() {
@@ -192,13 +350,16 @@ impl Signature {
         };
         let pattern = self.pattern.as_str();
         let intent = self.intent.as_str();
-        format!("drc={rules}|pattern={pattern}|intent={intent}")
+        let tools = self.tools.key();
+        format!("drc={rules}|pattern={pattern}|intent={intent}|tools={tools}")
     }
 
     /// A filesystem-safe slug (lowercase alphanumerics and underscores) built
     /// from the signature components; candidate ids are `cand_` plus this
     /// slug. The `none` intent kind is omitted, so a pure-DRC signature slugs
-    /// to, for example, `m1_1_rect_only`.
+    /// to, for example, `m1_1_rect_only`; the tool tokens are appended when the
+    /// surface is non-empty, so a boolean failure slugs to, for example,
+    /// `polygon_heavy_boolean_combine`.
     #[must_use]
     pub fn slug(&self) -> String {
         let mut parts: Vec<String> = self.drc_rules.iter().map(|rule| sanitize(rule)).collect();
@@ -206,6 +367,7 @@ impl Signature {
         if self.intent != IntentViolationKind::None {
             parts.push(self.intent.as_str().to_owned());
         }
+        parts.extend(self.tools.0.iter().map(|tag| tag.as_str().to_owned()));
         parts.join("_")
     }
 }
@@ -421,6 +583,17 @@ pub struct SourceRun {
     pub final_violations: u32,
     /// Wall-clock time for the whole task, in milliseconds.
     pub wall_ms: u64,
+    /// Which kind of client produced the row (`mock`, `ollama`, `anthropic`,
+    /// ...), so a candidate mined from local-model runs records the backend it
+    /// came from. Defaults to the empty string for provenance written before
+    /// the field existed.
+    #[serde(default)]
+    pub backend: String,
+    /// The model's quantization when the backend reports one (for example
+    /// `Q4_K_M` for a local GGUF model); `None` for frontier and mock
+    /// backends, and for provenance written before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantization: Option<String>,
 }
 
 impl SourceRun {
@@ -436,6 +609,8 @@ impl SourceRun {
             first_proposal_violations: run.record.first_proposal_violations,
             final_violations: run.record.final_violations,
             wall_ms: run.record.wall_ms,
+            backend: run.record.backend.clone(),
+            quantization: run.record.quantization.clone(),
         }
     }
 }
@@ -451,6 +626,10 @@ pub struct Provenance {
     pub pattern: String,
     /// The intent-violation token ([`IntentViolationKind::as_str`]).
     pub intent_violation: String,
+    /// The Wave 3 tool tokens the cluster's runs exercised, in sorted order
+    /// ([`ToolTag::as_str`]); empty when the cluster touched no new tool.
+    #[serde(default)]
+    pub tool_surface: Vec<String>,
     /// Every source run in the cluster, in scan input order.
     pub source_runs: Vec<SourceRun>,
 }
@@ -553,6 +732,7 @@ pub fn draft_candidates(
                 drc_rules: signature.drc_rules.iter().cloned().collect(),
                 pattern: signature.pattern.as_str().to_owned(),
                 intent_violation: signature.intent.as_str().to_owned(),
+                tool_surface: signature.tools.tokens(),
                 source_runs: members.iter().map(|run| SourceRun::of(run)).collect(),
             },
             two_way: TwoWay { good, bad },
@@ -598,9 +778,13 @@ fn layer_token(layer: u16, datatype: u16) -> String {
 
 /// The drafted prompt for a cluster: templated from the signature and the
 /// sorted source task ids, so a given cluster always drafts the same prompt.
+/// When the cluster used one or more Wave 3 tools, a clause naming them is
+/// appended so the drafted task points at the tool the mined runs struggled
+/// with.
 fn draft_prompt(signature: &Signature, sources: &BTreeSet<String>) -> String {
     let sources_list = sources.iter().cloned().collect::<Vec<_>>().join(", ");
     let pattern = signature.pattern.as_str();
+    let tools = tool_clause(&signature.tools);
     if !signature.drc_rules.is_empty() {
         let rules = signature
             .drc_rules
@@ -611,7 +795,8 @@ fn draft_prompt(signature: &Signature, sources: &BTreeSet<String>) -> String {
         return format!(
             "Create a cell named top and rebuild the {pattern} geometry that mined runs of \
              {sources_list} never got clean: rule(s) {rules} stayed violated through every \
-             correction attempt. Draw the same class of geometry so the final layout passes DRC."
+             correction attempt. Draw the same class of geometry so the final layout passes \
+             DRC.{tools}"
         );
     }
     if signature.intent != IntentViolationKind::None {
@@ -620,20 +805,39 @@ fn draft_prompt(signature: &Signature, sources: &BTreeSet<String>) -> String {
             "Create a cell named top and rebuild the {pattern} geometry that mined runs of \
              {sources_list} left with an unsatisfied connectivity intent ({kind} in the final \
              check). Connect every terminal of the intent spec so the check reports no opens \
-             and no shorts."
+             and no shorts.{tools}"
         );
     }
     if signature.pattern == PatternClass::NoGeometry {
         return format!(
             "Mined runs of {sources_list} produced no geometry at all. Create a cell named top \
              and place at least one met1 rectangle (layer 68/20) large enough to satisfy the \
-             checker."
+             checker.{tools}"
         );
     }
     format!(
         "Create a cell named top and redo the {pattern} geometry that mined runs of \
          {sources_list} only completed after several corrections. Produce the same class of \
-         geometry with the final layout DRC-clean."
+         geometry with the final layout DRC-clean.{tools}"
+    )
+}
+
+/// A trailing sentence naming the Wave 3 tools a cluster exercised, or the
+/// empty string when it touched none. Kept as a suffix so the tool hint layers
+/// onto whichever base prompt the signature selected.
+fn tool_clause(tools: &ToolSurface) -> String {
+    if tools.is_empty() {
+        return String::new();
+    }
+    let names = tools
+        .0
+        .iter()
+        .map(|tag| tag.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        " The mined runs reached for the {names} tool(s); use them where they fit rather than \
+         drawing every shape by hand."
     )
 }
 
@@ -1198,10 +1402,11 @@ fn bump_minor(version: &str) -> Option<String> {
 mod tests {
     use super::{
         CandidateFile, Cluster, IntentViolationKind, MinedRun, MiningOptions, PatternClass,
-        Signature, VectorRect, draft_candidates, scan, write_candidates,
+        Signature, ToolTag, VectorRect, draft_candidates, mined_runs_from_records, scan,
+        write_candidates,
     };
     use crate::{ResultRecord, Tier};
-    use reticle_agent_api::args::{LayerArg, PointArg, RectArg};
+    use reticle_agent_api::args::{AlignArg, AxisArg, BooleanOpArg, LayerArg, PointArg, RectArg};
     use reticle_agent_api::{
         AgentCommand, AgentResponse, CommandRecord, ElementId, Outcome, Transcript,
     };
@@ -1367,12 +1572,12 @@ mod tests {
         // BTreeMap ordering: "li.3" sorts before "m1.1".
         assert_eq!(
             clusters[0].signature.key(),
-            "drc=li.3|pattern=rect_only|intent=none"
+            "drc=li.3|pattern=rect_only|intent=none|tools=none"
         );
         assert_eq!(clusters[0].members, vec![3, 4]);
         assert_eq!(
             clusters[1].signature.key(),
-            "drc=m1.1|pattern=rect_only|intent=none"
+            "drc=m1.1|pattern=rect_only|intent=none|tools=none"
         );
         assert_eq!(clusters[1].members, vec![0, 2]);
     }
@@ -1541,6 +1746,280 @@ mod tests {
         );
     }
 
+    // ----- tool surface -----------------------------------------------------
+
+    /// A `boolean_combine` command over `ids` writing to `layer`.
+    fn boolean_combine(ids: &[u64], layer: (u16, u16)) -> AgentCommand {
+        AgentCommand::BooleanCombine {
+            cell: "top".into(),
+            bool_op: BooleanOpArg::Union,
+            ids: ids.iter().copied().map(ElementId).collect(),
+            layer: LayerArg {
+                layer: layer.0,
+                datatype: layer.1,
+            },
+        }
+    }
+
+    /// A failed run that drew two met1 rectangles and then merged them with
+    /// `boolean_combine`, never clearing `rule`. Rectangles (not polygons) so
+    /// the run has the same `rect_only` pattern as [`failed_rect_run`] and so
+    /// the rectangle-only [`replay_rects`] reconstructs a non-empty bad vector
+    /// for the promotion gate: only the tool surface distinguishes it.
+    fn boolean_run(task_id: &str, tier: u8, rule: &str) -> MinedRun {
+        run_of(
+            task_id,
+            tier,
+            false,
+            4,
+            vec![
+                cmd(0, add_rect((68, 20), (0, 0), (100, 100)), ok_mutation(&[1])),
+                cmd(
+                    1,
+                    add_rect((68, 20), (0, 200), (100, 300)),
+                    ok_mutation(&[2]),
+                ),
+                cmd(2, boolean_combine(&[1, 2], (68, 20)), ok_mutation(&[3])),
+                drc_report(3, &[rule]),
+            ],
+        )
+    }
+
+    #[test]
+    fn tool_surface_reads_every_wave3_command() {
+        let run = run_of(
+            "t3_mixed_tools",
+            3,
+            false,
+            2,
+            vec![
+                cmd(0, add_rect((68, 20), (0, 0), (10, 10)), ok_mutation(&[1])),
+                cmd(1, add_rect((68, 20), (0, 0), (10, 10)), ok_mutation(&[2])),
+                cmd(
+                    2,
+                    AgentCommand::AlignShapes {
+                        ids: vec![ElementId(1), ElementId(2)],
+                        align: AlignArg::Left,
+                    },
+                    ok_mutation(&[1, 2]),
+                ),
+                cmd(
+                    3,
+                    AgentCommand::OffsetShapes {
+                        ids: vec![ElementId(1)],
+                        delta: 5,
+                    },
+                    ok_mutation(&[1]),
+                ),
+            ],
+        );
+        let tools = &Signature::of(&run).tools;
+        assert_eq!(
+            tools.0.iter().copied().collect::<Vec<_>>(),
+            vec![ToolTag::AlignShapes, ToolTag::OffsetShapes],
+            "both distinct tools recorded, sorted, deduplicated"
+        );
+    }
+
+    #[test]
+    fn tool_surface_is_a_clustering_dimension() {
+        // Two boolean failures and two hand-drawn rectangle failures, all with
+        // the same persistent DRC rule and the same rect_only pattern: only the
+        // tool surface tells them apart.
+        let runs = vec![
+            boolean_run("t3_bool_a", 3, "m1.1"),
+            boolean_run("t3_bool_b", 3, "m1.1"),
+            failed_rect_run("t3_hand_a", 3, "m1.1"),
+            failed_rect_run("t3_hand_b", 3, "m1.1"),
+        ];
+        let clusters = scan(&runs, &MiningOptions::default());
+        assert_eq!(
+            clusters.len(),
+            2,
+            "the boolean failures split from the hand-drawn ones by tool surface"
+        );
+        // The empty-tool cluster sorts before the boolean one (`ToolSurface`
+        // ordering: empty set precedes a non-empty set).
+        assert_eq!(
+            clusters[0].signature.key(),
+            "drc=m1.1|pattern=rect_only|intent=none|tools=none"
+        );
+        assert_eq!(clusters[0].members, vec![2, 3]);
+        assert_eq!(
+            clusters[1].signature.key(),
+            "drc=m1.1|pattern=rect_only|intent=none|tools=boolean_combine"
+        );
+        assert_eq!(clusters[1].members, vec![0, 1]);
+        assert_eq!(
+            clusters[1].signature.slug(),
+            "m1_1_rect_only_boolean_combine"
+        );
+    }
+
+    #[test]
+    fn tool_surface_counts_a_tried_command_even_when_it_failed() {
+        // A `distribute_shapes` the engine rejected still marks intent to use
+        // the tool, so it lands in the surface.
+        let run = run_of(
+            "t3_bad_distribute",
+            3,
+            false,
+            1,
+            vec![cmd(
+                0,
+                AgentCommand::DistributeShapes {
+                    ids: vec![ElementId(1), ElementId(2)],
+                    axis: AxisArg::Horizontal,
+                },
+                Outcome::Err(reticle_agent_api::AgentError::invalid(
+                    "need at least three shapes",
+                )),
+            )],
+        );
+        let tools = &Signature::of(&run).tools;
+        assert_eq!(
+            tools.0.iter().copied().collect::<Vec<_>>(),
+            vec![ToolTag::DistributeShapes]
+        );
+    }
+
+    #[test]
+    fn tool_surface_candidate_carries_tool_provenance_and_prompt() {
+        let runs = vec![
+            boolean_run("t3_bool_a", 3, "m1.1"),
+            boolean_run("t3_bool_b", 2, "m1.1"),
+        ];
+        let options = MiningOptions::default();
+        let clusters = scan(&runs, &options);
+        let candidates = draft_candidates(&runs, &clusters, &options);
+        assert_eq!(candidates.len(), 1);
+        let candidate = &candidates[0];
+        assert_eq!(candidate.id, "cand_m1_1_rect_only_boolean_combine");
+        assert_eq!(
+            candidate.provenance.tool_surface,
+            vec!["boolean_combine".to_owned()],
+            "the drafted candidate records the tool surface it was mined from"
+        );
+        assert!(
+            candidate.prompt.contains("boolean_combine"),
+            "the drafted prompt names the tool the mined runs used"
+        );
+        // The DRC signature still drives the checker choice.
+        assert_eq!(candidate.checker, "drc_clean");
+    }
+
+    #[test]
+    fn tool_surface_candidate_still_passes_the_two_way_gate() {
+        // The tool surface changes clustering and provenance, not the checker
+        // or its vectors, so a boolean-combine cluster with a persistent DRC
+        // rule still gates on `drc_clean`: the two 100x100 met1 rects it drew
+        // become a bad vector the checker rejects (min width and area), and the
+        // canonical 500x500 rect is the good vector it accepts.
+        let runs = vec![
+            boolean_run("t3_bool_a", 3, "m1.1"),
+            boolean_run("t3_bool_b", 3, "m1.1"),
+        ];
+        let options = MiningOptions::default();
+        let candidates = draft_candidates(&runs, &scan(&runs, &options), &options);
+        super::verify_two_way(&candidates[0]).expect("good accepted, bad rejected");
+    }
+
+    // ----- mining committed ResultRecord-only runs --------------------------
+
+    #[test]
+    fn mined_runs_from_records_lifts_backend_provenance() {
+        let records = vec![
+            ResultRecord {
+                task_id: "t3_via_chain_4".into(),
+                model: "qwen2.5-coder:16k".into(),
+                suite_version: "adhoc".into(),
+                success: false,
+                iterations: 1,
+                first_proposal_violations: 0,
+                final_violations: 0,
+                wall_ms: 42,
+                backend: "ollama".into(),
+                quantization: Some("Q4_K_M".into()),
+            },
+            ResultRecord {
+                task_id: "t4_compound_grid".into(),
+                model: "qwen2.5-coder:16k".into(),
+                suite_version: "adhoc".into(),
+                success: false,
+                iterations: 1,
+                first_proposal_violations: 0,
+                final_violations: 0,
+                wall_ms: 55,
+                backend: "ollama".into(),
+                quantization: Some("Q4_K_M".into()),
+            },
+        ];
+        let runs = mined_runs_from_records(&records);
+        // Tier parsed from the task-id prefix.
+        assert_eq!(runs[0].tier, Tier(3));
+        assert_eq!(runs[1].tier, Tier(4));
+        // No transcript, so the signature is empty: these runs cluster only by
+        // "it failed", which is the honest limit of transcript-less data.
+        assert!(runs[0].transcript.records.is_empty());
+        assert_eq!(Signature::of(&runs[0]), Signature::of(&runs[1]));
+
+        let options = MiningOptions::default();
+        let clusters = scan(&runs, &options);
+        assert_eq!(clusters.len(), 1, "one empty-signature failure cluster");
+        let candidate = &draft_candidates(&runs, &clusters, &options)[0];
+        assert_eq!(candidate.id, "cand_no_geometry");
+        assert_eq!(candidate.provenance.source_runs.len(), 2);
+        assert_eq!(candidate.provenance.source_runs[0].backend, "ollama");
+        assert_eq!(
+            candidate.provenance.source_runs[0].quantization.as_deref(),
+            Some("Q4_K_M"),
+            "the local-model quantization survives into provenance"
+        );
+        assert_eq!(candidate.tier, Tier(4), "highest source tier");
+    }
+
+    #[test]
+    fn committed_local_model_results_mine_into_backend_tagged_candidates() {
+        // Mines the two committed local-model result sets. They carry no
+        // transcript, so this proves the ResultRecord-only path and its backend
+        // provenance, not tool-surface clustering (which needs transcripts the
+        // local runner does not persist). The numbers are non-deterministic
+        // local runs, so we assert on structure, not on exact counts.
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../benchmarks/results");
+        for (rel, backend, quant) in [
+            ("gpt-oss-16k/suite-ollama.json", "ollama", "MXFP4"),
+            ("qwen25-coder-16k/suite-ollama.json", "ollama", "Q4_K_M"),
+        ] {
+            let path = root.join(rel);
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            let records: Vec<ResultRecord> =
+                serde_json::from_str(&text).expect("committed results parse");
+            let runs = mined_runs_from_records(&records);
+            let options = MiningOptions::default();
+            let clusters = scan(&runs, &options);
+            let candidates = draft_candidates(&runs, &clusters, &options);
+            // There are real failures in each set, and with no transcript they
+            // collapse to the single empty (`no_geometry`) signature.
+            assert!(
+                !candidates.is_empty(),
+                "{rel} has failures worth drafting a candidate from"
+            );
+            let candidate = &candidates[0];
+            assert_eq!(candidate.provenance.source_runs[0].backend, backend);
+            assert_eq!(
+                candidate.provenance.source_runs[0].quantization.as_deref(),
+                Some(quant),
+                "{rel} candidate carries its quantization"
+            );
+            assert!(
+                candidate.provenance.tool_surface.is_empty(),
+                "{rel} is transcript-less, so no tool surface is recoverable"
+            );
+        }
+    }
+
     // ----- drafting ---------------------------------------------------------
 
     /// The synthetic corpus behind the committed sample candidate: two failed
@@ -1585,10 +2064,11 @@ mod tests {
         assert!(candidate.prompt.contains("t2_legal_spacing_met1"));
         assert_eq!(
             candidate.provenance.signature,
-            "drc=m1.1|pattern=rect_only|intent=none"
+            "drc=m1.1|pattern=rect_only|intent=none|tools=none"
         );
         assert_eq!(candidate.provenance.drc_rules, vec!["m1.1".to_owned()]);
         assert_eq!(candidate.provenance.pattern, "rect_only");
+        assert!(candidate.provenance.tool_surface.is_empty());
         assert_eq!(candidate.provenance.source_runs.len(), 2);
         assert_eq!(
             candidate.provenance.source_runs[0].task_id,

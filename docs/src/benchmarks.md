@@ -91,3 +91,38 @@ candidate tasks with provenance and two-way vectors; `just bench-promote <id>`
 admits a candidate into the live suite only if its checker passes those vectors,
 and bumps the manifest version. So the suite grows from observed failures without
 ever admitting a checker that cannot both accept and reject.
+
+The miner clusters failed and struggling runs by a failure **signature**, so a
+recurring failure mode becomes one candidate rather than many near-duplicates. A
+signature has four dimensions:
+
+- the persistent DRC rule ids no correction attempt ever cleared;
+- a geometric-pattern class (rectangles, a layer stack, a polygon, a path, a
+  placement, or no geometry at all);
+- the connectivity-intent kind the run ended with (an open, a short, both, or
+  none);
+- the **tool surface**: which of the Wave 3 editing commands the run
+  reached for.
+
+### Tool-surface failure mining
+
+The Wave 3 tool surface is the higher-level editing commands added to the agent
+API after the first tasks were authored: `boolean_combine`, `align_shapes`,
+`distribute_shapes`, `offset_shapes`, and `build_via_stack`. A model can fail a
+task *through* one of these tools (a botched boolean merge, a via stack whose
+enclosure violates the rule) in a way that looks identical, by DRC rule and
+geometric pattern, to a failure drawn shape by shape. Clustering by tool surface
+splits those apart, so the miner surfaces a tool-specific cluster (and drafts a
+candidate whose id and prompt name the tool) instead of hiding the tool failure
+inside a generic geometry cluster. The tool surface is recorded whether or not
+the command succeeded: a command the model *tried* is evidence of intent to use
+that tool. Every drafted candidate carries its tool surface in its provenance,
+alongside the backend, model, and quantization of each source run, so a failure
+mined from a local (Ollama) run is never conflated with a mock or frontier one.
+
+The tool surface is read from a run's command **transcript**. The committed
+local-model result sets under `benchmarks/results/` are plain result records
+with no transcript, so mining them recovers the backend provenance but not the
+per-tool signature: those runs cluster only by "it failed". Recovering the full
+DRC, geometric, intent, and tool-surface signature from a local run needs the
+command transcript the local runner does not yet persist.
