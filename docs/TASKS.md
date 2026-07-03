@@ -237,12 +237,16 @@ Batch 1 = 3A tool surface, 3B scoped context, 3C refinement, 3D planning (all
 reticle-agent-layer). Batch 2 = 3E failure-mining, 3F benchmark expansion (needs
 3A's new commands, so after Batch 1).
 
-- [~] Batch 1 in-progress (worktrees v6-3a-tools/3b-scoped/3c-refine/3d-plan off
-  main d155100): 3A new AgentCommands (boolean/align/offset/via-stack) via
-  reticle-geometry + MCP tools; 3B minimal context packs (region+rule, token
-  savings measured); 3C mid-session refinement folded into the loop feedback; 3D
-  structured plan step per iteration stored in the transcript and rendered in the
-  panel. Each with tests + mdbook notes.
+- [x] Batch 1 DONE-gate-green, merged (6afa05a 3A, dbcae3d 3B, cb2c17f 3C, 2a52433
+  3D; full just ci GREEN, 1042 tests, pushed 31ab771). 3A added 5 AgentCommands
+  (ADR 0031): BooleanCombine{cell,bool_op,ids,layer}, AlignShapes{ids,align},
+  DistributeShapes{ids,axis}, OffsetShapes{ids,delta}, BuildViaStack{cell,
+  lower/upper/cut_layer,center,cut_size,default_enclosure}, with MCP tools +
+  two-way schema tests. 3B context packs (~30x token reduction measured honestly).
+  3C refinement folded into the loop without changing the frozen Context (added a
+  RefinementSource seam). 3D per-iteration plan step in Transcript.plan (additive,
+  serde-default; ADR 0032) rendered in the panel. run.rs auto-merged (3C+3D). Two
+  more temp-dir test flakes fixed (loader, plugins).
 - [ ] Batch 2: 3E mine the local-model runs, cluster by the new tool surface,
   promote two-way-tested checkers, bump suite version; 3F +12 tasks (suite -> 75)
   for boolean/array/via-stack/refinement, re-run both local models.
