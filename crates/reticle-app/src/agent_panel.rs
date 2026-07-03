@@ -16,9 +16,10 @@
 //! violations out of `run_drc` responses) is plain code here, unit-tested
 //! without an egui context; the app module owns only the thin drawing glue.
 //!
-//! This module is native-only for now: `reticle-agent-api` does not compile to
-//! `wasm32-unknown-unknown` (its `render_png` command requires the native
-//! blocking GPU context), so the web build carries a stub panel instead.
+//! Model-free and portable: this compiles and runs on both native and
+//! `wasm32-unknown-unknown`. `reticle-agent-api` builds for wasm (its `render_png`
+//! command degrades to a clean error there rather than requiring the native
+//! blocking GPU context), so the web build runs the real panel, not a stub.
 
 use reticle_agent_api::args::{LayerArg, PointArg, RectArg};
 use reticle_agent_api::{
