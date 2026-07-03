@@ -1,4 +1,4 @@
-# Layout-tasks suite for the Reticle agent benchmark (v0.3.0).
+# Layout-tasks suite for the Reticle agent benchmark (v0.4.0).
 #
 # The 3 sample tasks prove the machinery end to end against the mock model;
 # the 50 authored tasks span tiers 1-4: primitive placement and legality,
@@ -6,8 +6,16 @@
 # connectivity-intent, and compound cells. The 10 tier-5 tasks are grounded in
 # the real SKY130 PDK: named periphery rules (m1.1, m1.4, m2.4, li.5, ct.1,
 # licon.1, via.1a) and the measured geometry of the sky130_fd_sc_hd tap and
-# fill cells. Bump `version` when tasks change.
-version = "0.3.0"
+# fill cells.
+#
+# v0.4.0 adds 12 Wave-3 tasks that exercise the boolean/align/array/via-stack tool
+# surface: 3 boolean-op constructions (union/intersection/difference, checked by
+# `boolean_result` on the result area with the inputs consumed), 3 array-with-pitch
+# placements (checked by `array_pitch` on count and step), 3 via-stack builds (checked
+# by `contact_stack` on connectivity and enclosure), and 3 iterative-refinement tasks
+# (an initial prompt plus a scripted `refinement` follow-up the refinement-aware runner
+# folds in between iterations). Bump `version` when tasks change.
+version = "0.4.0"
 tasks = [
     "t1_place_met1_rect",
     "t1_drc_clean_met1",
@@ -72,4 +80,16 @@ tasks = [
     "t5_route_cell_escape",
     "t5_tap_cell_core",
     "t5_fill_tile_row",
+    "t3_bool_union_met2",
+    "t3_bool_intersect_met2",
+    "t3_bool_difference_met2",
+    "t3_array_row4_pitch",
+    "t3_array_grid_pitch",
+    "t3_array_col3_pitch",
+    "t3_via_stack_m1_m2",
+    "t3_via_stack_li_m1",
+    "t3_via_stack_poly_li",
+    "t4_refine_widen_met1",
+    "t4_refine_add_shape_met1",
+    "t4_refine_li1_grow",
 ]

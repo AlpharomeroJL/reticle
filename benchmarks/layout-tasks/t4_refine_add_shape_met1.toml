@@ -1,0 +1,6 @@
+id = "t4_refine_add_shape_met1"
+tier = 4
+prompt = "Create a cell named top and place one met1 (68/20) rectangle."
+technology = "sky130.tech"
+checker = "shape_count:layer=68/20,min=2"
+refinement = "Refinement: add a second, separate met1 (68/20) rectangle placed clear of the first, so the cell holds at least two met1 shapes."

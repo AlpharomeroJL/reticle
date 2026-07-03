@@ -34,7 +34,8 @@ use std::time::Instant;
 use clap::Parser;
 use reticle_agent::run::document_summary;
 use reticle_agent::{
-    AnthropicModel, LoopOptions, OllamaModel, Provenance, RunOutcome, run_agent_task,
+    AnthropicModel, LoopOptions, OllamaModel, Provenance, RefinementFn, RunOutcome, run_agent_task,
+    run_agent_task_refined,
 };
 use reticle_bench::model::ModelClient;
 use reticle_bench::{BenchTask, CheckerRegistry, Tier, load_suite, load_task};
@@ -302,19 +303,51 @@ fn drive_one(
 ) -> Result<(bool, reticle_bench::ResultRecord, RunOutcome), String> {
     // Measure real wall time for the record (the loop itself never reads the clock).
     let started = Instant::now();
-    let outcome: RunOutcome = run_agent_task(
-        task,
-        model,
-        registry,
-        technology,
-        &cli.suite_version,
-        options,
-        &cli.out_dir,
-        0, // placeholder; overwritten below with the measured duration
-        provenance,
-        // Feed the model the current layout before each proposal.
-        |m, session| m.set_document_context(document_summary(session)),
-    )
+    // Feed the model the current layout before each proposal.
+    let context_hook =
+        |m: &mut DynModel, session: &_| m.set_document_context(document_summary(session));
+    let outcome: RunOutcome = match &task.refinement {
+        // An iterative-refinement task: the initial prompt drives iteration 0, then the
+        // scripted follow-up constraint is folded into the model's feedback before
+        // iteration 1 (after the first proposal), exactly as a live user would add a
+        // constraint mid-session. This routes through lane 3C's refinement seam
+        // (`run_agent_task_refined` + a `RefinementSource`) rather than restarting the run.
+        Some(refinement) => {
+            let refinement = refinement.clone();
+            run_agent_task_refined(
+                task,
+                model,
+                registry,
+                technology,
+                &cli.suite_version,
+                options,
+                &cli.out_dir,
+                0, // placeholder; overwritten below with the measured duration
+                provenance,
+                context_hook,
+                RefinementFn(move |iteration: u32| {
+                    if iteration == 1 {
+                        vec![refinement.clone()]
+                    } else {
+                        Vec::new()
+                    }
+                }),
+            )
+        }
+        // An ordinary single-shot task runs with no mid-session refinements.
+        None => run_agent_task(
+            task,
+            model,
+            registry,
+            technology,
+            &cli.suite_version,
+            options,
+            &cli.out_dir,
+            0, // placeholder; overwritten below with the measured duration
+            provenance,
+            context_hook,
+        ),
+    }
     .map_err(|e| e.to_string())?;
     let wall_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
 
@@ -409,6 +442,9 @@ fn resolve_task(cli: &Cli) -> Result<(BenchTask, String), String> {
             .unwrap_or_default(),
         checker,
         intent: cli.intent.clone(),
+        // An inline `--prompt` run carries no scripted refinement; a `--task` file that
+        // declares one is honored through the suite/single refinement path below.
+        refinement: None,
     };
     Ok((task, technology))
 }

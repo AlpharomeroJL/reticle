@@ -58,6 +58,7 @@ mod tests {
             technology: "tech/sky130.tech".into(),
             checker: "rect_present".into(),
             intent: None,
+            refinement: None,
         };
         let back: BenchTask = serde_json::from_str(&serde_json::to_string(&task).unwrap()).unwrap();
         assert_eq!(task, back);
