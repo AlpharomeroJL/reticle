@@ -4076,6 +4076,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "reticle-demo-server"
+version = "4.0.0"
+dependencies = [
+ "axum",
+ "futures-util",
+ "http-body-util",
+ "reticle-agent",
+ "reticle-agent-api",
+ "reticle-bench",
+ "reticle-demo",
+ "reticle-drc",
+ "reticle-geometry",
+ "reticle-model",
+ "reticle-server",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tower",
+]
+
+[[package]]
 name = "reticle-drc"
 version = "4.0.0"
 dependencies = [
