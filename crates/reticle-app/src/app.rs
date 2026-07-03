@@ -39,6 +39,7 @@ use crate::productivity::{self, ProductivityState};
 use crate::replay::ReplayTheater;
 use crate::selection::{self, Selection};
 use crate::snap::{self, Guide, SnapHint, SnapState};
+use crate::tech_editor::TechEditorState;
 use crate::tool::{Tool, ToolState};
 use crate::viewports::{self, Split, Viewports};
 /// A transient status message shown in the bottom bar.
@@ -173,6 +174,11 @@ pub struct App {
     /// The productivity panel state: the in-app clipboard plus the array,
     /// move-by-delta, and via-stack dialog fields.
     productivity: ProductivityState,
+
+    /// The technology-editor panel state: the draft technology being edited, its
+    /// validation errors, and the tech-file round-trip text (see
+    /// [`crate::tech_editor`]).
+    tech_editor: TechEditorState,
 
     /// The rebindable shortcut map every key press resolves through.
     keymap: Keymap,
@@ -336,6 +342,7 @@ impl App {
             netlight: Netlight::new(),
             view3d: crate::view3d::View3d::new(),
             productivity: ProductivityState::new(),
+            tech_editor: TechEditorState::new(),
             keymap: load_keymap(),
             keymap_open: false,
             rebinding: None,
@@ -783,6 +790,19 @@ impl App {
         let n = hits.len();
         self.selection.set(hits);
         self.status.set(format!("Selected {n} shape(s)"));
+    }
+
+    /// Draws the technology-editor panel and the upgraded layer manager at the end
+    /// of the right panel. Delegates to [`crate::tech_editor::show`] with the three
+    /// disjoint app fields it needs (its own state, the history, and the layer
+    /// table); borrowing them as separate fields here keeps a single call site.
+    fn tech_editor_panel(&mut self, ui: &mut egui::Ui) {
+        crate::tech_editor::show(
+            &mut self.tech_editor,
+            &mut self.history,
+            &mut self.layer_state,
+            ui,
+        );
     }
 
     /// Draws the right-hand undo-history panel: stack depths and step buttons.
@@ -3548,6 +3568,8 @@ impl eframe::App for App {
                         self.ops_panel(ui);
                         self.productivity_panel(ui);
                         self.snap_panel(ui);
+                        ui.separator();
+                        self.tech_editor_panel(ui);
                     });
             });
         egui::CentralPanel::default().show(ui, |ui| {

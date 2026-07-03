@@ -41,7 +41,9 @@ reticle-extract = { workspace = true }
 reticle-agent-api = { workspace = true }
 serde_json = { workspace = true }
 
-# `reticle-io` parses the committed SKY130 technology file so the cross-section
-# test checks real process-stack z bands rather than hand-built entries.
-[dev-dependencies]
+# `reticle-io` supplies the technology-file parser and serializer the technology
+# editor round-trips through (`parse_technology`/`write_technology`). It is already
+# in the wasm graph via `reticle-agent-api`, so making it a first-class dependency
+# keeps the web build green. The cross-section test also parses the committed
+# SKY130 file through it.
 reticle-io = { workspace = true }
