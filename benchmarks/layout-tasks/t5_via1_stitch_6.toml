@@ -1,0 +1,7 @@
+# Tier-5 via chain on real rules: six via cuts at the fixed via.1a size, each
+# with the m2.4 met2 enclosure, stitching met1 to met2.
+id = "t5_via1_stitch_6"
+tier = 5
+prompt = "Create a cell named top and stitch a met1 (68/20) strap to a met2 (69/20) strap with six via (68/44) cuts at the fixed via.1a size of 0.15um (150 dbu). Rule m2.4 requires met2 to enclose every cut by at least 0.055um (55 dbu) on every side. All six cuts must join one continuous met1/met2 net."
+technology = "sky130.tech"
+checker = "via_chain:via=68/44,vias=6,bottom=68/20,top=69/20"
