@@ -3970,10 +3970,15 @@ dependencies = [
 name = "reticle-bench"
 version = "4.0.0"
 dependencies = [
+ "clap",
  "reticle-agent-api",
+ "reticle-drc",
+ "reticle-extract",
+ "reticle-geometry",
  "reticle-model",
  "serde",
  "serde_json",
+ "toml 1.1.2+spec-1.1.0",
 ]
 
 [[package]]
