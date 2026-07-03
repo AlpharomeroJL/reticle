@@ -3,6 +3,85 @@
 All notable changes to Reticle are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com), and the project uses
 [conventional commits](https://www.conventionalcommits.org).
+## [6.0.0] - 2026-07-03
+
+### Features
+
+- Drawing tools and vertex editing
+- Boolean and transform operations on the selection
+- Productivity editing (clipboard, array, move-delta, via stacks)
+- Geometry snapping, ruler guides, and snap settings
+- In-app agent UX (conversation, history browser, ask-to-fix)
+- View and export panel (theme, bookmarks, SVG/PNG, monochrome)
+- Filter query language, saved sets, select-similar, outline tree
+- Layer manager upgrade and technology editor (lane v6-2e)
+- Expose Wave 2 editor ops as agent commands and MCP tools
+- Region-scoped context packs for scoped sessions
+- Mid-session refinement protocol in the propose-verify-correct loop
+- Per-iteration plan-step transparency
+- Embedded first-run tour with a pure state machine (lane 4A)
+- Bundled worked use cases + Start-screen chooser (Lane 4B)
+
+### Bug Fixes
+
+- Demote private and wasm-cfg intra-doc links to code spans
+- Wait for the demo-server slot release instead of asserting on the instant
+- Misread and PNG images in Wave 2 chapters; TASKS Wave 2 complete
+- Give each mining test a fresh temp dir (clear stale before create)
+- Fresh temp dir for loader and plugin tests (clear stale before create)
+
+### Documentation
+
+- V5.0.0 shipped (STATUS re-audit and release complete)
+- V6.0.0 run scaffolding and shared-tree incident record
+- Pages postmortem in STATUS; Wave 1 done-gate-green in TASKS
+- 0031 authorize Wave 3 AgentCommand expansion for the Wave 2 tools
+- Wave 3 batching plan and Batch-1 dispatch (agent capability expansion)
+- Wave 3 Batch 1 done-gate-green; record 3A command surface and 3D plan log (ADR 0032)
+- Wave 3 complete; Wave 4 dispatched; 75-task local re-run in progress
+- V6.0.0 credibility chapters + README overhaul (Lane 4C)
+- Wave 4 done; entering Wave 5 (QA gauntlet + v6.0.0 release)
+
+### Testing
+
+- Regression-test the live qwen content-embedded tool call
+
+### Build and tooling
+
+- Add lane/lane-done worktree recipes; record mandatory lane procedure
+
+### Other
+
+- Ollama backend, recovered from shared-tree incident
+- Ollama.rs OpenAI-compatible backend and agent wiring
+- Surface backend/quantization provenance in the results summary
+- Ollama OpenAI-compatible benchmark backend
+- Pages fix, recovered from shared-tree incident
+- Session store abstraction, bundled theater transcript, e2e subpath project
+- Un-gate the replay theater on wasm; green the lane gate
+- Pages base-path fix, wasm theater un-gate, deploy/smoke recipes
+- Gpt-oss:16k local run (42/63, 67%); TASKS benchmark + Batch-1 incident
+- Drawing and vertex editing tools
+- Boolean and transform operations
+- Productivity editing (clipboard, array, via-stack)
+- Snapping and guides
+- Qwen2.5-coder:16k local run (28/63, 44%); Wave 2 Batch-1 done
+- View and export polish (theme, bookmarks, PNG/SVG)
+- Search and selection depth (filter language, saved sets, outline)
+- Layer manager upgrade and technology editor (round-trip)
+- Richer agent tool surface (boolean/align/distribute/offset/via-stack)
+- Scoped sessions and minimal context packs
+- Iterative refinement protocol
+- Agent planning transparency (plan step per iteration)
+- Cluster failures by Wave 3 tool surface
+- Failure-mining tool-surface clustering
+- Expand suite to 75 tasks with 12 Wave-3 tasks (v0.4.0)
+- Benchmark expansion to 75 tasks (v0.4.0, boolean/array/via-stack/refinement)
+- Embedded first-run tour
+- Worked use cases and start screen
+- Credibility chapters (positioning/benchmark/sky130) and README overhaul
+- 75-task v0.4.0 two-model results and tables (gpt-oss 50/75=67%, qwen 25/75=33%)
+- Regenerate hero (2560x1440) and browse GIF for v6.0.0 (deterministic capture-media)
 ## [5.0.0] - 2026-07-03
 
 ### Bug Fixes
@@ -133,6 +212,7 @@ All notable changes to Reticle are documented here. The format follows
 - Live-wiring integration tests (real harness streams to a watcher; server-side cancel)
 - Flagship agent replay capture (propose-verify-correct with live DRC)
 - Replay-hash determinism test over every benchmark transcript
+- V5.0.0 (version bump, changelog, requirements table)
 ## [4.0.0] - 2026-07-02
 
 ### Performance

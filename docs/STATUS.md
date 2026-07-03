@@ -234,6 +234,68 @@ final "started event" confirmation on the live URL was made through the
 (the Playwright MCP browser backend was unavailable this session); `just
 smoke-pages` covers the live asset resolution.
 
+### v6.0.0 final re-audit (all waves, audited 2026-07-03)
+
+v6.0.0 fixed the front door, added a local benchmark backend, expanded the editor
+and the agent, and shipped a guided experience. Audited with the same skepticism.
+`just ci` (1098 test functions, up from 775) plus `just e2e` and `just e2e-subpath`
+are green; the greps below hold.
+
+Standard greps: zero `todo!`/`unimplemented!` in shipped code; two defensive
+`unreachable!` in `reticle-mcp` (invariant assertions, unchanged from v5); one
+`unsafe` (the documented mmap in `reticle-index`, unchanged); three legitimate
+`#[ignore]` (corpus-regeneration and a fetched-cell-gated test); a single author
+across all history; no leaked secret in the tree or full history
+(`just check-keys -History`); no AI-attribution string in any file or commit.
+
+New subsystems, itemized:
+
+- **Wave 2 editor (8 lanes) DONE.** Drawing and vertex editing (polygon/path/rect
+  tools, vertex drag/insert/delete, modifier constraints); boolean and transform
+  ops on the selection (union/intersection/difference/xor, offset, rotate/mirror,
+  align/distribute, single-step undo via `apply_group`); productivity (copy/cut/
+  paste, array, via-stack); snapping and guides (geometry snap + a `snap_world`
+  seam the drawing tools route through); layer manager upgrade + technology editor
+  (with a real `reticle_io::write_technology` round-trip and
+  `EditableDocument::set_technology`); search/selection filter language + saved sets
+  + outline tree; view/export (theme, bookmarks, SVG plus PNG); in-app agent UX.
+- **Wave 3 agent (6 lanes) DONE.** Five new AgentCommands (boolean/align/distribute/
+  offset/via-stack, ADR 0031) with MCP tools and two-way schema tests; region+rule
+  context packs (a measured ~30x token reduction versus same-fidelity whole-document
+  context); mid-session refinement folded into the loop without changing the frozen
+  `Context` (a `RefinementSource` seam); a per-iteration structured plan step stored
+  additively in the transcript (ADR 0032) and rendered in the panel; tool-surface
+  failure-mining; the suite expanded to 75 tasks (v0.4.0).
+- **Wave 4 guided experience (3 lanes) DONE.** A unit-tested first-run tour (native
+  and wasm); four bundled worked use cases behind a Start screen (a SKY130 cell and
+  its technology are compiled in, so they work on wasm); the positioning, benchmark,
+  and sky130 credibility chapters plus a top-down README overhaul with the stale
+  claims swept.
+
+Honest limitations (v6):
+
+1. **The benchmark is local models.** On the 75-task v0.4.0 suite: `gpt-oss:16k`
+   (MXFP4) 50/75 = 67%, `qwen2.5-coder:16k` (Q4_K_M) 25/75 = 33%. These are a
+   realistic floor for small quantized local models on this task, not an upper
+   bound, and are labeled by backend/model/quantization. Local outputs are not
+   deterministic; the transcript-replay determinism (which replays recorded
+   transcripts to a fixed `document_hash`) is unaffected and is a committed test.
+2. **Tool-surface failure mining has nothing to mine yet.** The clustering dimension
+   is implemented and tested, but the committed local runs are `ResultRecord`-only
+   (the local runner does not persist per-command transcripts), so no tool-surface
+   candidate can be drafted from them. Persisting run transcripts is a follow-up.
+3. **Media is the regenerated existing set.** The hero (2560x1440), the browse and
+   agent GIFs, and the five engine stills are regenerated deterministically by
+   `just capture-media`. The more ambitious per-new-feature GIF tour (a separate
+   clip for draw, boolean, array, and via-stack) would extend the capture harness
+   and is a documented partial, not shipped.
+4. **The agent "fix violation" affordance is UI plus a seam.** The DRC-panel button
+   assembles the violation region and rule into a real context string and launches a
+   session with it; the scoped-region enforcement is the Wave 3B context-pack seam,
+   so the clipping to the region is narration, not a hard constraint on the run.
+5. **Fuzzing still does not run on this Windows/MSVC host** (unchanged from v4/v5);
+   parser and boolean robustness stay covered by the gate's proptests.
+
 ## Section 16 (definition of done), item by item
 
 | # | Item | Status | Evidence |
