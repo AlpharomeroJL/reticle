@@ -9,10 +9,11 @@ technology = "sky130.tech"
 checker = "drc_clean"
 
 [provenance]
-signature = "drc=m1.1|pattern=rect_only|intent=none"
+signature = "drc=m1.1|pattern=rect_only|intent=none|tools=none"
 drc_rules = ["m1.1"]
 pattern = "rect_only"
 intent_violation = "none"
+tool_surface = []
 
 [[provenance.source_runs]]
 tier = 1
@@ -24,6 +25,7 @@ iterations = 4
 first_proposal_violations = 2
 final_violations = 1
 wall_ms = 5
+backend = "mock"
 
 [[provenance.source_runs]]
 tier = 2
@@ -35,6 +37,7 @@ iterations = 4
 first_proposal_violations = 2
 final_violations = 1
 wall_ms = 5
+backend = "mock"
 
 [[two_way.good]]
 layer = "68/20"
