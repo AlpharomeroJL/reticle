@@ -23,6 +23,8 @@ extend-ignore-re = ['\b[0-9a-f]{7,40}\b']
 
 [default.extend-words]
 # EDA / graphics / domain vocabulary that is not a typo.
+# Synopsys is an EDA company name (not "synopsis").
+Synopsys = "Synopsys"
 oas = "oas"
 nin = "nin"
 ser = "ser"
