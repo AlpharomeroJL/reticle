@@ -1,7 +1,43 @@
 //! Model Context Protocol server for Reticle.
 //!
-//! Exposes every `reticle-agent-api` command as an MCP tool with a JSON schema
-//! and a model-facing description (units, database-unit conventions, error
-//! semantics), plus read-only context tools. One document per session with a
-//! configurable command budget. Frozen Wave 0 skeleton; the tool implementations
-//! and the stdio transport land in a later wave.
+//! This crate exposes the frozen [`reticle_agent_api`] command surface to a
+//! language model over the [Model Context Protocol]. Every
+//! [`AgentCommand`](reticle_agent_api::AgentCommand) variant becomes an MCP
+//! *tool* with a JSON input schema and a model-facing description, and three
+//! read-only *context* tools sit alongside them
+//! ([`get_technology_rules`](tools), [`get_document_summary`](tools), and
+//! [`get_render_region`](tools)).
+//!
+//! # Transport
+//!
+//! The server speaks newline-delimited JSON-RPC 2.0 on stdin/stdout, matching
+//! the MCP stdio transport and the existing `reticle-dev` server. It is
+//! hand-rolled over [`serde_json`] rather than pulling in an MCP framework, so
+//! the dependency surface stays small and the wire format stays inspectable.
+//! Drive it with [`Server::run`], or step it message-by-message with
+//! [`Server::handle_line`] (used by the integration test).
+//!
+//! # Session model
+//!
+//! One [`Server`] owns exactly one [`Session`](reticle_agent_api::Session), so a
+//! server process edits a single document. A [`Budget`] caps how many tool calls
+//! a session may apply; once exhausted, further command tools are rejected with
+//! an [`ErrorCode::BudgetExhausted`](reticle_agent_api::ErrorCode) payload rather
+//! than mutating the document.
+//!
+//! # Units and conventions
+//!
+//! All coordinates are **database units** (DBU), the technology's integer
+//! coordinate resolution (`dbu_per_micron` DBU to the micron). Layers are a
+//! GDSII `(layer, datatype)` pair. These conventions are repeated in each tool
+//! description so a model calling a single tool has them in context.
+//!
+//! [Model Context Protocol]: https://modelcontextprotocol.io
+
+mod base64;
+mod context;
+mod schema;
+mod server;
+pub mod tools;
+
+pub use server::{Budget, Server};

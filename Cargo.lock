@@ -4073,6 +4073,13 @@ dependencies = [
 [[package]]
 name = "reticle-mcp"
 version = "4.0.0"
+dependencies = [
+ "reticle-agent-api",
+ "reticle-geometry",
+ "reticle-model",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "reticle-model"

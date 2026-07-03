@@ -13,4 +13,13 @@ categories = ["api-bindings", "science"]
 [lints]
 workspace = true
 
+[[bin]]
+name = "reticle-mcp"
+path = "src/bin/reticle-mcp.rs"
+
 [dependencies]
+reticle-agent-api = { workspace = true }
+reticle-geometry = { workspace = true }
+reticle-model = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
