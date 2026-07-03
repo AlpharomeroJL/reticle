@@ -27,3 +27,5 @@ superseded decision is marked and linked to its replacement.
 | [0019](0019-structured-violation.md) | Structured DRC violations, enriched in place |
 | [0020](0020-product-crates-in-workspace.md) | Agent, MCP, benchmark, and demo crates live in the workspace |
 | [0021](0021-intent-types-in-extract.md) | Intent types live in reticle-extract; serde on geometry value types |
+| [0022](0022-agent-crdt-collaborator-bridge.md) | The agent as a live CRDT collaborator: a step-atomic bridge |
+| [0023](0023-resume-authoritative-plan.md) | Resume orientation: docs/TASKS.md is the authoritative plan |
