@@ -808,6 +808,23 @@ impl App {
         ui.label("Agent runs are native-only in this build.");
     }
 
+    /// Installs a verify step's violation list into the DRC panel and overlay.
+    ///
+    /// Called whenever a running agent feed (or the replay theater) crosses a
+    /// `run_drc` record: the list parsed from the recorded response replaces the
+    /// panel's stored violations, so the markers on the canvas track the
+    /// agent's propose-verify-correct loop in real time.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn apply_agent_drc_update(&mut self, violations: Vec<reticle_model::Violation>) {
+        let n = violations.len();
+        self.drc.set_violations(violations);
+        if n == 0 {
+            self.status.set("Agent verify: DRC clean");
+        } else {
+            self.status.set(format!("Agent verify: {n} violation(s)"));
+        }
+    }
+
     /// Draws the agent's cursor: a distinct ringed crosshair plus the agent's
     /// actor name, so it cannot be mistaken for a collaborator's presence dot.
     #[cfg(not(target_arch = "wasm32"))]
@@ -1872,12 +1889,13 @@ impl eframe::App for App {
             .record(std::time::Duration::from_secs_f32(dt.max(0.0)));
 
         // Advance the agent run by this frame's dt so narration and the agent
-        // cursor animate while the panel is running.
+        // cursor animate while the panel is running. Each verify step the run
+        // crosses hands back the violation list parsed from its `run_drc`
+        // response, and installing it in the DRC results updates the panel list
+        // and the canvas markers live, mid-run.
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            // The verify steps' violation lists feed the DRC overlay (wired in
-            // the DRC-overlay milestone); narration and status update here.
-            let _drc_update = self.agent.tick(dt);
+        if let Some(update) = self.agent.tick(dt) {
+            self.apply_agent_drc_update(update);
         }
 
         // The surface color format when eframe is on its wgpu backend; drives the
@@ -2280,6 +2298,55 @@ pub(crate) mod png {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An agent verify step's parsed violations must land in the DRC panel (and
+    /// therefore the canvas markers), mid-run, exactly as a local run would.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn agent_verify_updates_the_drc_overlay_live() {
+        let mut app = App::new();
+        assert!(!app.drc.has_run());
+        app.agent.prompt = "overlay wiring".to_owned();
+        app.agent.start();
+        // Drain the run one generous tick at a time, applying each verify
+        // update the way the frame loop does.
+        let mut updates = 0;
+        for _ in 0..1_000 {
+            if let Some(update) = app.agent.tick(10.0) {
+                updates += 1;
+                app.apply_agent_drc_update(update);
+            }
+            if !app.agent.is_running() {
+                break;
+            }
+        }
+        assert!(updates >= 1, "at least one verify step fired");
+        // The script's final verify is clean, so the overlay ends empty but run.
+        assert!(app.drc.has_run());
+        assert!(app.drc.is_empty());
+        assert_eq!(app.status.text, "Agent verify: DRC clean");
+        // A mid-run flagged list replaces the panel content the same way.
+        let (transcript, _) = crate::agent_panel::scripted_run("flagged");
+        let flagged = transcript
+            .records
+            .iter()
+            .find_map(|r| {
+                if let reticle_agent_api::Outcome::Ok(reticle_agent_api::AgentResponse::Data {
+                    value,
+                    ..
+                }) = &r.outcome
+                {
+                    let v = crate::agent_panel::violations_from_json(value);
+                    if v.is_empty() { None } else { Some(v) }
+                } else {
+                    None
+                }
+            })
+            .expect("the script's first verify flags the thin wire");
+        app.apply_agent_drc_update(flagged);
+        assert!(!app.drc.is_empty());
+        assert!(app.status.text.contains("violation(s)"));
+    }
 
     #[test]
     fn app_new_loads_demo_scene() {
