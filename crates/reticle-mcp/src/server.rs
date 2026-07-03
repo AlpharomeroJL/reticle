@@ -132,7 +132,7 @@ impl Server {
     }
 
     /// Handles one request line, returning the response JSON to write, or `None`
-    /// for a notification (no `id`) or an unparseable line.
+    /// for a notification (no `id`) or an unparsable line.
     #[must_use]
     pub fn handle_line(&mut self, line: &str) -> Option<Value> {
         let msg: Value = serde_json::from_str(line).ok()?;

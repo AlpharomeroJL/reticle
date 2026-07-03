@@ -6,7 +6,7 @@
 //!
 //! The per-session command budget defaults to `10_000` and can be overridden
 //! with the `RETICLE_MCP_BUDGET` environment variable (a positive integer). An
-//! unparseable value falls back to the default.
+//! unparsable value falls back to the default.
 
 use std::io::{self, BufReader};
 
