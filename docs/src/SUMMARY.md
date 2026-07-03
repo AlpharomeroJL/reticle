@@ -13,6 +13,7 @@
 - [File formats](io.md)
 - [Rendering and scale](rendering.md)
 - [Snapping and guides](snapping.md)
+- [Search and selection depth](search-selection.md)
 - [Design-rule checking](drc.md)
   - [SKY130 rule coverage](sky130-drc-coverage.md)
 - [Routing](routing.md)
