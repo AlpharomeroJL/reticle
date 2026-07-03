@@ -3961,6 +3961,7 @@ dependencies = [
  "reticle-extract",
  "reticle-geometry",
  "reticle-index",
+ "reticle-io",
  "reticle-model",
  "reticle-render",
  "reticle-sync",

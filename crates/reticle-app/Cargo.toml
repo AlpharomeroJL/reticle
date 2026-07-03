@@ -31,3 +31,8 @@ reticle-render = { workspace = true }
 reticle-sync = { workspace = true }
 reticle-drc = { workspace = true }
 reticle-extract = { workspace = true }
+
+# `reticle-io` parses the committed SKY130 technology file so the cross-section
+# test checks real process-stack z bands rather than hand-built entries.
+[dev-dependencies]
+reticle-io = { workspace = true }
