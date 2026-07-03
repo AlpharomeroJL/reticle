@@ -36,10 +36,11 @@ use crate::labels;
 use crate::layers::{self, LayerState};
 use crate::minimap::MinimapLayout;
 use crate::netlight::{Generation, Netlight};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::replay::ReplayTheater;
 use crate::selection::{self, Selection};
 use crate::tool::{Tool, ToolState};
 use crate::viewports::{self, Split, Viewports};
-
 /// A transient status message shown in the bottom bar.
 #[derive(Clone, Debug, Default)]
 struct Status {
@@ -122,6 +123,19 @@ pub struct App {
     /// Native only: `reticle-agent-api` does not compile for wasm32 today.
     #[cfg(not(target_arch = "wasm32"))]
     agent: AgentPanelState,
+    /// The replay theater's playback state machine (native only, like the
+    /// agent panel: both drive `reticle-agent-api`).
+    #[cfg(not(target_arch = "wasm32"))]
+    replay: ReplayTheater,
+    /// Whether the replay theater window is open.
+    #[cfg(not(target_arch = "wasm32"))]
+    replay_open: bool,
+    /// The transcript-path text in the theater's load row.
+    #[cfg(not(target_arch = "wasm32"))]
+    replay_path: String,
+    /// The last theater load error, shown under the load row (empty when none).
+    #[cfg(not(target_arch = "wasm32"))]
+    replay_error: String,
 
     /// The DRC panel state: the last run's violations and the highlighted one.
     drc: DrcResults,
@@ -198,6 +212,14 @@ impl App {
             expanded,
             #[cfg(not(target_arch = "wasm32"))]
             agent: AgentPanelState::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            replay: ReplayTheater::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            replay_open: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            replay_path: String::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            replay_error: String::new(),
             drc: DrcResults::new(),
             zoom_to_selected_violation: false,
             netlight: Netlight::new(),
@@ -771,6 +793,20 @@ impl App {
                 self.agent.stop();
                 self.status.set("Agent run stopped");
             }
+            if ui.button("Replay theater").clicked() {
+                self.replay_open = !self.replay_open;
+            }
+            // Hand the finished (or stopped) run's transcript to the theater.
+            let replayable = !running && self.agent.transcript().is_some();
+            if ui
+                .add_enabled(replayable, egui::Button::new("Replay this run"))
+                .clicked()
+                && let Some(transcript) = self.agent.transcript().cloned()
+            {
+                self.replay.load_transcript(transcript);
+                self.replay_open = true;
+                self.drc.clear();
+            }
         });
         if let Some(status) = self.agent.latest_status() {
             let (done, total) = self.agent.progress();
@@ -822,6 +858,264 @@ impl App {
             self.status.set("Agent verify: DRC clean");
         } else {
             self.status.set(format!("Agent verify: {n} violation(s)"));
+        }
+    }
+
+    /// Applies a theater seek/step result to the DRC overlay: install the list
+    /// the new position implies, or clear the markers when no verify has run
+    /// yet at that point of the transcript.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn apply_replay_overlay(&mut self, update: Option<Vec<reticle_model::Violation>>) {
+        match update {
+            Some(v) => self.apply_agent_drc_update(v),
+            None => self.drc.clear(),
+        }
+    }
+
+    /// Loads the transcript JSONL named in the theater's path box.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn load_replay_from_path(&mut self) {
+        let path = self.replay_path.trim().to_owned();
+        if path.is_empty() {
+            "Enter a transcript .jsonl path".clone_into(&mut self.replay_error);
+            return;
+        }
+        match std::fs::read_to_string(&path) {
+            Ok(text) => match self.replay.load_jsonl(&text) {
+                Ok(()) => {
+                    self.replay_error.clear();
+                    self.drc.clear();
+                    let (_, total) = self.replay.progress();
+                    self.status.set(format!("Replay: loaded {total} record(s)"));
+                }
+                Err(e) => self.replay_error = format!("Parse failed: {e}"),
+            },
+            Err(e) => self.replay_error = format!("Read failed: {e}"),
+        }
+    }
+
+    /// Draws the replay theater window: load row, transport, readouts, and the
+    /// replayed document painted through a [`crate::replay::FitView`].
+    ///
+    /// All playback logic lives in [`crate::replay`]; this is glue. The theater
+    /// re-executes the transcript against a live engine session, so the canvas
+    /// here shows real replayed geometry, and each `run_drc` record it crosses
+    /// pushes its recorded violation list into the shared DRC overlay.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn replay_window(&mut self, ctx: &egui::Context) {
+        if !self.replay_open {
+            return;
+        }
+        let mut open = self.replay_open;
+        egui::Window::new("Replay theater")
+            .open(&mut open)
+            .default_size([480.0, 460.0])
+            .show(ctx, |ui| {
+                self.replay_load_row(ui);
+                ui.separator();
+                self.replay_transport_row(ui);
+                ui.separator();
+                self.replay_readouts(ui);
+                ui.separator();
+                self.replay_canvas(ui);
+            });
+        self.replay_open = open;
+    }
+
+    /// The theater's load row: a JSONL path, or the built-in scripted demo run.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn replay_load_row(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Transcript:");
+            ui.text_edit_singleline(&mut self.replay_path);
+            if ui.button("Load").clicked() {
+                self.load_replay_from_path();
+            }
+            if ui.button("Load demo run").clicked() {
+                let (transcript, _) = crate::agent_panel::scripted_run("replay theater demo");
+                self.replay.load_transcript(transcript);
+                self.replay_error.clear();
+                self.drc.clear();
+            }
+        });
+        if !self.replay_error.is_empty() {
+            ui.colored_label(Color32::from_rgb(255, 120, 120), &self.replay_error);
+        }
+    }
+
+    /// The theater's transport row: restart, step back, play/pause, step
+    /// forward, and the speed selector.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn replay_transport_row(&mut self, ui: &mut egui::Ui) {
+        use crate::replay::SPEEDS;
+
+        let loaded = self.replay.is_loaded();
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(loaded, egui::Button::new("|<"))
+                .on_hover_text("Restart")
+                .clicked()
+            {
+                let update = self.replay.seek(0);
+                self.apply_replay_overlay(update);
+            }
+            if ui
+                .add_enabled(loaded, egui::Button::new("< Step"))
+                .clicked()
+            {
+                let update = self.replay.step_back();
+                self.apply_replay_overlay(update);
+            }
+            let play_label = if self.replay.is_playing() {
+                "Pause"
+            } else {
+                "Play"
+            };
+            if ui
+                .add_enabled(loaded, egui::Button::new(play_label))
+                .clicked()
+            {
+                if self.replay.is_playing() {
+                    self.replay.pause();
+                } else {
+                    self.replay.play();
+                }
+            }
+            if ui
+                .add_enabled(loaded, egui::Button::new("Step >"))
+                .clicked()
+                && let Some(update) = self.replay.step_forward()
+            {
+                self.apply_agent_drc_update(update);
+            }
+            let mut speed = self.replay.speed();
+            egui::ComboBox::from_id_salt("replay_speed")
+                .selected_text(format!("{speed}x"))
+                .width(70.0)
+                .show_ui(ui, |ui| {
+                    for &s in &SPEEDS {
+                        ui.selectable_value(&mut speed, s, format!("{s}x"));
+                    }
+                });
+            self.replay.set_speed(speed);
+        });
+    }
+
+    /// The theater's readouts: progress, shape count, hash verdict, violation
+    /// count, and the "now playing" narration line.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn replay_readouts(&mut self, ui: &mut egui::Ui) {
+        use crate::replay::HashCheck;
+
+        let (done, total) = self.replay.progress();
+        ui.horizontal(|ui| {
+            ui.label(format!("Step {done}/{total}"));
+            ui.separator();
+            ui.label(format!("Shapes: {}", self.replay.shape_count()));
+            ui.separator();
+            ui.label(match self.replay.hash_check() {
+                HashCheck::Pending => "hash: pending",
+                HashCheck::Unverifiable => "hash: none recorded",
+                HashCheck::Match => "hash: match",
+                HashCheck::Mismatch => "hash: MISMATCH",
+            });
+            if self.replay.has_verified() {
+                ui.separator();
+                ui.label(format!(
+                    "{} violation(s)",
+                    self.replay.last_violations().len()
+                ));
+            }
+        });
+        if let Some(record) = self.replay.current_record() {
+            ui.monospace(crate::agent_panel::narrate_record(record));
+        } else {
+            ui.label(if self.replay.is_loaded() {
+                "At start: press Play or Step"
+            } else {
+                "No transcript loaded"
+            });
+        }
+    }
+
+    /// Paints the replayed document (and the last verify's violation markers)
+    /// into the theater window, letterboxed by a [`crate::replay::FitView`].
+    #[cfg(not(target_arch = "wasm32"))]
+    fn replay_canvas(&self, ui: &mut egui::Ui) {
+        use crate::replay::{FitView, shapes_bbox};
+
+        let size = Vec2::new(ui.available_width().max(160.0), 240.0);
+        let (response, painter) = ui.allocate_painter(size, Sense::hover());
+        let rect = response.rect;
+        painter.rect_filled(rect, 4.0, Color32::from_rgb(12, 14, 18));
+        let shapes = self.replay.flattened_shapes();
+        let Some(bbox) = shapes_bbox(&shapes) else {
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                "Nothing drawn yet",
+                FontId::proportional(12.0),
+                Color32::from_rgb(120, 126, 140),
+            );
+            return;
+        };
+        let view = FitView::fit(bbox, rect.width(), rect.height(), 14.0);
+        let to_pos = |p: Point| {
+            let (x, y) = view.to_screen(p);
+            Pos2::new(rect.left() + x, rect.top() + y)
+        };
+        // Layer colors come from the replayed session's own technology (the
+        // transcript installs it), with a neutral gray fallback.
+        let doc = self.replay.document();
+        let color_of = |layer: LayerId| -> Color32 {
+            doc.technology()
+                .layers
+                .iter()
+                .find(|l| l.id == layer)
+                .map_or(Color32::from_rgb(150, 150, 150), |l| {
+                    let (r, g, b, _) = layers::rgba_components(l.color_rgba);
+                    Color32::from_rgb(r, g, b)
+                })
+        };
+        for shape in &shapes {
+            let base = color_of(shape.layer);
+            let fill = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 170);
+            let stroke = Stroke::new(1.0, base);
+            match &shape.kind {
+                ShapeKind::Rect(r) => {
+                    let e = EguiRect::from_two_pos(to_pos(r.min), to_pos(r.max));
+                    painter.rect_filled(e, 0.0, fill);
+                    painter.rect_stroke(e, 0.0, stroke, StrokeKind::Middle);
+                }
+                ShapeKind::Polygon(poly) => {
+                    let pts: Vec<Pos2> = poly.vertices().iter().map(|p| to_pos(*p)).collect();
+                    if pts.len() >= 3 {
+                        painter.add(Shape::convex_polygon(pts, fill, stroke));
+                    }
+                }
+                ShapeKind::Path(path) => {
+                    let pts: Vec<Pos2> = path.points().iter().map(|p| to_pos(*p)).collect();
+                    if pts.len() >= 2 {
+                        painter.add(Shape::line(pts, Stroke::new(2.0, base)));
+                    }
+                }
+            }
+        }
+        // The last verify's markers, in the DRC overlay's alarm red.
+        let marker = Stroke::new(2.0, Color32::from_rgb(255, 90, 90));
+        for v in self.replay.last_violations() {
+            let e =
+                EguiRect::from_two_pos(to_pos(v.location.min), to_pos(v.location.max)).expand(2.0);
+            painter.rect_stroke(e, 0.0, marker, StrokeKind::Middle);
+        }
+        if let Some(cell) = self.replay.render_cell() {
+            painter.text(
+                Pos2::new(rect.left() + 8.0, rect.top() + 6.0),
+                Align2::LEFT_TOP,
+                cell,
+                FontId::monospace(10.0),
+                Color32::from_rgb(150, 156, 170),
+            );
         }
     }
 
@@ -1898,6 +2192,14 @@ impl eframe::App for App {
             self.apply_agent_drc_update(update);
         }
 
+        // Advance replay-theater playback the same way; a playing transcript
+        // updates the theater canvas and the DRC overlay as it crosses
+        // verifies.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(update) = self.replay.tick(dt) {
+            self.apply_agent_drc_update(update);
+        }
+
         // The surface color format when eframe is on its wgpu backend; drives the
         // retained GPU canvas. `None` (e.g. a glow build) falls back to egui painting.
         let gpu_format = frame.wgpu_render_state().map(|state| state.target_format);
@@ -1953,6 +2255,8 @@ impl eframe::App for App {
             &self.layer_state,
         );
         self.keymap_window(&ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.replay_window(&ctx);
 
         // Keep animating while dragging/measuring so interaction feels live.
         ctx.request_repaint();
@@ -2346,6 +2650,37 @@ mod tests {
         app.apply_agent_drc_update(flagged);
         assert!(!app.drc.is_empty());
         assert!(app.status.text.contains("violation(s)"));
+    }
+
+    /// The replay theater re-executes a transcript against a live session, and
+    /// its verify records drive the shared DRC overlay through the same path
+    /// the agent run uses; rewinding clears the overlay again.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn replay_theater_replays_and_drives_the_overlay() {
+        let mut app = App::new();
+        let (transcript, _) = crate::agent_panel::scripted_run("theater glue");
+        let total = transcript.records.len();
+        app.replay.load_transcript(transcript);
+        assert!(app.replay.is_loaded());
+        // Step to just past the first verify, applying overlay updates the way
+        // the transport buttons do.
+        let mut first_flagged = None;
+        while first_flagged.is_none() && !app.replay.at_end() {
+            if let Some(update) = app.replay.step_forward() {
+                first_flagged = Some(update.clone());
+                app.apply_agent_drc_update(update);
+            }
+        }
+        let flagged = first_flagged.expect("the script verifies");
+        assert!(!flagged.is_empty(), "first verify flags the thin wire");
+        assert_eq!(app.drc.len(), flagged.len());
+        assert!(app.replay.shape_count() >= 1);
+        // Restarting clears the overlay: no verify crossed at position 0.
+        let update = app.replay.seek(0);
+        app.apply_replay_overlay(update);
+        assert!(!app.drc.has_run());
+        assert_eq!(app.replay.progress(), (0, total));
     }
 
     #[test]
