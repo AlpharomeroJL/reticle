@@ -4055,6 +4055,7 @@ version = "4.0.0"
 dependencies = [
  "gds21",
  "proptest",
+ "reticle-drc",
  "reticle-geometry",
  "reticle-model",
 ]
