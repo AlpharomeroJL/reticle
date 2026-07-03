@@ -24,6 +24,24 @@ build:
 lint: fmt-check clippy
 
 # ---------------------------------------------------------------------------
+# Lane worktree management (ADR 0028, 0030): the orchestrator creates a lane
+# worktree BEFORE spawning its subagent and removes it after the wave merge.
+# Lane isolation is a real worktree on disk, never an Agent-call parameter.
+# ---------------------------------------------------------------------------
+# Create an isolated worktree D:/dev/reticle-lanes/<name> on a new branch
+# lane/<name> off main. Then spawn the subagent pinned to that directory with its
+# own CARGO_TARGET_DIR=D:/dev/reticle-target-<name>.
+lane name:
+    git worktree add ../reticle-lanes/{{name}} -b lane/{{name}} main
+    @echo "worktree ready: D:/dev/reticle-lanes/{{name}}  (branch lane/{{name}})"
+
+# Remove a lane worktree and delete its branch after the integration merge.
+# `git branch -d` refuses an unmerged branch, a deliberate guard against losing work.
+lane-done name:
+    git worktree remove ../reticle-lanes/{{name}}
+    git branch -d lane/{{name}}
+
+# ---------------------------------------------------------------------------
 # The gate (replaces GitHub Actions): fmt, clippy(-D warnings), tests, doc,
 # wasm build, license/advisory check, spelling.
 # ---------------------------------------------------------------------------
