@@ -20,7 +20,6 @@ use reticle_render::{
 use reticle_sync::SyncDocument;
 use std::sync::Arc;
 
-#[cfg(not(target_arch = "wasm32"))]
 use crate::agent_panel::AgentPanelState;
 use crate::camera::{ScreenRect, ViewCamera};
 use crate::command::{self, Command};
@@ -36,7 +35,6 @@ use crate::labels;
 use crate::layers::{self, LayerState};
 use crate::minimap::MinimapLayout;
 use crate::netlight::{Generation, Netlight};
-#[cfg(not(target_arch = "wasm32"))]
 use crate::replay::ReplayTheater;
 use crate::selection::{self, Selection};
 use crate::tool::{Tool, ToolState};
@@ -224,11 +222,11 @@ impl App {
     /// Creates the app opening into `start_view`.
     ///
     /// [`StartView::Editor`] is the desktop default. [`StartView::ReplayTheater`]
-    /// opens the replay theater and loads the built-in scripted demo run so a public
-    /// web visitor sees the agent draw immediately (ADR 0026). On a native build the
-    /// theater opens on construction; on wasm the theater window is not yet built
-    /// (see the module gating), so the intent is recorded and honoured once the
-    /// theater lands on wasm.
+    /// opens the replay theater and loads the default transcript from the platform
+    /// [`store`](crate::store) so a public web visitor sees the agent draw
+    /// immediately (ADR 0026). The theater is model-free and runs on both native and
+    /// wasm; on wasm it plays a bundled transcript, so the web bundle opens straight
+    /// into a working theater.
     #[must_use]
     pub fn with_start_view(start_view: StartView) -> Self {
         let mut app = Self::build(start_view);
@@ -977,7 +975,6 @@ impl App {
     /// re-executes the transcript against a live engine session, so the canvas
     /// here shows real replayed geometry, and each `run_drc` record it crosses
     /// pushes its recorded violation list into the shared DRC overlay.
-    #[cfg(not(target_arch = "wasm32"))]
     fn replay_window(&mut self, ctx: &egui::Context) {
         if !self.replay_open {
             return;
@@ -999,7 +996,6 @@ impl App {
     }
 
     /// The theater's load row: a JSONL path, or the built-in scripted demo run.
-    #[cfg(not(target_arch = "wasm32"))]
     fn replay_load_row(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Transcript:");
@@ -1021,7 +1017,6 @@ impl App {
 
     /// The theater's transport row: restart, step back, play/pause, step
     /// forward, and the speed selector.
-    #[cfg(not(target_arch = "wasm32"))]
     fn replay_transport_row(&mut self, ui: &mut egui::Ui) {
         use crate::replay::SPEEDS;
 
@@ -1079,7 +1074,6 @@ impl App {
 
     /// The theater's readouts: progress, shape count, hash verdict, violation
     /// count, and the "now playing" narration line.
-    #[cfg(not(target_arch = "wasm32"))]
     fn replay_readouts(&mut self, ui: &mut egui::Ui) {
         use crate::replay::HashCheck;
 
@@ -1116,7 +1110,6 @@ impl App {
 
     /// Paints the replayed document (and the last verify's violation markers)
     /// into the theater window, letterboxed by a [`crate::replay::FitView`].
-    #[cfg(not(target_arch = "wasm32"))]
     fn replay_canvas(&self, ui: &mut egui::Ui) {
         use crate::replay::{FitView, shapes_bbox};
 
@@ -1197,7 +1190,6 @@ impl App {
 
     /// Draws the agent's cursor: a distinct ringed crosshair plus the agent's
     /// actor name, so it cannot be mistaken for a collaborator's presence dot.
-    #[cfg(not(target_arch = "wasm32"))]
     fn draw_agent_cursor(&self, painter: &egui::Painter, screen: &ScreenRect) {
         if self.agent.state() == crate::agent_panel::RunState::Idle {
             return;
@@ -1527,7 +1519,6 @@ impl App {
             self.draw_minimap(&painter, &screen);
         }
         self.draw_presence(&painter, &screen);
-        #[cfg(not(target_arch = "wasm32"))]
         self.draw_agent_cursor(&painter, &screen);
 
         // Mark the focused pane when split (drawn unclipped so the full border
@@ -2288,7 +2279,6 @@ impl eframe::App for App {
         // crosses hands back the violation list parsed from its `run_drc`
         // response, and installing it in the DRC results updates the panel list
         // and the canvas markers live, mid-run.
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(update) = self.agent.tick(dt) {
             self.apply_agent_drc_update(update);
         }
@@ -2296,7 +2286,6 @@ impl eframe::App for App {
         // Advance replay-theater playback the same way; a playing transcript
         // updates the theater canvas and the DRC overlay as it crosses
         // verifies.
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(update) = self.replay.tick(dt) {
             self.apply_agent_drc_update(update);
         }
@@ -2358,7 +2347,6 @@ impl eframe::App for App {
             &self.layer_state,
         );
         self.keymap_window(&ctx);
-        #[cfg(not(target_arch = "wasm32"))]
         self.replay_window(&ctx);
 
         // Keep animating while dragging/measuring so interaction feels live.

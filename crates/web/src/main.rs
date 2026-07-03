@@ -28,18 +28,12 @@ fn main() {
             .expect("no window")
             .document()
             .expect("no document on window");
-        let canvas = match document
+        let Some(canvas) = document
             .get_element_by_id("reticle-canvas")
             .and_then(|el| el.dyn_into::<web_sys::HtmlCanvasElement>().ok())
-        {
-            Some(canvas) => canvas,
-            None => {
-                set_overlay_error(
-                    &document,
-                    "the page is missing its #reticle-canvas element",
-                );
-                return;
-            }
+        else {
+            set_overlay_error(&document, "the page is missing its #reticle-canvas element");
+            return;
         };
 
         // Start the renderer. Only hide the loading overlay AFTER start resolves
