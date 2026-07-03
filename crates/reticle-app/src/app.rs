@@ -85,7 +85,9 @@ pub struct App {
     /// Layer table, visibility, and filter.
     layer_state: LayerState,
     /// The current shape selection (indices into the scene).
-    selection: Selection,
+    pub(crate) selection: Selection,
+    /// The boolean/transform operations panel state (numeric inputs, status).
+    pub(crate) ops: crate::ops::OpsState,
     /// Grid, snapping, and ruler settings.
     grid: GridSettings,
     /// Whether the canvas text-label overlay (cell names, selection captions, live
@@ -276,6 +278,7 @@ impl App {
             draw: crate::draw::DrawState::new(),
             layer_state,
             selection: Selection::new(),
+            ops: crate::ops::OpsState::new(),
             grid: GridSettings::default(),
             labels_visible: true,
             minimap_visible: true,
@@ -799,6 +802,54 @@ impl App {
                 self.status.set("Added rectangle");
             }
             Err(e) => self.status.set(format!("Edit failed: {e}")),
+        }
+    }
+
+    /// The number of directly-editable shapes in the current top cell.
+    ///
+    /// Scene indices below this count map one-to-one onto the top cell's own shapes,
+    /// which is what the operations builders need to turn a selection into edits.
+    fn editable_shape_count(&self) -> usize {
+        crate::ops::editable_shape_count(self.history.document(), &self.top_cell)
+    }
+
+    /// Runs one operations-panel action: `build` turns the current selection into a
+    /// batch of edits, which are applied as a single undo step and the scene rebuilt.
+    ///
+    /// `build` receives the flattened scene shapes, the selected indices (ascending),
+    /// the top-cell name, and the editable-shape count. When it returns no edits (the
+    /// operation did not apply to this selection) the document is left untouched and a
+    /// short note is shown; `label` names the operation in the status line.
+    pub(crate) fn run_ops<F>(&mut self, label: &str, build: F)
+    where
+        F: FnOnce(&[DrawShape], &[usize], &str, usize) -> Vec<reticle_model::Edit>,
+    {
+        // Collect the edits first so every borrow of `self.scene`/`self.selection`
+        // ends before we mutate through `self.history`.
+        let selection: Vec<usize> = self.selection.iter().collect();
+        let editable = self.editable_shape_count();
+        let top = self.top_cell.clone();
+        let edits = build(self.scene.shapes(), &selection, &top, editable);
+
+        if edits.is_empty() {
+            self.ops.status = format!("{label}: nothing to do for this selection");
+            self.status.set(self.ops.status.clone());
+            return;
+        }
+        let added = edits
+            .iter()
+            .filter(|e| matches!(e, reticle_model::Edit::AddShape { .. }))
+            .count();
+        match self.history.apply_group(edits) {
+            Ok(()) => {
+                self.rebuild_scene();
+                self.ops.status = format!("{label}: {added} shape(s) produced");
+                self.status.set(self.ops.status.clone());
+            }
+            Err(e) => {
+                self.ops.status = format!("{label} failed: {e}");
+                self.status.set(self.ops.status.clone());
+            }
         }
     }
 
@@ -2740,6 +2791,8 @@ impl eframe::App for App {
                         self.agent_section(ui);
                         ui.separator();
                         self.share_section(ui);
+                        ui.separator();
+                        self.ops_panel(ui);
                     });
             });
         egui::CentralPanel::default().show(ui, |ui| {
