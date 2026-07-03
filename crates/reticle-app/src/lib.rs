@@ -31,6 +31,7 @@
 //! * [`inspector`], the read-only properties summary of the selection.
 //! * [`fps`], the rolling frame-time meter behind the status-bar fps readout.
 //! * [`session`], view/UI session save/restore (native file IO).
+//! * [`share`], the share-this-session relay room-link format.
 //! * [`viewports`], the multi-pane split layout, hit-testing, and camera swaps.
 //! * [`view3d`], the extruded 3D layer-stack window (orbit camera + wgpu glue).
 //! * [`xsection`], cut-line cross-sections (interval math + elevation panel).
@@ -66,6 +67,7 @@ pub mod netlight;
 pub mod replay;
 pub mod selection;
 pub mod session;
+pub mod share;
 pub mod tool;
 pub mod view3d;
 pub mod viewports;

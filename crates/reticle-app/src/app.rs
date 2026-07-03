@@ -160,6 +160,10 @@ pub struct App {
     palette_query: String,
     /// The query-bar text for "select by layer".
     layer_query: String,
+    /// The relay host in the Share section (see [`crate::share`]).
+    share_server: String,
+    /// The room name in the Share section; sanitized into the link.
+    share_room: String,
     /// The most recent status-bar message.
     status: Status,
     /// The last world position under the cursor, for the status readout.
@@ -230,6 +234,8 @@ impl App {
             palette_open: false,
             palette_query: String::new(),
             layer_query: String::new(),
+            share_server: crate::share::DEFAULT_SERVER.to_owned(),
+            share_room: crate::share::room_id(demo::TOP_CELL),
             status: Status::default(),
             cursor_world: None,
             frame_meter: FrameMeter::default(),
@@ -1151,6 +1157,31 @@ impl App {
             FontId::proportional(11.0),
             color,
         );
+    }
+
+    /// Draws the Share section: the relay host, the room, and the composed
+    /// join link with a copy button.
+    ///
+    /// The link format lives in [`crate::share`] (unit-tested there); this is
+    /// glue. The link targets the relay's only route, `GET /ws/{room}`, so a
+    /// collaborator who opens a client against it lands in this session's
+    /// room.
+    fn share_section(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Share");
+        ui.horizontal(|ui| {
+            ui.label("Relay:");
+            ui.text_edit_singleline(&mut self.share_server);
+        });
+        ui.horizontal(|ui| {
+            ui.label("Room:");
+            ui.text_edit_singleline(&mut self.share_room);
+        });
+        let link = crate::share::room_link(&self.share_server, &self.share_room);
+        ui.monospace(&link);
+        if ui.button("Copy link").clicked() {
+            ui.ctx().copy_text(link);
+            self.status.set("Share link copied");
+        }
     }
 
     /// Draws the properties inspector section for the current selection.
@@ -2233,6 +2264,8 @@ impl eframe::App for App {
                         self.drc_panel(ui);
                         ui.separator();
                         self.agent_section(ui);
+                        ui.separator();
+                        self.share_section(ui);
                     });
             });
         egui::CentralPanel::default().show(ui, |ui| {
@@ -2681,6 +2714,18 @@ mod tests {
         app.apply_replay_overlay(update);
         assert!(!app.drc.has_run());
         assert_eq!(app.replay.progress(), (0, total));
+    }
+
+    /// The Share section's defaults compose a joinable relay link for the
+    /// demo document's room out of the box.
+    #[test]
+    fn share_defaults_compose_the_demo_room_link() {
+        let app = App::new();
+        let link = crate::share::room_link(&app.share_server, &app.share_room);
+        assert_eq!(link, "ws://127.0.0.1:3030/ws/chip_top");
+        // A user-typed https relay and a messy room name still compose.
+        let link = crate::share::room_link("https://relay.example/", "My Layout!");
+        assert_eq!(link, "wss://relay.example/ws/my-layout");
     }
 
     #[test]
