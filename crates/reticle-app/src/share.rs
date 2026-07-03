@@ -20,8 +20,9 @@ const FALLBACK_ROOM: &str = "layout";
 ///
 /// Lowercases ASCII, keeps `a-z`, `0-9`, `-`, and `_`, and collapses every run
 /// of anything else into a single `-`, trimming stray dashes from the ends. A
-/// name with nothing usable in it becomes [`FALLBACK_ROOM`] so the composed
-/// link always has a room. Idempotent: sanitizing a sanitized id is a no-op.
+/// name with nothing usable in it becomes `FALLBACK_ROOM` (`"layout"`) so the
+/// composed link always has a room. Idempotent: sanitizing a sanitized id is a
+/// no-op.
 #[must_use]
 pub fn room_id(name: &str) -> String {
     let mut id = String::with_capacity(name.len());

@@ -247,7 +247,7 @@ const SCRIPT_TECH: &str = "technology agent-demo\n\
 /// Runs the built-in scripted propose-verify-correct loop against a real
 /// [`Session`] and returns its transcript plus the derived narration feed.
 ///
-/// The script installs [`SCRIPT_TECH`], creates [`AGENT_CELL`], draws a 60 DBU
+/// The script installs `SCRIPT_TECH`, creates [`AGENT_CELL`], draws a 60 DBU
 /// wide wire (violating the 100 DBU width rule), verifies with `run_drc`,
 /// corrects by deleting the thin wire and drawing a 400 DBU one, verifies
 /// again (clean), and closes with a cell summary. The prompt seeds where the
