@@ -1,0 +1,7 @@
+# Tier-5 legality on the real SKY130 deck: a wire at exactly the m1.1 minimum
+# width must still be sized to clear the m1.6 minimum area.
+id = "t5_met1_min_wire"
+tier = 5
+prompt = "Create a cell named top and draw one met1 (68/20) wire at exactly the m1.1 minimum width of 0.14um (140 dbu). Choose the length so the wire also clears the m1.6 minimum area of 0.083um^2 (83000 dbu^2), which takes at least 0.593um (593 dbu) at minimum width. The cell must pass the whole SKY130 rule subset."
+technology = "sky130.tech"
+checker = "drc_clean"

@@ -1,0 +1,7 @@
+# Tier-5 cell-from-spec plus assembly: define a sky130_fd_sc_hd style filler
+# tile (real nwell overhang and rail stack), then place a four-tile row.
+id = "t5_fill_tile_row"
+tier = 5
+prompt = "Define a sky130_fd_sc_hd style filler tile as its own cell on the real 0.46 x 2.72um tile: one nwell (64/20) rectangle over the upper half extending 0.19um past the tile top and sides, from (-190,1305) to (650,2910) in dbu like the PDK filler; VPWR and VGND met1 (68/20) rails 0.48um (480 dbu) thick centered on y = 2720 and y = 0; and matching li1 (67/20) rails 0.17um (170 dbu) thick, five shapes in all. Then create a cell named top that places four instances of the tile in a row on the 0.46um (460 dbu) cell pitch, flattening to at least 20 shapes."
+technology = "sky130.tech"
+checker = "compound_cell:instances=4,min_shapes=20"

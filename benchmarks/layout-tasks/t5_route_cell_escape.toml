@@ -1,0 +1,8 @@
+# Tier-5 routing across a real cell row: escape a met1 pin to met2 over a
+# four-tile sky130_fd_sc_hd row (4 x 0.46um wide, 2.72um tall), via required.
+id = "t5_route_cell_escape"
+tier = 5
+prompt = "Create a cell named top and escape a signal from a standard-cell row: connect terminal pin near (0,0) on met1 (68/20) to terminal escape near (1840,2720) on met2 (69/20), the far corner of a four-tile sky130_fd_sc_hd row (4 x 0.46um wide, 2.72um tall). Jog up through a via (68/44) at the fixed via.1a size of 0.15um (150 dbu), giving the via a met1 landing pad and met2 enclosure of at least 0.055um (55 dbu) per m2.4; run met1 and met2 at least 0.14um wide per m1.1 and m2.1."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"esc","terminals":[{"name":"pin","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}},{"name":"escape","layer":{"layer":69,"datatype":20},"region":{"min":{"x":1820,"y":2700},"max":{"x":1840,"y":2720}}}]}],"forbidden":[]}'

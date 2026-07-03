@@ -1,0 +1,7 @@
+# Tier-5 legality from a real cell: the met1 power rails of
+# sky130_fd_sc_hd__fill_1, at the tile's true rail thickness and overhang.
+id = "t5_fill_rail_pair"
+tier = 5
+prompt = "Create a cell named top and reproduce the power rails of the real sky130_fd_sc_hd__fill_1 tile: two horizontal met1 (68/20) rails, each 0.48um (480 dbu) thick, one centered on y = 0 (VGND) and one centered on y = 2.72um (2720 dbu, VPWR), each spanning x from -0.24um to 0.70um (940 dbu long) exactly as the PDK filler draws them. Total met1 area must reach at least 0.9um^2 (900000 dbu^2); rail thickness and spacing are legal under m1.1 and m1.2."
+technology = "sky130.tech"
+checker = "layer_area:layer=68/20,min_area=900000"

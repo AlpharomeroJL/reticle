@@ -1,0 +1,7 @@
+# Tier-5 cell-from-spec: the tap strips of the real sky130_fd_sc_hd__tap_1
+# cell, at the PDK cell's exact strip extents.
+id = "t5_tap_cell_core"
+tier = 5
+prompt = "Build the tap core of sky130_fd_sc_hd__tap_1 in a cell named top, on the real 0.46 x 2.72um tile: exactly two tap (65/44) strips, each 0.17um (170 dbu) wide and centered at x = 0.23um (230 dbu). The substrate tap runs from y = 0.32um to 0.845um (320 to 845 dbu) and the well tap from y = 1.525um to 2.40um (1525 to 2400 dbu), the exact strip extents of the PDK cell."
+technology = "sky130.tech"
+checker = "shape_count:layer=65/44,exact=2"
