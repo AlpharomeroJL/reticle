@@ -1,0 +1,8 @@
+# Tier-1 DRC: draw a met1 rectangle that is clean under the SKY130 rule subset.
+# The sample mock proposes an under-width rect first, then corrects it, so the run
+# exercises propose-verify-correct: first_proposal_violations > 0, final_violations 0.
+id = "t1_drc_clean_met1"
+tier = 1
+prompt = "Create a cell named top and place a met1 rectangle that passes DRC (min width 0.14um, min area 0.083um^2)."
+technology = "sky130.tech"
+checker = "drc_clean"

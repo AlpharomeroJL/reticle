@@ -1,0 +1,12 @@
+# Tier-1 connectivity: join two met1 terminals into one net. The sample mock draws
+# two disjoint rects first (an open net), then bridges them, so the run exercises
+# propose-verify-correct against the intent checker.
+#
+# `intent` is the serialized IntentSpec (JSON): one net "n" with terminals "a" at
+# (0,0)-(10,10) and "b" at (490,290)-(500,300), both on met1 (68/20).
+id = "t1_intent_connect"
+tier = 1
+prompt = "Create a cell named top and connect terminal a at (0,0) to terminal b near (500,300) on met1 with a single net."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"n","terminals":[{"name":"a","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":10,"y":10}}},{"name":"b","layer":{"layer":68,"datatype":20},"region":{"min":{"x":490,"y":290},"max":{"x":500,"y":300}}}]}],"forbidden":[]}'
