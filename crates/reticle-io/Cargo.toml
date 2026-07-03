@@ -24,4 +24,7 @@ reticle-model = { workspace = true }
 # (TEXT elements with strans and so on) that our own exporter never produces.
 gds21 = "0.2.0"
 proptest = "1.11.0"
+# The SKY130 corpus tests run the DRC subset over imported real standard cells
+# (reticle-drc does not depend on reticle-io, so this dev-only edge is acyclic).
+reticle-drc = { workspace = true }
 # Wave 1 wires `proptest` and round-trip corpus fixtures.
