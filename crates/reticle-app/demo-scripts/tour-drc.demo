@@ -1,0 +1,13 @@
+# tour-drc: run DRC on a real SKY130 cell, the violations list fills, then click a
+# violation and the canvas zooms to its marker. The feature reads within the first
+# two seconds: the list is populated before the first capture frame.
+viewport 1600x1000
+use-case inspect-cell
+wait 20
+run-drc
+wait 6
+capture 45 20
+select-violation 0
+zoom-violation
+wait 4
+capture 55 20

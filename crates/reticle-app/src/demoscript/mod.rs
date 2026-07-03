@@ -11,6 +11,14 @@
 
 use eframe::egui;
 
+mod script;
+pub use script::{Script, Step};
+
+#[cfg(not(target_arch = "wasm32"))]
+mod run;
+#[cfg(not(target_arch = "wasm32"))]
+pub use run::{DemoRun, Tick};
+
 /// One captured frame: tightly packed RGBA8, row 0 at the top.
 #[derive(Clone, Debug)]
 pub struct Frame {
