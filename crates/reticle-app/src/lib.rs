@@ -26,8 +26,10 @@
 //! * [`command`], the command-palette catalog and fuzzy filter.
 //! * [`keymap`], rebindable keyboard shortcuts: TOML load/save and conflicts.
 //! * [`drc_panel`], running the DRC engine and formatting its violations.
-//! * [`agent_panel`], the agent panel's run state machine and narration feed over
-//!   the `reticle-agent-api` transcript types.
+//! * [`agent_panel`], the agent panel's run state machine, conversation-mode
+//!   transcript, and narration feed over the `reticle-agent-api` transcript types.
+//! * [`agent_history`], the session history browser: enumerating past run
+//!   transcripts and loading one into the replay theater.
 //! * [`replay`], the replay theater: transcript JSONL loading and the
 //!   step/play/pause/speed playback machine over a live session.
 //! * [`store`], the transcript storage seam: filesystem on native, a bundled
@@ -53,6 +55,7 @@
 // error on wasm), and the theater sources its transcript through `store` (the
 // filesystem on native, a bundled transcript on wasm), so the public web bundle
 // can open straight into a playing theater (ADR 0026).
+pub mod agent_history;
 pub mod agent_panel;
 pub mod app;
 pub mod camera;
