@@ -36,6 +36,10 @@ pub struct SessionState {
     pub hidden_layers: Vec<(u16, u16)>,
     /// The active egui theme (dark by default).
     pub theme: Theme,
+    /// Whether the first-run tour has been shown. `false` on a fresh install, so
+    /// the tour auto-starts once; set `true` after it finishes so it never shows
+    /// again unprompted (the Help menu can still relaunch it). See [`crate::tour`].
+    pub tour_seen: bool,
 }
 
 impl Default for SessionState {
@@ -50,12 +54,14 @@ impl Default for SessionState {
             grid_step: 100,
             hidden_layers: Vec::new(),
             theme: Theme::Dark,
+            tour_seen: false,
         }
     }
 }
 
 impl SessionState {
-    /// Builds a snapshot from the live camera, tool, grid, theme, and hidden layers.
+    /// Builds a snapshot from the live camera, tool, grid, theme, hidden layers, and
+    /// the tour-seen flag.
     #[must_use]
     pub fn capture(
         camera: &ViewCamera,
@@ -63,6 +69,7 @@ impl SessionState {
         grid: GridSettings,
         theme: Theme,
         hidden: &[LayerId],
+        tour_seen: bool,
     ) -> Self {
         let center = camera.center();
         Self {
@@ -75,6 +82,7 @@ impl SessionState {
             grid_step: grid.base_step_dbu,
             hidden_layers: hidden.iter().map(|l| (l.layer, l.datatype)).collect(),
             theme,
+            tour_seen,
         }
     }
 
@@ -121,7 +129,7 @@ impl SessionState {
             .map(|(l, d)| format!("{l}/{d}"))
             .collect();
         format!(
-            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nhidden={}\n",
+            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nhidden={}\ntour_seen={}\n",
             self.center_x,
             self.center_y,
             self.pixels_per_dbu,
@@ -130,7 +138,8 @@ impl SessionState {
             self.snap_enabled,
             self.grid_step,
             self.theme.tag(),
-            hidden.join(",")
+            hidden.join(","),
+            self.tour_seen
         )
     }
 
@@ -176,6 +185,7 @@ impl SessionState {
                 }
                 "theme" => s.theme = Theme::from_tag(value),
                 "hidden" => s.hidden_layers = parse_hidden(value),
+                "tour_seen" => s.tour_seen = value == "true",
                 _ => {}
             }
         }
@@ -293,6 +303,7 @@ mod tests {
             grid_step: 250,
             hidden_layers: vec![(4, 0), (5, 0)],
             theme: Theme::Light,
+            tour_seen: true,
         }
     }
 
@@ -307,13 +318,37 @@ mod tests {
     fn capture_and_restore_camera() {
         let cam = ViewCamera::new(Point::new(700, 900), 4.0);
         let grid = GridSettings::default();
-        let s = SessionState::capture(&cam, Tool::Pan, grid, Theme::Light, &[LayerId::new(3, 0)]);
+        let s = SessionState::capture(
+            &cam,
+            Tool::Pan,
+            grid,
+            Theme::Light,
+            &[LayerId::new(3, 0)],
+            true,
+        );
         let restored = s.camera();
         assert_eq!(restored.center(), Point::new(700, 900));
         assert!((restored.pixels_per_dbu() - 4.0).abs() < 1e-9);
         assert_eq!(s.tool, Tool::Pan);
         assert_eq!(s.theme(), Theme::Light);
         assert_eq!(s.hidden_layers(), vec![LayerId::new(3, 0)]);
+        assert!(s.tour_seen, "capture carries the tour-seen flag through");
+    }
+
+    #[test]
+    fn tour_seen_round_trips_and_defaults_false() {
+        // Round-trips true.
+        let s = SessionState {
+            tour_seen: true,
+            ..SessionState::default()
+        };
+        let parsed = SessionState::from_text(&s.to_text()).expect("parses");
+        assert!(parsed.tour_seen);
+
+        // A session file without the key (an older file) defaults to not-seen, so
+        // an upgrade shows the tour once rather than suppressing it.
+        let older = SessionState::from_text("center_x=1\n").expect("parses");
+        assert!(!older.tour_seen);
     }
 
     #[test]
