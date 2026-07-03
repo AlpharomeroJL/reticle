@@ -208,21 +208,48 @@ impl CheckerRegistry {
         self.checkers.get(name).map(AsRef::as_ref)
     }
 
-    /// A registry specialized for `task`: the default checkers plus, when the task
-    /// carries an `intent`, an [`IntentCheck`] bound to the task's own checker name.
+    /// A registry specialized for `task`: the default checkers, plus a checker
+    /// compiled from the task's own `checker` string bound under that exact string so
+    /// the runner's `get(&task.checker)` resolves it.
     ///
-    /// This lets a task set `checker = "intent"` (or any name) and supply an `intent`
-    /// spec; the spec is compiled into a checker under that name.
+    /// Three shapes of task checker are compiled here:
+    ///
+    /// - A task carrying an `intent` field gets an [`IntentCheck`] bound to its
+    ///   checker name (typically `intent`), regardless of the name.
+    /// - A task whose checker string names a geometric checker
+    ///   (`shape_count`, `layer_area`, `contact_stack`, `via_chain`, `comb`,
+    ///   `guard_ring`, `compound_cell`) with parameters after a `:` gets that checker,
+    ///   built from the parsed parameters, bound under the full string.
+    /// - A parameterized `rect_present:layer=L/D` gets a [`RectPresent`] on that layer.
+    ///
+    /// Anything else is left to the default checkers (`rect_present`, `drc_clean`).
     ///
     /// # Errors
     ///
-    /// Returns an error if the task names an intent-style checker but its `intent`
-    /// field does not parse as an [`IntentSpec`].
+    /// Returns an error if the task carries an `intent` that does not parse, or if its
+    /// checker string names a geometric checker whose parameters are missing or
+    /// malformed.
     pub fn for_task(task: &BenchTask) -> Result<Self, String> {
         let mut registry = Self::default();
+
+        // An intent field always compiles to an IntentCheck under the checker name.
         if let Some(intent) = &task.intent {
             let checker = IntentCheck::from_json(intent)?;
             registry = registry.with(task.checker.clone(), Box::new(checker));
+            return Ok(registry);
+        }
+
+        // Otherwise try to compile a parameterized checker from the checker string.
+        let parsed = crate::params::ParsedChecker::parse(&task.checker);
+        if let Some(checker) = crate::geom_checkers::build(&parsed).map_err(|e| e.to_string())? {
+            registry = registry.with(task.checker.clone(), checker);
+        } else if parsed.name() == "rect_present" && parsed.has("layer") {
+            // A layer-parameterized rect_present, bound under the full string.
+            let layer = parsed.layer("layer").map_err(|e| e.to_string())?;
+            registry = registry.with(
+                task.checker.clone(),
+                Box::new(RectPresent::new(layer.layer, layer.datatype)),
+            );
         }
         Ok(registry)
     }
