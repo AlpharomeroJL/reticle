@@ -50,6 +50,9 @@ pub use comment::{Comment, CommentThread};
 pub use error::{Result, SyncError};
 pub use presence::{Awareness, Presence};
 
+// `StepEdit` is defined further down in this module and re-exported here so the one
+// grouped-edit type has a stable path alongside the rest of the public surface.
+
 use reticle_geometry::LayerId;
 use reticle_model::{ArrayInstance, Cell, Document, DrawShape, Instance};
 use std::collections::hash_map::DefaultHasher;
@@ -219,6 +222,41 @@ impl SyncDocument {
         self.edit(|txn, next_id| mapping::set_top_cell(txn, name, is_top, next_id));
     }
 
+    /// Runs `f` as a single grouped, atomic CRDT transaction.
+    ///
+    /// The closure receives a [`StepEdit`] handle whose methods mirror the
+    /// individual mutators ([`add_cell`](Self::add_cell),
+    /// [`add_shape`](Self::add_shape), ...) but batch every operation into **one**
+    /// underlying `yrs` transaction. The whole group commits together and produces a
+    /// single update, so a peer never observes a partially-applied step (for example,
+    /// one shape of a multi-shape placement landing before the rest).
+    ///
+    /// Returns whatever the closure returns, so ids allocated inside the step can be
+    /// handed back:
+    ///
+    /// ```
+    /// use reticle_sync::SyncDocument;
+    /// use reticle_geometry::{LayerId, Point, Rect};
+    ///
+    /// let mut doc = SyncDocument::new("agent");
+    /// let ids = doc.step(|edit| {
+    ///     edit.add_empty_cell("top");
+    ///     let a = edit.add_rect("top", LayerId::new(68, 20),
+    ///         Rect::new(Point::new(0, 0), Point::new(10, 10)));
+    ///     let b = edit.add_rect("top", LayerId::new(68, 20),
+    ///         Rect::new(Point::new(20, 0), Point::new(30, 10)));
+    ///     vec![a, b]
+    /// });
+    /// assert_eq!(ids.len(), 2);
+    /// assert_eq!(doc.document().cell("top").unwrap().shapes.len(), 2);
+    /// ```
+    pub fn step<R>(&mut self, f: impl FnOnce(&mut StepEdit) -> R) -> R {
+        self.edit(|txn, next_id| {
+            let mut edit = StepEdit { txn, next_id };
+            f(&mut edit)
+        })
+    }
+
     // -------------------------------------------------------------------------
     // Update exchange
     // -------------------------------------------------------------------------
@@ -323,6 +361,87 @@ impl SyncDocument {
         if let Ok(doc) = materialized {
             self.cache = doc;
         }
+    }
+}
+
+/// A handle to a single grouped [`SyncDocument::step`] transaction.
+///
+/// Its methods mirror [`SyncDocument`]'s individual mutators but write into the one
+/// shared transaction the step owns, so every operation performed through a single
+/// `StepEdit` lands as one atomic CRDT update. The mutators that create an element
+/// (`add_shape`, `add_instance`, `add_array`) return the globally-unique element id
+/// assigned to it, exactly as their `SyncDocument` counterparts do.
+///
+/// A `StepEdit` cannot be constructed directly; obtain one from
+/// [`SyncDocument::step`]. It borrows the live transaction, so it is scoped to that
+/// call and is not `Send`.
+pub struct StepEdit<'a, 'txn> {
+    txn: &'a mut yrs::TransactionMut<'txn>,
+    next_id: &'a mut dyn FnMut() -> String,
+}
+
+impl std::fmt::Debug for StepEdit<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StepEdit").finish_non_exhaustive()
+    }
+}
+
+impl StepEdit<'_, '_> {
+    /// Adds (or merges into) a cell, writing all of its geometry, as part of the step.
+    ///
+    /// Mirrors [`SyncDocument::add_cell`]: an existing cell of the same name gains
+    /// this cell's contents rather than being replaced.
+    pub fn add_cell(&mut self, cell: &Cell) {
+        mapping::write_cell(self.txn, cell, self.next_id);
+    }
+
+    /// Creates an empty cell (if absent) as part of the step.
+    pub fn add_empty_cell(&mut self, name: &str) {
+        mapping::ensure_cell(self.txn, name, self.next_id);
+    }
+
+    /// Removes a cell and all of its contents as part of the step.
+    pub fn remove_cell(&mut self, name: &str) {
+        mapping::remove_cell(self.txn, name);
+    }
+
+    /// Adds a shape to `cell` (creating the cell if needed) as part of the step,
+    /// returning the unique element id assigned to it.
+    pub fn add_shape(&mut self, cell: &str, shape: &DrawShape) -> String {
+        let id = (self.next_id)();
+        mapping::insert_shape(self.txn, cell, &id, shape, self.next_id);
+        id
+    }
+
+    /// Adds a rectangle shape on `layer` to `cell` as part of the step; a convenience
+    /// over [`StepEdit::add_shape`].
+    pub fn add_rect(&mut self, cell: &str, layer: LayerId, rect: reticle_geometry::Rect) -> String {
+        self.add_shape(
+            cell,
+            &DrawShape::new(layer, reticle_model::ShapeKind::Rect(rect)),
+        )
+    }
+
+    /// Adds a single instance placement to `cell` as part of the step, returning the
+    /// unique element id assigned to it.
+    pub fn add_instance(&mut self, cell: &str, instance: &Instance) -> String {
+        let id = (self.next_id)();
+        mapping::insert_instance(self.txn, cell, &id, instance, self.next_id);
+        id
+    }
+
+    /// Adds an array placement to `cell` as part of the step, returning the unique
+    /// element id assigned to it.
+    pub fn add_array(&mut self, cell: &str, array: &ArrayInstance) -> String {
+        let id = (self.next_id)();
+        mapping::insert_array(self.txn, cell, &id, array, self.next_id);
+        id
+    }
+
+    /// Marks (or, with `is_top = false`, clears) a cell as a top (root) cell, as part
+    /// of the step.
+    pub fn set_top_cell(&mut self, name: &str, is_top: bool) {
+        mapping::set_top_cell(self.txn, name, is_top, self.next_id);
     }
 }
 

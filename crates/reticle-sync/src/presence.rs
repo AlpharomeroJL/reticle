@@ -86,6 +86,13 @@ impl Presence {
 #[derive(Clone, Debug, Default)]
 pub struct Awareness {
     states: HashMap<String, Presence>,
+    /// An opaque, per-actor status payload, carried alongside presence.
+    ///
+    /// This is deliberately a bare `String`: `reticle-sync` does not know what the
+    /// payload means (an agent serializes its `AgentStatus` into it, but any actor
+    /// could publish any status text). Like [`Presence`], it is last-write-wins per
+    /// actor and holds no CRDT metadata, so a watcher reads the freshest value.
+    statuses: HashMap<String, String>,
 }
 
 impl Awareness {
@@ -129,6 +136,38 @@ impl Awareness {
     pub fn is_empty(&self) -> bool {
         self.states.is_empty()
     }
+
+    /// Records (or replaces) the opaque status payload for `actor`, returning the
+    /// previous value if one was present.
+    ///
+    /// The payload is not interpreted here; a producer serializes whatever it wants a
+    /// watcher to read (an agent uses its `AgentStatus` JSON). This rides the same
+    /// awareness channel as presence, so a status update and a cursor update reach a
+    /// watcher the same way.
+    pub fn set_status(
+        &mut self,
+        actor: impl Into<String>,
+        status: impl Into<String>,
+    ) -> Option<String> {
+        self.statuses.insert(actor.into(), status.into())
+    }
+
+    /// Returns the latest status payload for `actor`, if one has been published.
+    #[must_use]
+    pub fn status(&self, actor: &str) -> Option<&str> {
+        self.statuses.get(actor).map(String::as_str)
+    }
+
+    /// Removes and returns the status payload for `actor` (for example when they stop
+    /// publishing).
+    pub fn remove_status(&mut self, actor: &str) -> Option<String> {
+        self.statuses.remove(actor)
+    }
+
+    /// Iterates over every known `(actor, status)` pair.
+    pub fn statuses(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.statuses.iter()
+    }
 }
 
 /// Encodes a [`Point`] into its proto form.
@@ -155,4 +194,47 @@ fn rect_from_proto(r: v1::Rect) -> Rect {
     let min = r.min.map_or(Point::ORIGIN, point_from_proto);
     let max = r.max.map_or(Point::ORIGIN, point_from_proto);
     Rect::new(min, max)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Awareness;
+
+    #[test]
+    fn status_slot_is_last_write_wins_per_actor() {
+        let mut aw = Awareness::new();
+        assert!(aw.status("agent").is_none());
+
+        assert!(aw.set_status("agent", "iteration 0").is_none());
+        assert_eq!(aw.status("agent"), Some("iteration 0"));
+
+        // A second publish replaces the first and returns the prior value.
+        let prev = aw.set_status("agent", "iteration 1");
+        assert_eq!(prev.as_deref(), Some("iteration 0"));
+        assert_eq!(aw.status("agent"), Some("iteration 1"));
+    }
+
+    #[test]
+    fn status_is_independent_of_presence_and_scoped_by_actor() {
+        let mut aw = Awareness::new();
+        aw.set_status("agent", "running");
+        aw.set_status("alice", "idle");
+
+        // Two actors, two statuses; presence remains empty (status is a separate slot).
+        let mut seen: Vec<(String, String)> =
+            aw.statuses().map(|(a, s)| (a.clone(), s.clone())).collect();
+        seen.sort();
+        assert_eq!(
+            seen,
+            vec![
+                ("agent".to_owned(), "running".to_owned()),
+                ("alice".to_owned(), "idle".to_owned()),
+            ]
+        );
+        assert!(aw.is_empty(), "presence map is untouched by status writes");
+
+        assert_eq!(aw.remove_status("agent").as_deref(), Some("running"));
+        assert!(aw.status("agent").is_none());
+        assert_eq!(aw.status("alice"), Some("idle"));
+    }
 }
