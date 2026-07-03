@@ -91,6 +91,24 @@ impl EditableDocument {
         self.doc
     }
 
+    /// Replaces the document's [`Technology`](crate::Technology) in place, bumping
+    /// the revision so renderers and caches re-read.
+    ///
+    /// Setting technology is deliberately outside the [`Edit`] vocabulary: the
+    /// undo/redo log records geometry mutations, and a `Reverse` only ever touches
+    /// cells, so swapping the technology neither corrupts the existing history nor
+    /// participates in it. The undo and redo stacks are left untouched (a later
+    /// undo of a shape edit still works), but a technology change is itself *not*
+    /// undoable. The bounding-box cache keys on cells only, yet is cleared here too
+    /// so this stays a single, uniform "the document changed" point. This mirrors
+    /// the agent API's out-of-band `set_technology` while preserving history rather
+    /// than discarding it.
+    pub fn set_technology(&mut self, tech: crate::Technology) {
+        self.doc.set_technology(tech);
+        self.invalidate_bbox_cache();
+        self.revision += 1;
+    }
+
     /// The full recursive bounding box of a cell, memoized.
     ///
     /// On a cache hit this returns the stored answer; on a miss it calls

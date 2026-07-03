@@ -424,6 +424,47 @@ fn failed_and_noop_operations_leave_revision_unchanged() {
 }
 
 #[test]
+fn set_technology_bumps_revision_and_keeps_shape_history() {
+    use reticle_model::Technology;
+
+    let mut editor = EditableDocument::new(Document::new());
+    editor
+        .apply(Edit::AddCell {
+            cell: Cell::new("top"),
+        })
+        .unwrap();
+    editor
+        .apply(Edit::AddShape {
+            cell: "top".to_owned(),
+            shape: rect_shape(1, 0, 0, 10, 10),
+        })
+        .unwrap();
+    let rev_before = editor.revision();
+    let undo_before = editor.undo_depth();
+
+    // Setting technology is out-of-band: it replaces the tech and bumps the
+    // revision, but does not touch the shape-edit undo history.
+    let tech = Technology {
+        name: "demo".to_owned(),
+        dbu_per_micron: 1000,
+        ..Technology::default()
+    };
+    editor.set_technology(tech.clone());
+
+    assert_eq!(editor.document().technology(), &tech);
+    assert_eq!(editor.revision(), rev_before + 1, "revision advances");
+    assert_eq!(
+        editor.undo_depth(),
+        undo_before,
+        "the shape-edit history is untouched by a technology change"
+    );
+
+    // The prior shape edit still undoes cleanly afterward.
+    assert!(editor.undo());
+    assert_eq!(editor.document().cell("top").unwrap().shapes.len(), 0);
+}
+
+#[test]
 fn cell_bbox_includes_children() {
     let mut doc = Document::new();
     let mut child = Cell::new("child");

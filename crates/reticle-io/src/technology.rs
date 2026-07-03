@@ -232,6 +232,138 @@ fn parse_rule(rest: &[&str], line_no: usize) -> Result<Rule> {
     })
 }
 
+/// Serializes a [`Technology`] back into the technology-file text format.
+///
+/// This is the inverse of [`parse_technology`] over the format's *semantic*
+/// content: it emits one directive per line in the order `technology`,
+/// `dbu_per_micron`, `layer`s, `rule`s, `stack`s, with blank lines separating the
+/// sections for readability. Parsing the result yields a technology equal to the
+/// input, and re-serializing that technology reproduces this exact byte string, so
+/// `write_technology` is an idempotent, canonical form:
+///
+/// ```text
+/// parse(write(t)) == t                       // semantic round-trip
+/// write(parse(write(t))) == write(t)         // byte-stable fixpoint
+/// ```
+///
+/// # What round-trips and what does not
+///
+/// The parser discards comments, blank lines, token spacing, keyword case, and any
+/// `0x`/`#` color prefix; none of those survive a load, so `write_technology`
+/// cannot reproduce a hand-authored file byte-for-byte. It reproduces the canonical
+/// form. Colors are emitted as eight uppercase hex digits (`RRGGBBAA`); the
+/// `technology` line is omitted when the name is empty; `dbu_per_micron` is always
+/// emitted (a value of `0`, the [`Technology::default`] resolution, round-trips as
+/// the literal `dbu_per_micron 0`, which the parser rejects, so callers should set
+/// a positive resolution before writing a file they intend to re-load).
+///
+/// Rules choose the single- or two-layer form by whether [`Rule::other_layer`] is
+/// set, matching how [`parse_technology`] distinguishes the forms by token count.
+#[must_use]
+pub fn write_technology(tech: &Technology) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+
+    if !tech.name.is_empty() {
+        let _ = writeln!(out, "technology {}", tech.name);
+    }
+    let _ = writeln!(out, "dbu_per_micron {}", tech.dbu_per_micron);
+
+    if !tech.layers.is_empty() {
+        out.push('\n');
+        for layer in &tech.layers {
+            let _ = writeln!(
+                out,
+                "layer {} {} {} {}",
+                layer.id.layer,
+                layer.id.datatype,
+                layer.name,
+                format_rgba(layer.color_rgba),
+            );
+        }
+    }
+
+    if !tech.rules.is_empty() {
+        out.push('\n');
+        for rule in &tech.rules {
+            write_rule(&mut out, rule);
+        }
+    }
+
+    if !tech.stack.is_empty() {
+        out.push('\n');
+        for entry in &tech.stack {
+            let _ = writeln!(
+                out,
+                "stack {} {} {} {}",
+                entry.layer.layer, entry.layer.datatype, entry.z_bottom_nm, entry.thickness_nm,
+            );
+        }
+    }
+
+    out
+}
+
+/// Appends one `rule` line to `out` in the single- or two-layer form.
+fn write_rule(out: &mut String, rule: &Rule) {
+    use std::fmt::Write as _;
+
+    let kind = rule_kind_keyword(rule.kind);
+    match rule.other_layer {
+        Some(other) => {
+            let _ = writeln!(
+                out,
+                "rule {} {} {} {} {} {}",
+                kind,
+                rule.layer.layer,
+                rule.layer.datatype,
+                other.layer,
+                other.datatype,
+                rule.value,
+            );
+        }
+        None => {
+            let _ = writeln!(
+                out,
+                "rule {} {} {} {}",
+                kind, rule.layer.layer, rule.layer.datatype, rule.value,
+            );
+        }
+    }
+}
+
+/// Formats a packed `0xRRGGBBAA` color as eight uppercase hex digits.
+///
+/// This is the canonical spelling [`write_technology`] emits; [`parse_rgba`]
+/// accepts it (and lower case, and `0x`/`#` prefixes) on the way back in.
+fn format_rgba(color_rgba: u32) -> String {
+    format!("{color_rgba:08X}")
+}
+
+/// Maps a [`RuleKind`] to its lowercase keyword, the inverse of
+/// [`parse_rule_kind`].
+///
+/// [`RuleKind`] is `#[non_exhaustive]`; the wildcard arm defends against a future
+/// variant added without a keyword here by falling back to `width` (which keeps the
+/// output parseable rather than panicking). The duplicate body with the `Width` arm
+/// is deliberate, hence the `allow`. Extend this match whenever [`parse_rule_kind`]
+/// gains a keyword.
+#[allow(clippy::match_same_arms)]
+fn rule_kind_keyword(kind: RuleKind) -> &'static str {
+    match kind {
+        RuleKind::Width => "width",
+        RuleKind::Spacing => "spacing",
+        RuleKind::Enclosure => "enclosure",
+        RuleKind::Extension => "extension",
+        RuleKind::Notch => "notch",
+        RuleKind::Area => "area",
+        RuleKind::Density => "density",
+        RuleKind::Angle => "angle",
+        _ => "width",
+    }
+}
+
 /// Maps a rule-kind keyword to a [`RuleKind`].
 fn parse_rule_kind(token: &str, line_no: usize) -> Result<RuleKind> {
     let kind = match token.to_ascii_lowercase().as_str() {
