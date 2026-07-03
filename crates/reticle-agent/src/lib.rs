@@ -39,12 +39,14 @@
 //! never conflated (authorized by ADR 0029).
 
 pub mod collab;
+pub mod context_pack;
 pub mod model;
 pub mod ollama;
 pub mod redact;
 pub mod run;
 
 pub use collab::{AgentCollaborator, Pacing, StepReport};
+pub use context_pack::{ContextPack, DEFAULT_SHAPE_CAP, token_estimate, whole_document_context};
 pub use model::{AnthropicModel, BuildError, DEFAULT_BASE_URL, DEFAULT_MODEL, HttpTransport};
 pub use ollama::{
     BuildError as OllamaBuildError, DEFAULT_OLLAMA_BASE_URL, DEFAULT_SUMMARIZE_THRESHOLD_TOKENS,
