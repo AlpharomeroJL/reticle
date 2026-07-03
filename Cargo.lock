@@ -3988,6 +3988,7 @@ dependencies = [
  "reticle-extract",
  "reticle-geometry",
  "reticle-model",
+ "reticle-sync",
  "serde",
  "serde_json",
  "ureq",

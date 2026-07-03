@@ -28,6 +28,10 @@ reticle-drc = { workspace = true }
 # CheckerRegistry, ResultRecord, and write_records rather than re-deriving them,
 # and does not modify that crate (another lane owns it).
 reticle-bench = { workspace = true }
+# The collaboration bridge (`collab` module) mirrors the agent's edits onto the
+# reticle-sync CRDT under AGENT_ACTOR, as atomic per-step transactions, and
+# publishes cursor/selection presence plus AgentStatus over the awareness layer.
+reticle-sync = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 # The runner binary's argument parser; version matched to reticle-cli / reticle-bench.
