@@ -201,3 +201,70 @@ fn resolve_technology(suite: &Path, task: &BenchTask) -> Result<String, String> 
 /// The manifest is loaded for its version; expose the type so the summary heading and
 /// record `suite_version` stay in sync with the loaded suite.
 const _: fn() -> SuiteManifest = SuiteManifest::default;
+
+#[cfg(test)]
+mod replay_determinism_tests {
+    //! Replay-hash determinism over every benchmark transcript (Wave 3 QA).
+    //!
+    //! Runs the whole suite against the deterministic mock and, for each task,
+    //! re-applies the recorded transcript on a fresh session and asserts it
+    //! reproduces the exact document hash (the replay contract). It also runs the
+    //! whole suite twice and asserts the per-task hashes are identical, so the
+    //! benchmark is bit-for-bit reproducible.
+
+    use super::{resolve_technology, scripts};
+    use reticle_agent_api::verify_replay;
+    use reticle_bench::runner::run_task_with_transcript;
+    use reticle_bench::{CheckerRegistry, RunOptions, load_suite};
+    use std::path::{Path, PathBuf};
+
+    /// The workspace-root suite directory (tests run with the crate dir as CWD).
+    fn suite_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../benchmarks/layout-tasks")
+    }
+
+    /// Runs the whole suite once, verify-replaying every transcript, and returns the
+    /// per-task final document hashes in suite order.
+    fn run_all_and_verify_replay() -> Vec<(String, u64)> {
+        let suite = suite_dir();
+        let (manifest, tasks) = load_suite(&suite).expect("load the suite");
+        let mut model = scripts::sample_mock();
+        let mut hashes = Vec::with_capacity(tasks.len());
+        for task in &tasks {
+            let technology = resolve_technology(&suite, task).expect("resolve technology");
+            let registry = CheckerRegistry::for_task(task).expect("build the checker registry");
+            let (record, transcript) = run_task_with_transcript(
+                task,
+                &mut model,
+                &registry,
+                &technology,
+                &manifest.version,
+                RunOptions::default(),
+            )
+            .expect("run the task");
+            verify_replay(&transcript).unwrap_or_else(|e| {
+                panic!(
+                    "task `{}` transcript did not replay to its recorded hash: {e}",
+                    record.task_id
+                )
+            });
+            hashes.push((record.task_id, transcript.final_hash));
+        }
+        hashes
+    }
+
+    #[test]
+    fn every_benchmark_transcript_replays_and_is_deterministic() {
+        let first = run_all_and_verify_replay();
+        assert!(
+            first.len() >= 60,
+            "the full suite is loaded (got {} tasks)",
+            first.len()
+        );
+        let second = run_all_and_verify_replay();
+        assert_eq!(
+            first, second,
+            "the benchmark suite is not bit-for-bit deterministic across two runs"
+        );
+    }
+}

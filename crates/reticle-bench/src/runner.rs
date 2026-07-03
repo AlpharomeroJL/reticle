@@ -94,6 +94,32 @@ pub fn run_task(
     suite_version: &str,
     options: RunOptions,
 ) -> Result<ResultRecord, RunError> {
+    run_task_with_transcript(
+        task,
+        model,
+        registry,
+        technology_source,
+        suite_version,
+        options,
+    )
+    .map(|(record, _transcript)| record)
+}
+
+/// Like [`run_task`], but also returns the [`Transcript`] of the run, so a caller can
+/// replay it and check that the document hash is reproducible (see the replay
+/// determinism test). `run_task` is this function with the transcript discarded.
+///
+/// # Errors
+///
+/// Same as [`run_task`].
+pub fn run_task_with_transcript(
+    task: &BenchTask,
+    model: &mut dyn ModelClient,
+    registry: &CheckerRegistry,
+    technology_source: &str,
+    suite_version: &str,
+    options: RunOptions,
+) -> Result<(ResultRecord, Transcript), RunError> {
     let checker = registry
         .get(&task.checker)
         .ok_or_else(|| RunError::UnknownChecker {
@@ -160,7 +186,7 @@ pub fn run_task(
         }
     }
 
-    Ok(ResultRecord {
+    let record = ResultRecord {
         task_id: task.id.clone(),
         model: model.id().to_owned(),
         suite_version: suite_version.to_owned(),
@@ -169,7 +195,8 @@ pub fn run_task(
         first_proposal_violations,
         final_violations,
         wall_ms: clock.elapsed_ms(),
-    })
+    };
+    Ok((record, reticle_agent_api::transcript_of(&session)))
 }
 
 /// A deterministic stand-in for wall time: a monotonic count of applied commands,
