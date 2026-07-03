@@ -322,6 +322,14 @@ pub struct App {
     /// a fresh install and is relaunchable from the Help menu. Its "seen" bit
     /// persists with the session so the automatic tour shows only once.
     tour: Tour,
+
+    /// Active scripted-capture state, set only by the native `--screenshot-smoke` /
+    /// `--demo-script` launcher; `None` in normal interactive and web use. It drives
+    /// full-window egui screenshots for the README media harness (see
+    /// [`crate::demoscript`]); native only, since a windowed screenshot is
+    /// meaningless on wasm.
+    #[cfg(not(target_arch = "wasm32"))]
+    capture: Option<crate::demoscript::CaptureState>,
 }
 
 /// The view the app opens into.
@@ -483,6 +491,8 @@ impl App {
             start_screen: start_view == StartView::Editor,
             view_export: crate::viewexport::ViewExport::new(),
             tour: Tour::from_seen(tour_already_seen()),
+            #[cfg(not(target_arch = "wasm32"))]
+            capture: None,
         }
     }
 
@@ -555,6 +565,21 @@ impl App {
         self.netlight.clear();
         self.drc.clear();
         self.fit_requested = true;
+    }
+
+    /// Arms a one-shot full-window screenshot smoke test (native launcher only).
+    ///
+    /// Loads the bundled SKY130 cell into the editor and runs DRC so the captured
+    /// frame shows the real panels populated, then installs a
+    /// [`CaptureState`](crate::demoscript::CaptureState) that the frame loop drives:
+    /// it screenshots the window once, writes it to `out_path`, and closes. This
+    /// exists to prove the egui viewport-screenshot round trip on this wgpu backend
+    /// before the full demo-script harness is built on top of it.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_screenshot_smoke(&mut self, out_path: std::path::PathBuf) {
+        self.enter_use_case(crate::usecases::UseCase::InspectCell);
+        self.run_drc();
+        self.capture = Some(crate::demoscript::CaptureState::smoke(out_path));
     }
 
     /// The renderer (frozen Wave 0 contract accessor).
@@ -4659,6 +4684,18 @@ impl eframe::App for App {
         // Draw the first-run tour overlay last so its card and highlight sit over
         // everything else.
         self.tour_overlay(&ctx, &tour_targets);
+
+        // Scripted-capture mode (native launcher only): advance the screenshot state
+        // machine after everything has been drawn this frame, and close the window
+        // once the capture is complete.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let done = self.capture.as_mut().is_some_and(|cap| cap.tick(&ctx));
+            if done {
+                self.capture = None;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
 
         // Keep animating while dragging/measuring so interaction feels live.
         ctx.request_repaint();

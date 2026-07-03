@@ -4017,6 +4017,7 @@ version = "6.0.0"
 dependencies = [
  "eframe",
  "egui-wgpu",
+ "image",
  "reticle-agent-api",
  "reticle-drc",
  "reticle-extract",

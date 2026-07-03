@@ -47,3 +47,10 @@ serde_json = { workspace = true }
 # keeps the web build green. The cross-section test also parses the committed
 # SKY130 file through it.
 reticle-io = { workspace = true }
+
+# The scripted demo-capture mode (`crate::demoscript`, native only) writes
+# full-window PNG frames with `image`; a windowed screenshot has no meaning on wasm,
+# so the dependency is kept out of the web graph. Matches the xtask media pipeline's
+# `image` build so the lockfile gains no new version.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png"] }

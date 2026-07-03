@@ -49,6 +49,8 @@
 //! * [`view3d`], the extruded 3D layer-stack window (orbit camera + wgpu glue).
 //! * [`xsection`], cut-line cross-sections (interval math + elevation panel).
 //! * [`demo`], the built-in hierarchical demo document.
+//! * [`demoscript`], the scripted demo-capture mode that drives the real window and
+//!   screenshots it, so the README media shows the actual editor (native only).
 //! * [`usecases`], the four bundled worked use-case scenarios offered from the
 //!   Start screen (inspect a SKY130 cell, find and fix a violation, watch the
 //!   agent, build with the new tools), each preparing a starting document or the
@@ -70,6 +72,7 @@ pub mod camera;
 pub mod command;
 pub mod culling;
 pub mod demo;
+pub mod demoscript;
 pub mod draw;
 pub mod drc_panel;
 pub mod fps;
