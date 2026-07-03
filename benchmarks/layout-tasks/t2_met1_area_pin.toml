@@ -1,0 +1,5 @@
+id = "t2_met1_area_pin"
+tier = 2
+prompt = "Create a cell named top and place four met1 rectangles, each at least 0.083um^2, giving a combined met1 area of at least 0.33um^2 (332000 dbu^2)."
+technology = "sky130.tech"
+checker = "layer_area:layer=68/20,min_area=332000"

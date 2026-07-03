@@ -1,0 +1,5 @@
+id = "t3_via_chain_via2_4"
+tier = 3
+prompt = "Create a cell named top. Connect a met2 plane to a met3 plane with at least four via2 (69/44) vias, all on the same met2/met3 net."
+technology = "sky130.tech"
+checker = "via_chain:via=69/44,vias=4"

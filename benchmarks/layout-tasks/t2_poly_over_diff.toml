@@ -1,0 +1,5 @@
+id = "t2_poly_over_diff"
+tier = 2
+prompt = "Create a cell named top. Draw a diff (65/20) rectangle and a poly (66/20) rectangle crossing it so the poly extends at least 0.13um (130 dbu) past the diff on both ends (the poly endcap rule), keeping the cell DRC clean."
+technology = "sky130.tech"
+checker = "drc_clean"

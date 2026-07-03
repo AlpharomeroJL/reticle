@@ -1,0 +1,5 @@
+id = "t3_via_chain_8"
+tier = 3
+prompt = "Create a cell named top. Build a redundant met1-to-met2 connection with at least eight vias (68/44), all landing on the same met1/met2 net."
+technology = "sky130.tech"
+checker = "via_chain:via=68/44,vias=8"

@@ -1,0 +1,5 @@
+id = "t3_guard_ring_li1"
+tier = 3
+prompt = "Create a cell named top. Draw a closed li1 (67/20) guard ring: four rectangles forming a rectangular loop that fully encloses an empty interior with no gap on any side."
+technology = "sky130.tech"
+checker = "guard_ring:layer=67/20"

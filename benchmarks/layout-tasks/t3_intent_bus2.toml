@@ -1,0 +1,6 @@
+id = "t3_intent_bus2"
+tier = 3
+prompt = "Create a cell named top routing a two-bit met1 bus: bit0 connects a0 near (0,0) to b0 near (600,0); bit1 connects a1 near (0,140) to b1 near (600,140). Keep the two bits from shorting."
+technology = "sky130.tech"
+checker = "intent"
+intent = '{"nets":[{"name":"bit0","terminals":[{"name":"a0","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":0},"max":{"x":20,"y":20}}},{"name":"b0","layer":{"layer":68,"datatype":20},"region":{"min":{"x":580,"y":0},"max":{"x":600,"y":20}}}]},{"name":"bit1","terminals":[{"name":"a1","layer":{"layer":68,"datatype":20},"region":{"min":{"x":0,"y":140},"max":{"x":20,"y":160}}},{"name":"b1","layer":{"layer":68,"datatype":20},"region":{"min":{"x":580,"y":140},"max":{"x":600,"y":160}}}]}],"forbidden":[{"net_a":"bit0","net_b":"bit1"}]}'

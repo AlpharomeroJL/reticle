@@ -1,0 +1,5 @@
+id = "t2_two_met1_shapes"
+tier = 2
+prompt = "Create a cell named top and place exactly two separate met1 rectangles."
+technology = "sky130.tech"
+checker = "shape_count:layer=68/20,exact=2"

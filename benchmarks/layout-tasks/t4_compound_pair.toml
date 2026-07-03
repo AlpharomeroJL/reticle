@@ -1,0 +1,5 @@
+id = "t4_compound_pair"
+tier = 4
+prompt = "Create a leaf cell holding a met1 rectangle, then create a cell named top that places two instances of that leaf cell side by side."
+technology = "sky130.tech"
+checker = "compound_cell:instances=2"

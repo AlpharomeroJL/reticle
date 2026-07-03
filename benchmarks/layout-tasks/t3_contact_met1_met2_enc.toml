@@ -1,0 +1,5 @@
+id = "t3_contact_met1_met2_enc"
+tier = 3
+prompt = "Create a cell named top. Connect met1 (68/20) to met2 (69/20) with a via (68/44), and make met2 enclose the via by at least 0.055um (55 dbu) on every side as the via enclosure rule requires."
+technology = "sky130.tech"
+checker = "contact_stack:via=68/44,min_enclosure=55"
