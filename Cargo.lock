@@ -4090,6 +4090,7 @@ dependencies = [
  "reticle-geometry",
  "reticle-model",
  "reticle-server",
+ "reticle-sync",
  "serde",
  "serde_json",
  "tokio",

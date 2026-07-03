@@ -53,3 +53,6 @@ futures-util = "0.3.32"
 # Drive the demo router in-process with oneshot requests, as tests/abuse.rs does.
 tower = { version = "0.5.3", features = ["util"] }
 http-body-util = "0.1.3"
+# The live-wiring test decodes the CRDT frames a watcher receives from the room,
+# exactly as a browser reticle-sync peer would, and materializes the drawn geometry.
+reticle-sync = { workspace = true }

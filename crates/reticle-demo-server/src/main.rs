@@ -21,6 +21,9 @@ mod config;
 mod harness;
 mod relay;
 
+#[cfg(test)]
+mod tests_livewire;
+
 use config::DemoConfig;
 use harness::{AgentHarness, LoopBounds, ModelSource, demo_script};
 use reticle_demo::DemoServer;
