@@ -35,7 +35,9 @@ use crate::labels;
 use crate::layers::{self, LayerState};
 use crate::minimap::MinimapLayout;
 use crate::netlight::{Generation, Netlight};
+use crate::outline::{self, OutlineTree, SavedSets};
 use crate::productivity::{self, ProductivityState};
+use crate::query::{LayerLookup, Query};
 use crate::replay::ReplayTheater;
 use crate::selection::{self, Selection};
 use crate::snap::{self, Guide, SnapHint, SnapState};
@@ -53,6 +55,32 @@ impl Status {
     fn set(&mut self, text: impl Into<String>) {
         self.text = text.into();
     }
+}
+
+/// State for the search / selection-depth panel: the filter query bar, saved
+/// selection sets, select-similar, and the cell/instance outline tree.
+///
+/// The heavy lifting (parsing, evaluation, saved-set bookkeeping, outline
+/// building) lives in [`crate::query`] and [`crate::outline`]; this struct only
+/// holds the panel's editable fields plus the cached outline. `pending_locate` is
+/// a deferred camera target set when an outline row is clicked and consumed inside
+/// [`App::canvas`] once the real screen rectangle is known, exactly like the DRC
+/// panel's deferred zoom.
+#[derive(Clone, Debug, Default)]
+struct SearchState {
+    /// The filter query text (e.g. `layer:METAL1 width<400`).
+    query_text: String,
+    /// The last query error message, shown under the bar (empty when none).
+    error: String,
+    /// The name field for saving/restoring a selection set.
+    set_name: String,
+    /// The cached outline tree, rebuilt when the document changes.
+    outline: OutlineTree,
+    /// The saved selection sets for this session.
+    saved: SavedSets,
+    /// A world rectangle the camera should frame on the next frame, set by an
+    /// outline "locate" click and consumed in [`App::canvas`].
+    pending_locate: Option<Rect>,
 }
 
 /// Which via-stack layer field a picker combo writes to.
@@ -177,6 +205,10 @@ pub struct App {
     /// The productivity panel state: the in-app clipboard plus the array,
     /// move-by-delta, and via-stack dialog fields.
     productivity: ProductivityState,
+
+    /// The search / selection-depth panel: filter query bar, saved selection
+    /// sets, select-similar, and the cell/instance outline tree.
+    search: SearchState,
 
     /// The rebindable shortcut map every key press resolves through.
     keymap: Keymap,
@@ -310,6 +342,8 @@ impl App {
         let palette = palette_from_layers(&layer_state);
         let retained = RetainedScene::new(&doc, demo::TOP_CELL, &palette);
         let expanded = Arc::new(retained.expand());
+        // Build the outline before `doc` is moved into the history below.
+        let outline = OutlineTree::build(&doc);
         Self {
             renderer: WgpuRenderer::new(),
             document,
@@ -347,6 +381,10 @@ impl App {
             netlight: Netlight::new(),
             view3d: crate::view3d::View3d::new(),
             productivity: ProductivityState::new(),
+            search: SearchState {
+                outline,
+                ..SearchState::default()
+            },
             keymap: load_keymap(),
             keymap_open: false,
             rebinding: None,
@@ -392,6 +430,8 @@ impl App {
         // bump the revision so the net-extraction cache re-extracts on the next pick.
         self.netlight.clear();
         self.doc_generation = self.doc_generation.wrapping_add(1);
+        // The cell hierarchy may have changed, so refresh the outline tree.
+        self.search.outline = OutlineTree::build(self.history.document());
     }
 
     /// The technology database-units-per-micron for the current document.
@@ -795,6 +835,184 @@ impl App {
         let n = hits.len();
         self.selection.set(hits);
         self.status.set(format!("Selected {n} shape(s)"));
+    }
+
+    /// Builds a name -> [`LayerId`] lookup from the layer table for query
+    /// evaluation (resolving `layer:METAL1` to a concrete layer id).
+    fn layer_lookup(&self) -> LayerLookup {
+        LayerLookup::new(
+            self.layer_state
+                .rows()
+                .iter()
+                .map(|r| (r.name.clone(), r.id)),
+        )
+    }
+
+    /// The search / selection-depth panel: the filter query bar, saved selection
+    /// sets, select-similar, and the cell/instance outline tree.
+    ///
+    /// All the logic lives in [`crate::query`] and [`crate::outline`]; this method
+    /// only draws the widgets and forwards the results into the live selection and
+    /// the deferred camera locate.
+    fn search_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Search");
+
+        // --- Filter query bar ------------------------------------------------
+        ui.label("Filter (e.g. layer:METAL1 width<400 area>1000):");
+        let query_response = ui.text_edit_singleline(&mut self.search.query_text);
+        let run = ui.button("Select matching").clicked()
+            || (query_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+        if run {
+            self.run_filter_query();
+        }
+        if !self.search.error.is_empty() {
+            ui.colored_label(Color32::from_rgb(230, 120, 120), &self.search.error);
+        }
+
+        ui.separator();
+
+        // --- Select similar --------------------------------------------------
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    !self.selection.is_empty(),
+                    egui::Button::new("Select similar"),
+                )
+                .clicked()
+            {
+                self.select_similar();
+            }
+            ui.label("same layer + size");
+        });
+
+        ui.separator();
+
+        // --- Saved selection sets --------------------------------------------
+        ui.label("Selection sets:");
+        ui.horizontal(|ui| {
+            ui.text_edit_singleline(&mut self.search.set_name);
+            if ui
+                .add_enabled(!self.selection.is_empty(), egui::Button::new("Save"))
+                .clicked()
+            {
+                self.save_selection_set();
+            }
+        });
+        let mut restore: Option<String> = None;
+        let mut remove: Option<String> = None;
+        for set in self.search.saved.sets() {
+            ui.horizontal(|ui| {
+                if ui
+                    .button(format!("{} ({})", set.name, set.indices.len()))
+                    .clicked()
+                {
+                    restore = Some(set.name.clone());
+                }
+                if ui.small_button("x").clicked() {
+                    remove = Some(set.name.clone());
+                }
+            });
+        }
+        if let Some(name) = restore {
+            self.restore_selection_set(&name);
+        }
+        if let Some(name) = remove {
+            self.search.saved.remove(&name);
+            self.status.set(format!("Removed set '{name}'"));
+        }
+
+        ui.separator();
+
+        // --- Outline / hierarchy tree ----------------------------------------
+        ui.label("Outline (click to locate):");
+        let mut locate: Option<Rect> = None;
+        egui::ScrollArea::vertical()
+            .max_height(180.0)
+            .auto_shrink([false, false])
+            .id_salt("outline_tree")
+            .show(ui, |ui| {
+                for node in self.search.outline.nodes() {
+                    let indent = "    ".repeat(node.depth);
+                    let text = format!("{indent}{}", node.label);
+                    let response =
+                        ui.add_enabled(node.locate.is_some(), egui::Button::new(text).frame(false));
+                    if response.clicked() {
+                        locate = node.locate;
+                    }
+                }
+            });
+        if let Some(target) = locate {
+            // Framed on the next canvas pass, once the screen rect is known.
+            self.search.pending_locate = Some(target);
+            self.status.set("Located");
+        }
+    }
+
+    /// Parses the filter query bar and selects every matching shape, replacing the
+    /// current selection. A parse error is shown under the bar and leaves the
+    /// selection untouched.
+    fn run_filter_query(&mut self) {
+        match Query::parse(&self.search.query_text) {
+            Ok(query) => {
+                self.search.error.clear();
+                if query.is_empty() {
+                    self.status.set("Enter a filter to select");
+                    return;
+                }
+                let lookup = self.layer_lookup();
+                let hits = query.select(self.scene.shapes(), &lookup, &self.top_cell);
+                let n = hits.len();
+                self.selection.set(hits);
+                self.status.set(format!("Filter selected {n} shape(s)"));
+            }
+            Err(e) => {
+                self.search.error = e.to_string();
+            }
+        }
+    }
+
+    /// Grows the current selection by adding shapes on the same layer and of a
+    /// similar size to any already-selected shape (see [`outline::select_similar`]).
+    fn select_similar(&mut self) {
+        if self.selection.is_empty() {
+            self.status.set("Select a shape first");
+            return;
+        }
+        let seed: std::collections::BTreeSet<usize> = self.selection.iter().collect();
+        let before = seed.len();
+        let grown = outline::select_similar(
+            self.scene.shapes(),
+            &seed,
+            outline::DEFAULT_SIMILAR_TOLERANCE,
+        );
+        let added = grown.len().saturating_sub(before);
+        self.selection.set(grown);
+        self.status
+            .set(format!("Select similar added {added} shape(s)"));
+    }
+
+    /// Saves the current selection under the name in the set-name field.
+    fn save_selection_set(&mut self) {
+        let name = self.search.set_name.clone();
+        if self.search.saved.save(&name, self.selection.iter()) {
+            self.status.set(format!(
+                "Saved {} shape(s) as '{}'",
+                self.selection.len(),
+                name.trim()
+            ));
+        } else {
+            self.status.set("Enter a name for the selection set");
+        }
+    }
+
+    /// Restores a saved selection set into the live selection by name.
+    fn restore_selection_set(&mut self, name: &str) {
+        if let Some(indices) = self.search.saved.restore(name) {
+            let indices = indices.to_vec();
+            let n = indices.len();
+            self.selection.set(indices);
+            self.status.set(format!("Restored '{name}' ({n} shape(s))"));
+        }
     }
 
     /// Draws the right-hand undo-history panel: stack depths and step buttons.
@@ -2503,6 +2721,12 @@ impl App {
             self.zoom_to_selected_violation = false;
         }
 
+        // Deferred locate to the outline row the search panel just clicked. Framed
+        // with the same 25% border as the DRC locate so the target reads clearly.
+        if let Some(target) = self.search.pending_locate.take() {
+            self.camera.zoom_to_rect(&screen, target, 0.25);
+        }
+
         // Input routes to the focused pane only; the click that switched focus is
         // consumed, and pointer positions over other panes never reach the tools.
         let pointer_in_pane = response
@@ -3972,6 +4196,8 @@ impl eframe::App for App {
                         self.snap_panel(ui);
                         ui.separator();
                         self.view_export_panel(ui);
+                        self.search_panel(ui);
+                        ui.separator();
                     });
             });
         egui::CentralPanel::default().show(ui, |ui| {
