@@ -12,7 +12,7 @@ use egui::{
     Align2, Color32, FontId, Pos2, Rect as EguiRect, Sense, Shape, Stroke, StrokeKind, Vec2,
 };
 
-use reticle_geometry::{LayerId, Point, Rect, Shape as _};
+use reticle_geometry::{Endcap, LayerId, Point, Rect, Shape as _};
 use reticle_model::{DrawShape, LayerInfo, ShapeKind, Technology};
 use reticle_render::{
     ExpandedScene, Palette, RetainedRenderer, RetainedScene, ViewUniform, WgpuRenderer,
@@ -79,6 +79,9 @@ pub struct App {
     fit_requested: bool,
     /// The tool state machine.
     tools: ToolState,
+    /// The drawing / vertex-edit state: in-progress polygon and path builders, the
+    /// path width and end cap, and any live vertex grab (see [`crate::draw`]).
+    draw: crate::draw::DrawState,
     /// Layer table, visibility, and filter.
     layer_state: LayerState,
     /// The current shape selection (indices into the scene).
@@ -270,6 +273,7 @@ impl App {
             camera: ViewCamera::new(Point::ORIGIN, 0.05),
             fit_requested: true,
             tools: ToolState::new(),
+            draw: crate::draw::DrawState::new(),
             layer_state,
             selection: Selection::new(),
             grid: GridSettings::default(),
@@ -399,7 +403,7 @@ impl App {
     fn run_command(&mut self, cmd: Command, screen: Option<ScreenRect>) {
         match cmd {
             Command::SetTool(tool) => {
-                self.tools.set_active(tool);
+                self.select_tool(tool);
                 self.status.set(format!("Tool: {}", tool.label()));
             }
             Command::ToggleLayer(i) => {
@@ -603,7 +607,29 @@ impl App {
             for tool in Tool::all() {
                 let selected = self.tools.active() == tool;
                 if ui.selectable_label(selected, tool.label()).clicked() {
-                    self.tools.set_active(tool);
+                    self.select_tool(tool);
+                }
+            }
+            // Path tool options: width and end cap, shown only while it is active.
+            if self.tools.active() == Tool::DrawPath {
+                ui.separator();
+                ui.label("Width:");
+                let mut w = self.draw.path.width();
+                if ui
+                    .add(egui::DragValue::new(&mut w).speed(5.0).range(1..=100_000))
+                    .changed()
+                {
+                    self.draw.path.set_width(w);
+                }
+                let cap = self.draw.path.endcap();
+                for (variant, name) in [
+                    (Endcap::Flat, "Flat"),
+                    (Endcap::Square, "Square"),
+                    (Endcap::Round, "Round"),
+                ] {
+                    if ui.selectable_label(cap == variant, name).clicked() {
+                        self.draw.path.set_endcap(variant);
+                    }
                 }
             }
             ui.separator();
@@ -1512,6 +1538,7 @@ impl App {
 
         self.draw_rulers(&painter, &screen);
         self.draw_measure(&painter, &screen);
+        self.draw_draw_overlay(&painter, &screen, &response, ui.ctx());
         if self.labels_visible {
             self.draw_labels(&painter, &screen);
         }
@@ -1668,6 +1695,299 @@ impl App {
                     }
                 }
             }
+            Tool::DrawRect => self.handle_draw_rect_input(ctx, response, screen),
+            Tool::DrawPolygon => self.handle_draw_polygon_input(ctx, response, screen),
+            Tool::DrawPath => self.handle_draw_path_input(ctx, response, screen),
+            Tool::EditVertex => self.handle_edit_vertex_input(ctx, response, screen),
+        }
+    }
+
+    /// Switches to `tool`, resetting any half-drawn shape or vertex grab when the new
+    /// tool is not a drawing tool (or when leaving one), so in-progress geometry never
+    /// leaks between tools. The path width and end cap survive (see
+    /// [`crate::draw::DrawState::reset`]).
+    fn select_tool(&mut self, tool: Tool) {
+        if self.tools.active() != tool && (self.tools.active().is_draw() || !tool.is_draw()) {
+            self.draw.reset();
+        }
+        self.tools.set_active(tool);
+    }
+
+    /// Rectangle tool: drag to rubber-band a rectangle, with shift (square) and
+    /// alt/ctrl (from-center) constraints; commit on release as an undo-integrated
+    /// [`Edit::AddShape`](reticle_model::Edit).
+    fn handle_draw_rect_input(
+        &mut self,
+        ctx: &egui::Context,
+        response: &egui::Response,
+        screen: &ScreenRect,
+    ) {
+        if !response.drag_stopped() {
+            return;
+        }
+        let (Some(origin), Some(current)) = (Self::drag_origin(response), response.hover_pos())
+        else {
+            return;
+        };
+        let anchor = self
+            .grid
+            .snap(self.camera.screen_to_world(screen, origin.x, origin.y));
+        let cursor = self
+            .grid
+            .snap(self.camera.screen_to_world(screen, current.x, current.y));
+        let mods = Self::rect_mods(ctx);
+        let rect = crate::draw::rect_from_drag(anchor, cursor, mods);
+        if rect.is_empty() {
+            return;
+        }
+        self.commit_shape(ShapeKind::Rect(rect), "Drew rectangle");
+    }
+
+    /// Polygon tool: each click places a vertex; a double-click or Enter closes the
+    /// ring into a polygon; Escape cancels the in-progress ring.
+    fn handle_draw_polygon_input(
+        &mut self,
+        ctx: &egui::Context,
+        response: &egui::Response,
+        screen: &ScreenRect,
+    ) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.draw.poly.clear();
+            self.status.set("Polygon cancelled");
+            return;
+        }
+        let finish = response.double_clicked() || ctx.input(|i| i.key_pressed(egui::Key::Enter));
+        if (response.clicked() || response.double_clicked())
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            let world = self
+                .grid
+                .snap(self.camera.screen_to_world(screen, pos.x, pos.y));
+            self.draw.poly.push(world);
+        }
+        if finish {
+            if let Some(poly) = std::mem::take(&mut self.draw.poly).finish() {
+                let n = poly.len();
+                self.commit_shape(ShapeKind::Polygon(poly), &format!("Drew polygon ({n} pts)"));
+            } else {
+                self.draw.poly.clear();
+                self.status.set("Polygon needs at least 3 vertices");
+            }
+        } else if !self.draw.poly.is_empty() {
+            self.status.set(format!(
+                "Polygon: {} vertices (double-click to close)",
+                self.draw.poly.len()
+            ));
+        }
+    }
+
+    /// Path tool: each click places a point; a double-click or Enter finishes the
+    /// wire with the toolbar's width and end cap; Escape cancels it.
+    fn handle_draw_path_input(
+        &mut self,
+        ctx: &egui::Context,
+        response: &egui::Response,
+        screen: &ScreenRect,
+    ) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.draw.path.clear();
+            self.status.set("Path cancelled");
+            return;
+        }
+        let finish = response.double_clicked() || ctx.input(|i| i.key_pressed(egui::Key::Enter));
+        if (response.clicked() || response.double_clicked())
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            let world = self
+                .grid
+                .snap(self.camera.screen_to_world(screen, pos.x, pos.y));
+            self.draw.path.push(world);
+        }
+        if finish {
+            // Keep the width and end cap by rebuilding a fresh builder from the taken
+            // one's settings after finishing.
+            let width = self.draw.path.width();
+            let endcap = self.draw.path.endcap();
+            let builder = std::mem::take(&mut self.draw.path);
+            if let Some(path) = builder.finish() {
+                let n = path.points().len();
+                self.commit_shape(ShapeKind::Path(path), &format!("Drew path ({n} pts)"));
+            } else {
+                self.status.set("Path needs at least 2 points");
+            }
+            self.draw.path.set_width(width);
+            self.draw.path.set_endcap(endcap);
+        } else if !self.draw.path.is_empty() {
+            self.status.set(format!(
+                "Path: {} points (double-click to finish)",
+                self.draw.path.len()
+            ));
+        }
+    }
+
+    /// Vertex-edit tool over the selected shape: drag a vertex to move it, alt-click a
+    /// vertex to delete it, or click on an edge to insert one. Only the top cell's own
+    /// shapes (scene indices below its direct-shape count) are editable.
+    fn handle_edit_vertex_input(
+        &mut self,
+        ctx: &egui::Context,
+        response: &egui::Response,
+        screen: &ScreenRect,
+    ) {
+        let Some(shape_idx) = self.editable_selection() else {
+            if response.clicked() {
+                self.status
+                    .set("Select a shape you drew to edit its vertices");
+            }
+            return;
+        };
+        let radius = self.vertex_pick_radius();
+        let (verts, closed) = {
+            let kind = &self.scene.shapes()[shape_idx].kind;
+            crate::draw::editable_vertices(kind)
+        };
+
+        // Begin a drag: grab the nearest vertex under the press.
+        if response.drag_started()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            let world = self.camera.screen_to_world(screen, pos.x, pos.y);
+            if let Some(v) = crate::draw::nearest_vertex(&verts, world, radius) {
+                self.draw.grab = Some(crate::draw::VertexGrab {
+                    shape: shape_idx,
+                    vertex: v,
+                });
+            }
+        }
+
+        // Commit a vertex move on release.
+        if response.drag_stopped() {
+            if let (Some(grab), Some(pos)) = (self.draw.grab.take(), response.hover_pos()) {
+                let to = self
+                    .grid
+                    .snap(self.camera.screen_to_world(screen, pos.x, pos.y));
+                let moved = crate::draw::move_vertex(&verts, grab.vertex, to);
+                self.replace_shape_vertices(shape_idx, moved, "Moved vertex");
+            }
+            return;
+        }
+
+        // A plain click either deletes (with a modifier) or inserts on an edge.
+        if response.clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            let world = self.camera.screen_to_world(screen, pos.x, pos.y);
+            let delete_mod =
+                ctx.input(|i| i.modifiers.alt || i.modifiers.command || i.modifiers.ctrl);
+            if delete_mod {
+                if let Some(v) = crate::draw::nearest_vertex(&verts, world, radius) {
+                    let floor = if closed { 3 } else { 2 };
+                    let (out, ok) = crate::draw::delete_vertex(&verts, v, floor);
+                    if ok {
+                        self.replace_shape_vertices(shape_idx, out, "Deleted vertex");
+                    } else {
+                        self.status
+                            .set("Cannot delete: shape is at its minimum vertices");
+                    }
+                }
+            } else if let Some(ins) =
+                crate::draw::nearest_segment_insertion(&verts, world, radius, closed)
+            {
+                let out = crate::draw::insert_vertex_on_segment(&verts, ins.index, ins.point);
+                self.replace_shape_vertices(shape_idx, out, "Inserted vertex");
+            }
+        }
+    }
+
+    /// The single selected shape's scene index if it is one of the top cell's own
+    /// directly-editable shapes.
+    ///
+    /// The flattened scene lists the top cell's own shapes first (before any
+    /// instances), so a scene index below the cell's direct-shape count maps exactly
+    /// to `cell.shapes[index]`, which the vertex edit rewrites in place. A selection
+    /// that is not exactly one such shape returns `None`.
+    fn editable_selection(&self) -> Option<usize> {
+        if self.selection.len() != 1 {
+            return None;
+        }
+        let idx = self.selection.iter().next()?;
+        let direct = self
+            .history
+            .document()
+            .cell(&self.top_cell)
+            .map_or(0, |c| c.shapes.len());
+        (idx < direct).then_some(idx)
+    }
+
+    /// The vertex hit radius in DBU: a few screen pixels converted through the camera
+    /// so picking feels the same at any zoom.
+    fn vertex_pick_radius(&self) -> i64 {
+        let ppd = self.camera.pixels_per_dbu().max(f64::MIN_POSITIVE);
+        ((8.0 / ppd).round() as i64).max(1)
+    }
+
+    /// Reads the rectangle-drag modifiers (shift squares, alt/ctrl from-center) from
+    /// the current egui input state.
+    fn rect_mods(ctx: &egui::Context) -> crate::draw::RectMods {
+        let m = ctx.input(|i| i.modifiers);
+        crate::draw::RectMods::new(m.shift, m.alt, m.command || m.ctrl)
+    }
+
+    /// Commits a freshly drawn shape on the current layer as an undo-integrated edit.
+    ///
+    /// The layer is the first row in the layer table (falling back to layer 1/0), the
+    /// same default the demo "add rectangle" action uses. On success the scene is
+    /// rebuilt so the new shape is immediately pickable.
+    fn commit_shape(&mut self, kind: ShapeKind, status: &str) {
+        let layer = self
+            .layer_state
+            .rows()
+            .first()
+            .map_or(LayerId::new(1, 0), |r| r.id);
+        let shape = DrawShape::new(layer, kind);
+        match self.history.apply(reticle_model::Edit::AddShape {
+            cell: self.top_cell.clone(),
+            shape,
+        }) {
+            Ok(()) => {
+                self.rebuild_scene();
+                self.status.set(status.to_owned());
+            }
+            Err(e) => self.status.set(format!("Draw failed: {e}")),
+        }
+    }
+
+    /// Replaces the top cell's shape at scene index `shape_idx` with a copy whose
+    /// vertex ring is `vertices`, as a single undoable remove-then-add.
+    ///
+    /// The shape family is preserved through [`crate::draw::rebuild_kind`] (a
+    /// rectangle promotes to a polygon once a corner leaves axis-alignment; a path
+    /// keeps its width and cap). A ring that would be degenerate is declined. Because
+    /// the scene lists direct shapes first, `shape_idx` is also the cell shape index
+    /// the [`Edit::RemoveShape`](reticle_model::Edit) targets.
+    fn replace_shape_vertices(&mut self, shape_idx: usize, vertices: Vec<Point>, status: &str) {
+        let original = self.scene.shapes()[shape_idx].clone();
+        let Some(kind) = crate::draw::rebuild_kind(&original.kind, vertices) else {
+            self.status.set("Edit declined: too few vertices");
+            return;
+        };
+        let replacement = DrawShape::new(original.layer, kind);
+        if let Err(e) = self.history.apply(reticle_model::Edit::RemoveShape {
+            cell: self.top_cell.clone(),
+            index: shape_idx,
+        }) {
+            self.status.set(format!("Edit failed: {e}"));
+            return;
+        }
+        match self.history.apply(reticle_model::Edit::AddShape {
+            cell: self.top_cell.clone(),
+            shape: replacement,
+        }) {
+            Ok(()) => {
+                self.rebuild_scene();
+                self.status.set(status.to_owned());
+            }
+            Err(e) => self.status.set(format!("Edit failed: {e}")),
         }
     }
 
@@ -2068,6 +2388,101 @@ impl App {
             // First point placed, awaiting the second.
             let a = self.world_pos_to_screen(screen, start);
             painter.circle_filled(a, 3.0, color);
+        }
+    }
+
+    /// Draws the live preview for the active drawing or vertex-edit tool.
+    ///
+    /// The rectangle tool shows the rubber-band box under the current drag (with its
+    /// modifier constraints applied); the polygon and path tools show the placed
+    /// vertices, the edges between them, and a dashed segment out to the cursor; the
+    /// vertex-edit tool ticks every vertex of the editable selection so the user sees
+    /// what can be grabbed. Everything is derived from state each frame, so nothing is
+    /// cached.
+    fn draw_draw_overlay(
+        &self,
+        painter: &egui::Painter,
+        screen: &ScreenRect,
+        response: &egui::Response,
+        ctx: &egui::Context,
+    ) {
+        let accent = Color32::from_rgb(120, 200, 255);
+        let stroke = Stroke::new(1.5, accent);
+        match self.tools.active() {
+            Tool::DrawRect => {
+                if response.dragged()
+                    && let (Some(origin), Some(current)) =
+                        (Self::drag_origin(response), response.hover_pos())
+                {
+                    let anchor = self
+                        .grid
+                        .snap(self.camera.screen_to_world(screen, origin.x, origin.y));
+                    let cursor = self
+                        .grid
+                        .snap(self.camera.screen_to_world(screen, current.x, current.y));
+                    let rect = crate::draw::rect_from_drag(anchor, cursor, Self::rect_mods(ctx));
+                    if !rect.is_empty() {
+                        let e = self.world_rect_to_screen(screen, rect);
+                        painter.rect_stroke(e, 0.0, stroke, StrokeKind::Middle);
+                    }
+                }
+            }
+            Tool::DrawPolygon => {
+                self.draw_vertex_chain(painter, screen, self.draw.poly.vertices(), true, accent);
+            }
+            Tool::DrawPath => {
+                self.draw_vertex_chain(painter, screen, self.draw.path.points(), false, accent);
+            }
+            Tool::EditVertex => {
+                if let Some(idx) = self.editable_selection() {
+                    let (verts, _) = crate::draw::editable_vertices(&self.scene.shapes()[idx].kind);
+                    for v in &verts {
+                        let s = self.world_pos_to_screen(screen, *v);
+                        painter.circle_filled(s, 3.5, accent);
+                        painter.circle_stroke(s, 3.5, Stroke::new(1.0, Color32::BLACK));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Draws an in-progress vertex chain (polygon or path) plus a live segment to the
+    /// cursor, used by the polygon and path preview.
+    fn draw_vertex_chain(
+        &self,
+        painter: &egui::Painter,
+        screen: &ScreenRect,
+        verts: &[Point],
+        close_hint: bool,
+        color: Color32,
+    ) {
+        if verts.is_empty() {
+            return;
+        }
+        let stroke = Stroke::new(1.5, color);
+        let pts: Vec<Pos2> = verts
+            .iter()
+            .map(|v| self.world_pos_to_screen(screen, *v))
+            .collect();
+        for pair in pts.windows(2) {
+            painter.line_segment([pair[0], pair[1]], stroke);
+        }
+        for pt in &pts {
+            painter.circle_filled(*pt, 3.0, color);
+        }
+        // A faint segment from the last placed vertex to the live cursor.
+        if let Some(pos) = self.cursor_world {
+            let cursor = self.world_pos_to_screen(screen, pos);
+            let last = *pts.last().expect("verts is non-empty");
+            painter.line_segment([last, cursor], Stroke::new(1.0, color.gamma_multiply(0.6)));
+            // For a polygon, also hint the closing edge back to the first vertex.
+            if close_hint && pts.len() >= 2 {
+                painter.line_segment(
+                    [cursor, pts[0]],
+                    Stroke::new(1.0, color.gamma_multiply(0.35)),
+                );
+            }
         }
     }
 
