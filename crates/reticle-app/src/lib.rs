@@ -25,6 +25,8 @@
 //! * [`drc_panel`], running the DRC engine and formatting its violations.
 //! * `agent_panel` (native only), the agent panel's run state machine and
 //!   narration feed over the `reticle-agent-api` transcript types.
+//! * `replay` (native only), the replay theater: transcript JSONL loading and
+//!   the step/play/pause/speed playback machine over a live session.
 //! * [`netlight`], cached connectivity extraction for net highlighting.
 //! * [`inspector`], the read-only properties summary of the selection.
 //! * [`fps`], the rolling frame-time meter behind the status-bar fps readout.
@@ -60,6 +62,8 @@ pub mod layers;
 pub mod measure;
 pub mod minimap;
 pub mod netlight;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod replay;
 pub mod selection;
 pub mod session;
 pub mod tool;
