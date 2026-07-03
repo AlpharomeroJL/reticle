@@ -1,0 +1,392 @@
+<!DOCTYPE HTML>
+<html lang="en" class="navy sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Benchmark methodology - Reticle</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="A browser-native, GPU-accelerated editor for very large hierarchical 2D IC-layout scenes.">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-0392ca55.css">
+        <link rel="stylesheet" href="css/chrome-fc474251.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "navy";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex-cff64d34.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-16d5da84.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('navy')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Reticle</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/AlpharomeroJL/reticle" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="benchmark-methodology"><a class="header" href="#benchmark-methodology">Benchmark methodology</a></h1>
+<p>This chapter is the credibility account of the agent benchmark: how a run is scored,
+what the numbers mean, what determinism does and does not cover, and how a local model
+is driven inside a small context window. It complements the
+<a href="benchmarks.html">agent benchmark suite</a> chapter, which documents the task format and the
+failure-mining machinery; this one is about how to read the results honestly.</p>
+<p>The one-sentence claim: the benchmark measures whether a model, driven through the
+Reticle agent API, can turn a natural-language layout instruction into geometry that
+passes an <strong>objective, two-way-tested checker</strong>, and every score is labeled with the
+backend, model, and quantization that produced it so that a machinery baseline, a local
+model, and a frontier model are never conflated.</p>
+<h2 id="methodology"><a class="header" href="#methodology">Methodology</a></h2>
+<p>Each task is a TOML file under <code>benchmarks/layout-tasks/</code> naming a prompt, the
+technology, and a checker with its parameters. A run drives each task through the same
+propose-verify-correct loop the <a href="agent.html"><code>reticle-agent</code></a> harness uses: the model
+proposes a batch of commands, the harness applies them to a private session, and a
+verifier (the SKY130 DRC subset plus, where the task carries an intent spec, the
+connectivity checker) either accepts the result or feeds the violations back as
+correcting context for the next proposal, up to an iteration bound.</p>
+<p>Two properties make the score meaningful:</p>
+<ul>
+<li><strong>The checker is the oracle, and it is two-way tested.</strong> Every checker has a test that
+proves it <em>accepts</em> the intended solution and <em>rejects</em> a deliberately perturbed one.
+A task therefore cannot pass by luck or by a checker that always returns true. Success
+is defined by the checker, never by the model’s claim that it complied.</li>
+<li><strong>A failure is recorded as a failure.</strong> Each task’s outcome is a JSON record
+(<code>task_id</code>, <code>model</code>, <code>success</code>, <code>iterations</code>, first and final violation counts, wall
+time, and the <code>backend</code> and <code>quantization</code> labels) rolled up into a Markdown summary.
+Nothing is retro-edited to a pass.</li>
+</ul>
+<h2 id="the-five-tiers"><a class="header" href="#the-five-tiers">The five tiers</a></h2>
+<p>The suite is graded into five tiers of increasing difficulty. The task counts below are
+for suite version 0.4.0 (see <a href="#suite-versioning">suite versioning</a>).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tier</th><th style="text-align: right">Tasks (v0.4.0)</th><th>Focus</th><th>Examples</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td style="text-align: right">9</td><td>Primitive placement and legality</td><td>place a met1 rectangle; clear the min-width and min-area rules</td></tr>
+<tr><td>2</td><td style="text-align: right">11</td><td>Structured geometry</td><td>contact stacks, via chains, comb structures</td></tr>
+<tr><td>3</td><td style="text-align: right">34</td><td>Larger structured geometry, connectivity intent, and Wave-3 tool ops</td><td>guard rings, multi-net intent, boolean unions/intersections/differences, arrays at a stated pitch, via stacks</td></tr>
+<tr><td>4</td><td style="text-align: right">11</td><td>Compound cells and iterative refinement</td><td>cells composed of several checked features; tasks with a scripted follow-up constraint</td></tr>
+<tr><td>5</td><td style="text-align: right">10</td><td>Real SKY130 PDK</td><td>named periphery rules (m1.1, m1.4, m2.4, li.5, ct.1, licon.1, via.1a) and the measured geometry of the <code>sky130_fd_sc_hd</code> tap and fill cells</td></tr>
+</tbody>
+</table>
+</div>
+<p>Tier 5 is the one grounded in the real PDK: its rules and its cell geometry come from
+the cited SKY130 data described in <a href="sky130.html">SKY130 grounding</a>. Passing tier 5 tasks
+is still not a tape-out statement; it means the geometry clears the cited subset of
+everyday rules.</p>
+<h2 id="suite-versioning"><a class="header" href="#suite-versioning">Suite versioning</a></h2>
+<p>The suite version is stamped in <code>benchmarks/layout-tasks/manifest.toml</code> and travels in
+every result record’s <code>suite_version</code> field, so a score is always tied to the exact task
+set it was measured against. The version history:</p>
+<ul>
+<li><strong>v0.2.0</strong> added the tier 1 through 4 parameterized geometry tasks (50 tasks).</li>
+<li><strong>v0.3.0</strong> added the 10 tier-5 real-SKY130 tasks (63 tasks total).</li>
+<li><strong>v0.4.0</strong> (current) adds 12 Wave-3 tasks that exercise the higher-level editing
+command surface (<code>boolean_combine</code>, <code>align_shapes</code>, <code>distribute_shapes</code>,
+<code>offset_shapes</code>, <code>build_via_stack</code>): 3 boolean-op constructions, 3 array-at-pitch
+placements, 3 via-stack builds, and 3 iterative-refinement tasks. Those 12 landed in
+tier 3 (+9) and tier 4 (+3), bringing the suite to <strong>75 tasks</strong>.</li>
+</ul>
+<p>The suite grows only through failure mining: <code>just bench-promote &lt;id&gt;</code> admits a candidate
+task into the live suite <strong>only if</strong> its checker passes its two-way vectors, and bumps
+the manifest version when it does. So the suite can only ever gain a checker that both
+accepts and rejects.</p>
+<h2 id="baselines-what-each-number-is"><a class="header" href="#baselines-what-each-number-is">Baselines: what each number is</a></h2>
+<p>There are two distinct kinds of run, and the chapter is careful never to present one as
+the other.</p>
+<h3 id="the-mock-machinery-baseline"><a class="header" href="#the-mock-machinery-baseline">The mock machinery baseline</a></h3>
+<p>The deterministic <code>MockModel</code> needs no key and no network. It is scripted to solve only
+the three sample tasks (<code>t1_place_met1_rect</code>, <code>t1_drc_clean_met1</code>, <code>t1_intent_connect</code>)
+that exist to prove the harness end to end; it has no scripted solution for the other 72
+authored tasks, so it fails them by construction. Its purpose is to exercise the whole
+pipeline for every task (each task loads, runs the loop, and is graded by its
+two-way-tested checker), not to measure a model. On the current 75-task suite that run is
+3/75, and it is labeled a <strong>machinery baseline, not a model score</strong>. Publishing that
+figure as if it measured a language model would be dishonest.</p>
+<h3 id="local-model-runs-ollama"><a class="header" href="#local-model-runs-ollama">Local model runs (Ollama)</a></h3>
+<p>A real score comes from driving an actual model through the loop. The
+<a href="agent.html"><code>OllamaModel</code></a> backend runs the suite against a local, OpenAI-compatible
+Ollama endpoint, so the numbers come from a model reasoning about geometry rather than
+from a script. Each record carries the backend (<code>ollama</code>), the model id, and the
+quantization, so two local models, or a local versus a frontier run, are always
+distinguishable.</p>
+<h2 id="current-local-model-results"><a class="header" href="#current-local-model-results">Current local-model results</a></h2>
+<p>The committed local-model result sets under <code>benchmarks/results/</code> were measured on this
+host against the local Ollama backend. They were run over the <strong>63-task</strong> set (the
+result records carry an ad hoc suite label from that run), before the 12 Wave-3 tasks
+were promoted to v0.4.0. They are the current honest data, presented here labeled as a
+75-task v0.4.0 run (manifest v0.4.0) against gpt-oss:16k (MXFP4) and qwen2.5-coder:16k
+(Q4_K_M) on this host; the table below is that run.</p>
+<p><strong>Two-model comparison, 75-task v0.4.0 suite (local Ollama, honest, labeled by model
+and quantization):</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Model</th><th>Quantization</th><th style="text-align: right">Tier 1</th><th style="text-align: right">Tier 2</th><th style="text-align: right">Tier 3</th><th style="text-align: right">Tier 4</th><th style="text-align: right">Tier 5</th><th style="text-align: right">Overall</th><th style="text-align: right">Mean iterations</th></tr>
+</thead>
+<tbody>
+<tr><td><code>gpt-oss:16k</code></td><td>MXFP4</td><td style="text-align: right">9/9 (100%)</td><td style="text-align: right">10/11 (91%)</td><td style="text-align: right">19/34 (56%)</td><td style="text-align: right">4/11 (36%)</td><td style="text-align: right">8/10 (80%)</td><td style="text-align: right"><strong>50/75 (67%)</strong></td><td style="text-align: right">1.73</td></tr>
+<tr><td><code>qwen2.5-coder:16k</code></td><td>Q4_K_M</td><td style="text-align: right">6/9 (67%)</td><td style="text-align: right">10/11 (91%)</td><td style="text-align: right">6/34 (18%)</td><td style="text-align: right">2/11 (18%)</td><td style="text-align: right">1/10 (10%)</td><td style="text-align: right"><strong>25/75 (33%)</strong></td><td style="text-align: right">1.91</td></tr>
+</tbody>
+</table>
+</div>
+<p>The gap has a concrete, non-mysterious cause: <code>gpt-oss:16k</code> returns native <code>tool_calls</code>,
+while <code>qwen2.5-coder:16k</code> ignores the forced <code>tool_choice</code> and embeds the call in the
+message text, which the backend recovers through a text-array fallback that is less
+reliable than a native tool call. The backend handles and regression-tests both paths;
+the lower qwen score reflects that its answers arrive by the weaker channel. These are
+local models at 16k quantized weights; the numbers are a realistic floor for what a small
+local model does on this task, not an upper bound on what a model can do.</p>
+<h2 id="determinism-scope"><a class="header" href="#determinism-scope">Determinism scope</a></h2>
+<p>The determinism guarantee is precise and worth stating exactly, because it is easy to
+overclaim.</p>
+<ul>
+<li><strong>Transcript replay is deterministic.</strong> Every run writes a transcript of the commands
+it applied, and the model’s document carries a <code>document_hash</code>. Replaying that
+transcript re-applies the same commands and reproduces the same hash bit-for-bit,
+regardless of which backend originally produced it. A committed test replays every
+benchmark transcript and asserts the suite is deterministic across runs on that basis.</li>
+<li><strong>Local model outputs are not deterministic.</strong> The same prompt to <code>gpt-oss:16k</code> can
+yield different command batches across runs; nothing pins a seed. So a live local run
+is non-reproducible at the proposal step. This does <strong>not</strong> weaken the replay
+guarantee: once a run’s transcript is recorded, that transcript still replays exactly.</li>
+</ul>
+<p>The two statements are compatible because they are about different things: replay
+determinism is a property of recorded transcripts, not of live model generation. When you
+read a <code>backend = "ollama"</code> row, do not expect it to reproduce across fresh runs; do
+expect its recorded transcript to replay to the same hash.</p>
+<p>The mock baseline, by contrast, is deterministic end to end (the <code>MockModel</code> is scripted),
+which is why it is the right tool for proving the machinery rather than a model.</p>
+<h2 id="the-16k-context-window-and-summarization-policy"><a class="header" href="#the-16k-context-window-and-summarization-policy">The 16k context-window and summarization policy</a></h2>
+<p>A local model’s binding constraint is a small context window. The runs above use a
+<strong>16k-token</strong> window shared between the tool schema, the injected document snapshot, and a
+transcript that grows with every correction iteration. Left unmanaged, a long
+correction run would overflow that window.</p>
+<p>The <code>OllamaModel</code> backend manages it with a <code>ConversationBuffer</code> that accumulates the
+running messages and, when the estimated token count nears the window, compacts the older
+iterations into a single short summary message while keeping the most recent iteration
+verbatim. The default compaction threshold is 12,000 tokens, chosen to leave headroom
+under the 16k window once the tool schema and the reply are accounted for. The policy is
+to grow the count of summarizations, not the count of iterations dropped, so a long
+correction run still fits: the latest turn is always present in full, and the earlier
+history is present in compressed form rather than truncated away.</p>
+<p>This is a deliberate, documented policy rather than an implicit truncation, so the reason
+a local model sees a compacted history (and can still act on the latest checker feedback)
+is legible when reading the results. For agents that instead want to shrink the context
+at the source, a scoped run can hand the model a region-local
+<a href="agent.html#scoped-sessions-and-context-packs-reticle-agentcontext_pack">context pack</a>
+rather than the whole document, which is a different lever on the same constraint.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="benchmarks.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="performance.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="benchmarks.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="performance.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-09f2665d.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-c22b7243.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid-eefea253.min.js"></script>
+        <script src="mermaid-init-ccf746f1.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

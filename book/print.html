@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-0df54dcb.js";
+            window.path_to_searchindex_js = "searchindex-cff64d34.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-0f76cbb2.js"></script>
+        <script src="toc-16d5da84.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -204,6 +204,128 @@ exact-integer geometry core up through rendering, checking, routing, and
 collaboration. The <strong>Reference</strong> chapters cover how performance is measured, how to
 use the application, and how to contribute. Every subsystem is a separate crate;
 see <a href="#architecture">Architecture</a> for the crate graph.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="positioning"><a class="header" href="#positioning">Positioning</a></h1>
+<p>This chapter is an honest map of where Reticle sits among layout tools. It states
+what Reticle is, what the established tools do that Reticle does not, and the full
+list of things Reticle deliberately is not. The goal is that a reader from the EDA
+world knows within a page whether this project is relevant to them and can trust
+that nothing here is oversold.</p>
+<h2 id="the-field"><a class="header" href="#the-field">The field</a></h2>
+<p>Physical IC layout has a mature, mostly open or commercial tooling landscape.
+Reticle overlaps a narrow slice of it.</p>
+<ul>
+<li><strong>KLayout</strong> is the reference open-source layout viewer and editor. It reads and
+writes GDSII and OASIS at production scale, has a full DRC and LVS scripting
+engine (Ruby and Python), a rich GUI, and a large plugin ecosystem. It is the tool
+most engineers reach for to open, inspect, and script mask data. Reticle does not
+approach KLayout’s format coverage, DRC-language maturity, or feature breadth.</li>
+<li><strong>Magic</strong> is the classic open-source layout editor from Berkeley, still widely
+used, with interactive layout, a built-in continuous DRC, and its own extraction
+to a SPICE netlist. Magic’s device-level extraction (recognizing transistors,
+resistors, and capacitors from geometry and emitting a netlist a simulator can
+read) is a capability Reticle does not have.</li>
+<li><strong>Commercial place-and-route and signoff flows</strong> (the tools from Cadence,
+Synopsys, and Siemens EDA) cover the parts of the flow that turn a netlist into a
+manufacturable, verified mask set: synthesis, floorplanning, placement, clock-tree
+synthesis, detailed routing, parasitic extraction, static timing analysis,
+signoff DRC and LVS against a foundry-qualified rule deck, and tape-out. These are
+the tools a design must pass through to be fabricated. Reticle does none of this
+and is not on that path.</li>
+<li><strong>The open SKY130 flow</strong> (OpenLane / OpenROAD on the SkyWater SKY130 PDK) is the
+open reference for taking RTL to a GDSII that a shuttle can fabricate. Reticle uses
+the same SKY130 PDK data as a source of real, cited numbers (layers, a stack, and a
+DRC rule subset), but it is not part of the OpenLane flow and produces nothing that
+flow consumes.</li>
+</ul>
+<h2 id="where-reticle-sits"><a class="header" href="#where-reticle-sits">Where Reticle sits</a></h2>
+<p>Reticle is a browser-native, GPU-accelerated <strong>viewer and editor</strong> for very large
+hierarchical layout scenes, with a checker layer and an agent layer on top. Its
+distinct emphasis is threefold:</p>
+<ol>
+<li><strong>Interactive rendering of very large scenes in a browser.</strong> Reticle renders
+hierarchical IC geometry through a retained GPU scene on <code>wgpu</code> (WebGPU natively
+and in the browser, with a WebGL2 fallback), never flattening the hierarchy for
+browsing, so an arrayed cell with billions of effective leaf shapes costs only what
+is on screen. The measured retained path holds interactive frame rates on scenes of
+ten million leaf shapes (see <a href="#performance-methodology">Performance methodology</a> and
+<code>PERF.md</code>). Running this in a plain browser tab, with no install, is the part of the
+problem Reticle pushes hardest on.</li>
+<li><strong>Objective checkers as a first-class engine.</strong> The design-rule checker, router,
+and connectivity extractor are each pinned to an independent reference oracle by
+property tests, so their correctness is demonstrated rather than asserted. They are
+built to be driven programmatically, not only from a GUI.</li>
+<li><strong>An agent surface graded by those checkers.</strong> Reticle exposes its whole editing
+engine as a serializable command API and drives a model through a
+propose-verify-correct loop whose success is decided by the DRC subset and the
+connectivity checker, not by the model’s own claim. A benchmark suite scores that
+loop; an MCP server offers the surface to any model host. This agent-plus-objective-
+checker angle is where Reticle does something the established tools do not package.</li>
+</ol>
+<p>So the honest one-line placement: Reticle is a fast, browser-native layout viewer and
+editor with a verified checker core and a checker-graded agent layer. It is a
+portfolio-grade engineering project and a research vehicle for machine-driven layout,
+not a production EDA tool.</p>
+<h2 id="what-the-established-tools-do-that-reticle-does-not"><a class="header" href="#what-the-established-tools-do-that-reticle-does-not">What the established tools do that Reticle does not</a></h2>
+<p>These are real capabilities of KLayout, Magic, or the commercial and open signoff
+flows that Reticle does not have. This list is deliberately blunt.</p>
+<ul>
+<li><strong>Full-fidelity format coverage.</strong> Reticle reads and writes GDSII with full
+hierarchy (via <code>gds21</code>), but its OASIS support is a <strong>subset</strong>: rectangles,
+polygons, paths, instances, and arrays round-trip, and anything outside that subset
+is rejected with an explicit <code>Unsupported</code> error rather than silently dropped.
+KLayout’s format coverage is far broader.</li>
+<li><strong>A production DRC rule language.</strong> Reticle’s DRC is a fixed set of eight rule
+kinds (width, spacing, enclosure, extension, notch, area, density, angle) evaluated
+over indexed geometry. It is not a general rule-scripting language, and its SKY130
+deck is a small cited subset (see <a href="#sky130-grounding">SKY130 grounding</a>). KLayout’s DRC and
+Magic’s continuous DRC are far more complete.</li>
+<li><strong>Layout-versus-schematic (LVS).</strong> Reticle has connectivity extraction and can
+compare an extracted netlist against an expected one (opens and shorts), but it does
+not do LVS in the device-recognition sense: it does not identify transistors,
+resistors, or capacitors from geometry, and it does not match a layout against a
+schematic netlist.</li>
+</ul>
+<p>The remaining, larger set of things Reticle does not do is the not-list below.</p>
+<h2 id="the-full-not-list"><a class="header" href="#the-full-not-list">The full not-list</a></h2>
+<p>Reticle deliberately does <strong>not</strong> include, and does not claim, any of the following.
+Each is stated so no reader mistakes the project’s scope.</p>
+<ul>
+<li><strong>No logic or physical synthesis.</strong> Reticle does not turn RTL, a gate netlist, or a
+behavioral description into geometry. There is no synthesis, no technology mapping,
+no floorplanning, no placement of a synthesized netlist. The router routes explicit
+nets on a grid; it is not a place-and-route flow.</li>
+<li><strong>No timing.</strong> There is no static timing analysis, no parasitic (RC) extraction for
+timing, no delay calculation, and no timing-driven optimization anywhere in the
+project. Reticle knows geometry and connectivity, not timing.</li>
+<li><strong>No device-level LVS.</strong> Reticle does not recognize devices (transistors,
+resistors, capacitors, diodes) from layout geometry and does not match a layout
+against a schematic. Its extraction is geometric net connectivity (union-find over
+touching shapes and cross-layer vias) with an opens-and-shorts compare against an
+expected netlist. That is net-level connectivity checking, not LVS.</li>
+<li><strong>No tape-out signoff.</strong> Passing Reticle’s checks does not mean a layout is
+manufacturable. The SKY130 DRC subset is a fast first filter over everyday geometry
+mistakes against cited values; it is explicitly <strong>not tape-out clean</strong> and omits
+antenna, density, latch-up, most implant and well rules, and the exact-size and
+differential contact and via rules. There is no signoff DRC, no signoff LVS, no fill
+insertion for manufacturing, no antenna fixing, and no foundry-qualified rule deck.
+See <a href="#sky130-grounding">SKY130 grounding</a> for exactly which rules are and are not checked.</li>
+</ul>
+<p>Beyond those four, Reticle also does not provide: analog or custom device generators
+(PCells beyond the built-in array and via-stack helpers), a schematic editor,
+simulation of any kind (no SPICE, no field solver), mask data preparation (OPC,
+fracturing), a parametric-cell scripting language matching KLayout’s PCell system, or
+any manufacturing handoff.</p>
+<h2 id="reading-this-honestly"><a class="header" href="#reading-this-honestly">Reading this honestly</a></h2>
+<p>Everything above is checkable. The capabilities Reticle does have are audited,
+per-feature, with a command you can run yourself, in
+<a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/STATUS.md">the project status report</a>.
+The subsystems that carry the “verified” weight (geometry booleans, spatial index,
+DRC, routing, extraction, and CRDT convergence) are each pinned to an independent
+reference oracle by property tests, which is the strongest evidence in the project
+that they compute what they claim. When this chapter says Reticle does something, that
+audit backs it; when it says Reticle does not, that absence is deliberate and stated so
+the project is not mistaken for a production flow it is not.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="architecture"><a class="header" href="#architecture">Architecture</a></h1>
 <p>Reticle is a Cargo workspace of focused crates. The core geometry, indexing, and
@@ -382,6 +504,149 @@ for routing, <code>Importer</code> and <code>Exporter</code> for file formats, a
 drawing. Keeping these here lets the core stay free of the GPU, IO, and async
 stacks while still describing how they plug in.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="drawing-and-vertex-editing"><a class="header" href="#drawing-and-vertex-editing">Drawing and vertex editing</a></h1>
+<p>The editor’s drawing tools add geometry to the top cell, and the vertex-edit tool
+reshapes a shape already there. As with the rest of the app, the interesting logic is
+window-free and lives in <code>reticle-app</code>’s <code>draw</code> module, unit-tested without a GPU; the
+egui layer only turns pixels into world points, calls in, and paints the live
+preview.</p>
+<p>Every one of these actions goes through the undo history, so drawing a shape or moving
+a vertex can be undone and redone like any other edit.</p>
+<h2 id="tools"><a class="header" href="#tools">Tools</a></h2>
+<p>Four tools sit on the toolbar next to Select, Pan, Measure, and Cut. They are also in
+the command palette under <code>Tool:</code>.</p>
+<ul>
+<li><strong>Rect</strong> draws an axis-aligned rectangle by dragging from one corner to the opposite
+one.</li>
+<li><strong>Polygon</strong> draws a closed polygon by clicking to place each vertex.</li>
+<li><strong>Path</strong> draws a wire: a polyline with a width and an end-cap style.</li>
+<li><strong>Vertices</strong> edits the vertices of the selected shape.</li>
+</ul>
+<p>Switching to any non-drawing tool discards a half-drawn shape so nothing leaks between
+tools. The path width and end cap you pick survive the switch.</p>
+<h2 id="rectangle-constraints"><a class="header" href="#rectangle-constraints">Rectangle constraints</a></h2>
+<p>A plain drag spans the two corners. Two modifiers refine it, and they combine:</p>
+<ul>
+<li><strong>Shift</strong> constrains the rectangle to a square, growing the shorter side to match the
+longer one while keeping the far corner in the direction you dragged.</li>
+<li><strong>Alt</strong> or <strong>Ctrl</strong> treats the drag’s start point as the rectangle’s center rather
+than a corner, so the box grows symmetrically. Held together with shift, a centered
+square uses the larger half-extent on both axes.</li>
+</ul>
+<p>The start and end points are snapped to the grid first (see <a href="#snapping">Snapping</a>), so
+the committed rectangle lands on grid coordinates.</p>
+<h2 id="placing-polygons-and-paths"><a class="header" href="#placing-polygons-and-paths">Placing polygons and paths</a></h2>
+<p>Both tools accumulate vertices click by click, drawing a live preview of the edges
+placed so far plus a faint segment out to the cursor. An immediate repeat of the last
+point is ignored, so a closing double-click never leaves a zero-length edge.</p>
+<ul>
+<li>A <strong>double-click</strong>, or <strong>Enter</strong>, finishes the shape. A polygon needs at least three
+distinct vertices; a path needs at least two points. A finish gesture with too few
+points is declined rather than committing a degenerate shape.</li>
+<li><strong>Escape</strong> cancels the shape in progress.</li>
+</ul>
+<p>A path carries a width in database units and one of three end caps, both set on the
+toolbar while the path tool is active:</p>
+<ul>
+<li><strong>Flat</strong> ends the wire exactly at its endpoints.</li>
+<li><strong>Square</strong> extends each end by half the width.</li>
+<li><strong>Round</strong> rounds each end by a half-width radius.</li>
+</ul>
+<h2 id="editing-vertices"><a class="header" href="#editing-vertices">Editing vertices</a></h2>
+<p>Select a single shape you drew, then switch to the Vertices tool. It ticks every vertex
+of the shape so you can see what is grabbable. Only shapes owned directly by the top
+cell are editable; geometry that comes from a placed instance is not.</p>
+<ul>
+<li><strong>Drag</strong> a vertex to move it. The new position is snapped to the grid.</li>
+<li><strong>Click on an edge</strong> to insert a vertex there. The new vertex lands on the point of
+the segment nearest the click.</li>
+<li><strong>Alt-click</strong> (or ctrl-click) a vertex to delete it. A polygon keeps at least three
+vertices and a path at least two, so a deletion that would collapse the shape is
+refused.</li>
+</ul>
+<p>A rectangle promotes to a polygon the moment one of its corners is edited off the axis,
+since a rectangle can no longer describe the result. A path keeps its width and end cap
+through an edit. Each move, insert, or delete is one undoable step, applied as a
+remove-then-add of the reshaped shape.</p>
+<h2 id="snapping"><a class="header" href="#snapping">Snapping</a></h2>
+<p>Every placed point and moved vertex is snapped through the shared grid before it is
+committed, so drawn geometry lands on grid coordinates whenever snapping is on. Turning
+snapping off (the Snap toggle) places points at the exact cursor position instead.
+Snapping to nearby existing geometry, as opposed to the grid, is handled elsewhere in
+the editor.</p>
+<h2 id="testing-1"><a class="header" href="#testing-1">Testing</a></h2>
+<p>The module’s geometry is unit-tested in isolation: the rectangle-from-drag math for
+each modifier combination, the polygon and path builders’ finish thresholds and
+deduplication, vertex hit-testing by exact squared distance, edge projection for
+insertion, and the insert, delete, and move operations against their vertex-count
+floors. Because this logic is pure, the tests need no window and run with the rest of
+the <code>reticle-app</code> suite.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="boolean-and-transform-operations"><a class="header" href="#boolean-and-transform-operations">Boolean and transform operations</a></h1>
+<p>The Operations panel turns the current shape selection into edits: planar
+booleans, an offset, rotate and mirror, and align and distribute. It lives in
+<code>reticle-app</code>’s <code>ops</code> module. The heavy geometry is delegated to
+<code>reticle-geometry</code> (the same robust <code>i_overlay</code> engine the rest of the app uses);
+<code>ops</code> is the glue that maps selected scene shapes back to editable cell shapes,
+runs the operation, and records the result as one undo step.</p>
+<h2 id="what-the-selection-points-at"><a class="header" href="#what-the-selection-points-at">What the selection points at</a></h2>
+<p>Selection is a set of indices into the <em>flattened</em> top-cell scene, the same list
+the canvas hit-tests. Only the top cell’s own shapes can be edited by index, and
+<code>Document::flatten</code> emits those first, so a scene index below the editable-shape
+count maps one-to-one onto a top-cell shape index. Selected indices at or above
+that count come from placed instances and arrays; there is no single shape in the
+top cell to rewrite, so the operations skip them.</p>
+<p>Booleans and offset act on <em>filled</em> geometry, so they consider rectangles and
+polygons. A path is a stroked wire rather than a fill region, and turning it into a
+fill needs the render tessellator, so paths are skipped from boolean and offset
+input. Transforms (rotate, mirror, align, distribute) are coordinate maps and apply
+to every shape kind.</p>
+<h2 id="booleans-per-layer"><a class="header" href="#booleans-per-layer">Booleans, per layer</a></h2>
+<p>Union, intersection, difference, and exclusive-or run through
+<code>reticle_geometry::polygon_boolean</code>. The selection is grouped by layer first: only
+shapes on the <em>same</em> layer combine, and each group’s result stays on that layer.
+This keeps a boolean from silently merging, say, metal-1 and metal-2 geometry. A
+layer group needs at least two fillable shapes to do anything.</p>
+<p>Union, intersection, and exclusive-or fold pairwise across the group (they are
+associative). Difference subtracts every later shape from the first, matching the
+usual “A minus the rest” editor behavior. When the engine produces no geometry (an
+empty intersection, for instance) the inputs are left untouched rather than being
+deleted.</p>
+<h2 id="offset-grow-and-shrink"><a class="header" href="#offset-grow-and-shrink">Offset, grow, and shrink</a></h2>
+<p>The offset control feeds <code>reticle_geometry::offset</code>, which grows for a positive DBU
+amount and shrinks for a negative one, with mitered corners. Each selected fillable
+shape is offset independently and its result replaces it on the same layer. A shrink
+that collapses a shape to nothing simply drops it. The offset runs on the float
+outline engine and rounds back to the grid, so results are on-grid but not
+guaranteed bit-exact for pathological input.</p>
+<h2 id="rotate-and-mirror"><a class="header" href="#rotate-and-mirror">Rotate and mirror</a></h2>
+<p>Rotate takes a numeric angle in degrees and turns the selection about its combined
+bounding-box center, counter-clockwise. Rotation runs on a floating basis and rounds
+each vertex to the nearest DBU, so a multiple of 90 degrees is exact while an
+arbitrary angle is on-grid but not exactly reversible. A rotated rectangle is
+promoted to a polygon, since a non-orthogonal angle tilts it off the axes.</p>
+<p>Mirror reflects the selection across its center, either about the vertical center
+line (left to right) or the horizontal one (top to bottom). An axis mirror is exact
+integer arithmetic (<code>2 * center - coordinate</code>), so mirroring twice about the same
+axis returns the original geometry.</p>
+<h2 id="align-and-distribute"><a class="header" href="#align-and-distribute">Align and distribute</a></h2>
+<p>Align moves every selected shape to a shared edge or center of the selection’s
+combined bounding box: left, right, or horizontal center; top, bottom, or vertical
+center. A shape already in place does not move. Distribute needs at least three
+shapes: it fixes the two extreme shapes and respaces the ones between them so the
+edge-to-edge gaps along the chosen axis are equal.</p>
+<p>The alignment and distribution math is pure and unit-tested against hand-computed
+offsets, independent of the UI.</p>
+<h2 id="one-edit-one-undo-step"><a class="header" href="#one-edit-one-undo-step">One edit, one undo step</a></h2>
+<p>A single operation is usually several edits: a boolean removes each of its inputs
+and adds one result. Those must undo together. The frozen <code>Edit</code> vocabulary has no
+group variant, so the app layer’s <code>History</code> records how many underlying edits make
+up each logical step (<code>History::apply_group</code>) and steps <code>undo</code> and <code>redo</code> over a
+whole group at once. Removals within a group are ordered highest-index-first so that
+removing one input does not shift the index of another before it is removed. The
+result: a boolean over three rectangles is a single entry on the undo stack, and one
+undo restores all three.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="file-formats"><a class="header" href="#file-formats">File formats</a></h1>
 <p><code>reticle-io</code> reads and writes the layout interchange formats and the technology
 description.</p>
@@ -436,6 +701,261 @@ interactive at 30 fps or better, and hierarchical designs with effectively billi
 of leaf shapes at 60 fps through cell culling and LOD. Measured numbers are in the
 <a href="#performance-methodology">performance chapter</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="view-and-export"><a class="header" href="#view-and-export">View and export</a></h1>
+<p>The editor’s right-hand column ends with a <strong>View and export</strong> panel that groups
+four pieces of view polish: switching the colour theme, saving and restoring
+camera positions, exporting the current view or selection to a file, and a
+print-style monochrome render mode. The logic that can be pure is pure and lives
+in <code>reticle-app</code>’s <code>viewexport</code> module, unit-tested without a window; the egui and
+GPU wiring is a thin layer in the <code>app</code> module.</p>
+<h2 id="theme-switching"><a class="header" href="#theme-switching">Theme switching</a></h2>
+<p>Reticle opens in a dark theme. The <strong>Toggle theme</strong> button flips a stored
+<code>Theme</code> between dark and light, and the app applies it to the egui <code>Visuals</code>
+every frame at the top of its <code>ui</code> method, calling <code>ctx.set_visuals</code> with
+<code>egui::Visuals::dark()</code> or <code>egui::Visuals::light()</code>. Applying it each frame keeps
+the whole UI, panels and canvas chrome alike, consistent after a toggle.</p>
+<p>The theme is part of the persisted view state: it is captured into the session
+snapshot alongside the camera, tool, and grid (see the <code>session</code> module) and
+serialized as a <code>theme=dark</code> or <code>theme=light</code> line, so the choice survives a
+restart. An unknown or missing value falls back to the dark default.</p>
+<h2 id="view-bookmarks"><a class="header" href="#view-bookmarks">View bookmarks</a></h2>
+<p>A bookmark records where the camera was looking so you can return to it later. It
+stores only the world center and the zoom (pixels per DBU), not a snapshot of the
+document, so it stays a tiny value that reconstructs a live camera exactly.</p>
+<ul>
+<li>Type a name and press <strong>Save view</strong> to capture the current camera. A blank name
+is filled in with an auto-generated <code>View N</code> label so the entry is always
+clickable.</li>
+<li>Press a bookmark’s name button to jump back: the app rebuilds the camera with
+<code>ViewCamera::new(center, pixels_per_dbu)</code>, which round-trips the saved position.</li>
+<li>Press the small <code>x</code> next to a bookmark to remove it.</li>
+</ul>
+<p>Because a bookmark is just a <code>(center, zoom)</code> pair, saving and restoring is a pure
+round-trip through the camera constructor, which the tests pin down directly.</p>
+<h2 id="exporting"><a class="header" href="#exporting">Exporting</a></h2>
+<p>Export has two independent choices: a <strong>scope</strong> and a <strong>format</strong>.</p>
+<ul>
+<li><strong>Scope</strong> is either the whole <strong>View</strong> (every shape in the flattened scene) or
+just the current <strong>Selection</strong>. Exporting an empty selection is refused with a
+status message rather than writing a blank file.</li>
+<li><strong>Format</strong> is <strong>SVG</strong> or <strong>PNG</strong>.</li>
+</ul>
+<p>Files are written into the working directory as <code>reticle-export.svg</code> or
+<code>reticle-export.png</code>, and the status bar reports the path.</p>
+<h3 id="svg"><a class="header" href="#svg">SVG</a></h3>
+<p>SVG is the primary export and is generated purely from the shape list by
+<code>shapes_to_svg</code>, a function of its inputs with no egui or GPU involvement. Each
+shape kind maps to one SVG element:</p>
+<ul>
+<li>a rectangle becomes a <code>&lt;rect&gt;</code>;</li>
+<li>a polygon becomes a <code>&lt;polygon&gt;</code> with its vertices;</li>
+<li>a path (wire) becomes a stroked <code>&lt;polyline&gt;</code> whose stroke width is the path
+width scaled into output pixels.</li>
+</ul>
+<p>Shapes are placed by an affine fit of the export bounds onto the pixel canvas
+(the <code>Projection</code> type), preserving aspect ratio and flipping world <code>+y</code> up to
+image <code>+y</code> down so the picture matches the on-screen canvas. Fill colours come
+from the live layer table, the same colours the canvas draws with.</p>
+<h3 id="png"><a class="header" href="#png">PNG</a></h3>
+<p>PNG export takes one of two paths:</p>
+<ul>
+<li>A full-colour export of the <strong>whole view</strong> reuses the native offscreen GPU
+renderer (<code>render_document_offscreen</code>) for a pixel-accurate frame that matches
+the canvas exactly. This is native-only and is skipped with a status note when
+no GPU is available.</li>
+<li>A <strong>selection</strong> export, or <strong>any monochrome</strong> export, uses the pure rasterizer
+in the <code>viewexport</code> module: a small scanline filler that paints each shape over
+a white page and feeds the crate’s dependency-free PNG encoder. It needs no GPU,
+so it is unit-tested, and it is what makes selection-only and print-mode PNG images
+possible.</li>
+</ul>
+<p>On the web there is no filesystem and no blocking GPU context, so PNG export
+reports that it is native-only and SVG generation reports the byte count instead
+of writing a file.</p>
+<h2 id="monochrome-print-mode"><a class="header" href="#monochrome-print-mode">Monochrome (print) mode</a></h2>
+<p>The <strong>Monochrome (print) mode</strong> checkbox switches both export paths to a
+print-style render: shapes are drawn as pure black on a white page regardless of
+their layer colour. In SVG, filled shapes become unfilled black outlines and wires
+stay black strokes; in the raster path every shape is filled black. This produces
+a clean, ink-friendly rendering suitable for printing or embedding in a document,
+independent of the on-screen theme.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="snapping-and-guides"><a class="header" href="#snapping-and-guides">Snapping and guides</a></h1>
+<p>Placing geometry by eye is imprecise. Reticle snaps the cursor onto meaningful
+positions so a new point lands exactly where it should: on the grid, on existing
+geometry, or on a guide line the user has pulled out. The snap logic is pure DBU
+arithmetic and lives in <code>reticle-app</code>’s <code>snap</code> module, unit-tested without a
+canvas, a camera, or any drawing.</p>
+<p>There are three things the cursor can snap to, checked together and resolved to
+whichever is nearest:</p>
+<ul>
+<li><strong>The grid.</strong> The background grid rounds a point onto the nearest grid
+intersection. This is the baseline snap and is described under
+<a href="#rendering-and-scale">Rendering and scale</a>; it is owned by <code>GridSettings</code>.</li>
+<li><strong>Nearby geometry.</strong> The vertices, edges, edge midpoints, and bounding-box
+centers of the shapes around the cursor.</li>
+<li><strong>User guides.</strong> Draggable horizontal and vertical lines, pulled off the
+rulers, that behave like an extra piece of geometry to snap to.</li>
+</ul>
+<h2 id="snapping-to-geometry"><a class="header" href="#snapping-to-geometry">Snapping to geometry</a></h2>
+<p>For each shape near the cursor the engine emits a set of snap candidates:</p>
+<ul>
+<li>a <strong>vertex</strong> at every corner of a rectangle and every vertex of a polygon or
+path;</li>
+<li>an <strong>edge</strong> for every segment between consecutive vertices (a polygon also
+closes the loop back to its first vertex; an open path does not);</li>
+<li>a <strong>midpoint</strong> at the center of every edge;</li>
+<li>a <strong>center</strong> at the middle of the shape’s bounding box.</li>
+</ul>
+<p>A discrete candidate (vertex, midpoint, center) snaps to its own position. An edge
+snaps to the perpendicular foot of the cursor on the segment, clamped to the
+endpoints, so the cursor slides along the edge rather than only catching its ends.</p>
+<p>The nearest resolved candidate within the snap radius wins. When two candidates
+sit at exactly the same distance the more specific one is chosen, so an exact
+corner is preferred over the two edges that meet there, and a midpoint is preferred
+over the edge it lies on. Only shapes on visible layers are considered, so a hidden
+layer never steals a snap.</p>
+<p>The snap radius is set in screen pixels and converted to world units at the current
+zoom, so the feel is the same whether zoomed in or out. Candidates are gathered
+only from the shapes whose bounding box lies within that radius of the cursor, so
+the cost is bounded by what is under the cursor rather than by the size of the
+design.</p>
+<h2 id="user-guides"><a class="header" href="#user-guides">User guides</a></h2>
+<p>Guides are horizontal or vertical reference lines at a fixed world coordinate. A
+horizontal guide pins a <code>y</code> value; a vertical guide pins an <code>x</code> value. Drag inward
+from the top ruler to pull out a horizontal guide, or from the left ruler to pull
+out a vertical one; the guide drops at the cursor, rounded onto the grid. Guides
+are listed in the snap panel, where each can be removed individually or the whole
+set cleared, and guides can also be added at the view center from the panel.</p>
+<p>Guide snapping runs per axis: the nearest vertical guide within range pins the
+cursor’s <code>x</code>, and the nearest horizontal guide pins its <code>y</code>. When a horizontal and
+a vertical guide are both in range the cursor lands on their intersection, so
+crossing guides give an exact point to snap to.</p>
+<p>Guides are view and session state. They are never written into the document, so
+adding, moving, or clearing a guide is not an undoable edit and does not touch the
+layout.</p>
+<h2 id="the-snap-indicator"><a class="header" href="#the-snap-indicator">The snap indicator</a></h2>
+<p>Whenever the cursor catches something, a small diamond is drawn at the snapped
+point with a short caption naming what it hit (vertex, edge, midpoint, center, or
+guide), colored by kind. The indicator rides on top of the geometry so it is never
+hidden, and disappears the moment the cursor moves off every candidate.</p>
+<h2 id="settings"><a class="header" href="#settings">Settings</a></h2>
+<p>The snap panel in the right sidebar surfaces every knob:</p>
+<ul>
+<li><strong>Show grid</strong>, <strong>Snap to grid</strong>: the grid’s visibility and grid snapping.</li>
+<li><strong>Snap to geometry</strong>: whether nearby vertices, edges, midpoints, and centers
+catch the cursor.</li>
+<li><strong>Snap to guides</strong>: whether guide lines catch the cursor.</li>
+<li><strong>Grid spacing</strong>: the base grid step, in DBU.</li>
+<li><strong>Snap radius</strong>: how close, in screen pixels, a candidate must be to catch the
+cursor.</li>
+</ul>
+<p>Grid visibility and grid snapping are also toggleable from the toolbar. Turning off
+both geometry and guide snapping leaves only the grid, and turning off grid
+snapping as well places points exactly where the cursor is.</p>
+<h2 id="how-it-fits-together"><a class="header" href="#how-it-fits-together">How it fits together</a></h2>
+<p>The canvas routes its cursor through a single snap seam that tries geometry and
+guide snapping first and falls back to the grid when nothing is in range. That seam
+returns both the snapped point, which is what a tool places, and the hint that
+drives the on-canvas indicator. Because the drawing tools place at the point this
+seam returns, geometry drawn with a tool snaps to existing geometry and guides, not
+only to the grid.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="search-and-selection-depth"><a class="header" href="#search-and-selection-depth">Search and selection depth</a></h1>
+<p>The search panel adds three ways to build and navigate a selection that go beyond
+clicking shapes one at a time: a filter query bar, saved selection sets with
+select-similar, and a cell/instance outline that jumps the camera to whatever you
+click. It sits at the bottom of the right-hand side panel, under the snapping panel.</p>
+<p>Like the rest of the editor, the interesting parts are window-free and unit-tested.
+The filter language lives in the <code>query</code> module (parser plus evaluator) and the
+saved-set, select-similar, and outline logic in the <code>outline</code> module; the panel
+itself is thin glue that binds widgets to that logic, unions the results into the
+live selection, and defers the camera locate to the next canvas pass.</p>
+<pre class="mermaid">flowchart LR
+    bar["Filter query bar"] --&gt; parse["query::Query::parse"]
+    parse --&gt;|"Ok(query)"| eval["query.select(shapes, layers, scope)"]
+    parse --&gt;|"Err(ParseError)"| msg["error shown under the bar"]
+    eval --&gt; sel["Selection"]
+    seed["Current selection"] --&gt; sim["outline::select_similar"]
+    sim --&gt; sel
+    tree["Outline row click"] --&gt; locate["camera.zoom_to_rect"]
+</pre>
+
+<h2 id="the-filter-query-language"><a class="header" href="#the-filter-query-language">The filter query language</a></h2>
+<p>The query bar takes a space-separated list of predicates that are combined with a
+logical and: a shape is selected only when it satisfies every predicate. So</p>
+<pre><code class="language-text">layer:METAL1 width&lt;400 area&gt;1000
+</code></pre>
+<p>selects every shape on the <code>METAL1</code> layer that is narrower than 400 DBU and whose
+bounding-box area exceeds 1000 DBU². The grammar is deliberately small:</p>
+<pre><code class="language-text">query      := predicate (WS predicate)*
+predicate  := layer-pred | cell-pred | metric-pred
+layer-pred := "layer:" NAME
+cell-pred  := "cell:" NAME
+metric-pred:= metric OP INT
+metric     := "area" | "width" | "height"
+OP         := "&lt;" | "&lt;=" | "&gt;" | "&gt;=" | "=" | "=="
+</code></pre>
+<p>Names match case-insensitively, so <code>layer:metal1</code> and <code>layer:METAL1</code> are the same.
+The metric comparisons read straight off the shape’s bounding box using the same
+<code>i64</code> arithmetic as the geometry crate, so nothing is rounded: <code>area</code> is in DBU²,
+<code>width</code> and <code>height</code> are in DBU.</p>
+<p><code>layer:</code> resolves the name against the current layer table; a name that is not in
+the table simply matches nothing rather than erroring, so a typo narrows the
+selection to empty instead of selecting the whole scene.</p>
+<p><code>cell:</code> is a scope assertion. The panel selects over the flattened top cell, so
+individual shapes carry no cell provenance to filter on; <code>cell:TOP</code> therefore keeps
+every shape while <code>TOP</code> is the cell being viewed and drops them all otherwise. It
+lets a query state which cell it targets and read naturally next to the other
+predicates, but it does not descend into sub-cells.</p>
+<h3 id="malformed-queries-fail-cleanly"><a class="header" href="#malformed-queries-fail-cleanly">Malformed queries fail cleanly</a></h3>
+<p>Parsing returns a typed error naming the first token at fault, and the panel shows
+that message under the bar without touching the selection. The cases are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Query</th><th>Error</th></tr>
+</thead>
+<tbody>
+<tr><td><code>layer:</code></td><td><code>'layer:' needs a value, e.g. layer:METAL1</code></td></tr>
+<tr><td><code>area1000</code></td><td><code>'area1000' needs a comparator, e.g. width&lt;400 …</code></td></tr>
+<tr><td><code>area&gt;big</code></td><td><code>'area' expects a number, got 'big'</code></td></tr>
+<tr><td><code>color:red</code></td><td><code>unknown term 'color:red'</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>An empty query bar selects nothing rather than silently grabbing everything.</p>
+<h2 id="saved-selection-sets"><a class="header" href="#saved-selection-sets">Saved selection sets</a></h2>
+<p>Once you have a selection you care about, name it and save it. A saved set is a
+snapshot of the selected shape indices under a name; restoring it installs those
+indices back into the live selection. Saving under an existing name replaces it, a
+blank name is refused, and each set shows its shape count so you can tell them apart.
+Because a set stores flattened-scene indices, it is meaningful within a session
+against the scene it was captured from.</p>
+<h2 id="select-similar"><a class="header" href="#select-similar">Select similar</a></h2>
+<p>Select-similar grows the current selection: for every already-selected shape it adds
+every other shape that is on the same layer and whose area is within a tolerance band
+(±25% by default) of that shape’s area. It is the “select all the vias like this one”
+gesture. It only ever adds to the selection, never removes, and an empty selection
+grows to nothing because there is no seed to be similar to.</p>
+<h2 id="the-outline-tree"><a class="header" href="#the-outline-tree">The outline tree</a></h2>
+<p>The outline lists the document’s cell hierarchy one level deep: each top cell,
+followed by its instances and arrays as indented child rows labelled with the child
+cell and the placement origin (for example <code>LEAF @ (1000, 2000)</code> or
+<code>LEAF [8x6] @ (0, 4000)</code>). Clicking a row locates it: the camera frames the row’s
+world rectangle with a small margin so the target lands centered on the canvas.</p>
+<p>An instance row’s rectangle is the child cell’s bounding box put through the
+placement transform, so locating an instance frames exactly where that placement sits
+in the parent, not the child’s own coordinate origin. Rows for empty cells (no
+geometry to frame) are shown but not clickable. The tree is rebuilt whenever the
+document changes, so it never points the camera at stale geometry.</p>
+<h2 id="where-the-camera-locate-happens"><a class="header" href="#where-the-camera-locate-happens">Where the camera locate happens</a></h2>
+<p>The panel cannot frame a target the instant a row is clicked: the true canvas size in
+pixels is not known until the central panel lays out, which happens after the side
+panel is drawn. So a click records the target rectangle, and the deferred zoom is
+applied on the next canvas pass once the screen rectangle is in hand. This mirrors the
+deferred zoom the DRC panel uses to frame a selected violation.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="design-rule-checking"><a class="header" href="#design-rule-checking">Design-rule checking</a></h1>
 <p><code>reticle-drc</code> verifies that a layout obeys the process design rules.</p>
 <h2 id="declarative-rules"><a class="header" href="#declarative-rules">Declarative rules</a></h2>
@@ -457,7 +977,7 @@ straight to them.</p>
 the rules touching the affected region are re-run, using the index to bound the
 work. The target is under a hundred milliseconds for a local edit, so the violation
 overlay stays live as you draw.</p>
-<h2 id="testing-1"><a class="header" href="#testing-1">Testing</a></h2>
+<h2 id="testing-2"><a class="header" href="#testing-2">Testing</a></h2>
 <p>The engine is checked against a naive reference implementation that tests every
 rule the slow, obvious way over randomized inputs, so the fast path cannot silently
 disagree with the specification.</p>
@@ -542,6 +1062,152 @@ as violations.</p>
 <p>If a layout must be manufacturable, run the full SkyWater deck in a sign-off
 tool. This subset is a fast, honest first filter, nothing more.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="sky130-grounding"><a class="header" href="#sky130-grounding">SKY130 grounding</a></h1>
+<p>Reticle uses real data from the open SkyWater SKY130 PDK so that its technology file,
+its 3D layer stack, its DRC subset, and its tier-5 benchmark tasks are grounded in cited
+numbers rather than invented ones. This chapter is the provenance record: where each
+piece of SKY130 data comes from, exactly which design rules are and are not checked, the
+explicit statement that passing them is not tape-out clean, and the license attribution
+for the standard-cell layouts committed as test fixtures.</p>
+<p>Nothing here makes Reticle part of a SKY130 sign-off flow. It uses the PDK as a source of
+truth for values, so that when the editor, the agent harness, or the benchmark reports a
+measurement it is a real SKY130 number.</p>
+<h2 id="the-technology-stack-and-its-source"><a class="header" href="#the-technology-stack-and-its-source">The technology stack and its source</a></h2>
+<p>The technology file <code>tech/sky130.tech</code> defines the digital metal stack: the drawing
+layers (nwell, diff/tap, poly, li1, and met1 through met5 with their contacts and vias),
+the pin and label purposes, and the physical z-height and thickness of each conductor for
+the 3D layer-stack view. It is a subset sufficient for the digital stack, not a complete
+SKY130 layer map.</p>
+<p>The data is transcribed from the open SkyWater SKY130 documentation, cited in the file
+header:</p>
+<ul>
+<li><strong>Layers</strong> (GDS <code>layer:datatype</code>): the SkyWater
+<a href="https://skywater-pdk.readthedocs.io/en/main/rules/layers.html">layers reference</a>,
+generated from <code>docs/rules/gds_layers.csv</code> in the
+<a href="https://github.com/google/skywater-pdk">google/skywater-pdk</a> repository.</li>
+<li><strong>Process stack</strong> (z and thickness): the official Process Stack Diagram
+(<code>docs/_static/metal_stack.svg</code>) on the
+<a href="https://skywater-pdk.readthedocs.io/en/main/rules/assumptions.html">Criteria and Assumptions</a>
+page.</li>
+<li><strong>Units</strong>: SKY130 library GDS uses 1 database unit = 1 nm and 1 user unit = 1 um,
+verified by binary-parsing the UNITS record of <code>sky130_fd_sc_hd__fill_1.gds</code>. The
+technology file declares <code>dbu_per_micron 1000</code> accordingly.</li>
+</ul>
+<p>In the stack section, the conductor z and thickness values are read from the process
+stack diagram; contact and via slabs span the gap between the layers they connect. The
+well and active z-values are approximate substrate features (the diagram sets the silicon
+surface at z = 0) and are marked as approximate in the file. Those approximations affect
+only the 3D visualization’s substrate depiction, not any geometric check.</p>
+<h2 id="drc-rule-subset"><a class="header" href="#drc-rule-subset">DRC rule subset</a></h2>
+<p>The DRC rules live in <code>tech/sky130-drc-subset.toml</code>, transcribed from the
+<a href="https://skywater-pdk.readthedocs.io/en/main/rules/periphery.html">SkyWater SKY130 periphery rules</a>
+(the Al flow, generated from <code>docs/rules/periphery/periphery.csv</code> in
+google/skywater-pdk) for the digital metal stack. <code>reticle_drc::sky130_drc_rules()</code>
+embeds that file at compile time and returns it as engine rules ready for
+<code>DrcEngine::new</code>. Values are in database units (1 dbu = 1 nm); areas are in dbu squared.</p>
+<p>The full coverage table, with every rule id, kind, layer, value, and meaning, is in the
+<a href="#sky130-rule-coverage">SKY130 rule coverage</a> chapter and is reproduced here so this
+grounding record is self-contained. Layer names follow <code>tech/sky130.tech</code> (GDS
+<code>layer/datatype</code>).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Rule id</th><th>Kind</th><th>Layer(s)</th><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>li.1</code></td><td>width</td><td>li1 (67/20)</td><td>170 (0.17 um)</td><td>Min width of li1</td></tr>
+<tr><td><code>li.3</code></td><td>spacing</td><td>li1 (67/20)</td><td>170 (0.17 um)</td><td>Min li1 to li1 spacing</td></tr>
+<tr><td><code>li.5</code></td><td>enclosure</td><td>licon1 (66/44) in li1 (67/20)</td><td>80 (0.08 um)</td><td>licon1 enclosed by li1</td></tr>
+<tr><td><code>li.6</code></td><td>area</td><td>li1 (67/20)</td><td>56100 (0.0561 um²)</td><td>Min li1 area</td></tr>
+<tr><td><code>m1.1</code></td><td>width</td><td>met1 (68/20)</td><td>140 (0.14 um)</td><td>Min width of met1</td></tr>
+<tr><td><code>m1.2</code></td><td>spacing</td><td>met1 (68/20)</td><td>140 (0.14 um)</td><td>Min met1 to met1 spacing</td></tr>
+<tr><td><code>m1.4</code></td><td>enclosure</td><td>mcon (67/44) in met1 (68/20)</td><td>30 (0.03 um)</td><td>mcon enclosed by met1</td></tr>
+<tr><td><code>m1.6</code></td><td>area</td><td>met1 (68/20)</td><td>83000 (0.083 um²)</td><td>Min met1 area</td></tr>
+<tr><td><code>m2.1</code></td><td>width</td><td>met2 (69/20)</td><td>140 (0.14 um)</td><td>Min width of met2</td></tr>
+<tr><td><code>m2.2</code></td><td>spacing</td><td>met2 (69/20)</td><td>140 (0.14 um)</td><td>Min met2 to met2 spacing</td></tr>
+<tr><td><code>m2.4</code></td><td>enclosure</td><td>via (68/44) in met2 (69/20)</td><td>55 (0.055 um)</td><td>via enclosed by met2</td></tr>
+<tr><td><code>m3.1</code></td><td>width</td><td>met3 (70/20)</td><td>300 (0.3 um)</td><td>Min width of met3</td></tr>
+<tr><td><code>m3.2</code></td><td>spacing</td><td>met3 (70/20)</td><td>300 (0.3 um)</td><td>Min met3 to met3 spacing</td></tr>
+<tr><td><code>m4.1</code></td><td>width</td><td>met4 (71/20)</td><td>300 (0.3 um)</td><td>Min width of met4</td></tr>
+<tr><td><code>m4.2</code></td><td>spacing</td><td>met4 (71/20)</td><td>300 (0.3 um)</td><td>Min met4 to met4 spacing</td></tr>
+<tr><td><code>m5.1</code></td><td>width</td><td>met5 (72/20)</td><td>1600 (1.6 um)</td><td>Min width of met5</td></tr>
+<tr><td><code>m5.2</code></td><td>spacing</td><td>met5 (72/20)</td><td>1600 (1.6 um)</td><td>Min met5 to met5 spacing</td></tr>
+<tr><td><code>poly.1a</code></td><td>width</td><td>poly (66/20)</td><td>150 (0.15 um)</td><td>Min width of poly</td></tr>
+<tr><td><code>poly.2</code></td><td>spacing</td><td>poly (66/20)</td><td>210 (0.21 um)</td><td>Min poly to poly spacing</td></tr>
+<tr><td><code>poly.8</code></td><td>extension</td><td>poly (66/20) past diff (65/20)</td><td>130 (0.13 um)</td><td>Poly endcap past diff</td></tr>
+<tr><td><code>difftap.1</code></td><td>width</td><td>diff (65/20)</td><td>150 (0.15 um)</td><td>Min width of diff or tap</td></tr>
+<tr><td><code>difftap.3</code></td><td>spacing</td><td>diff (65/20)</td><td>270 (0.27 um)</td><td>Min diff to diff spacing</td></tr>
+<tr><td><code>licon.1</code></td><td>width</td><td>licon1 (66/44)</td><td>170 (0.17 um)</td><td>licon1 size, as min width</td></tr>
+<tr><td><code>ct.1</code></td><td>width</td><td>mcon (67/44)</td><td>170 (0.17 um)</td><td>mcon size, as min width</td></tr>
+<tr><td><code>via.1a</code></td><td>width</td><td>via (68/44)</td><td>150 (0.15 um)</td><td>via size, as min width</td></tr>
+<tr><td><code>via2.1a</code></td><td>width</td><td>via2 (69/44)</td><td>200 (0.2 um)</td><td>via2 size, as min width</td></tr>
+</tbody>
+</table>
+</div>
+<p>That is <strong>26 rules: 12 width, 8 spacing, 3 enclosure, 2 area, 1 extension</strong>. The
+loader’s tests pin this count and the per-kind distribution, so the table above and the
+committed data cannot drift apart silently.</p>
+<h2 id="this-is-a-subset-not-tape-out-clean"><a class="header" href="#this-is-a-subset-not-tape-out-clean">This is a subset, not tape-out clean</a></h2>
+<p>Passing this deck does <strong>not</strong> mean a layout is manufacturable. It is a fast, honest
+first filter over the everyday geometry mistakes (too narrow, too close, too small,
+under-enclosed, short endcap) against cited SKY130 values. It exists so the editor, the
+agent harness, and the benchmark can check real geometry against real numbers, not so a
+design can be signed off.</p>
+<p>What the deck does not cover, including but not limited to:</p>
+<ul>
+<li><strong>Antenna rules.</strong> No charge-accumulation checks at all.</li>
+<li><strong>Density rules.</strong> No metal fill or min/max density windows (the engine has a density
+check kind, but this deck defines none).</li>
+<li><strong>Latch-up and well rules.</strong> No nwell spacing or width, no tap-distance rules
+(<code>tap.*</code>, <code>nwell.*</code>), no butting rules.</li>
+<li><strong>Implant and marker layers.</strong> <code>nsdm</code>/<code>psdm</code>/<code>npc</code> and friends are in the layer map but
+carry no rules here; most implant enclosure and spacing rules (<code>nsd.*</code>, <code>psd.*</code>,
+<code>npc.*</code>) are absent.</li>
+<li><strong>Most contact and via rules.</strong> Sizes are encoded as min-width only (the real rules are
+exact-size), and only three enclosure directions are present; end-of-line,
+differential enclosure (<code>m1.5</code>, <code>m2.5</code>), array spacing, and licon-on-poly versus
+licon-on-diff distinctions are absent.</li>
+<li><strong>Transistor-level rules.</strong> Gate spacing to licon, diff extension past poly
+(<code>difftap.2</code>, <code>poly.7</code>), and everything hvi/hv related.</li>
+<li><strong>Resistor, capacitor, SRAM, sealring, and pad</strong> special-case rules.</li>
+</ul>
+<p>Two engine caveats also apply (detailed in <a href="#design-rule-checking">Design-rule checking</a>): shapes are
+reduced to axis-aligned bounding boxes, which is exact for rectangles but conservative
+(it may over-report, never under-report) for polygons and paths; and same-layer spacing
+treats touching or overlapping shapes as merged rather than as a violation.</p>
+<p>If a layout must be manufacturable, run the full SkyWater deck in a sign-off tool. This
+subset is a fast, honest first filter, nothing more.</p>
+<h2 id="cell-provenance-and-license-attribution"><a class="header" href="#cell-provenance-and-license-attribution">Cell provenance and license attribution</a></h2>
+<p>Three standard-cell layouts from the SKY130 high-density library are committed as test
+fixtures and used as the geometry ground truth for tier-5 benchmark tasks. They are
+unmodified copies, attributed in
+<code>crates/reticle-io/tests/corpus/sky130/NOTICE.md</code>:</p>
+<ul>
+<li><strong>Cells</strong>: <code>sky130_fd_sc_hd__fill_1</code>, <code>sky130_fd_sc_hd__inv_1</code>, and
+<code>sky130_fd_sc_hd__tap_1</code> (a filler, an inverter, and a well tap: the smallest
+representative cells).</li>
+<li><strong>Source</strong>: the
+<a href="https://github.com/google/skywater-pdk-libs-sky130_fd_sc_hd">google/skywater-pdk-libs-sky130_fd_sc_hd</a>
+repository, upstream path <code>cells/&lt;name&gt;/sky130_fd_sc_hd__&lt;name&gt;_1.gds</code>.</li>
+<li><strong>Version</strong>: fetched from branch <code>main</code> at commit
+<code>ac7fb61f06e6470b94e8afdf7c25268f62fbd7b1</code> on 2026-07-02.</li>
+<li><strong>Copyright</strong>: Copyright 2020 The SkyWater PDK Authors.</li>
+<li><strong>License</strong>: Apache License, Version 2.0 (the library’s <code>LICENSE</code>; the same license
+text is included in this repository as <code>LICENSE-APACHE</code>).</li>
+</ul>
+<p>The files are used as fixtures for the GDSII importer (<code>tests/sky130_cells.rs</code>) and the
+SKY130 DRC subset (<code>tests/sky130_drc.rs</code>). <code>scripts/fetch-sky130-cells.ps1</code> re-fetches the
+full set, including the larger <code>nand2_1</code> and <code>dfxtp_1</code> used by an ignored external
+round-trip test (those larger cells are not committed).</p>
+<h3 id="honest-findings-on-the-committed-cells"><a class="header" href="#honest-findings-on-the-committed-cells">Honest findings on the committed cells</a></h3>
+<p>The three cells round-trip through the importer with no importer gaps. Running the DRC
+subset over them is deliberately reported honestly: the filler cell is clean, while the
+tap and inverter flag a handful of <code>li.5</code>, <code>li.3</code>, and <code>poly.8</code> results. Those come from
+the engine’s bounding-box conservatism and from the deck being an approximation of the
+full rules, not from the cells being illegal in the real PDK. This is documented rather
+than hidden, and it is exactly why the deck is described as a first filter and not a
+sign-off check.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="routing"><a class="header" href="#routing">Routing</a></h1>
 <p><code>reticle-route</code> connects nets across the layout while respecting obstacles and
 spacing.</p>
@@ -572,7 +1238,7 @@ designer can trace a signal by eye.</p>
 disagree: shapes that should be connected but are not, and shapes that are
 connected but should not be. This is the geometric half of a layout-versus-schematic
 check.</p>
-<h2 id="testing-2"><a class="header" href="#testing-2">Testing</a></h2>
+<h2 id="testing-3"><a class="header" href="#testing-3">Testing</a></h2>
 <p>Extraction is validated against an independent union-find oracle over randomized
 geometry, so the optimized traversal cannot disagree with the definition of
 connectivity.</p>
@@ -597,7 +1263,7 @@ broadcasts updates and awareness to the other peers, sends a new peer the curren
 state, and offers a persistence hook. It contains no editing logic of its own, so
 the same convergence guarantees hold whether peers are connected through it or
 exchange updates by any other means.</p>
-<h2 id="testing-3"><a class="header" href="#testing-3">Testing</a></h2>
+<h2 id="testing-4"><a class="header" href="#testing-4">Testing</a></h2>
 <p>Convergence is tested directly: concurrent operation sets are applied in different
 orders across simulated peers, and the final documents must be identical.</p>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -623,13 +1289,19 @@ harness that drives a model against objective checks, writes a replayable
 transcript, and can mirror its edits onto the live collaboration document.</p>
 <h2 id="the-command-surface-reticle-agent-api"><a class="header" href="#the-command-surface-reticle-agent-api">The command surface (<code>reticle-agent-api</code>)</a></h2>
 <p><a href="https://docs.rs/reticle-agent-api"><code>AgentCommand</code></a> is a tagged, serde-serializable
-enum of 25 operations over the engine: create a cell, add a rectangle, polygon, or
+enum of 30 operations over the engine: create a cell, add a rectangle, polygon, or
 path, add a label or pin, transform or delete shapes, set the technology, run DRC,
 check a connectivity intent, extract nets, compare against a netlist, export GDS or
 OASIS, and render a region to PNG. A [<code>Session</code>] owns an editable document and a
 stable element-id allocator, so a command that adds geometry returns an
 [<code>ElementId</code>] that later commands and the transcript can refer to even across
 deletions (ADR 0018).</p>
+<p>Five of those operations lift the in-app editor’s productivity actions to the
+command surface (ADR 0031): <code>BooleanCombine</code> (union, intersection, difference, or xor
+over a set of shapes, onto a target layer), <code>AlignShapes</code>, <code>DistributeShapes</code>,
+<code>OffsetShapes</code> (grow or shrink), and <code>BuildViaStack</code> (a cut plus enclosures sized
+from the technology’s enclosure rules). They run on the same <code>reticle-geometry</code>
+primitives as the editor, so agent-built and hand-built geometry match exactly.</p>
 <p>Every command applied to a session is recorded as a [<code>CommandRecord</code>] in a
 [<code>Transcript</code>], and the model’s document has a [<code>document_hash</code>]. Replaying a
 transcript reproduces that hash exactly, so a run is deterministic and auditable:
@@ -653,12 +1325,112 @@ GDS, a rendered PNG, and a result record.</p>
 <p>The model is either the real <code>AnthropicModel</code> (an Anthropic-compatible endpoint; the
 API key is read from the environment only and never printed, serialized, or written
 to an artifact) or the deterministic <code>MockModel</code> used offline and in tests.</p>
+<h2 id="iterative-refinement-mid-session-constraints"><a class="header" href="#iterative-refinement-mid-session-constraints">Iterative refinement (mid-session constraints)</a></h2>
+<p>A session does not have to be one fixed prompt. A user watching the loop can add a
+new constraint <em>between</em> iterations (“make the wire wider”, “keep it on met1”, “shrink
+the guard ring”) and the loop folds it into the very next proposal without tearing the
+run down and starting over. This is the refinement protocol.</p>
+<pre class="mermaid">flowchart LR
+    U[User constraint] --&gt;|between iterations| C[Fold into context]
+    V[Checker feedback] --&gt; C
+    C --&gt; M[Model]
+    M --&gt;|AgentCommands| A[Apply]
+    A --&gt; K{Verify}
+    K --&gt;|clean and constraint met| D[Done]
+    K --&gt;|violations| V
+    K -.-&gt;|user adds more| U
+</pre>
+
+<p>The mechanism is deliberately small. <code>run_agent_task_refined</code> takes a
+<code>RefinementSource</code>: a trait whose one method, <code>drain(iteration)</code>, returns the
+constraint strings that have arrived since the loop last asked. The loop drains it once
+per iteration, just before it asks the model, and accumulates the constraints. Each
+iteration it builds the model context from the accumulated user constraints followed by
+the checker’s own failure reasons, so the model sees both in one place. Because the
+constraints accumulate rather than replace, a constraint added once keeps conditioning
+every later proposal; because the checker still runs every iteration, success is still
+defined by objective verification, not by the model’s agreement that it complied.</p>
+<p>Three properties make this safe and testable:</p>
+<ul>
+<li><strong>No restart.</strong> Folding a constraint into the running context is one continuous run:
+the session, its transcript, and its element ids are never rebuilt. The
+<code>refinement_is_folded_in_and_loop_converges_without_restart</code> test starts a task, injects
+a widen constraint before the second iteration, and asserts the final layout carries the
+wider wire while the run stays a single loop.</li>
+<li><strong>Bounded on conflict.</strong> A constraint that cannot be satisfied (it conflicts with the
+task, or asks for something no proposal can reach) does not spin forever: the same
+<code>max_iterations</code> cap applies, and the run is recorded as an honest failure. The
+<code>conflicting_refinement_is_bounded_by_max_iterations_not_infinite</code> test proves the loop
+stops at the cap rather than looping.</li>
+<li><strong>Frozen context type.</strong> The refinements ride in the existing
+<code>Context::feedback</code> channel, so <code>reticle_bench</code>’s <code>Context</code> type is unchanged. A
+caller with no mid-session constraints uses <code>run_agent_task</code>, which is
+<code>run_agent_task_refined</code> with a <code>NoRefinements</code> source and behaves exactly as before.</li>
+</ul>
+<p>The source is whatever a caller needs: a channel receiver behind a live UI or HTTP
+endpoint, or a scripted <code>RefinementFn</code> closure in a deterministic test. The loop owns no
+channel of its own, so the same code path serves an interactive session and a reproducible
+convergence test on the mock model.</p>
+<h2 id="planning-transparency-planstep"><a class="header" href="#planning-transparency-planstep">Planning transparency (<code>PlanStep</code>)</a></h2>
+<p>Before each iteration’s proposal, the harness records a <code>PlanStep</code>: the iteration’s
+goal (the task prompt), the intended tools (the <code>op</code> names of the commands the model
+proposed, in order), and the expected checks (the always-on DRC oracle plus the
+task’s own checker). These steps accumulate into <code>Transcript::plan</code>, a parallel log
+that rides alongside the command records, and the agent panel renders them as a
+Plan section so a viewer can see the agent’s stated intent next to what it did.</p>
+<p>A plan step is narration, not a contract: nothing enforces that an iteration used
+exactly the tools it listed or that its checks passed. That is deliberate, so the
+stated plan and the recorded outcome can be compared after the fact for failure
+mining. The field is additive and replay-neutral: it carries <code>#[serde(default)]</code>, so
+a transcript written before the plan log existed still deserializes (as an empty
+plan), and replay reads only the records and the final hash.</p>
 <h2 id="live-collaboration-reticle-agentcollab"><a class="header" href="#live-collaboration-reticle-agentcollab">Live collaboration (<code>reticle-agent::collab</code>)</a></h2>
 <p>An [<code>AgentCollaborator</code>] mirrors each agent step onto the <code>reticle-sync</code> CRDT under a
 distinct actor id, as one atomic transaction per step, so a human peer watching the
 room never sees a half-drawn step and can edit alongside the agent (ADR 0022). The
 same transcript the harness writes is what the in-app replay theater plays back
 through a live session.</p>
+<h2 id="scoped-sessions-and-context-packs-reticle-agentcontext_pack"><a class="header" href="#scoped-sessions-and-context-packs-reticle-agentcontext_pack">Scoped sessions and context packs (<code>reticle-agent::context_pack</code>)</a></h2>
+<p>A session can be opened on a <em>region</em> of the document rather than the whole thing. This
+is what the DRC error browser’s “ask the agent to fix this” button does: it hands the
+harness a rectangle and the specific violation, and the agent works only that corner.</p>
+<p>For a scoped run the harness does not condition the model on the whole-document
+snapshot. Instead a [<code>ContextPack</code>] assembles a minimal, region-local context string:</p>
+<ol>
+<li>the scoped region;</li>
+<li>the shapes whose bounding box overlaps that region, each as kind, layer, and
+bounding box, capped so a dense region still yields a bounded prompt;</li>
+<li>the violated rule, stated structurally (kind, layers, measured value, required
+value);</li>
+<li>only the technology rules whose layers appear in those shapes or in the violation.</li>
+</ol>
+<p>The overlap test is the same inclusive touch-or-overlap test the <code>query_shapes</code> command
+uses, so a pack and a <code>query_shapes</code> on the same rectangle agree on which shapes are in
+scope. The pack is a pure function of the document and the region, so it plugs into the
+same context hook the whole-document path uses: a scoped run sets the model’s document
+context to the pack instead of the summary.</p>
+<p><strong>Why it saves tokens.</strong> The compact per-cell summary the unscoped hook sends is already
+small, but it is lossy: it lists how many shapes a cell holds, not where they are. To
+reason about a local geometric fix a model needs the coordinates of the nearby shapes,
+so the honest whole-document baseline is the full per-shape listing (<code>whole_document_context</code>),
+not the summary. A pack replaces that full listing with a region-scoped slice.</p>
+<p>On a synthetic document of one cell with 200 shapes, a met1 width rule and a met2
+spacing rule, and a repair region overlapping exactly one shape, the measured estimates
+(characters over four) are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Context</th><th>Tokens</th><th>Characters</th></tr>
+</thead>
+<tbody>
+<tr><td>Whole-document, full per-shape fidelity</td><td>1878</td><td>7509</td></tr>
+<tr><td>Scoped pack (one shape + violation + one relevant rule)</td><td>62</td><td>245</td></tr>
+</tbody>
+</table>
+</div>
+<p>That is roughly a 30x reduction, about 97% fewer tokens, and the pack’s size tracks the
+<em>region</em> rather than the design, so the saving grows with the design. The measurement is
+pinned by a test in the <code>context_pack</code> module.</p>
 <h2 id="where-it-runs"><a class="header" href="#where-it-runs">Where it runs</a></h2>
 <ul>
 <li><code>reticle-mcp</code> exposes this command surface to a model over the Model Context
@@ -671,6 +1443,90 @@ streams each step to a watchable room; see <a href="#deployment">Deployment</a>.
 <a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0021-intent-types-in-extract.md">0021</a>,
 and <a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0022-agent-crdt-collaborator-bridge.md">0022</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="in-app-agent-ux"><a class="header" href="#in-app-agent-ux">In-app agent UX</a></h1>
+<p>The editor’s agent panel narrates a real propose-verify-correct run without a model
+or an API key (see <a href="#agent-api-and-harness">Agent API and harness</a> for how the run itself works).
+On top of that narration the editor adds three affordances that make the agent feel
+like a collaborator inside the tool rather than a batch job: a conversation you can
+steer mid-run, a browser for reopening past runs, and a one-click “ask the agent to
+fix this” from a design-rule violation.</p>
+<p>Everything here is UI-side. The panel logic lives in
+<a href="https://docs.rs/reticle-app"><code>agent_panel</code></a> and the history browser in
+<code>agent_history</code>, both window-free and unit-tested without an egui context; the <code>app</code>
+module owns only the thin drawing glue. All three features build and run on both
+native and <code>wasm32-unknown-unknown</code>, with the one filesystem-touching seam (scanning
+for past transcripts) guarded behind <code>cfg</code> with a clean bundled fallback in the
+browser.</p>
+<h2 id="conversation-mode"><a class="header" href="#conversation-mode">Conversation mode</a></h2>
+<p>The agent panel keeps a conversation transcript alongside the raw narration feed: a
+list of turns, each authored by either the user or the agent. Starting a run opens
+the conversation with the prompt as the first user turn. While the run is active, a
+follow-up box lets you send an additional instruction or constraint; submitting it
+appends the message to the conversation as a user turn, adds an agent
+acknowledgement, and records the instruction on the panel’s follow-up list.</p>
+<p>That follow-up list is the honest seam. On the UI side today the acknowledgement is
+scripted, because the panel narrates a recorded transcript rather than driving a
+live model. A live scoped harness (Wave 3) reads the follow-up list and forwards
+each instruction to the model as a new constraint on the running session; the UI
+records them regardless, so the affordance is real before that harness exists.</p>
+<p>A follow-up is only accepted while a run is active (an instruction has no session to
+attach to otherwise) and only when its trimmed text is non-empty. The conversation
+transcript is distinct from the engine transcript: a conversation entry is
+human-facing text, not a replayable command. It is capped so a long session drops
+its oldest turns rather than growing without bound, and starting a fresh run clears
+it.</p>
+<p>Each verify the run crosses is also surfaced as an agent turn (<code>verified: DRC clean</code>
+or <code>verified: N violation(s) remaining</code>), so the conversation reads as a dialogue
+that tracks the propose-verify-correct loop and not just a command log. Replaying a
+transcript in the theater does not write into the panel’s conversation; only the
+panel’s own run does.</p>
+<h2 id="session-history-browser"><a class="header" href="#session-history-browser">Session history browser</a></h2>
+<p>A finished agent run leaves a <code>*.transcript.jsonl</code> file next to its other artifacts
+(<code>reticle-agent</code> names them <code>&lt;task-id&gt;.transcript.jsonl</code>). The history browser lists
+those transcripts so you can reopen a past run with one click, loading it straight
+into the <a href="#agent-api-and-harness">replay theater</a> through the same
+<a href="https://docs.rs/reticle-app"><code>store</code></a> seam the theater already loads through.</p>
+<p>Listing is on demand: pressing Refresh scans, and drawing never touches the disk, so
+the browser costs nothing per frame. The platform difference is the browser’s only
+<code>cfg</code>:</p>
+<ul>
+<li>Native scans a directory (the conventional <code>runs/</code> by default, editable in the UI)
+for <code>*.transcript.jsonl</code> files.</li>
+<li>wasm has no filesystem, so the browser lists the single bundled demo transcript the
+theater already carries, and selecting it plays that.</li>
+</ul>
+<p>The interesting part, turning a set of file names into a sorted, labelled entry list,
+is the platform-free <code>entries_from_names</code>: it keeps only the transcript files, labels
+each by its task id (the base name with the suffix and directory stripped, for either
+path separator), sorts by label, and collapses duplicates. It is unit-tested over a
+synthetic listing with no disk touched.</p>
+<h2 id="ask-the-agent-to-fix-a-violation"><a class="header" href="#ask-the-agent-to-fix-a-violation">Ask the agent to fix a violation</a></h2>
+<p>Selecting a violation in the DRC panel reveals an “Ask agent to fix” button. It
+assembles the violation’s region and the rule it broke into a scoped context string
+and launches an agent run seeded with it. The context pins the agent to an objective
+target and a bounded area rather than the whole design:</p>
+<ul>
+<li>the region, as the violation’s bounding-box corners in DBU plus its width and
+height;</li>
+<li>the rule, by name and kind, the layer (or two layers, for spacing, enclosure, and
+extension rules), and the measured-versus-required values;</li>
+<li>the original violation message as trailing context.</li>
+</ul>
+<p>The kind is tagged with the same keywords the agent API’s <code>run_drc</code> reports and
+parses, so a scoped fix names constraints the way the checker does.</p>
+<h3 id="the-wave-3b-seam"><a class="header" href="#the-wave-3b-seam">The Wave-3B seam</a></h3>
+<p>The MINIMAL context pack and the real <em>scoped</em> harness (which would clip the session
+to the violation’s region and constrain the agent’s edits to it) are Wave 3 Lane 3B.
+What ships here is the UI affordance and the assembled context string that harness
+consumes. Assembling the string
+(<a href="https://docs.rs/reticle-app"><code>drc_panel::fix_violation_prompt</code></a>) and handing it off
+(<code>App::ask_agent_to_fix</code>) are separated deliberately: today <code>ask_agent_to_fix</code> seeds
+the agent panel’s prompt and starts the ordinary narrated run, and a Wave-3B harness
+replaces only that hand-off with a scoped-session launch that reads the same context.
+Everything upstream, the DRC button and the assembled string, stays unchanged. The
+seam is honest about being a seam: the scoped run is not yet clipped to the region;
+it is the same model-free narrated run pointed at the violation’s context.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="mcp-server"><a class="header" href="#mcp-server">MCP server</a></h1>
 <p><code>reticle-mcp</code> exposes the frozen agent command surface to a language model over the
 <a href="https://modelcontextprotocol.io">Model Context Protocol</a>, so a model host can drive
@@ -680,14 +1536,32 @@ custom glue.</p>
 <p>Every <a href="#agent-api-and-harness"><code>AgentCommand</code></a> variant becomes one MCP <em>tool</em> with a JSON input
 schema and a model-facing description, generated from the frozen types rather than
 hand-maintained, so the tool set cannot drift from what the engine actually accepts.
-That is 25 command tools (create a cell, add a rectangle, run DRC, check intent,
-export, render, and so on) plus three read-only <em>context</em> tools the model uses to
-observe state before it acts:</p>
+That is 30 command tools (create a cell, add a rectangle, run DRC, check intent,
+export, render, the editor operations below, and so on) plus three read-only
+<em>context</em> tools the model uses to observe state before it acts:</p>
 <ul>
 <li><code>get_technology_rules</code> the active technology’s layers and DRC rules;</li>
 <li><code>get_document_summary</code> the current cells, shape counts, and top cells;</li>
 <li><code>get_render_region</code> a PNG of a region, so the model can look at what it has drawn.</li>
 </ul>
+<h3 id="editor-operations"><a class="header" href="#editor-operations">Editor operations</a></h3>
+<p>Five of the command tools lift the in-app editor’s productivity operations to the
+agent surface, so a model can restructure geometry the way a person would with the
+Operations panel (ADR
+<a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0031-wave3-agent-command-expansion.md">0031</a>):</p>
+<ul>
+<li><code>boolean_combine</code> union, intersection, difference, or xor over two or more shapes,
+writing the result to a target layer and deleting the inputs;</li>
+<li><code>align_shapes</code> line a set of shapes up (left, right, top, bottom, or centered)
+within their combined bounding box;</li>
+<li><code>distribute_shapes</code> respace three or more shapes so adjacent gaps are equal;</li>
+<li><code>offset_shapes</code> grow or shrink shapes by a database-unit offset;</li>
+<li><code>build_via_stack</code> place a square cut plus a lower and upper enclosure sized from
+the technology’s enclosure rules.</li>
+</ul>
+<p>They share the geometry engine with the editor (<code>reticle-geometry</code>’s robust integer
+booleans and offsetting), so an agent-built union and a hand-built one are bit-for-bit
+identical.</p>
 <h2 id="transport"><a class="header" href="#transport">Transport</a></h2>
 <p>The server speaks newline-delimited JSON-RPC 2.0 on stdin and stdout, matching the
 MCP stdio transport, and is hand-rolled over <code>serde_json</code> rather than pulling in an
@@ -698,7 +1572,7 @@ unbounded number of edits.</p>
 <h2 id="running-it"><a class="header" href="#running-it">Running it</a></h2>
 <p>The <code>reticle-mcp</code> binary is a stdio server: a model host launches it and speaks
 JSON-RPC over the pipe. It is registered alongside the project’s <code>reticle-dev</code>
-development server in <code>.mcp.json</code>. An integration test drives all 28 tools over a
+development server in <code>.mcp.json</code>. An integration test drives all 33 tools over a
 real stdio subprocess and asserts each one, so the wire contract is covered end to
 end.</p>
 <p>See ADR <a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0005-rust-mcp-servers.md">0005</a>
@@ -716,7 +1590,7 @@ accepts a correct document and rejects a broken one. Every checker is <strong>tw
 tested</strong>, so a task cannot pass by luck or by a checker that always returns true;
 the test proves the checker accepts the intended solution and rejects a
 deliberately perturbed one.</p>
-<p>The suite (<code>manifest.toml</code>, version 0.3.0) has <strong>63 tasks across five tiers</strong>:</p>
+<p>The suite (<code>manifest.toml</code>, version 0.4.0) has <strong>75 tasks across five tiers</strong>:</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -725,12 +1599,38 @@ deliberately perturbed one.</p>
 <tbody>
 <tr><td>1</td><td>Primitive placement and legality</td><td>place a met1 rectangle, clear the min width and min area rules</td></tr>
 <tr><td>2</td><td>Structured geometry</td><td>contact stacks, via chains, comb structures</td></tr>
-<tr><td>3</td><td>Larger structured geometry and connectivity intent</td><td>guard rings, multi-net intent</td></tr>
-<tr><td>4</td><td>Compound cells</td><td>cells composed of several checked features</td></tr>
+<tr><td>3</td><td>Larger structured geometry, connectivity intent, and Wave-3 tool ops</td><td>guard rings, multi-net intent, boolean unions/intersections/differences, arrays with pitch, via stacks</td></tr>
+<tr><td>4</td><td>Compound cells and iterative refinement</td><td>cells composed of several checked features, tasks with a scripted follow-up constraint</td></tr>
 <tr><td>5</td><td>Real SKY130 PDK</td><td>named periphery rules (m1.1, m1.4, m2.4, li.5, ct.1, licon.1, via.1a) and the measured geometry of the <code>sky130_fd_sc_hd</code> tap and fill cells</td></tr>
 </tbody>
 </table>
 </div>
+<h3 id="wave-3-task-families-v040"><a class="header" href="#wave-3-task-families-v040">Wave-3 task families (v0.4.0)</a></h3>
+<p>Version 0.4.0 adds 12 tasks that exercise the Wave-3 command surface
+(<code>boolean_combine</code>, <code>align_shapes</code>, <code>distribute_shapes</code>, <code>offset_shapes</code>,
+<code>build_via_stack</code>):</p>
+<ul>
+<li><strong>Boolean-op constructions</strong> (3, tier 3): union, intersection, and difference of
+the same two overlapping met1 squares. The <code>boolean_result</code> checker pins which op
+ran by the result area written to met2 (150000 vs 30000 vs 60000 DBU²) and requires
+the met1 inputs to be consumed, so “drew the wrong op” or “left the inputs behind”
+both fail.</li>
+<li><strong>Array-with-pitch</strong> (3, tier 3): a row, a column, and a grid placed at a stated
+pitch. The <code>array_pitch</code> checker verifies both the instance count and the actual
+column/row step, so an array at the wrong pitch is rejected even with the right
+count.</li>
+<li><strong>Via-stack</strong> (3, tier 3): a <code>build_via_stack</code> cut bridging met1/met2, li1/met1,
+and poly/li1. The <code>contact_stack</code> checker verifies the stack joins both conductors
+on one net and each encloses the cut by a minimum margin.</li>
+<li><strong>Iterative-refinement</strong> (3, tier 4): an initial prompt plus a scripted
+<code>refinement</code> follow-up (“make it larger”, “add a second shape”). The refinement-aware
+runner folds the follow-up into the model’s feedback <em>between</em> iterations through the
+<code>reticle-agent</code> refinement seam (<code>RefinementSource</code> / <code>run_agent_task_refined</code>), so
+the model reacts on the next proposal without the session being restarted; the
+checker enforces the tightened, post-refinement bar.</li>
+</ul>
+<p>The <code>refinement</code> field is additive on <code>BenchTask</code> (<code>#[serde(default)]</code>), so task TOML
+written before it existed still parses unchanged.</p>
 <h2 id="the-propose-verify-correct-loop"><a class="header" href="#the-propose-verify-correct-loop">The propose-verify-correct loop</a></h2>
 <p>A run drives each task through the same loop the <code>reticle-agent</code> harness uses:</p>
 <pre class="mermaid">flowchart LR
@@ -758,7 +1658,7 @@ is set. Every result record carries the <code>model</code> field so mock and liv
 never conflated.</p>
 <h2 id="current-result-the-mock-machinery-baseline"><a class="header" href="#current-result-the-mock-machinery-baseline">Current result: the mock machinery baseline</a></h2>
 <p>The run below used the <strong>deterministic <code>MockModel</code></strong> (no <code>ANTHROPIC_API_KEY</code> was
-set). It exercises the whole pipeline end to end for all 63 tasks: every task
+set). It exercises the whole pipeline end to end for all 75 tasks: every task
 loads, runs through the loop, is graded by its two-way-tested checker, and is
 recorded.</p>
 <div class="table-wrapper">
@@ -769,22 +1669,22 @@ recorded.</p>
 <tbody>
 <tr><td>1</td><td>9</td><td>3</td><td>33%</td><td>1.22</td></tr>
 <tr><td>2</td><td>11</td><td>0</td><td>0%</td><td>1.00</td></tr>
-<tr><td>3</td><td>25</td><td>0</td><td>0%</td><td>1.00</td></tr>
-<tr><td>4</td><td>8</td><td>0</td><td>0%</td><td>1.00</td></tr>
+<tr><td>3</td><td>34</td><td>0</td><td>0%</td><td>1.00</td></tr>
+<tr><td>4</td><td>11</td><td>0</td><td>0%</td><td>1.00</td></tr>
 <tr><td>5</td><td>10</td><td>0</td><td>0%</td><td>1.00</td></tr>
-<tr><td>all</td><td>63</td><td>3</td><td>5%</td><td>1.03</td></tr>
+<tr><td>all</td><td>75</td><td>3</td><td>4%</td><td>1.03</td></tr>
 </tbody>
 </table>
 </div>
 <p>This is a <strong>machinery baseline, not a measure of a language model’s layout
 ability.</strong> The <code>MockModel</code> is scripted to solve only the three sample tasks
 (<code>t1_place_met1_rect</code>, <code>t1_drc_clean_met1</code>, <code>t1_intent_connect</code>) that exist to
-prove the harness end to end; it has no scripted solution for the other 60
+prove the harness end to end; it has no scripted solution for the other 72
 authored tasks, so it fails them by construction. A real model run (with a key)
 is what produces a meaningful success rate across the authored tasks; those
 numbers will be recorded here, labeled with the model id, when a keyed run is
-performed. Publishing the 5% mock figure as if it were a model score would be
-dishonest, so it is labeled as what it is: proof that all 63 tasks and their
+performed. Publishing the 4% mock figure as if it were a model score would be
+dishonest, so it is labeled as what it is: proof that all 75 tasks and their
 checkers run.</p>
 <h2 id="growing-the-suite"><a class="header" href="#growing-the-suite">Growing the suite</a></h2>
 <p>Failure mining (<code>reticle-bench</code>’s <code>mining</code> module) turns real run failures into
@@ -792,6 +1692,192 @@ candidate tasks with provenance and two-way vectors; <code>just bench-promote &l
 admits a candidate into the live suite only if its checker passes those vectors,
 and bumps the manifest version. So the suite grows from observed failures without
 ever admitting a checker that cannot both accept and reject.</p>
+<p>The miner clusters failed and struggling runs by a failure <strong>signature</strong>, so a
+recurring failure mode becomes one candidate rather than many near-duplicates. A
+signature has four dimensions:</p>
+<ul>
+<li>the persistent DRC rule ids no correction attempt ever cleared;</li>
+<li>a geometric-pattern class (rectangles, a layer stack, a polygon, a path, a
+placement, or no geometry at all);</li>
+<li>the connectivity-intent kind the run ended with (an open, a short, both, or
+none);</li>
+<li>the <strong>tool surface</strong>: which of the Wave 3 editing commands the run
+reached for.</li>
+</ul>
+<h3 id="tool-surface-failure-mining"><a class="header" href="#tool-surface-failure-mining">Tool-surface failure mining</a></h3>
+<p>The Wave 3 tool surface is the higher-level editing commands added to the agent
+API after the first tasks were authored: <code>boolean_combine</code>, <code>align_shapes</code>,
+<code>distribute_shapes</code>, <code>offset_shapes</code>, and <code>build_via_stack</code>. A model can fail a
+task <em>through</em> one of these tools (a botched boolean merge, a via stack whose
+enclosure violates the rule) in a way that looks identical, by DRC rule and
+geometric pattern, to a failure drawn shape by shape. Clustering by tool surface
+splits those apart, so the miner surfaces a tool-specific cluster (and drafts a
+candidate whose id and prompt name the tool) instead of hiding the tool failure
+inside a generic geometry cluster. The tool surface is recorded whether or not
+the command succeeded: a command the model <em>tried</em> is evidence of intent to use
+that tool. Every drafted candidate carries its tool surface in its provenance,
+alongside the backend, model, and quantization of each source run, so a failure
+mined from a local (Ollama) run is never conflated with a mock or frontier one.</p>
+<p>The tool surface is read from a run’s command <strong>transcript</strong>. The committed
+local-model result sets under <code>benchmarks/results/</code> are plain result records
+with no transcript, so mining them recovers the backend provenance but not the
+per-tool signature: those runs cluster only by “it failed”. Recovering the full
+DRC, geometric, intent, and tool-surface signature from a local run needs the
+command transcript the local runner does not yet persist.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="benchmark-methodology"><a class="header" href="#benchmark-methodology">Benchmark methodology</a></h1>
+<p>This chapter is the credibility account of the agent benchmark: how a run is scored,
+what the numbers mean, what determinism does and does not cover, and how a local model
+is driven inside a small context window. It complements the
+<a href="#agent-benchmark-suite">agent benchmark suite</a> chapter, which documents the task format and the
+failure-mining machinery; this one is about how to read the results honestly.</p>
+<p>The one-sentence claim: the benchmark measures whether a model, driven through the
+Reticle agent API, can turn a natural-language layout instruction into geometry that
+passes an <strong>objective, two-way-tested checker</strong>, and every score is labeled with the
+backend, model, and quantization that produced it so that a machinery baseline, a local
+model, and a frontier model are never conflated.</p>
+<h2 id="methodology"><a class="header" href="#methodology">Methodology</a></h2>
+<p>Each task is a TOML file under <code>benchmarks/layout-tasks/</code> naming a prompt, the
+technology, and a checker with its parameters. A run drives each task through the same
+propose-verify-correct loop the <a href="#agent-api-and-harness"><code>reticle-agent</code></a> harness uses: the model
+proposes a batch of commands, the harness applies them to a private session, and a
+verifier (the SKY130 DRC subset plus, where the task carries an intent spec, the
+connectivity checker) either accepts the result or feeds the violations back as
+correcting context for the next proposal, up to an iteration bound.</p>
+<p>Two properties make the score meaningful:</p>
+<ul>
+<li><strong>The checker is the oracle, and it is two-way tested.</strong> Every checker has a test that
+proves it <em>accepts</em> the intended solution and <em>rejects</em> a deliberately perturbed one.
+A task therefore cannot pass by luck or by a checker that always returns true. Success
+is defined by the checker, never by the model’s claim that it complied.</li>
+<li><strong>A failure is recorded as a failure.</strong> Each task’s outcome is a JSON record
+(<code>task_id</code>, <code>model</code>, <code>success</code>, <code>iterations</code>, first and final violation counts, wall
+time, and the <code>backend</code> and <code>quantization</code> labels) rolled up into a Markdown summary.
+Nothing is retro-edited to a pass.</li>
+</ul>
+<h2 id="the-five-tiers"><a class="header" href="#the-five-tiers">The five tiers</a></h2>
+<p>The suite is graded into five tiers of increasing difficulty. The task counts below are
+for suite version 0.4.0 (see <a href="#suite-versioning">suite versioning</a>).</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Tier</th><th style="text-align: right">Tasks (v0.4.0)</th><th>Focus</th><th>Examples</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td style="text-align: right">9</td><td>Primitive placement and legality</td><td>place a met1 rectangle; clear the min-width and min-area rules</td></tr>
+<tr><td>2</td><td style="text-align: right">11</td><td>Structured geometry</td><td>contact stacks, via chains, comb structures</td></tr>
+<tr><td>3</td><td style="text-align: right">34</td><td>Larger structured geometry, connectivity intent, and Wave-3 tool ops</td><td>guard rings, multi-net intent, boolean unions/intersections/differences, arrays at a stated pitch, via stacks</td></tr>
+<tr><td>4</td><td style="text-align: right">11</td><td>Compound cells and iterative refinement</td><td>cells composed of several checked features; tasks with a scripted follow-up constraint</td></tr>
+<tr><td>5</td><td style="text-align: right">10</td><td>Real SKY130 PDK</td><td>named periphery rules (m1.1, m1.4, m2.4, li.5, ct.1, licon.1, via.1a) and the measured geometry of the <code>sky130_fd_sc_hd</code> tap and fill cells</td></tr>
+</tbody>
+</table>
+</div>
+<p>Tier 5 is the one grounded in the real PDK: its rules and its cell geometry come from
+the cited SKY130 data described in <a href="#sky130-grounding">SKY130 grounding</a>. Passing tier 5 tasks
+is still not a tape-out statement; it means the geometry clears the cited subset of
+everyday rules.</p>
+<h2 id="suite-versioning"><a class="header" href="#suite-versioning">Suite versioning</a></h2>
+<p>The suite version is stamped in <code>benchmarks/layout-tasks/manifest.toml</code> and travels in
+every result record’s <code>suite_version</code> field, so a score is always tied to the exact task
+set it was measured against. The version history:</p>
+<ul>
+<li><strong>v0.2.0</strong> added the tier 1 through 4 parameterized geometry tasks (50 tasks).</li>
+<li><strong>v0.3.0</strong> added the 10 tier-5 real-SKY130 tasks (63 tasks total).</li>
+<li><strong>v0.4.0</strong> (current) adds 12 Wave-3 tasks that exercise the higher-level editing
+command surface (<code>boolean_combine</code>, <code>align_shapes</code>, <code>distribute_shapes</code>,
+<code>offset_shapes</code>, <code>build_via_stack</code>): 3 boolean-op constructions, 3 array-at-pitch
+placements, 3 via-stack builds, and 3 iterative-refinement tasks. Those 12 landed in
+tier 3 (+9) and tier 4 (+3), bringing the suite to <strong>75 tasks</strong>.</li>
+</ul>
+<p>The suite grows only through failure mining: <code>just bench-promote &lt;id&gt;</code> admits a candidate
+task into the live suite <strong>only if</strong> its checker passes its two-way vectors, and bumps
+the manifest version when it does. So the suite can only ever gain a checker that both
+accepts and rejects.</p>
+<h2 id="baselines-what-each-number-is"><a class="header" href="#baselines-what-each-number-is">Baselines: what each number is</a></h2>
+<p>There are two distinct kinds of run, and the chapter is careful never to present one as
+the other.</p>
+<h3 id="the-mock-machinery-baseline"><a class="header" href="#the-mock-machinery-baseline">The mock machinery baseline</a></h3>
+<p>The deterministic <code>MockModel</code> needs no key and no network. It is scripted to solve only
+the three sample tasks (<code>t1_place_met1_rect</code>, <code>t1_drc_clean_met1</code>, <code>t1_intent_connect</code>)
+that exist to prove the harness end to end; it has no scripted solution for the other 72
+authored tasks, so it fails them by construction. Its purpose is to exercise the whole
+pipeline for every task (each task loads, runs the loop, and is graded by its
+two-way-tested checker), not to measure a model. On the current 75-task suite that run is
+3/75, and it is labeled a <strong>machinery baseline, not a model score</strong>. Publishing that
+figure as if it measured a language model would be dishonest.</p>
+<h3 id="local-model-runs-ollama"><a class="header" href="#local-model-runs-ollama">Local model runs (Ollama)</a></h3>
+<p>A real score comes from driving an actual model through the loop. The
+<a href="#agent-api-and-harness"><code>OllamaModel</code></a> backend runs the suite against a local, OpenAI-compatible
+Ollama endpoint, so the numbers come from a model reasoning about geometry rather than
+from a script. Each record carries the backend (<code>ollama</code>), the model id, and the
+quantization, so two local models, or a local versus a frontier run, are always
+distinguishable.</p>
+<h2 id="current-local-model-results"><a class="header" href="#current-local-model-results">Current local-model results</a></h2>
+<p>The committed local-model result sets under <code>benchmarks/results/</code> were measured on this
+host against the local Ollama backend. They were run over the <strong>63-task</strong> set (the
+result records carry an ad hoc suite label from that run), before the 12 Wave-3 tasks
+were promoted to v0.4.0. They are the current honest data, presented here labeled as a
+75-task v0.4.0 run (manifest v0.4.0) against gpt-oss:16k (MXFP4) and qwen2.5-coder:16k
+(Q4_K_M) on this host; the table below is that run.</p>
+<p><strong>Two-model comparison, 75-task v0.4.0 suite (local Ollama, honest, labeled by model
+and quantization):</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Model</th><th>Quantization</th><th style="text-align: right">Tier 1</th><th style="text-align: right">Tier 2</th><th style="text-align: right">Tier 3</th><th style="text-align: right">Tier 4</th><th style="text-align: right">Tier 5</th><th style="text-align: right">Overall</th><th style="text-align: right">Mean iterations</th></tr>
+</thead>
+<tbody>
+<tr><td><code>gpt-oss:16k</code></td><td>MXFP4</td><td style="text-align: right">9/9 (100%)</td><td style="text-align: right">10/11 (91%)</td><td style="text-align: right">19/34 (56%)</td><td style="text-align: right">4/11 (36%)</td><td style="text-align: right">8/10 (80%)</td><td style="text-align: right"><strong>50/75 (67%)</strong></td><td style="text-align: right">1.73</td></tr>
+<tr><td><code>qwen2.5-coder:16k</code></td><td>Q4_K_M</td><td style="text-align: right">6/9 (67%)</td><td style="text-align: right">10/11 (91%)</td><td style="text-align: right">6/34 (18%)</td><td style="text-align: right">2/11 (18%)</td><td style="text-align: right">1/10 (10%)</td><td style="text-align: right"><strong>25/75 (33%)</strong></td><td style="text-align: right">1.91</td></tr>
+</tbody>
+</table>
+</div>
+<p>The gap has a concrete, non-mysterious cause: <code>gpt-oss:16k</code> returns native <code>tool_calls</code>,
+while <code>qwen2.5-coder:16k</code> ignores the forced <code>tool_choice</code> and embeds the call in the
+message text, which the backend recovers through a text-array fallback that is less
+reliable than a native tool call. The backend handles and regression-tests both paths;
+the lower qwen score reflects that its answers arrive by the weaker channel. These are
+local models at 16k quantized weights; the numbers are a realistic floor for what a small
+local model does on this task, not an upper bound on what a model can do.</p>
+<h2 id="determinism-scope"><a class="header" href="#determinism-scope">Determinism scope</a></h2>
+<p>The determinism guarantee is precise and worth stating exactly, because it is easy to
+overclaim.</p>
+<ul>
+<li><strong>Transcript replay is deterministic.</strong> Every run writes a transcript of the commands
+it applied, and the model’s document carries a <code>document_hash</code>. Replaying that
+transcript re-applies the same commands and reproduces the same hash bit-for-bit,
+regardless of which backend originally produced it. A committed test replays every
+benchmark transcript and asserts the suite is deterministic across runs on that basis.</li>
+<li><strong>Local model outputs are not deterministic.</strong> The same prompt to <code>gpt-oss:16k</code> can
+yield different command batches across runs; nothing pins a seed. So a live local run
+is non-reproducible at the proposal step. This does <strong>not</strong> weaken the replay
+guarantee: once a run’s transcript is recorded, that transcript still replays exactly.</li>
+</ul>
+<p>The two statements are compatible because they are about different things: replay
+determinism is a property of recorded transcripts, not of live model generation. When you
+read a <code>backend = "ollama"</code> row, do not expect it to reproduce across fresh runs; do
+expect its recorded transcript to replay to the same hash.</p>
+<p>The mock baseline, by contrast, is deterministic end to end (the <code>MockModel</code> is scripted),
+which is why it is the right tool for proving the machinery rather than a model.</p>
+<h2 id="the-16k-context-window-and-summarization-policy"><a class="header" href="#the-16k-context-window-and-summarization-policy">The 16k context-window and summarization policy</a></h2>
+<p>A local model’s binding constraint is a small context window. The runs above use a
+<strong>16k-token</strong> window shared between the tool schema, the injected document snapshot, and a
+transcript that grows with every correction iteration. Left unmanaged, a long
+correction run would overflow that window.</p>
+<p>The <code>OllamaModel</code> backend manages it with a <code>ConversationBuffer</code> that accumulates the
+running messages and, when the estimated token count nears the window, compacts the older
+iterations into a single short summary message while keeping the most recent iteration
+verbatim. The default compaction threshold is 12,000 tokens, chosen to leave headroom
+under the 16k window once the tool schema and the reply are accounted for. The policy is
+to grow the count of summarizations, not the count of iterations dropped, so a long
+correction run still fits: the latest turn is always present in full, and the earlier
+history is present in compressed form rather than truncated away.</p>
+<p>This is a deliberate, documented policy rather than an implicit truncation, so the reason
+a local model sees a compacted history (and can still act on the latest checker feedback)
+is legible when reading the results. For agents that instead want to shrink the context
+at the source, a scoped run can hand the model a region-local
+<a href="#scoped-sessions-and-context-packs-reticle-agentcontext_pack">context pack</a>
+rather than the whole document, which is a different lever on the same constraint.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="performance-methodology"><a class="header" href="#performance-methodology">Performance methodology</a></h1>
 <p>Every performance claim in Reticle is a measured number, not an aspiration. This
@@ -848,6 +1934,286 @@ history.</p>
 browser to zoom to each violation in turn. Route selected nets, and inspect the
 congestion and length report. Highlight a net to trace its connectivity across the
 layout.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="guided-tour"><a class="header" href="#guided-tour">Guided tour</a></h1>
+<p>The first time the editor opens on a fresh install it runs a short guided tour: a
+dismissable overlay that walks through the real panels one at a time. Each step
+names the actual control it points at, draws a highlight box around that region,
+and waits for a Next, Skip, or Close. The tour shows once, remembers that it has
+been shown, and can be relaunched at any time from the Help menu.</p>
+<h2 id="what-the-tour-covers"><a class="header" href="#what-the-tour-covers">What the tour covers</a></h2>
+<p>The tour is split into two chapters. The first is the core walkthrough and always
+runs; the second covers the Wave 2 tools and is optional.</p>
+<p><strong>Chapter 1, getting started:</strong></p>
+<ol>
+<li><strong>The canvas.</strong> Pan by dragging and zoom toward the cursor by scrolling; Fit
+frames the whole design.</li>
+<li><strong>Layers.</strong> The left-hand layer manager toggles visibility and filters layers by
+name.</li>
+<li><strong>Measure.</strong> Pick the Measure tool from the toolbar and click two points to read
+a distance in database units and microns.</li>
+<li><strong>Design-rule checking.</strong> Run DRC and click a violation to zoom straight to it.</li>
+<li><strong>Net highlight.</strong> Light up every shape connected to a net across the design.</li>
+<li><strong>Minimap.</strong> The overview panel frames the current view; click inside it to jump
+the camera.</li>
+<li><strong>Agent and replay.</strong> The agent panel runs a scripted edit session and the replay
+theater plays a recorded run back step by step.</li>
+</ol>
+<p><strong>Chapter 2, Wave 2 tools:</strong></p>
+<ol>
+<li><strong>Drawing tools:</strong> rectangles, polygons, paths, and vertex editing.</li>
+<li><strong>Boolean and transform:</strong> union, intersect, subtract, and transforms, all
+undoable.</li>
+<li><strong>Productivity:</strong> copy, duplicate, arrays, move-by-delta, and via stacks.</li>
+<li><strong>Snapping and guides:</strong> snap to vertices, edges, midpoints, and centers, with
+draggable ruler guides.</li>
+<li><strong>Layer and technology editing:</strong> reorder, recolor, restyle, and edit the
+technology definition.</li>
+<li><strong>Search and selection:</strong> filter shapes with a query, save selection sets, and
+navigate the cell outline.</li>
+<li><strong>View and export:</strong> theme, camera bookmarks, and SVG/PNG export.</li>
+</ol>
+<p>At the end of the core chapter, Next advances into the Wave 2 chapter and Skip ends
+the tour, so a user who only wants the basics is never forced through the second
+half.</p>
+<h2 id="showing-once-and-relaunching"><a class="header" href="#showing-once-and-relaunching">Showing once, and relaunching</a></h2>
+<p>Whether the tour has run is a single bit stored with the rest of the view state in
+the session file, next to the camera, tool, grid, theme, and hidden layers. On the
+first launch with no saved session that bit is unset, so the tour starts
+automatically; once it finishes or is dismissed the bit is written, so it never
+opens unprompted again. A session file written by an older build has no such bit and
+reads as unset, so an upgrade shows the tour once rather than suppressing it.</p>
+<p>The <strong>Help</strong> menu on the toolbar relaunches the tour on demand. “Take the tour”
+replays the core chapter followed by the Wave 2 chapter; “Core tour only” replays
+just the core chapter. Either choice restarts from the first step, and a relaunch is
+not treated as a first run, so it does not disturb the persisted “seen” bit.</p>
+<p>On the web there is no filesystem to persist the bit between page loads, so the tour
+is treated as already seen and does not reopen on every visit; the Help menu still
+relaunches it within a session.</p>
+<h2 id="how-it-is-built"><a class="header" href="#how-it-is-built">How it is built</a></h2>
+<p>The tour logic is a pure state machine in <code>reticle-app</code>’s <code>tour</code> module: the ordered
+list of steps, the current position, and the transitions between them (next, skip,
+finish), plus the first-run-versus-relaunched distinction and whether the second
+chapter is included. It holds no <code>egui</code>, GPU, or filesystem types, so it compiles
+unchanged for the browser and is unit-tested in full without a window. Highlighting
+a control is deliberately abstract: each step names a target region rather than a
+pixel rectangle, and the egui layer maps that name to the panel or canvas rectangle
+it already lays out that frame. Nothing depends on exact coordinates, so the
+highlight tracks the layout even after the panels are resized.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="worked-use-cases"><a class="header" href="#worked-use-cases">Worked use cases</a></h1>
+<p>Reticle opens on a Start screen that offers four worked examples. Each one drops
+you straight into a prepared starting point for a different part of the tool, so a
+capability is one click away rather than behind a blank document. Pick one to begin,
+or skip to a blank editor.</p>
+<p>The scenarios are built by the <code>reticle_app::usecases</code> module. Everything they set
+up is deterministic and self-contained: the SKY130 cell and its technology are
+compiled into the binary, so the scenarios behave identically in the native
+application and in the browser, where there is no filesystem. The chooser itself is
+skipped for the deployed web replay build, which drops a public visitor straight
+into the theater instead.</p>
+<h2 id="1-inspect-a-sky130-cell"><a class="header" href="#1-inspect-a-sky130-cell">1. Inspect a SKY130 cell</a></h2>
+<p>Loads a real SkyWater SKY130 high-density standard cell, the <code>inv_1</code> inverter, from
+a bundled GDSII stream. The imported geometry is given the committed SKY130
+technology, so its layers arrive named and colored (nwell, diff, poly, li1, met1,
+and their contacts and vias) rather than as anonymous layer numbers, and the
+physical layer stack comes along so the 3D view has real elevations to extrude.</p>
+<p>From here you can:</p>
+<ul>
+<li>Toggle layers in the layer manager to isolate the poly gate, the local
+interconnect, or metal 1.</li>
+<li>Measure feature widths and spacings with the measure tool, reading values in both
+database units and microns.</li>
+<li>Open the 3D layer-stack window to see the metals and contacts extruded to their
+process heights, and take a cross-section across the cell.</li>
+</ul>
+<p>This is the fastest way to see that the importer handles a production layout, not
+just fixtures, and that the layer, measurement, and 3D machinery all read a real
+technology. See the <a href="#file-formats">file formats</a> and <a href="#rendering-and-scale">rendering</a> chapters for
+the underlying import and 3D-stack details.</p>
+<h2 id="2-find-and-fix-a-violation"><a class="header" href="#2-find-and-fix-a-violation">2. Find and fix a violation</a></h2>
+<p>Opens a small layout that deliberately breaks a design rule. The top cell holds two
+metal-1 wires: one comfortably wider than the SKY130 minimum, and one only 80 nm
+wide, which violates the SKY130 <code>m1.1</code> rule (minimum met1 width of 0.14 um, i.e.
+140 nm). The SKY130 rule subset is carried in the document’s technology, so a check
+resolves the real periphery rules rather than a generic fallback.</p>
+<p>The intended loop is:</p>
+<ol>
+<li>Run the design-rule checker. The violation overlay marks the narrow wire and the
+error browser lists the <code>m1.1</code> violation with its measured-versus-required width.</li>
+<li>Zoom to the violation, select the offending wire, and widen it to at least 140 nm
+(for example with the productivity panel’s move-by-delta, or by editing its
+vertices).</li>
+<li>Re-run the checker. With both wires meeting the minimum, the <code>m1.1</code> violation
+clears.</li>
+</ol>
+<p>This exercises the whole DRC path end to end on rules that mean something. See the
+<a href="#design-rule-checking">design-rule checking</a> chapter and the <a href="#sky130-rule-coverage">SKY130 rule
+coverage</a> table for exactly which rules the subset checks.</p>
+<h2 id="3-watch-the-agent-work"><a class="header" href="#3-watch-the-agent-work">3. Watch the agent work</a></h2>
+<p>Opens the replay theater and plays a recorded agent run. The transcript is the
+bundled model-free scripted run in which the agent places a clean met1 wire; it
+drives a real engine replay, with step, play, pause, and speed controls and a live
+narration feed alongside the canvas. Each verify step the run crosses feeds its
+design-rule results back to the overlay, so you watch the check clear as the run
+progresses.</p>
+<p>Because the theater plays a compiled-in transcript, it needs no model, network, or
+API key, and it runs identically on native and in the browser. See the <a href="#in-app-agent-ux">in-app agent
+UX</a> chapter for the theater and narration, and the <a href="#agent-api-and-harness">agent API and
+harness</a> chapter for how such transcripts are produced.</p>
+<h2 id="4-build-with-the-new-tools"><a class="header" href="#4-build-with-the-new-tools">4. Build with the new tools</a></h2>
+<p>Loads a small starter layout, sparse on purpose, so there is real geometry to work
+with but plenty of room to build. It seeds two short metal-1 wires and a metal-2
+landing pad on the SKY130 metal layers.</p>
+<p>It is a sandbox for the newer editing tools:</p>
+<ul>
+<li><strong>Draw</strong> additional shapes on the active layer, snapping to the existing geometry.</li>
+<li><strong>Boolean</strong> the two met1 wires together, or subtract one shape from another.</li>
+<li><strong>Array</strong> a shape into a repeated block to see hierarchy build up.</li>
+<li><strong>Via stack</strong> from met1 up to the met2 pad, generating the enclosure and cut
+geometry between the layers.</li>
+</ul>
+<p>Every edit is undo-integrated, so you can experiment freely. See the <a href="#drawing-and-vertex-editing">drawing and
+vertex editing</a>, <a href="#boolean-and-transform-operations">boolean and transform operations</a>,
+and <a href="#productivity-editing">productivity editing</a> chapters for the tools themselves.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="productivity-editing"><a class="header" href="#productivity-editing">Productivity editing</a></h1>
+<p>The productivity panel gathers the everyday layout-editing shortcuts into one place:
+an in-app clipboard, an array tool with a live preview, numeric move-by-delta, and a
+via-stack builder. Every change it makes to the document goes through the undo
+history, so anything the panel does can be undone and redone from the history panel.</p>
+<p>The panel lives at the bottom of the right-hand side panel. Its window-free logic
+sits in the <code>productivity</code> module and is unit-tested without a GPU or a window; the
+panel itself is thin glue that binds widgets to that logic and routes the resulting
+edits through the editing history.</p>
+<h2 id="clipboard-copy-cut-paste-and-duplicate"><a class="header" href="#clipboard-copy-cut-paste-and-duplicate">Clipboard: copy, cut, paste, and duplicate</a></h2>
+<p>Copy snapshots the current selection into an in-app clipboard as resolved shapes in
+top-cell coordinates. Because the clipboard holds geometry rather than selection
+indices, it survives later edits, undo, and selection changes.</p>
+<p>Paste stamps the clipboard back into the top cell, shifted by the panel’s offset
+(dx, dy). Duplicate is copy-plus-paste in one step over the current selection, so it
+works on instanced geometry too: the duplicate is flat geometry drawn directly in the
+top cell.</p>
+<p>Cut copies the selection and then removes it. Only shapes drawn directly in the top
+cell can be removed, because the model’s remove operation addresses a cell’s own
+shape list; any selected geometry that belongs to an instance or an array is copied
+but left in place, and the status line reports how many were skipped.</p>
+<h2 id="move-by-delta"><a class="header" href="#move-by-delta">Move by delta</a></h2>
+<p>Move applies a numeric (dx, dy) shift to the selected direct shapes. A move is a
+remove of each original followed by an add of its translated copy, both through the
+history, so it undoes cleanly. As with cut, only directly-owned shapes move;
+instanced geometry is left in place.</p>
+<h2 id="array-tool"><a class="header" href="#array-tool">Array tool</a></h2>
+<p>The array tool repeats the current selection into a grid of rows by columns at a
+given row pitch and column pitch. Element (0, 0) reproduces the selection in place,
+so the originals stay put and the grid grows from them.</p>
+<p>With the live-preview checkbox on, the pending elements are outlined on the canvas
+before you commit, so you can dial in the counts and pitches and see the result
+first. Element (0, 0) is not drawn in the preview because it coincides with the
+existing selection.</p>
+<p>The tool is for tractable, previewable repeats. The element count (rows times
+columns) is capped; past the cap the commit is refused and the panel says so. Very
+large regular repeats belong in a hierarchical array placement instead, which the
+renderer expands lazily rather than materializing every leaf shape.</p>
+<p>On commit, each array element is added as its own edit, so each is individually
+undoable and the scene rebuilds once at the end.</p>
+<h2 id="via-stack-builder"><a class="header" href="#via-stack-builder">Via-stack builder</a></h2>
+<p>The via-stack builder places a connecting cut between two picked layers together with
+the enclosure rectangles those layers need around it. You pick a lower layer, an
+upper layer, and the cut layer, set the cut’s square size, and place it at a chosen
+center.</p>
+<p>The enclosure margin for each picked layer is read from the technology’s enclosure
+rules: the rule whose enclosing layer is that picked layer and whose enclosed layer
+is the cut layer. When several such rules apply, the largest margin wins so the drawn
+geometry satisfies all of them at once. A layer with no matching rule falls back to a
+default margin you can set in the panel, so the builder still produces a sane stack
+against a technology that omits the rule.</p>
+<p>Each enclosure rectangle is the cut expanded outward by its margin, so it overlaps
+the cut on every side by at least the required amount. The cut and its two enclosures
+are placed as three separate edits, so the whole stack is undoable.</p>
+<h2 id="undo-integration"><a class="header" href="#undo-integration">Undo integration</a></h2>
+<p>Everything here is built on the same contract: geometry helpers return owned shapes,
+and the panel wraps each in an add or remove edit applied through the editing history,
+then rebuilds the scene once. Nothing mutates the document directly. That is what
+keeps copy, paste, duplicate, move, array, and via placement all reversible from the
+history panel.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="layer-and-technology-editing"><a class="header" href="#layer-and-technology-editing">Layer and technology editing</a></h1>
+<p>The layer-and-technology panel groups two related jobs into the end of the right-hand
+side panel: an upgraded layer manager for arranging and styling the layer table, and a
+technology editor for viewing and changing the process description that drives the
+whole document. Its window-free logic lives in the <code>tech_editor</code> module and the layer
+state lives in <code>layers</code>, so the interesting behavior is unit-tested without a GPU or a
+window; the panel itself is thin glue that binds widgets to that logic.</p>
+<h2 id="layer-manager"><a class="header" href="#layer-manager">Layer manager</a></h2>
+<p>The layer manager is a view over the app’s layer state, the same table the canvas
+consults when it culls hidden layers. Every action here is a cheap, view-only change:
+it never mutates the document and never lands on the undo stack.</p>
+<ul>
+<li><strong>Reorder.</strong> The up and down arrows move a layer one position earlier or later in
+the table. The first row cannot move up and the last cannot move down. Reordering
+keeps the layer table’s internal id-to-index lookup in sync, so visibility and
+name queries keep resolving to the right rows after a move.</li>
+<li><strong>Recolor.</strong> The color button opens a picker seeded with the layer’s current color.
+Choosing a new color repacks it into the layer’s <code>0xRRGGBBAA</code> value; the canvas
+palette re-reads layer colors, so the change shows up on the next scene rebuild.</li>
+<li><strong>Fill style.</strong> Each layer carries a fill style (solid, hatch, or outline) chosen
+from a small drop-down. Fill style is display metadata for the manager preview and
+the legend; it stays inside the app and does not change the geometry.</li>
+<li><strong>Solo.</strong> Solo shows only the chosen layer and hides every other, the fast way to
+isolate one layer. Soloing an unknown layer is a no-op rather than a blank canvas,
+so a stale id never hides everything.</li>
+<li><strong>Show all / Hide all</strong> flip every layer visible or hidden at once, and the
+per-row checkbox toggles a single layer.</li>
+</ul>
+<h2 id="technology-editor"><a class="header" href="#technology-editor">Technology editor</a></h2>
+<p>The technology editor edits a working <em>draft</em> of the document’s technology: the
+database resolution (<code>dbu_per_micron</code>), the layer table, and the DRC rule
+thresholds. The draft is seeded from the live document the first time the panel is
+shown, and from then on it is yours to edit; nothing touches the document until you
+press <strong>Apply</strong>.</p>
+<p>You can edit the technology name and resolution, recolor and renumber layers or
+rename them, and adjust each rule’s threshold value. The rule rows show each rule’s
+kind and its layer (or layer pair) for context, with the threshold as the editable
+field, because retuning a value is the common change.</p>
+<h3 id="validation"><a class="header" href="#validation">Validation</a></h3>
+<p><strong>Apply</strong> validates the whole draft before it commits, and if anything is wrong it
+applies nothing and lists every problem inline. The checks are the invariants the DRC
+engine and the file format assume but the in-memory type does not enforce on its own:</p>
+<ul>
+<li>the resolution must be positive,</li>
+<li>every rule threshold must be non-negative, and a length-style rule
+(width, spacing, enclosure, extension, notch) or an area rule must be strictly
+positive, so a negative or zero width is rejected,</li>
+<li>a two-layer rule kind (spacing, enclosure, extension) must carry a second layer and
+a single-layer kind must not, and</li>
+<li>every physical-stack entry’s thickness must be positive.</li>
+</ul>
+<p>Only a clean draft reaches the document. <strong>Revert</strong> throws the draft away and reloads
+it from the current document, discarding any in-progress edits.</p>
+<h3 id="how-the-change-reaches-the-document"><a class="header" href="#how-the-change-reaches-the-document">How the change reaches the document</a></h3>
+<p>Setting a technology is not one of the document’s undoable edits: the edit vocabulary
+is geometry-only (add and remove shapes, cells, instances, and labels), and the
+undo/redo log records only those. So a validated technology is applied directly to the
+document rather than pushed onto the undo stack. The document revision still advances,
+which is what the retained renderer keys its cache invalidation on, so the canvas
+re-reads the new technology. The practical consequence is that a technology change is
+not itself undoable, and it leaves the existing shape-edit history intact: undoing a
+shape edit made before the technology change still works.</p>
+<h2 id="technology-file-round-trip"><a class="header" href="#technology-file-round-trip">Technology file round-trip</a></h2>
+<p>The editor round-trips the draft through the line-oriented technology-file text
+format described in <a href="#file-formats">File formats</a>. The collapsible <strong>Technology file (text)</strong>
+panel shows the draft serialized to that format; <strong>Refresh from draft</strong> re-serializes
+the current draft, and <strong>Load from text</strong> parses the text box back into the draft,
+reporting a parse error instead of loading a malformed file.</p>
+<p>Serialization is canonical and byte-stable rather than a verbatim copy. Parsing
+discards comments, blank lines, token spacing, keyword case, and any <code>0x</code> or <code>#</code> color
+prefix, so those cannot survive a load; the serializer emits one directive per line in
+a fixed order, with colors as eight uppercase hex digits. The guarantee the editor
+relies on is a fixpoint: parsing the serialized draft yields an equal technology, and
+re-serializing it reproduces the same bytes. Re-saving a file the editor wrote gives
+back exactly that file; a hand-authored file with comments comes back in canonical form
+without them.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="deployment"><a class="header" href="#deployment">Deployment</a></h1>
 <p>This chapter covers running the public demo: the rate-limited demo server, the

@@ -97,8 +97,8 @@
     </script>
     
 <script type="module">
-import init, * as bindings from '/reticle/web-1968935bbf316c56.js';
-const wasm = await init({ module_or_path: '/reticle/web-1968935bbf316c56_bg.wasm' });
+import init, * as bindings from '/reticle/web-adb9e44f3e8c5473.js';
+const wasm = await init({ module_or_path: '/reticle/web-adb9e44f3e8c5473_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -174,7 +174,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         background: rgba(49, 50, 68, 0.95);
       }
     </style>
-  <link rel="modulepreload" href="/reticle/web-1968935bbf316c56.js" crossorigin="anonymous" integrity="sha384-dzGoUZ6cNATcMAXqIF9Q+eJmO5tLFeqC+6HWCczR0HQ+02VDqPXzbtKTNKjv8OKp"><link rel="preload" href="/reticle/web-1968935bbf316c56_bg.wasm" crossorigin="anonymous" integrity="sha384-mOpJU3bjh30yloIU0/1LrW1bAFtObZybC4xaC5uUTsg3QLZ/+0RzyHcu+bFHKSlm" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/reticle/web-adb9e44f3e8c5473.js" crossorigin="anonymous" integrity="sha384-gnlJP1T/SO4oSvFG8/dy3Wx4kgkS8yPF3EoqOLhwJyc8kELapqqz9YAl8xk9Prqq"><link rel="preload" href="/reticle/web-adb9e44f3e8c5473_bg.wasm" crossorigin="anonymous" integrity="sha384-5cco+JMeWziiFkzmgvezPKcRdDUxOlZl3qq+WB9ljFnuiLAp74+5/JunzR6nCPoq" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="reticle-canvas"></canvas>
     <a id="view-switch" href="?view=editor">Open the full editor</a>

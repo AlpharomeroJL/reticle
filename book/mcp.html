@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-0df54dcb.js";
+            window.path_to_searchindex_js = "searchindex-cff64d34.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-0f76cbb2.js"></script>
+        <script src="toc-16d5da84.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -186,14 +186,32 @@ custom glue.</p>
 <p>Every <a href="agent.html"><code>AgentCommand</code></a> variant becomes one MCP <em>tool</em> with a JSON input
 schema and a model-facing description, generated from the frozen types rather than
 hand-maintained, so the tool set cannot drift from what the engine actually accepts.
-That is 25 command tools (create a cell, add a rectangle, run DRC, check intent,
-export, render, and so on) plus three read-only <em>context</em> tools the model uses to
-observe state before it acts:</p>
+That is 30 command tools (create a cell, add a rectangle, run DRC, check intent,
+export, render, the editor operations below, and so on) plus three read-only
+<em>context</em> tools the model uses to observe state before it acts:</p>
 <ul>
 <li><code>get_technology_rules</code> the active technology’s layers and DRC rules;</li>
 <li><code>get_document_summary</code> the current cells, shape counts, and top cells;</li>
 <li><code>get_render_region</code> a PNG of a region, so the model can look at what it has drawn.</li>
 </ul>
+<h3 id="editor-operations"><a class="header" href="#editor-operations">Editor operations</a></h3>
+<p>Five of the command tools lift the in-app editor’s productivity operations to the
+agent surface, so a model can restructure geometry the way a person would with the
+Operations panel (ADR
+<a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0031-wave3-agent-command-expansion.md">0031</a>):</p>
+<ul>
+<li><code>boolean_combine</code> union, intersection, difference, or xor over two or more shapes,
+writing the result to a target layer and deleting the inputs;</li>
+<li><code>align_shapes</code> line a set of shapes up (left, right, top, bottom, or centered)
+within their combined bounding box;</li>
+<li><code>distribute_shapes</code> respace three or more shapes so adjacent gaps are equal;</li>
+<li><code>offset_shapes</code> grow or shrink shapes by a database-unit offset;</li>
+<li><code>build_via_stack</code> place a square cut plus a lower and upper enclosure sized from
+the technology’s enclosure rules.</li>
+</ul>
+<p>They share the geometry engine with the editor (<code>reticle-geometry</code>’s robust integer
+booleans and offsetting), so an agent-built union and a hand-built one are bit-for-bit
+identical.</p>
 <h2 id="transport"><a class="header" href="#transport">Transport</a></h2>
 <p>The server speaks newline-delimited JSON-RPC 2.0 on stdin and stdout, matching the
 MCP stdio transport, and is hand-rolled over <code>serde_json</code> rather than pulling in an
@@ -204,7 +222,7 @@ unbounded number of edits.</p>
 <h2 id="running-it"><a class="header" href="#running-it">Running it</a></h2>
 <p>The <code>reticle-mcp</code> binary is a stdio server: a model host launches it and speaks
 JSON-RPC over the pipe. It is registered alongside the project’s <code>reticle-dev</code>
-development server in <code>.mcp.json</code>. An integration test drives all 28 tools over a
+development server in <code>.mcp.json</code>. An integration test drives all 33 tools over a
 real stdio subprocess and asserts each one, so the wire contract is covered end to
 end.</p>
 <p>See ADR <a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0005-rust-mcp-servers.md">0005</a>
@@ -214,7 +232,7 @@ and the <a href="agent.html">agent chapter</a> for the command surface these too
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="agent.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="agent-ux.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -228,7 +246,7 @@ and the <a href="agent.html">agent chapter</a> for the command surface these too
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="agent.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="agent-ux.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 

@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-0df54dcb.js";
+            window.path_to_searchindex_js = "searchindex-cff64d34.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-0f76cbb2.js"></script>
+        <script src="toc-16d5da84.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -189,7 +189,7 @@ accepts a correct document and rejects a broken one. Every checker is <strong>tw
 tested</strong>, so a task cannot pass by luck or by a checker that always returns true;
 the test proves the checker accepts the intended solution and rejects a
 deliberately perturbed one.</p>
-<p>The suite (<code>manifest.toml</code>, version 0.3.0) has <strong>63 tasks across five tiers</strong>:</p>
+<p>The suite (<code>manifest.toml</code>, version 0.4.0) has <strong>75 tasks across five tiers</strong>:</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -198,12 +198,38 @@ deliberately perturbed one.</p>
 <tbody>
 <tr><td>1</td><td>Primitive placement and legality</td><td>place a met1 rectangle, clear the min width and min area rules</td></tr>
 <tr><td>2</td><td>Structured geometry</td><td>contact stacks, via chains, comb structures</td></tr>
-<tr><td>3</td><td>Larger structured geometry and connectivity intent</td><td>guard rings, multi-net intent</td></tr>
-<tr><td>4</td><td>Compound cells</td><td>cells composed of several checked features</td></tr>
+<tr><td>3</td><td>Larger structured geometry, connectivity intent, and Wave-3 tool ops</td><td>guard rings, multi-net intent, boolean unions/intersections/differences, arrays with pitch, via stacks</td></tr>
+<tr><td>4</td><td>Compound cells and iterative refinement</td><td>cells composed of several checked features, tasks with a scripted follow-up constraint</td></tr>
 <tr><td>5</td><td>Real SKY130 PDK</td><td>named periphery rules (m1.1, m1.4, m2.4, li.5, ct.1, licon.1, via.1a) and the measured geometry of the <code>sky130_fd_sc_hd</code> tap and fill cells</td></tr>
 </tbody>
 </table>
 </div>
+<h3 id="wave-3-task-families-v040"><a class="header" href="#wave-3-task-families-v040">Wave-3 task families (v0.4.0)</a></h3>
+<p>Version 0.4.0 adds 12 tasks that exercise the Wave-3 command surface
+(<code>boolean_combine</code>, <code>align_shapes</code>, <code>distribute_shapes</code>, <code>offset_shapes</code>,
+<code>build_via_stack</code>):</p>
+<ul>
+<li><strong>Boolean-op constructions</strong> (3, tier 3): union, intersection, and difference of
+the same two overlapping met1 squares. The <code>boolean_result</code> checker pins which op
+ran by the result area written to met2 (150000 vs 30000 vs 60000 DBU²) and requires
+the met1 inputs to be consumed, so “drew the wrong op” or “left the inputs behind”
+both fail.</li>
+<li><strong>Array-with-pitch</strong> (3, tier 3): a row, a column, and a grid placed at a stated
+pitch. The <code>array_pitch</code> checker verifies both the instance count and the actual
+column/row step, so an array at the wrong pitch is rejected even with the right
+count.</li>
+<li><strong>Via-stack</strong> (3, tier 3): a <code>build_via_stack</code> cut bridging met1/met2, li1/met1,
+and poly/li1. The <code>contact_stack</code> checker verifies the stack joins both conductors
+on one net and each encloses the cut by a minimum margin.</li>
+<li><strong>Iterative-refinement</strong> (3, tier 4): an initial prompt plus a scripted
+<code>refinement</code> follow-up (“make it larger”, “add a second shape”). The refinement-aware
+runner folds the follow-up into the model’s feedback <em>between</em> iterations through the
+<code>reticle-agent</code> refinement seam (<code>RefinementSource</code> / <code>run_agent_task_refined</code>), so
+the model reacts on the next proposal without the session being restarted; the
+checker enforces the tightened, post-refinement bar.</li>
+</ul>
+<p>The <code>refinement</code> field is additive on <code>BenchTask</code> (<code>#[serde(default)]</code>), so task TOML
+written before it existed still parses unchanged.</p>
 <h2 id="the-propose-verify-correct-loop"><a class="header" href="#the-propose-verify-correct-loop">The propose-verify-correct loop</a></h2>
 <p>A run drives each task through the same loop the <code>reticle-agent</code> harness uses:</p>
 <pre class="mermaid">flowchart LR
@@ -231,7 +257,7 @@ is set. Every result record carries the <code>model</code> field so mock and liv
 never conflated.</p>
 <h2 id="current-result-the-mock-machinery-baseline"><a class="header" href="#current-result-the-mock-machinery-baseline">Current result: the mock machinery baseline</a></h2>
 <p>The run below used the <strong>deterministic <code>MockModel</code></strong> (no <code>ANTHROPIC_API_KEY</code> was
-set). It exercises the whole pipeline end to end for all 63 tasks: every task
+set). It exercises the whole pipeline end to end for all 75 tasks: every task
 loads, runs through the loop, is graded by its two-way-tested checker, and is
 recorded.</p>
 <div class="table-wrapper">
@@ -242,22 +268,22 @@ recorded.</p>
 <tbody>
 <tr><td>1</td><td>9</td><td>3</td><td>33%</td><td>1.22</td></tr>
 <tr><td>2</td><td>11</td><td>0</td><td>0%</td><td>1.00</td></tr>
-<tr><td>3</td><td>25</td><td>0</td><td>0%</td><td>1.00</td></tr>
-<tr><td>4</td><td>8</td><td>0</td><td>0%</td><td>1.00</td></tr>
+<tr><td>3</td><td>34</td><td>0</td><td>0%</td><td>1.00</td></tr>
+<tr><td>4</td><td>11</td><td>0</td><td>0%</td><td>1.00</td></tr>
 <tr><td>5</td><td>10</td><td>0</td><td>0%</td><td>1.00</td></tr>
-<tr><td>all</td><td>63</td><td>3</td><td>5%</td><td>1.03</td></tr>
+<tr><td>all</td><td>75</td><td>3</td><td>4%</td><td>1.03</td></tr>
 </tbody>
 </table>
 </div>
 <p>This is a <strong>machinery baseline, not a measure of a language model’s layout
 ability.</strong> The <code>MockModel</code> is scripted to solve only the three sample tasks
 (<code>t1_place_met1_rect</code>, <code>t1_drc_clean_met1</code>, <code>t1_intent_connect</code>) that exist to
-prove the harness end to end; it has no scripted solution for the other 60
+prove the harness end to end; it has no scripted solution for the other 72
 authored tasks, so it fails them by construction. A real model run (with a key)
 is what produces a meaningful success rate across the authored tasks; those
 numbers will be recorded here, labeled with the model id, when a keyed run is
-performed. Publishing the 5% mock figure as if it were a model score would be
-dishonest, so it is labeled as what it is: proof that all 63 tasks and their
+performed. Publishing the 4% mock figure as if it were a model score would be
+dishonest, so it is labeled as what it is: proof that all 75 tasks and their
 checkers run.</p>
 <h2 id="growing-the-suite"><a class="header" href="#growing-the-suite">Growing the suite</a></h2>
 <p>Failure mining (<code>reticle-bench</code>’s <code>mining</code> module) turns real run failures into
@@ -265,6 +291,38 @@ candidate tasks with provenance and two-way vectors; <code>just bench-promote &l
 admits a candidate into the live suite only if its checker passes those vectors,
 and bumps the manifest version. So the suite grows from observed failures without
 ever admitting a checker that cannot both accept and reject.</p>
+<p>The miner clusters failed and struggling runs by a failure <strong>signature</strong>, so a
+recurring failure mode becomes one candidate rather than many near-duplicates. A
+signature has four dimensions:</p>
+<ul>
+<li>the persistent DRC rule ids no correction attempt ever cleared;</li>
+<li>a geometric-pattern class (rectangles, a layer stack, a polygon, a path, a
+placement, or no geometry at all);</li>
+<li>the connectivity-intent kind the run ended with (an open, a short, both, or
+none);</li>
+<li>the <strong>tool surface</strong>: which of the Wave 3 editing commands the run
+reached for.</li>
+</ul>
+<h3 id="tool-surface-failure-mining"><a class="header" href="#tool-surface-failure-mining">Tool-surface failure mining</a></h3>
+<p>The Wave 3 tool surface is the higher-level editing commands added to the agent
+API after the first tasks were authored: <code>boolean_combine</code>, <code>align_shapes</code>,
+<code>distribute_shapes</code>, <code>offset_shapes</code>, and <code>build_via_stack</code>. A model can fail a
+task <em>through</em> one of these tools (a botched boolean merge, a via stack whose
+enclosure violates the rule) in a way that looks identical, by DRC rule and
+geometric pattern, to a failure drawn shape by shape. Clustering by tool surface
+splits those apart, so the miner surfaces a tool-specific cluster (and drafts a
+candidate whose id and prompt name the tool) instead of hiding the tool failure
+inside a generic geometry cluster. The tool surface is recorded whether or not
+the command succeeded: a command the model <em>tried</em> is evidence of intent to use
+that tool. Every drafted candidate carries its tool surface in its provenance,
+alongside the backend, model, and quantization of each source run, so a failure
+mined from a local (Ollama) run is never conflated with a mock or frontier one.</p>
+<p>The tool surface is read from a run’s command <strong>transcript</strong>. The committed
+local-model result sets under <code>benchmarks/results/</code> are plain result records
+with no transcript, so mining them recovers the backend provenance but not the
+per-tool signature: those runs cluster only by “it failed”. Recovering the full
+DRC, geometric, intent, and tool-surface signature from a local run needs the
+command transcript the local runner does not yet persist.</p>
 
                     </main>
 
@@ -274,7 +332,7 @@ ever admitting a checker that cannot both accept and reject.</p>
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="performance.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="benchmark.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -288,7 +346,7 @@ ever admitting a checker that cannot both accept and reject.</p>
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="performance.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="benchmark.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

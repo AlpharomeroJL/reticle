@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-0df54dcb.js";
+            window.path_to_searchindex_js = "searchindex-cff64d34.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-0f76cbb2.js"></script>
+        <script src="toc-16d5da84.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -185,13 +185,19 @@ harness that drives a model against objective checks, writes a replayable
 transcript, and can mirror its edits onto the live collaboration document.</p>
 <h2 id="the-command-surface-reticle-agent-api"><a class="header" href="#the-command-surface-reticle-agent-api">The command surface (<code>reticle-agent-api</code>)</a></h2>
 <p><a href="https://docs.rs/reticle-agent-api"><code>AgentCommand</code></a> is a tagged, serde-serializable
-enum of 25 operations over the engine: create a cell, add a rectangle, polygon, or
+enum of 30 operations over the engine: create a cell, add a rectangle, polygon, or
 path, add a label or pin, transform or delete shapes, set the technology, run DRC,
 check a connectivity intent, extract nets, compare against a netlist, export GDS or
 OASIS, and render a region to PNG. A [<code>Session</code>] owns an editable document and a
 stable element-id allocator, so a command that adds geometry returns an
 [<code>ElementId</code>] that later commands and the transcript can refer to even across
 deletions (ADR 0018).</p>
+<p>Five of those operations lift the in-app editor’s productivity actions to the
+command surface (ADR 0031): <code>BooleanCombine</code> (union, intersection, difference, or xor
+over a set of shapes, onto a target layer), <code>AlignShapes</code>, <code>DistributeShapes</code>,
+<code>OffsetShapes</code> (grow or shrink), and <code>BuildViaStack</code> (a cut plus enclosures sized
+from the technology’s enclosure rules). They run on the same <code>reticle-geometry</code>
+primitives as the editor, so agent-built and hand-built geometry match exactly.</p>
 <p>Every command applied to a session is recorded as a [<code>CommandRecord</code>] in a
 [<code>Transcript</code>], and the model’s document has a [<code>document_hash</code>]. Replaying a
 transcript reproduces that hash exactly, so a run is deterministic and auditable:
@@ -215,12 +221,112 @@ GDS, a rendered PNG, and a result record.</p>
 <p>The model is either the real <code>AnthropicModel</code> (an Anthropic-compatible endpoint; the
 API key is read from the environment only and never printed, serialized, or written
 to an artifact) or the deterministic <code>MockModel</code> used offline and in tests.</p>
+<h2 id="iterative-refinement-mid-session-constraints"><a class="header" href="#iterative-refinement-mid-session-constraints">Iterative refinement (mid-session constraints)</a></h2>
+<p>A session does not have to be one fixed prompt. A user watching the loop can add a
+new constraint <em>between</em> iterations (“make the wire wider”, “keep it on met1”, “shrink
+the guard ring”) and the loop folds it into the very next proposal without tearing the
+run down and starting over. This is the refinement protocol.</p>
+<pre class="mermaid">flowchart LR
+    U[User constraint] --&gt;|between iterations| C[Fold into context]
+    V[Checker feedback] --&gt; C
+    C --&gt; M[Model]
+    M --&gt;|AgentCommands| A[Apply]
+    A --&gt; K{Verify}
+    K --&gt;|clean and constraint met| D[Done]
+    K --&gt;|violations| V
+    K -.-&gt;|user adds more| U
+</pre>
+
+<p>The mechanism is deliberately small. <code>run_agent_task_refined</code> takes a
+<code>RefinementSource</code>: a trait whose one method, <code>drain(iteration)</code>, returns the
+constraint strings that have arrived since the loop last asked. The loop drains it once
+per iteration, just before it asks the model, and accumulates the constraints. Each
+iteration it builds the model context from the accumulated user constraints followed by
+the checker’s own failure reasons, so the model sees both in one place. Because the
+constraints accumulate rather than replace, a constraint added once keeps conditioning
+every later proposal; because the checker still runs every iteration, success is still
+defined by objective verification, not by the model’s agreement that it complied.</p>
+<p>Three properties make this safe and testable:</p>
+<ul>
+<li><strong>No restart.</strong> Folding a constraint into the running context is one continuous run:
+the session, its transcript, and its element ids are never rebuilt. The
+<code>refinement_is_folded_in_and_loop_converges_without_restart</code> test starts a task, injects
+a widen constraint before the second iteration, and asserts the final layout carries the
+wider wire while the run stays a single loop.</li>
+<li><strong>Bounded on conflict.</strong> A constraint that cannot be satisfied (it conflicts with the
+task, or asks for something no proposal can reach) does not spin forever: the same
+<code>max_iterations</code> cap applies, and the run is recorded as an honest failure. The
+<code>conflicting_refinement_is_bounded_by_max_iterations_not_infinite</code> test proves the loop
+stops at the cap rather than looping.</li>
+<li><strong>Frozen context type.</strong> The refinements ride in the existing
+<code>Context::feedback</code> channel, so <code>reticle_bench</code>’s <code>Context</code> type is unchanged. A
+caller with no mid-session constraints uses <code>run_agent_task</code>, which is
+<code>run_agent_task_refined</code> with a <code>NoRefinements</code> source and behaves exactly as before.</li>
+</ul>
+<p>The source is whatever a caller needs: a channel receiver behind a live UI or HTTP
+endpoint, or a scripted <code>RefinementFn</code> closure in a deterministic test. The loop owns no
+channel of its own, so the same code path serves an interactive session and a reproducible
+convergence test on the mock model.</p>
+<h2 id="planning-transparency-planstep"><a class="header" href="#planning-transparency-planstep">Planning transparency (<code>PlanStep</code>)</a></h2>
+<p>Before each iteration’s proposal, the harness records a <code>PlanStep</code>: the iteration’s
+goal (the task prompt), the intended tools (the <code>op</code> names of the commands the model
+proposed, in order), and the expected checks (the always-on DRC oracle plus the
+task’s own checker). These steps accumulate into <code>Transcript::plan</code>, a parallel log
+that rides alongside the command records, and the agent panel renders them as a
+Plan section so a viewer can see the agent’s stated intent next to what it did.</p>
+<p>A plan step is narration, not a contract: nothing enforces that an iteration used
+exactly the tools it listed or that its checks passed. That is deliberate, so the
+stated plan and the recorded outcome can be compared after the fact for failure
+mining. The field is additive and replay-neutral: it carries <code>#[serde(default)]</code>, so
+a transcript written before the plan log existed still deserializes (as an empty
+plan), and replay reads only the records and the final hash.</p>
 <h2 id="live-collaboration-reticle-agentcollab"><a class="header" href="#live-collaboration-reticle-agentcollab">Live collaboration (<code>reticle-agent::collab</code>)</a></h2>
 <p>An [<code>AgentCollaborator</code>] mirrors each agent step onto the <code>reticle-sync</code> CRDT under a
 distinct actor id, as one atomic transaction per step, so a human peer watching the
 room never sees a half-drawn step and can edit alongside the agent (ADR 0022). The
 same transcript the harness writes is what the in-app replay theater plays back
 through a live session.</p>
+<h2 id="scoped-sessions-and-context-packs-reticle-agentcontext_pack"><a class="header" href="#scoped-sessions-and-context-packs-reticle-agentcontext_pack">Scoped sessions and context packs (<code>reticle-agent::context_pack</code>)</a></h2>
+<p>A session can be opened on a <em>region</em> of the document rather than the whole thing. This
+is what the DRC error browser’s “ask the agent to fix this” button does: it hands the
+harness a rectangle and the specific violation, and the agent works only that corner.</p>
+<p>For a scoped run the harness does not condition the model on the whole-document
+snapshot. Instead a [<code>ContextPack</code>] assembles a minimal, region-local context string:</p>
+<ol>
+<li>the scoped region;</li>
+<li>the shapes whose bounding box overlaps that region, each as kind, layer, and
+bounding box, capped so a dense region still yields a bounded prompt;</li>
+<li>the violated rule, stated structurally (kind, layers, measured value, required
+value);</li>
+<li>only the technology rules whose layers appear in those shapes or in the violation.</li>
+</ol>
+<p>The overlap test is the same inclusive touch-or-overlap test the <code>query_shapes</code> command
+uses, so a pack and a <code>query_shapes</code> on the same rectangle agree on which shapes are in
+scope. The pack is a pure function of the document and the region, so it plugs into the
+same context hook the whole-document path uses: a scoped run sets the model’s document
+context to the pack instead of the summary.</p>
+<p><strong>Why it saves tokens.</strong> The compact per-cell summary the unscoped hook sends is already
+small, but it is lossy: it lists how many shapes a cell holds, not where they are. To
+reason about a local geometric fix a model needs the coordinates of the nearby shapes,
+so the honest whole-document baseline is the full per-shape listing (<code>whole_document_context</code>),
+not the summary. A pack replaces that full listing with a region-scoped slice.</p>
+<p>On a synthetic document of one cell with 200 shapes, a met1 width rule and a met2
+spacing rule, and a repair region overlapping exactly one shape, the measured estimates
+(characters over four) are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Context</th><th>Tokens</th><th>Characters</th></tr>
+</thead>
+<tbody>
+<tr><td>Whole-document, full per-shape fidelity</td><td>1878</td><td>7509</td></tr>
+<tr><td>Scoped pack (one shape + violation + one relevant rule)</td><td>62</td><td>245</td></tr>
+</tbody>
+</table>
+</div>
+<p>That is roughly a 30x reduction, about 97% fewer tokens, and the pack’s size tracks the
+<em>region</em> rather than the design, so the saving grows with the design. The measurement is
+pinned by a test in the <code>context_pack</code> module.</p>
 <h2 id="where-it-runs"><a class="header" href="#where-it-runs">Where it runs</a></h2>
 <ul>
 <li><code>reticle-mcp</code> exposes this command surface to a model over the Model Context
@@ -241,7 +347,7 @@ and <a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="mcp.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="agent-ux.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -255,7 +361,7 @@ and <a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="mcp.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="agent-ux.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
