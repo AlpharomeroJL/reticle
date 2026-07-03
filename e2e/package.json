@@ -1,0 +1,15 @@
+{
+  "name": "reticle-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Playwright end-to-end tests for the Reticle browser demo (WebGPU and WebGL2 fallback).",
+  "scripts": {
+    "test": "playwright test",
+    "test:webgl2": "playwright test --project=webgl2",
+    "test:webgpu": "playwright test --project=webgpu",
+    "probe": "node probe-capability.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.0"
+  }
+}

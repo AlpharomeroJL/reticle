@@ -29,3 +29,4 @@ superseded decision is marked and linked to its replacement.
 | [0021](0021-intent-types-in-extract.md) | Intent types live in reticle-extract; serde on geometry value types |
 | [0022](0022-agent-crdt-collaborator-bridge.md) | The agent as a live CRDT collaborator: a step-atomic bridge |
 | [0023](0023-resume-authoritative-plan.md) | Resume orientation: docs/TASKS.md is the authoritative plan |
+| [0027](0027-e2e-webgl2-gate-webgpu-attempted.md) | Playwright e2e: WebGL2 hard gate, WebGPU attempted and skipped honestly headless |
