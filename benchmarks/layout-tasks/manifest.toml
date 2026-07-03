@@ -1,0 +1,10 @@
+# Sample layout-tasks suite for the Reticle agent benchmark.
+#
+# This is a SAMPLE suite that proves the reticle-bench machinery end to end against
+# the deterministic mock model: one straight placement, one DRC violation that gets
+# corrected, and one connectivity open that gets bridged. The full 60-task suite is
+# authored in a later wave; do not treat passing this as a model capability result.
+#
+# Bump `version` whenever tasks are added or promoted between tiers.
+version = "0.1.0"
+tasks = ["t1_place_met1_rect", "t1_drc_clean_met1", "t1_intent_connect"]
