@@ -11,6 +11,7 @@
 //!
 //! * [`camera`], the world<->screen pan/zoom transform (zoom-to-cursor, fit).
 //! * [`culling`], viewport culling over a spatial index, plus level-of-detail.
+//! * [`draw`], the drawing tools and vertex-level editing geometry.
 //! * [`tool`], the Select/Pan/Measure tool state machine.
 //! * [`measure`], distance measurement in DBU and microns.
 //! * [`minimap`], the overview panel's world-to-panel mapping and viewport rect.
@@ -54,6 +55,7 @@ pub mod camera;
 pub mod command;
 pub mod culling;
 pub mod demo;
+pub mod draw;
 pub mod drc_panel;
 pub mod fps;
 pub mod grid;
