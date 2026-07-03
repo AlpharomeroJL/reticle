@@ -86,7 +86,7 @@ All notable changes to Reticle are documented here. The format follows
 
 ### Bug Fixes
 
-- Fix remaining typos flagged by the gate (unparsable, reword mis-checking)
+- Fix remaining typos flagged by the gate (unparsable, reword mischecking)
 
 ### Performance
 
