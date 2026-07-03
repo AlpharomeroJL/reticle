@@ -182,6 +182,58 @@ cargo nextest run -p reticle-bench         # replay-hash determinism over every 
 git log --format='%an <%ae>' | Sort-Object -Unique   # one author, no AI attribution
 ```
 
+## v6.0.0 progress (Wave 1, audited 2026-07-03)
+
+v6.0.0 fixes the front door, adds a local benchmark backend, and (in later waves)
+expands the editor, agent, and guided experience. Wave 1 is merged and gate-green
+on this host (`just ci`, `just e2e` plus `just e2e-subpath`, and `just smoke-pages`
+against the live redeployed site all pass). The full skeptical re-audit lands at
+Wave 5; this section records Wave 1 and its Pages postmortem.
+
+- **Pages base-path fix (Lane 1A) DONE and verified live.** The public bundle now
+  loads under the project subpath. `just deploy-pages` builds with
+  `trunk --release --public-url /reticle/` and asserts the emitted `index.html`
+  carries `/reticle/`-prefixed assets and no bare-root refs; the artifact is
+  published to gh-pages and `just smoke-pages` confirms the live base URL and both
+  assets return 200 under `/reticle/`. The replay theater is un-gated for wasm32
+  through a `SessionStore` seam (filesystem on native, a bundled transcript on
+  web), so the browser bundle opens into a playing theater instead of hanging.
+- **Ollama benchmark backend (Lane 1B) DONE.** An OpenAI-compatible `OllamaModel`
+  in `reticle-agent` drives the propose-verify-correct loop against a local model;
+  `ResultRecord` gained backend and quantization labels (ADR 0029) so mock, local,
+  and frontier runs are never conflated. The full 63-task local run is an
+  orchestrator step tracked in the benchmark chapter.
+- **Test count:** 798 workspace test functions (up from 775 at v5), all green.
+
+### Pages postmortem (what broke, why the gauntlet missed it, what prevents it now)
+
+What broke: the deployed `index.html` imported its wasm loader and module at
+absolute root (`/web-<hash>.js`, `/web-<hash>_bg.wasm`), but GitHub project Pages
+serve this site under `/reticle/`. The browser therefore fetched the assets from
+the domain root, got 404s, and the page hung forever on "Loading the replay
+theater". Root cause: `just web-build` ran `trunk build --release` with no
+`--public-url`, so Trunk emitted absolute-root asset paths.
+
+Why the gauntlet missed it: the v5 QA gauntlet exercised the bundle only at the
+server root (`http://127.0.0.1:8080/`), where absolute-root asset refs resolve
+fine, so the subpath break never manifested. There was no deployed-URL check and
+no test that served the bundle at the `/reticle/` subpath, so no gate saw the
+condition GitHub Pages actually serves under.
+
+What prevents it now: (1) `just deploy-pages` bakes `--public-url /reticle/` into
+the build permanently and fails if the emitted `index.html` is not
+`/reticle/`-prefixed; (2) a Playwright `ghpages-subpath` project (`just
+e2e-subpath`) serves the exact bundle at `/reticle/` and asserts the app reaches
+its started event, so a base-path regression fails before deploy; (3) `just
+smoke-pages` fetches the live deployed URL and asserts every asset is 200 under
+`/reticle/`, run at the Wave 1 merge and wired for the release; (4) the wasm
+theater un-gate plus a visible-error path in `index.html` mean any load failure
+surfaces a message rather than an infinite spinner. One honest limitation: the
+final "started event" confirmation on the live URL was made through the
+`ghpages-subpath` e2e run over the identical bundle, not a live headless browser
+(the Playwright MCP browser backend was unavailable this session); `just
+smoke-pages` covers the live asset resolution.
+
 ## Section 16 (definition of done), item by item
 
 | # | Item | Status | Evidence |
