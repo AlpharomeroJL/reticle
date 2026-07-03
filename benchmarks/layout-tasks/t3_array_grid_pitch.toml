@@ -1,0 +1,5 @@
+id = "t3_array_grid_pitch"
+tier = 3
+prompt = "Create a leaf cell named leaf holding a met1 (68/20) rectangle, then create a cell named top that places a 3-column by 2-row array of the leaf cell with a column pitch of 800 database units and a row pitch of 600 database units."
+technology = "sky130.tech"
+checker = "array_pitch:instances=6,col_pitch=800,row_pitch=600"

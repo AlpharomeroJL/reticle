@@ -672,6 +672,9 @@ impl CandidateFile {
             technology: self.technology.clone(),
             checker: self.checker.clone(),
             intent: self.intent.clone(),
+            // Mined candidates are single-shot placement/geometry tasks, never
+            // iterative-refinement tasks, so a promoted candidate carries no refinement.
+            refinement: None,
         }
     }
 }

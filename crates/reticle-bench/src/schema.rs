@@ -27,6 +27,16 @@ pub struct BenchTask {
     /// Serialized connectivity intent spec, for intent-verified tasks.
     #[serde(default)]
     pub intent: Option<String>,
+    /// A scripted mid-session refinement constraint for an iterative-refinement task:
+    /// an extra requirement the user adds *after* the initial prompt (for example
+    /// "make it larger" or "add a second shape"). When present, a refinement-aware
+    /// runner folds this string into the model's feedback between iterations through the
+    /// `reticle-agent` refinement seam (`RefinementSource` / `run_agent_task_refined`),
+    /// so the model reacts to it on the next proposal without the session being torn
+    /// down and rebuilt. Absent for ordinary single-shot tasks; `#[serde(default)]`
+    /// keeps task TOML written before the field existed parsing unchanged.
+    #[serde(default)]
+    pub refinement: Option<String>,
 }
 
 /// A versioned manifest of the tasks in a suite.

@@ -217,9 +217,9 @@ impl CheckerRegistry {
     /// - A task carrying an `intent` field gets an [`IntentCheck`] bound to its
     ///   checker name (typically `intent`), regardless of the name.
     /// - A task whose checker string names a geometric checker
-    ///   (`shape_count`, `layer_area`, `contact_stack`, `via_chain`, `comb`,
-    ///   `guard_ring`, `compound_cell`) with parameters after a `:` gets that checker,
-    ///   built from the parsed parameters, bound under the full string.
+    ///   (`shape_count`, `layer_area`, `boolean_result`, `array_pitch`, `contact_stack`,
+    ///   `via_chain`, `comb`, `guard_ring`, `compound_cell`) with parameters after a `:`
+    ///   gets that checker, built from the parsed parameters, bound under the full string.
     /// - A parameterized `rect_present:layer=L/D` gets a [`RectPresent`] on that layer.
     ///
     /// Anything else is left to the default checkers (`rect_present`, `drc_clean`).
@@ -384,6 +384,7 @@ mod tests {
             technology: "sky130.tech".into(),
             checker: "intent".into(),
             intent: Some(intent),
+            refinement: None,
         };
         let reg = CheckerRegistry::for_task(&task).expect("build");
         assert!(reg.get("intent").is_some());
@@ -398,6 +399,7 @@ mod tests {
             technology: "sky130.tech".into(),
             checker: "intent".into(),
             intent: Some("{not valid".into()),
+            refinement: None,
         };
         assert!(CheckerRegistry::for_task(&task).is_err());
     }

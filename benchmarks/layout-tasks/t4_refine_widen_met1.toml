@@ -1,0 +1,6 @@
+id = "t4_refine_widen_met1"
+tier = 4
+prompt = "Create a cell named top and place a single met1 (68/20) rectangle covering at least 90000 square database units."
+technology = "sky130.tech"
+checker = "layer_area:layer=68/20,min_area=250000"
+refinement = "Refinement: the met1 rectangle must be larger. Grow it so the met1 area on layer 68/20 is at least 250000 square database units (for example a 500x500 rectangle)."

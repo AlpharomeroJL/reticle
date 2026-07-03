@@ -814,6 +814,7 @@ mod tests {
             technology: "sky130.tech".into(),
             checker: "drc_clean".into(),
             intent: None,
+            refinement: None,
         }
     }
 

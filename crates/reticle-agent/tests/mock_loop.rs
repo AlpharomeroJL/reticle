@@ -18,10 +18,12 @@
 
 use std::path::Path;
 
-use reticle_agent::{LoopOptions, Provenance, run_agent_task};
+use reticle_agent::{
+    LoopOptions, Provenance, RefinementFn, run_agent_task, run_agent_task_refined,
+};
 use reticle_agent_api::AgentCommand;
 use reticle_agent_api::args::{LayerArg, PointArg, RectArg};
-use reticle_bench::model::MockModel;
+use reticle_bench::model::{Context, MockModel, ModelClient};
 use reticle_bench::{BenchTask, CheckerRegistry, ResultRecord, Tier};
 
 /// A met1 rectangle command from the origin to `(size, size)` in cell `top`.
@@ -48,6 +50,7 @@ fn drc_task() -> BenchTask {
         technology: "sky130.tech".into(),
         checker: "drc_clean".into(),
         intent: None,
+        refinement: None,
     }
 }
 
@@ -245,6 +248,116 @@ fn transcript_is_jsonl_and_carries_no_injected_secret() {
     assert!(
         command_lines >= 2,
         "at least the create_cell + add_rect records"
+    );
+    cleanup(&dir);
+}
+
+/// The refinement task fixture: mirrors the committed `t4_refine_add_shape_met1` task.
+/// The initial prompt asks for one met1 rectangle; the scripted `refinement` asks for
+/// a second, and the `shape_count` checker enforces the post-refinement bar (>= 2).
+fn refine_add_shape_task() -> BenchTask {
+    BenchTask {
+        id: "t4_refine_add_shape_met1".into(),
+        tier: Tier(4),
+        prompt: "Create a cell named top and place one met1 rectangle.".into(),
+        technology: "sky130.tech".into(),
+        checker: "shape_count:layer=68/20,min=2".into(),
+        intent: None,
+        refinement: Some(
+            "Refinement: add a second, separate met1 rectangle so the cell holds at \
+             least two met1 shapes."
+                .into(),
+        ),
+    }
+}
+
+/// A mock that places one met1 rect on iteration 0, then places a second rect once it
+/// sees an "add a second" refinement folded into its feedback. This mirrors a real
+/// model reacting to the scripted follow-up constraint, and proves the loop delivered
+/// the `BenchTask.refinement` through the refinement seam without a restart.
+#[derive(Clone, Debug, Default)]
+struct AddSecondShapeMock;
+
+impl ModelClient for AddSecondShapeMock {
+    #[allow(clippy::unnecessary_literal_bound)]
+    fn id(&self) -> &str {
+        "add-second-shape-mock"
+    }
+
+    fn propose(&mut self, _task_id: &str, _prompt: &str, context: &Context) -> Vec<AgentCommand> {
+        if context.iteration == 0 {
+            // Initial proposal: the cell and the first met1 rect.
+            return vec![
+                AgentCommand::CreateCell { name: "top".into() },
+                met1_rect(300),
+            ];
+        }
+        // The scripted refinement asks for a second shape; add one clear of the first.
+        let asked_for_second = context
+            .feedback
+            .iter()
+            .any(|line| line.contains("second") && line.contains("met1"));
+        if asked_for_second {
+            vec![AgentCommand::AddRect {
+                cell: "top".into(),
+                layer: LayerArg {
+                    layer: 68,
+                    datatype: 20,
+                },
+                rect: RectArg {
+                    min: PointArg { x: 500, y: 0 },
+                    max: PointArg { x: 800, y: 300 },
+                },
+            }]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+#[test]
+fn benchtask_refinement_is_folded_in_and_converges() {
+    // Drive the committed-style refinement task exactly as the CLI's `drive_one` does:
+    // the scripted `refinement` string is yielded on iteration 1 (after the first
+    // proposal) through a `RefinementFn`, and folded into the model's feedback. The
+    // model then adds the second shape and the `shape_count` checker passes, all in one
+    // continuous run (no restart).
+    let task = refine_add_shape_task();
+    let refinement = task
+        .refinement
+        .clone()
+        .expect("fixture carries a refinement");
+    let registry = CheckerRegistry::for_task(&task).expect("checker compiles");
+    let mut model = AddSecondShapeMock;
+    let dir = out_dir("refine-benchtask");
+    let outcome = run_agent_task_refined(
+        &task,
+        &mut model,
+        &registry,
+        "",
+        "0.4.0",
+        LoopOptions::default(),
+        &dir,
+        0,
+        &Provenance::new("mock"),
+        |_, _| {},
+        RefinementFn(move |iteration: u32| {
+            if iteration == 1 {
+                vec![refinement.clone()]
+            } else {
+                Vec::new()
+            }
+        }),
+    )
+    .expect("run");
+
+    assert!(
+        outcome.record.success,
+        "the loop must converge once the second-shape refinement is applied"
+    );
+    assert_eq!(
+        outcome.record.iterations, 2,
+        "iteration 0 (one shape, fails min=2) then 1 (second shape) converges"
     );
     cleanup(&dir);
 }
