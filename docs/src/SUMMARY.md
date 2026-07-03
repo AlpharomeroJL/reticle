@@ -33,6 +33,7 @@
 
 - [Performance methodology](performance.md)
 - [User guide](user-guide.md)
+- [Worked use cases](use-cases.md)
 - [Productivity editing](productivity.md)
 - [Layer and technology editing](layer-tech-editing.md)
 - [Deployment](deployment.md)
