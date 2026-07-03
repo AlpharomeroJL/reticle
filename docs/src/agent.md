@@ -60,6 +60,47 @@ room never sees a half-drawn step and can edit alongside the agent (ADR 0022). T
 same transcript the harness writes is what the in-app replay theater plays back
 through a live session.
 
+## Scoped sessions and context packs (`reticle-agent::context_pack`)
+
+A session can be opened on a *region* of the document rather than the whole thing. This
+is what the DRC error browser's "ask the agent to fix this" button does: it hands the
+harness a rectangle and the specific violation, and the agent works only that corner.
+
+For a scoped run the harness does not condition the model on the whole-document
+snapshot. Instead a [`ContextPack`] assembles a minimal, region-local context string:
+
+1. the scoped region;
+2. the shapes whose bounding box overlaps that region, each as kind, layer, and
+   bounding box, capped so a dense region still yields a bounded prompt;
+3. the violated rule, stated structurally (kind, layers, measured value, required
+   value);
+4. only the technology rules whose layers appear in those shapes or in the violation.
+
+The overlap test is the same inclusive touch-or-overlap test the `query_shapes` command
+uses, so a pack and a `query_shapes` on the same rectangle agree on which shapes are in
+scope. The pack is a pure function of the document and the region, so it plugs into the
+same context hook the whole-document path uses: a scoped run sets the model's document
+context to the pack instead of the summary.
+
+**Why it saves tokens.** The compact per-cell summary the unscoped hook sends is already
+small, but it is lossy: it lists how many shapes a cell holds, not where they are. To
+reason about a local geometric fix a model needs the coordinates of the nearby shapes,
+so the honest whole-document baseline is the full per-shape listing (`whole_document_context`),
+not the summary. A pack replaces that full listing with a region-scoped slice.
+
+On a synthetic document of one cell with 200 shapes, a met1 width rule and a met2
+spacing rule, and a repair region overlapping exactly one shape, the measured estimates
+(characters over four) are:
+
+| Context | Tokens | Characters |
+| --- | --- | --- |
+| Whole-document, full per-shape fidelity | 1878 | 7509 |
+| Scoped pack (one shape + violation + one relevant rule) | 62 | 245 |
+
+That is roughly a 30x reduction, about 97% fewer tokens, and the pack's size tracks the
+*region* rather than the design, so the saving grows with the design. The measurement is
+pinned by a test in the `context_pack` module.
+
 ## Where it runs
 
 - `reticle-mcp` exposes this command surface to a model over the Model Context
