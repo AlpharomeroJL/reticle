@@ -744,3 +744,32 @@ fn assemble_gif(frames: &[PathBuf], out: &Path) {
         Err(err) => eprintln!("could not run gifski (is it installed and on PATH?): {err}"),
     }
 }
+
+/// Assembles PNG frames into a GIF with the installed `gifski` CLI, downscaling to
+/// `width` pixels and using `fps`/`quality`, so a caller can trade size for fidelity
+/// under a byte budget. Shares the gifski path with [`assemble_gif`].
+pub(crate) fn assemble_gif_scaled(
+    frames: &[PathBuf],
+    out: &Path,
+    fps: u32,
+    quality: u8,
+    width: u32,
+) {
+    let mut cmd = Command::new("gifski");
+    cmd.arg("--fps")
+        .arg(fps.to_string())
+        .arg("--quality")
+        .arg(quality.to_string())
+        .arg("--width")
+        .arg(width.to_string())
+        .arg("-o")
+        .arg(out);
+    for frame in frames {
+        cmd.arg(frame);
+    }
+    match cmd.status() {
+        Ok(status) if status.success() => {}
+        Ok(status) => eprintln!("gifski exited with {status}"),
+        Err(err) => eprintln!("could not run gifski (is it installed and on PATH?): {err}"),
+    }
+}

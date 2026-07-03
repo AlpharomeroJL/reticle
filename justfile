@@ -232,6 +232,14 @@ route-run file:
 capture-media:
     cargo run -p xtask --release -- capture-media
 
+# UI-capture: drive the real editor window through the committed demo scripts
+# (crates/reticle-app/demo-scripts/*.demo) and assemble the README media (hero still
+# plus tour GIFs, each under 6 MB) from full-window screenshots. Pass a name to limit
+# to one capture, e.g. `just capture-ui tour-drc`. Reproducible: same scripts, same
+# media. Needs `gifski` on PATH and a GPU (opens the app window per capture).
+capture-ui *args:
+    cargo run -p xtask --release -- capture-ui {{args}}
+
 # ---------------------------------------------------------------------------
 # Nightly-only: fuzzing and miri
 # ---------------------------------------------------------------------------
