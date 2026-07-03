@@ -323,13 +323,25 @@ pub struct App {
     /// persists with the session so the automatic tour shows only once.
     tour: Tour,
 
-    /// Active scripted-capture state, set only by the native `--screenshot-smoke` /
-    /// `--demo-script` launcher; `None` in normal interactive and web use. It drives
-    /// full-window egui screenshots for the README media harness (see
-    /// [`crate::demoscript`]); native only, since a windowed screenshot is
-    /// meaningless on wasm.
+    /// Active one-shot screenshot smoke, set only by the native `--screenshot-smoke`
+    /// launcher; `None` otherwise. Drives a single full-window egui screenshot to
+    /// de-risk the capture path (see [`crate::demoscript`]); native only.
     #[cfg(not(target_arch = "wasm32"))]
     capture: Option<crate::demoscript::CaptureState>,
+
+    /// Active scripted demo run, set only by the native `--demo-script` launcher;
+    /// `None` in normal interactive and web use. It drives the editor through a timed
+    /// step list and screenshots each capture frame for the README media harness (see
+    /// [`crate::demoscript`]); native only, since a windowed screenshot is meaningless
+    /// on wasm.
+    #[cfg(not(target_arch = "wasm32"))]
+    demo: Option<crate::demoscript::DemoRun>,
+
+    /// Whether a demo capture wants the floating 3D-stack window shown. Off by
+    /// default so non-3D tours are not cluttered by it; a `view3d on` step turns it on
+    /// for the 3D tour. Ignored outside capture mode (the window shows normally).
+    #[cfg(not(target_arch = "wasm32"))]
+    demo_show_3d: bool,
 }
 
 /// The view the app opens into.
@@ -493,6 +505,10 @@ impl App {
             tour: Tour::from_seen(tour_already_seen()),
             #[cfg(not(target_arch = "wasm32"))]
             capture: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            demo: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            demo_show_3d: false,
         }
     }
 
@@ -580,6 +596,141 @@ impl App {
         self.enter_use_case(crate::usecases::UseCase::InspectCell);
         self.run_drc();
         self.capture = Some(crate::demoscript::CaptureState::smoke(out_path));
+    }
+
+    /// Arms a scripted demo run (native launcher only), writing captured frames under
+    /// `out_dir`.
+    ///
+    /// Dismisses the Start screen so the editor renders from the first frame; the
+    /// script's own `use-case` step then loads the scenario it wants. The first-run
+    /// tour and the cross-section prompt are suppressed while a demo runs (see
+    /// `in_demo_capture`) so captures show only the feature under test.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_demo_script(
+        &mut self,
+        script: crate::demoscript::Script,
+        out_dir: std::path::PathBuf,
+    ) {
+        self.start_screen = false;
+        self.demo = Some(crate::demoscript::DemoRun::new(script, out_dir));
+    }
+
+    /// Whether a demo capture (scripted run or one-shot smoke) is in progress.
+    ///
+    /// Capture mode hides transient chrome (the first-run tour overlay and the empty
+    /// cross-section prompt) so the media shows the feature, not onboarding.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn in_demo_capture(&self) -> bool {
+        self.demo.is_some() || self.capture.is_some()
+    }
+
+    /// On wasm there is no capture mode, so nothing is ever suppressed.
+    #[cfg(target_arch = "wasm32")]
+    fn in_demo_capture(&self) -> bool {
+        false
+    }
+
+    /// Applies one instantaneous demo step to the editor.
+    ///
+    /// Each arm invokes the exact same code path the interactive UI uses, so a demo
+    /// capture shows the real feature rather than a staged mock. Scheduler-only steps
+    /// (`Wait`/`Capture`/`Snap`/`Orbit`) never reach here.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn apply_demo_step(&mut self, step: &crate::demoscript::Step) {
+        use crate::demoscript::Step;
+        match step {
+            Step::UseCase(use_case) => self.enter_use_case(*use_case),
+            Step::RunDrc => self.run_drc(),
+            Step::SelectViolation(index) => {
+                let _ = self.drc.select(*index);
+            }
+            Step::ZoomViolation => self.zoom_to_selected_violation = true,
+            Step::Select(indices) => {
+                if let Some((first, rest)) = indices.split_first() {
+                    self.selection.select_one(*first);
+                    self.selection.extend(rest.iter().copied());
+                }
+            }
+            Step::HighlightNet(index) => {
+                let _ = self.netlight.highlight_shape(
+                    self.history.document(),
+                    &self.top_cell,
+                    self.doc_generation,
+                    *index,
+                );
+            }
+            Step::View3d(open) => {
+                self.demo_show_3d = *open;
+                if *open {
+                    self.view3d.reset();
+                }
+            }
+            // Editing, query, and free camera steps are added in the follow-up task;
+            // until then they log rather than silently no-op.
+            Step::Filter(_)
+            | Step::OutlineLocate(_)
+            | Step::AddPoly(_)
+            | Step::VertexMove { .. }
+            | Step::Union
+            | Step::Array { .. }
+            | Step::Zoom(_)
+            | Step::Pan(..) => {
+                eprintln!("demo: step {step:?} not yet implemented");
+            }
+            // Handled by the scheduler, never dispatched as an action.
+            Step::Wait(_) | Step::Capture { .. } | Step::Snap(_) | Step::Orbit(..) => {}
+        }
+    }
+
+    /// Advances the active demo run by one frame: applies the scheduler's next
+    /// instruction, requesting and saving full-window screenshots as it captures.
+    ///
+    /// The run is taken out of `self` for the duration so the step dispatch can borrow
+    /// the app freely, then put back unless the run finished.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn drive_demo(&mut self, ctx: &egui::Context) {
+        use crate::demoscript::Tick;
+        let Some(mut demo) = self.demo.take() else {
+            return;
+        };
+        match demo.next_tick() {
+            Tick::Idle => {}
+            Tick::Apply(step) => self.apply_demo_step(&step),
+            Tick::Capture { orbit } => {
+                if orbit.0.abs() > f32::EPSILON || orbit.1.abs() > f32::EPSILON {
+                    self.view3d.drag(orbit.0, orbit.1);
+                }
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+            }
+            Tick::Save => {
+                let shot = ctx.input(|i| {
+                    i.raw.events.iter().find_map(|e| match e {
+                        egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                        _ => None,
+                    })
+                });
+                match shot {
+                    Some(image) => {
+                        let frame = crate::demoscript::frame_from_color_image(&image);
+                        demo.store_frame(&frame);
+                    }
+                    None => demo.miss(),
+                }
+            }
+            Tick::Done => {
+                match demo.write_manifest() {
+                    Ok(path) => eprintln!(
+                        "demo: captured {} frames; manifest {}",
+                        demo.frame_count(),
+                        path.display()
+                    ),
+                    Err(e) => eprintln!("demo: manifest write failed: {e}"),
+                }
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return;
+            }
+        }
+        self.demo = Some(demo);
     }
 
     /// The renderer (frozen Wave 0 contract accessor).
@@ -4664,37 +4815,52 @@ impl eframe::App for App {
         self.view_export.last_canvas = canvas_screen;
 
         self.palette_window(&ctx, canvas_screen);
-        self.view3d.show(
-            &ctx,
-            frame,
-            self.history.document(),
-            &self.top_cell,
-            &self.layer_state,
-        );
-        crate::xsection::window(
-            &ctx,
-            self.tools.cut_line(),
-            self.scene.shapes(),
-            self.history.document().technology(),
-            &self.layer_state,
-        );
+        // The floating 3D-stack window shows normally, but during a demo capture it is
+        // shown only when a `view3d on` step asked for it, so non-3D tours stay clean.
+        #[cfg(not(target_arch = "wasm32"))]
+        let show_view3d = !self.in_demo_capture() || self.demo_show_3d;
+        #[cfg(target_arch = "wasm32")]
+        let show_view3d = true;
+        if show_view3d {
+            self.view3d.show(
+                &ctx,
+                frame,
+                self.history.document(),
+                &self.top_cell,
+                &self.layer_state,
+            );
+        }
+        if !self.in_demo_capture() {
+            crate::xsection::window(
+                &ctx,
+                self.tools.cut_line(),
+                self.scene.shapes(),
+                self.history.document().technology(),
+                &self.layer_state,
+            );
+        }
         self.keymap_window(&ctx);
         self.replay_window(&ctx);
 
         // Draw the first-run tour overlay last so its card and highlight sit over
-        // everything else.
-        self.tour_overlay(&ctx, &tour_targets);
+        // everything else. Suppressed during a demo capture so onboarding chrome does
+        // not cover the feature under test.
+        if !self.in_demo_capture() {
+            self.tour_overlay(&ctx, &tour_targets);
+        }
 
         // Scripted-capture mode (native launcher only): advance the screenshot state
         // machine after everything has been drawn this frame, and close the window
-        // once the capture is complete.
+        // once the capture is complete. The one-shot smoke and the scripted demo run
+        // are independent; at most one is ever armed.
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let done = self.capture.as_mut().is_some_and(|cap| cap.tick(&ctx));
-            if done {
+            let smoke_done = self.capture.as_mut().is_some_and(|cap| cap.tick(&ctx));
+            if smoke_done {
                 self.capture = None;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+            self.drive_demo(&ctx);
         }
 
         // Keep animating while dragging/measuring so interaction feels live.
