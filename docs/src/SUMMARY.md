@@ -19,6 +19,8 @@
 
 # Automation and agents
 
+- [Agent API and harness](agent.md)
+- [MCP server](mcp.md)
 - [Agent benchmark suite](benchmarks.md)
 
 # Reference
