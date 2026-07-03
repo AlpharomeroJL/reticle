@@ -61,6 +61,19 @@ impl DrcResults {
         self.violations.len()
     }
 
+    /// Replaces the stored list with an externally computed violation set.
+    ///
+    /// This is how a live agent run or a transcript replay feeds the canvas
+    /// overlay: each `run_drc` response it crosses carries a violation list, and
+    /// installing it here updates the panel and the markers exactly as a local
+    /// [`run`](Self::run) would. The selection is dropped because indices into
+    /// the previous list are stale.
+    pub fn set_violations(&mut self, violations: Vec<Violation>) {
+        self.violations = violations;
+        self.has_run = true;
+        self.selected = None;
+    }
+
     /// Clears the stored violations and the "has run" flag.
     pub fn clear(&mut self) {
         self.violations.clear();
@@ -258,6 +271,32 @@ mod tests {
         assert!(results.is_empty());
         assert!(!results.has_run());
         assert!(results.selected().is_none());
+    }
+
+    #[test]
+    fn set_violations_installs_an_external_list_and_drops_selection() {
+        let mut results = DrcResults::new();
+        results.run(&thin_feature_doc(), "TOP");
+        results.select(0).expect("index 0 exists");
+        let external = vec![Violation {
+            rule: "agent_min_width".to_owned(),
+            kind: RuleKind::Width,
+            layer: LayerId::new(4, 0),
+            other_layer: None,
+            measured: 60,
+            required: 100,
+            location: Rect::new(Point::new(0, 0), Point::new(60, 2000)),
+            message: "from a transcript run_drc response".to_owned(),
+        }];
+        results.set_violations(external);
+        assert!(results.has_run());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results.violations()[0].rule, "agent_min_width");
+        assert!(results.selected().is_none(), "stale selection dropped");
+        // An empty external list still counts as "ran, found nothing".
+        results.set_violations(Vec::new());
+        assert!(results.has_run());
+        assert!(results.is_empty());
     }
 
     #[test]

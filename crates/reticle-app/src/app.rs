@@ -20,6 +20,8 @@ use reticle_render::{
 use reticle_sync::SyncDocument;
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::agent_panel::AgentPanelState;
 use crate::camera::{ScreenRect, ViewCamera};
 use crate::command::{self, Command};
 use crate::culling::{self, DetailLevel, SceneIndex};
@@ -34,10 +36,11 @@ use crate::labels;
 use crate::layers::{self, LayerState};
 use crate::minimap::MinimapLayout;
 use crate::netlight::{Generation, Netlight};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::replay::ReplayTheater;
 use crate::selection::{self, Selection};
 use crate::tool::{Tool, ToolState};
 use crate::viewports::{self, Split, Viewports};
-
 /// A transient status message shown in the bottom bar.
 #[derive(Clone, Debug, Default)]
 struct Status {
@@ -116,6 +119,24 @@ pub struct App {
     /// it is refreshed only when [`App::sync_retained`] rebuilds.
     expanded: Arc<ExpandedScene>,
 
+    /// The agent panel: prompt, run state machine, narration, and cursor.
+    /// Native only: `reticle-agent-api` does not compile for wasm32 today.
+    #[cfg(not(target_arch = "wasm32"))]
+    agent: AgentPanelState,
+    /// The replay theater's playback state machine (native only, like the
+    /// agent panel: both drive `reticle-agent-api`).
+    #[cfg(not(target_arch = "wasm32"))]
+    replay: ReplayTheater,
+    /// Whether the replay theater window is open.
+    #[cfg(not(target_arch = "wasm32"))]
+    replay_open: bool,
+    /// The transcript-path text in the theater's load row.
+    #[cfg(not(target_arch = "wasm32"))]
+    replay_path: String,
+    /// The last theater load error, shown under the load row (empty when none).
+    #[cfg(not(target_arch = "wasm32"))]
+    replay_error: String,
+
     /// The DRC panel state: the last run's violations and the highlighted one.
     drc: DrcResults,
     /// Whether the camera should frame the selected violation on the next frame
@@ -139,6 +160,10 @@ pub struct App {
     palette_query: String,
     /// The query-bar text for "select by layer".
     layer_query: String,
+    /// The relay host in the Share section (see [`crate::share`]).
+    share_server: String,
+    /// The room name in the Share section; sanitized into the link.
+    share_room: String,
     /// The most recent status-bar message.
     status: Status,
     /// The last world position under the cursor, for the status readout.
@@ -189,6 +214,16 @@ impl App {
             render_revision: 0,
             visibility_sig: 0,
             expanded,
+            #[cfg(not(target_arch = "wasm32"))]
+            agent: AgentPanelState::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            replay: ReplayTheater::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            replay_open: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            replay_path: String::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            replay_error: String::new(),
             drc: DrcResults::new(),
             zoom_to_selected_violation: false,
             netlight: Netlight::new(),
@@ -199,6 +234,8 @@ impl App {
             palette_open: false,
             palette_query: String::new(),
             layer_query: String::new(),
+            share_server: crate::share::DEFAULT_SERVER.to_owned(),
+            share_room: crate::share::room_id(demo::TOP_CELL),
             status: Status::default(),
             cursor_world: None,
             frame_meter: FrameMeter::default(),
@@ -738,6 +775,415 @@ impl App {
         }
     }
 
+    /// Draws the agent panel: prompt box, Run/Stop, live status, and narration.
+    ///
+    /// The state machine and the narration feed live in [`crate::agent_panel`];
+    /// this is glue only. The panel drives a scripted transcript (no model or
+    /// key), so Run always has something honest to narrate.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn agent_section(&mut self, ui: &mut egui::Ui) {
+        use crate::agent_panel::RunState;
+
+        ui.heading("Agent");
+        ui.horizontal(|ui| {
+            ui.label("Prompt:");
+            ui.text_edit_singleline(&mut self.agent.prompt);
+        });
+        ui.horizontal(|ui| {
+            let running = self.agent.is_running();
+            if ui.add_enabled(!running, egui::Button::new("Run")).clicked() {
+                self.agent.start();
+                self.status.set("Agent run started");
+            }
+            if ui.add_enabled(running, egui::Button::new("Stop")).clicked() {
+                self.agent.stop();
+                self.status.set("Agent run stopped");
+            }
+            if ui.button("Replay theater").clicked() {
+                self.replay_open = !self.replay_open;
+            }
+            // Hand the finished (or stopped) run's transcript to the theater.
+            let replayable = !running && self.agent.transcript().is_some();
+            if ui
+                .add_enabled(replayable, egui::Button::new("Replay this run"))
+                .clicked()
+                && let Some(transcript) = self.agent.transcript().cloned()
+            {
+                self.replay.load_transcript(transcript);
+                self.replay_open = true;
+                self.drc.clear();
+            }
+        });
+        if let Some(status) = self.agent.latest_status() {
+            let (done, total) = self.agent.progress();
+            ui.label(format!(
+                "iter {} | {} | {} violation(s) | step {done}/{total}",
+                status.iteration, status.step, status.violations
+            ));
+        } else {
+            ui.label(match self.agent.state() {
+                RunState::Idle => "Idle: enter a prompt and press Run",
+                RunState::Running => "Starting...",
+                RunState::Stopped => "Stopped",
+            });
+        }
+        ui.separator();
+        egui::ScrollArea::vertical()
+            .max_height(140.0)
+            .auto_shrink([false, false])
+            .stick_to_bottom(true)
+            .id_salt("agent_narration")
+            .show(ui, |ui| {
+                if self.agent.narration().is_empty() {
+                    ui.label("No run yet");
+                }
+                for line in self.agent.narration() {
+                    ui.monospace(line);
+                }
+            });
+    }
+
+    /// The web build's agent panel stub: the command API is native-only today.
+    #[cfg(target_arch = "wasm32")]
+    fn agent_section(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Agent");
+        ui.label("Agent runs are native-only in this build.");
+    }
+
+    /// Installs a verify step's violation list into the DRC panel and overlay.
+    ///
+    /// Called whenever a running agent feed (or the replay theater) crosses a
+    /// `run_drc` record: the list parsed from the recorded response replaces the
+    /// panel's stored violations, so the markers on the canvas track the
+    /// agent's propose-verify-correct loop in real time.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn apply_agent_drc_update(&mut self, violations: Vec<reticle_model::Violation>) {
+        let n = violations.len();
+        self.drc.set_violations(violations);
+        if n == 0 {
+            self.status.set("Agent verify: DRC clean");
+        } else {
+            self.status.set(format!("Agent verify: {n} violation(s)"));
+        }
+    }
+
+    /// Applies a theater seek/step result to the DRC overlay: install the list
+    /// the new position implies, or clear the markers when no verify has run
+    /// yet at that point of the transcript.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn apply_replay_overlay(&mut self, update: Option<Vec<reticle_model::Violation>>) {
+        match update {
+            Some(v) => self.apply_agent_drc_update(v),
+            None => self.drc.clear(),
+        }
+    }
+
+    /// Loads the transcript JSONL named in the theater's path box.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn load_replay_from_path(&mut self) {
+        let path = self.replay_path.trim().to_owned();
+        if path.is_empty() {
+            "Enter a transcript .jsonl path".clone_into(&mut self.replay_error);
+            return;
+        }
+        match std::fs::read_to_string(&path) {
+            Ok(text) => match self.replay.load_jsonl(&text) {
+                Ok(()) => {
+                    self.replay_error.clear();
+                    self.drc.clear();
+                    let (_, total) = self.replay.progress();
+                    self.status.set(format!("Replay: loaded {total} record(s)"));
+                }
+                Err(e) => self.replay_error = format!("Parse failed: {e}"),
+            },
+            Err(e) => self.replay_error = format!("Read failed: {e}"),
+        }
+    }
+
+    /// Draws the replay theater window: load row, transport, readouts, and the
+    /// replayed document painted through a [`crate::replay::FitView`].
+    ///
+    /// All playback logic lives in [`crate::replay`]; this is glue. The theater
+    /// re-executes the transcript against a live engine session, so the canvas
+    /// here shows real replayed geometry, and each `run_drc` record it crosses
+    /// pushes its recorded violation list into the shared DRC overlay.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn replay_window(&mut self, ctx: &egui::Context) {
+        if !self.replay_open {
+            return;
+        }
+        let mut open = self.replay_open;
+        egui::Window::new("Replay theater")
+            .open(&mut open)
+            .default_size([480.0, 460.0])
+            .show(ctx, |ui| {
+                self.replay_load_row(ui);
+                ui.separator();
+                self.replay_transport_row(ui);
+                ui.separator();
+                self.replay_readouts(ui);
+                ui.separator();
+                self.replay_canvas(ui);
+            });
+        self.replay_open = open;
+    }
+
+    /// The theater's load row: a JSONL path, or the built-in scripted demo run.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn replay_load_row(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Transcript:");
+            ui.text_edit_singleline(&mut self.replay_path);
+            if ui.button("Load").clicked() {
+                self.load_replay_from_path();
+            }
+            if ui.button("Load demo run").clicked() {
+                let (transcript, _) = crate::agent_panel::scripted_run("replay theater demo");
+                self.replay.load_transcript(transcript);
+                self.replay_error.clear();
+                self.drc.clear();
+            }
+        });
+        if !self.replay_error.is_empty() {
+            ui.colored_label(Color32::from_rgb(255, 120, 120), &self.replay_error);
+        }
+    }
+
+    /// The theater's transport row: restart, step back, play/pause, step
+    /// forward, and the speed selector.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn replay_transport_row(&mut self, ui: &mut egui::Ui) {
+        use crate::replay::SPEEDS;
+
+        let loaded = self.replay.is_loaded();
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(loaded, egui::Button::new("|<"))
+                .on_hover_text("Restart")
+                .clicked()
+            {
+                let update = self.replay.seek(0);
+                self.apply_replay_overlay(update);
+            }
+            if ui
+                .add_enabled(loaded, egui::Button::new("< Step"))
+                .clicked()
+            {
+                let update = self.replay.step_back();
+                self.apply_replay_overlay(update);
+            }
+            let play_label = if self.replay.is_playing() {
+                "Pause"
+            } else {
+                "Play"
+            };
+            if ui
+                .add_enabled(loaded, egui::Button::new(play_label))
+                .clicked()
+            {
+                if self.replay.is_playing() {
+                    self.replay.pause();
+                } else {
+                    self.replay.play();
+                }
+            }
+            if ui
+                .add_enabled(loaded, egui::Button::new("Step >"))
+                .clicked()
+                && let Some(update) = self.replay.step_forward()
+            {
+                self.apply_agent_drc_update(update);
+            }
+            let mut speed = self.replay.speed();
+            egui::ComboBox::from_id_salt("replay_speed")
+                .selected_text(format!("{speed}x"))
+                .width(70.0)
+                .show_ui(ui, |ui| {
+                    for &s in &SPEEDS {
+                        ui.selectable_value(&mut speed, s, format!("{s}x"));
+                    }
+                });
+            self.replay.set_speed(speed);
+        });
+    }
+
+    /// The theater's readouts: progress, shape count, hash verdict, violation
+    /// count, and the "now playing" narration line.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn replay_readouts(&mut self, ui: &mut egui::Ui) {
+        use crate::replay::HashCheck;
+
+        let (done, total) = self.replay.progress();
+        ui.horizontal(|ui| {
+            ui.label(format!("Step {done}/{total}"));
+            ui.separator();
+            ui.label(format!("Shapes: {}", self.replay.shape_count()));
+            ui.separator();
+            ui.label(match self.replay.hash_check() {
+                HashCheck::Pending => "hash: pending",
+                HashCheck::Unverifiable => "hash: none recorded",
+                HashCheck::Match => "hash: match",
+                HashCheck::Mismatch => "hash: MISMATCH",
+            });
+            if self.replay.has_verified() {
+                ui.separator();
+                ui.label(format!(
+                    "{} violation(s)",
+                    self.replay.last_violations().len()
+                ));
+            }
+        });
+        if let Some(record) = self.replay.current_record() {
+            ui.monospace(crate::agent_panel::narrate_record(record));
+        } else {
+            ui.label(if self.replay.is_loaded() {
+                "At start: press Play or Step"
+            } else {
+                "No transcript loaded"
+            });
+        }
+    }
+
+    /// Paints the replayed document (and the last verify's violation markers)
+    /// into the theater window, letterboxed by a [`crate::replay::FitView`].
+    #[cfg(not(target_arch = "wasm32"))]
+    fn replay_canvas(&self, ui: &mut egui::Ui) {
+        use crate::replay::{FitView, shapes_bbox};
+
+        let size = Vec2::new(ui.available_width().max(160.0), 240.0);
+        let (response, painter) = ui.allocate_painter(size, Sense::hover());
+        let rect = response.rect;
+        painter.rect_filled(rect, 4.0, Color32::from_rgb(12, 14, 18));
+        let shapes = self.replay.flattened_shapes();
+        let Some(bbox) = shapes_bbox(&shapes) else {
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                "Nothing drawn yet",
+                FontId::proportional(12.0),
+                Color32::from_rgb(120, 126, 140),
+            );
+            return;
+        };
+        let view = FitView::fit(bbox, rect.width(), rect.height(), 14.0);
+        let to_pos = |p: Point| {
+            let (x, y) = view.to_screen(p);
+            Pos2::new(rect.left() + x, rect.top() + y)
+        };
+        // Layer colors come from the replayed session's own technology (the
+        // transcript installs it), with a neutral gray fallback.
+        let doc = self.replay.document();
+        let color_of = |layer: LayerId| -> Color32 {
+            doc.technology()
+                .layers
+                .iter()
+                .find(|l| l.id == layer)
+                .map_or(Color32::from_rgb(150, 150, 150), |l| {
+                    let (r, g, b, _) = layers::rgba_components(l.color_rgba);
+                    Color32::from_rgb(r, g, b)
+                })
+        };
+        for shape in &shapes {
+            let base = color_of(shape.layer);
+            let fill = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 170);
+            let stroke = Stroke::new(1.0, base);
+            match &shape.kind {
+                ShapeKind::Rect(r) => {
+                    let e = EguiRect::from_two_pos(to_pos(r.min), to_pos(r.max));
+                    painter.rect_filled(e, 0.0, fill);
+                    painter.rect_stroke(e, 0.0, stroke, StrokeKind::Middle);
+                }
+                ShapeKind::Polygon(poly) => {
+                    let pts: Vec<Pos2> = poly.vertices().iter().map(|p| to_pos(*p)).collect();
+                    if pts.len() >= 3 {
+                        painter.add(Shape::convex_polygon(pts, fill, stroke));
+                    }
+                }
+                ShapeKind::Path(path) => {
+                    let pts: Vec<Pos2> = path.points().iter().map(|p| to_pos(*p)).collect();
+                    if pts.len() >= 2 {
+                        painter.add(Shape::line(pts, Stroke::new(2.0, base)));
+                    }
+                }
+            }
+        }
+        // The last verify's markers, in the DRC overlay's alarm red.
+        let marker = Stroke::new(2.0, Color32::from_rgb(255, 90, 90));
+        for v in self.replay.last_violations() {
+            let e =
+                EguiRect::from_two_pos(to_pos(v.location.min), to_pos(v.location.max)).expand(2.0);
+            painter.rect_stroke(e, 0.0, marker, StrokeKind::Middle);
+        }
+        if let Some(cell) = self.replay.render_cell() {
+            painter.text(
+                Pos2::new(rect.left() + 8.0, rect.top() + 6.0),
+                Align2::LEFT_TOP,
+                cell,
+                FontId::monospace(10.0),
+                Color32::from_rgb(150, 156, 170),
+            );
+        }
+    }
+
+    /// Draws the agent's cursor: a distinct ringed crosshair plus the agent's
+    /// actor name, so it cannot be mistaken for a collaborator's presence dot.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn draw_agent_cursor(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        if self.agent.state() == crate::agent_panel::RunState::Idle {
+            return;
+        }
+        let Some(world) = self.agent.cursor() else {
+            return;
+        };
+        let p = self.world_pos_to_screen(screen, world);
+        let color = Color32::from_rgb(235, 80, 220);
+        let stroke = Stroke::new(2.0, color);
+        painter.circle_stroke(p, 9.0, stroke);
+        painter.circle_filled(p, 3.0, color);
+        // Four crosshair ticks just outside the ring.
+        for (dx, dy) in [(1.0f32, 0.0f32), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+            painter.line_segment(
+                [
+                    Pos2::new(p.x + dx * 5.0, p.y + dy * 5.0),
+                    Pos2::new(p.x + dx * 13.0, p.y + dy * 13.0),
+                ],
+                stroke,
+            );
+        }
+        painter.text(
+            Pos2::new(p.x + 15.0, p.y - 12.0),
+            Align2::LEFT_CENTER,
+            reticle_agent_api::AGENT_ACTOR,
+            FontId::proportional(11.0),
+            color,
+        );
+    }
+
+    /// Draws the Share section: the relay host, the room, and the composed
+    /// join link with a copy button.
+    ///
+    /// The link format lives in [`crate::share`] (unit-tested there); this is
+    /// glue. The link targets the relay's only route, `GET /ws/{room}`, so a
+    /// collaborator who opens a client against it lands in this session's
+    /// room.
+    fn share_section(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Share");
+        ui.horizontal(|ui| {
+            ui.label("Relay:");
+            ui.text_edit_singleline(&mut self.share_server);
+        });
+        ui.horizontal(|ui| {
+            ui.label("Room:");
+            ui.text_edit_singleline(&mut self.share_room);
+        });
+        let link = crate::share::room_link(&self.share_server, &self.share_room);
+        ui.monospace(&link);
+        if ui.button("Copy link").clicked() {
+            ui.ctx().copy_text(link);
+            self.status.set("Share link copied");
+        }
+    }
+
     /// Draws the properties inspector section for the current selection.
     fn inspector_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Properties");
@@ -1011,6 +1457,8 @@ impl App {
             self.draw_minimap(&painter, &screen);
         }
         self.draw_presence(&painter, &screen);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.draw_agent_cursor(&painter, &screen);
 
         // Mark the focused pane when split (drawn unclipped so the full border
         // stroke shows).
@@ -1765,6 +2213,24 @@ impl eframe::App for App {
         self.frame_meter
             .record(std::time::Duration::from_secs_f32(dt.max(0.0)));
 
+        // Advance the agent run by this frame's dt so narration and the agent
+        // cursor animate while the panel is running. Each verify step the run
+        // crosses hands back the violation list parsed from its `run_drc`
+        // response, and installing it in the DRC results updates the panel list
+        // and the canvas markers live, mid-run.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(update) = self.agent.tick(dt) {
+            self.apply_agent_drc_update(update);
+        }
+
+        // Advance replay-theater playback the same way; a playing transcript
+        // updates the theater canvas and the DRC overlay as it crosses
+        // verifies.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(update) = self.replay.tick(dt) {
+            self.apply_agent_drc_update(update);
+        }
+
         // The surface color format when eframe is on its wgpu backend; drives the
         // retained GPU canvas. `None` (e.g. a glow build) falls back to egui painting.
         let gpu_format = frame.wgpu_render_state().map(|state| state.target_format);
@@ -1796,6 +2262,10 @@ impl eframe::App for App {
                         self.inspector_panel(ui);
                         ui.separator();
                         self.drc_panel(ui);
+                        ui.separator();
+                        self.agent_section(ui);
+                        ui.separator();
+                        self.share_section(ui);
                     });
             });
         egui::CentralPanel::default().show(ui, |ui| {
@@ -1818,6 +2288,8 @@ impl eframe::App for App {
             &self.layer_state,
         );
         self.keymap_window(&ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.replay_window(&ctx);
 
         // Keep animating while dragging/measuring so interaction feels live.
         ctx.request_repaint();
@@ -2163,6 +2635,98 @@ pub(crate) mod png {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An agent verify step's parsed violations must land in the DRC panel (and
+    /// therefore the canvas markers), mid-run, exactly as a local run would.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn agent_verify_updates_the_drc_overlay_live() {
+        let mut app = App::new();
+        assert!(!app.drc.has_run());
+        app.agent.prompt = "overlay wiring".to_owned();
+        app.agent.start();
+        // Drain the run one generous tick at a time, applying each verify
+        // update the way the frame loop does.
+        let mut updates = 0;
+        for _ in 0..1_000 {
+            if let Some(update) = app.agent.tick(10.0) {
+                updates += 1;
+                app.apply_agent_drc_update(update);
+            }
+            if !app.agent.is_running() {
+                break;
+            }
+        }
+        assert!(updates >= 1, "at least one verify step fired");
+        // The script's final verify is clean, so the overlay ends empty but run.
+        assert!(app.drc.has_run());
+        assert!(app.drc.is_empty());
+        assert_eq!(app.status.text, "Agent verify: DRC clean");
+        // A mid-run flagged list replaces the panel content the same way.
+        let (transcript, _) = crate::agent_panel::scripted_run("flagged");
+        let flagged = transcript
+            .records
+            .iter()
+            .find_map(|r| {
+                if let reticle_agent_api::Outcome::Ok(reticle_agent_api::AgentResponse::Data {
+                    value,
+                    ..
+                }) = &r.outcome
+                {
+                    let v = crate::agent_panel::violations_from_json(value);
+                    if v.is_empty() { None } else { Some(v) }
+                } else {
+                    None
+                }
+            })
+            .expect("the script's first verify flags the thin wire");
+        app.apply_agent_drc_update(flagged);
+        assert!(!app.drc.is_empty());
+        assert!(app.status.text.contains("violation(s)"));
+    }
+
+    /// The replay theater re-executes a transcript against a live session, and
+    /// its verify records drive the shared DRC overlay through the same path
+    /// the agent run uses; rewinding clears the overlay again.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn replay_theater_replays_and_drives_the_overlay() {
+        let mut app = App::new();
+        let (transcript, _) = crate::agent_panel::scripted_run("theater glue");
+        let total = transcript.records.len();
+        app.replay.load_transcript(transcript);
+        assert!(app.replay.is_loaded());
+        // Step to just past the first verify, applying overlay updates the way
+        // the transport buttons do.
+        let mut first_flagged = None;
+        while first_flagged.is_none() && !app.replay.at_end() {
+            if let Some(update) = app.replay.step_forward() {
+                first_flagged = Some(update.clone());
+                app.apply_agent_drc_update(update);
+            }
+        }
+        let flagged = first_flagged.expect("the script verifies");
+        assert!(!flagged.is_empty(), "first verify flags the thin wire");
+        assert_eq!(app.drc.len(), flagged.len());
+        assert!(app.replay.shape_count() >= 1);
+        // Restarting clears the overlay: no verify crossed at position 0.
+        let update = app.replay.seek(0);
+        app.apply_replay_overlay(update);
+        assert!(!app.drc.has_run());
+        assert_eq!(app.replay.progress(), (0, total));
+    }
+
+    /// The Share section's defaults compose a joinable relay link for the
+    /// demo document's room out of the box.
+    #[test]
+    fn share_defaults_compose_the_demo_room_link() {
+        let app = App::new();
+        let link = crate::share::room_link(&app.share_server, &app.share_room);
+        assert_eq!(link, "ws://127.0.0.1:3030/ws/chip_top");
+        // A user-typed https relay and a messy room name still compose.
+        let link = crate::share::room_link("https://relay.example/", "My Layout!");
+        assert_eq!(link, "wss://relay.example/ws/my-layout");
+    }
 
     #[test]
     fn app_new_loads_demo_scene() {

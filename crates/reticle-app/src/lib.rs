@@ -23,10 +23,15 @@
 //! * [`command`], the command-palette catalog and fuzzy filter.
 //! * [`keymap`], rebindable keyboard shortcuts: TOML load/save and conflicts.
 //! * [`drc_panel`], running the DRC engine and formatting its violations.
+//! * `agent_panel` (native only), the agent panel's run state machine and
+//!   narration feed over the `reticle-agent-api` transcript types.
+//! * `replay` (native only), the replay theater: transcript JSONL loading and
+//!   the step/play/pause/speed playback machine over a live session.
 //! * [`netlight`], cached connectivity extraction for net highlighting.
 //! * [`inspector`], the read-only properties summary of the selection.
 //! * [`fps`], the rolling frame-time meter behind the status-bar fps readout.
 //! * [`session`], view/UI session save/restore (native file IO).
+//! * [`share`], the share-this-session relay room-link format.
 //! * [`viewports`], the multi-pane split layout, hit-testing, and camera swaps.
 //! * [`view3d`], the extruded 3D layer-stack window (orbit camera + wgpu glue).
 //! * [`xsection`], cut-line cross-sections (interval math + elevation panel).
@@ -36,6 +41,12 @@
 //! The public [`App`] type is the frozen Wave 0 contract; it is now a real
 //! `eframe::App` built on the modules above.
 
+// The agent panel and replay theater drive `reticle-agent-api`, which does not
+// compile for wasm32 today (its render command needs the native blocking GPU
+// context), so both modules exist only in native builds; the web build shows a
+// stub panel note instead.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod agent_panel;
 pub mod app;
 pub mod camera;
 pub mod command;
@@ -52,8 +63,11 @@ pub mod layers;
 pub mod measure;
 pub mod minimap;
 pub mod netlight;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod replay;
 pub mod selection;
 pub mod session;
+pub mod share;
 pub mod tool;
 pub mod view3d;
 pub mod viewports;
