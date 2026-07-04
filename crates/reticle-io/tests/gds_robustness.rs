@@ -107,3 +107,69 @@ fn import_contains_gds21_zero_length_string_panic() {
     // We don't care whether it's Ok or Err, only that it returned at all.
     let _ = result;
 }
+
+/// The hardened `import_with_warnings` entry point also never panics on arbitrary
+/// bytes, and its warnings channel is present (empty here) whenever it returns Ok.
+#[test]
+fn import_with_warnings_never_panics_on_garbage() {
+    let _guard = QuietPanics::install();
+    for seed in 0u8..64 {
+        let bytes: Vec<u8> = (0..97u16)
+            .map(|i| (i as u8).wrapping_mul(seed.max(1)))
+            .collect();
+        // Reaching past this call at all proves no unwind.
+        if let Ok(import) = Gds.import_with_warnings(&bytes) {
+            // Warnings, when present, are well-formed.
+            for w in &import.warnings {
+                assert!(!w.summary.is_empty());
+                assert!(!w.detail.is_empty());
+            }
+        }
+    }
+}
+
+/// An input larger than the accepted ceiling is refused up front with an error,
+/// not parsed (so a hostile length cannot force a huge allocation). The buffer is
+/// filled with a valid HEADER prefix so the rejection is by size, not content.
+#[test]
+fn oversized_input_is_refused_before_parsing() {
+    let mut bytes = vec![0x00, 0x06, 0x00, 0x02, 0x00, 0x03];
+    // One byte past the documented maximum.
+    bytes.resize(reticle_io::gds::MAX_INPUT_BYTES + 1, 0);
+    let err = Gds
+        .import_with_warnings(&bytes)
+        .expect_err("an oversized input must be refused");
+    // It is a model error (the lowered IoError), and the input was never parsed.
+    let msg = err.to_string();
+    assert!(!msg.is_empty(), "the refusal carries a message");
+}
+
+/// A boundary with too few vertices imports as a warning, not a failure, and the
+/// good geometry in the same cell survives. Exercises the recoverable path end to
+/// end via a hand-built stream.
+#[test]
+fn degenerate_boundary_warns_and_keeps_good_geometry() {
+    // Build a minimal valid library with a struct holding one good rectangle and
+    // one degenerate (2-vertex) boundary, using our own exporter to get a valid
+    // frame and then not; simplest is to reuse the committed corpus sample.
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../corpus/tinytapeout/degenerate_boundary.gds");
+    let bytes = std::fs::read(&path).expect("degenerate_boundary corpus sample present");
+    let import = Gds
+        .import_with_warnings(&bytes)
+        .expect("a degenerate boundary is recoverable, not fatal");
+
+    // Exactly one warning, of the degenerate-geometry kind.
+    assert_eq!(import.warnings.len(), 1, "one degenerate boundary warned");
+    assert_eq!(
+        import.warnings[0].kind,
+        reticle_io::WarningKind::DegenerateGeometry
+    );
+    // The good boundary in the same struct survived (one shape remains).
+    let cell = import.document.cells().next().expect("the struct imported");
+    assert_eq!(
+        cell.shapes.len(),
+        1,
+        "the good boundary survives; only the degenerate one is dropped"
+    );
+}

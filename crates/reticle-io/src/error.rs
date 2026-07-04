@@ -68,6 +68,89 @@ impl fmt::Display for IoError {
 
 impl core::error::Error for IoError {}
 
+/// A non-fatal problem found while importing an otherwise-usable document.
+///
+/// Import surfaces come in two flavours. A hard failure (no HEADER record, a
+/// record length that does not decode, a parser panic) is an [`IoError`] and the
+/// import returns `Err`. A *recoverable* problem (a boundary with too few
+/// vertices to be a polygon, a degenerate zero-area rectangle, an element count
+/// so large the import was capped) does not stop the import: the offending piece
+/// is skipped or clamped and the rest of the document is still returned, with one
+/// [`ImportWarning`] recorded per problem so a caller can show the user what was
+/// dropped rather than silently losing it.
+///
+/// A warning is deliberately plain data: a machine-friendly [`kind`](ImportWarning::kind)
+/// for grouping, plus a one-line human [`summary`](ImportWarning::summary) and a
+/// longer [`detail`](ImportWarning::detail). It carries no borrowed data so it can
+/// cross crate and thread boundaries freely (the app maps it straight onto its own
+/// `OpenWarning`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportWarning {
+    /// The category of problem, for grouping and filtering.
+    pub kind: WarningKind,
+    /// A short, human-readable one-liner naming what happened.
+    pub summary: String,
+    /// A longer explanation: which cell/element, what was expected, what was done
+    /// instead (skipped, clamped, defaulted).
+    pub detail: String,
+}
+
+impl ImportWarning {
+    /// Builds a warning from its category, summary, and detail.
+    pub(crate) fn new(
+        kind: WarningKind,
+        summary: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind,
+            summary: summary.into(),
+            detail: detail.into(),
+        }
+    }
+}
+
+impl fmt::Display for ImportWarning {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.summary, self.detail)
+    }
+}
+
+/// The category of an [`ImportWarning`].
+///
+/// Kept small and stable so callers can group or count warnings without parsing
+/// free text. `#[non_exhaustive]` because new recoverable checks may be added.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum WarningKind {
+    /// A shape or element was skipped because its geometry was degenerate
+    /// (too few vertices, zero area, or otherwise not representable).
+    DegenerateGeometry,
+    /// A structural limit was hit and the import was capped (for example an
+    /// element or vertex count beyond the guard ceiling), so some content past
+    /// the cap was not imported.
+    LimitExceeded,
+    /// A value was out of the range the model can hold and was clamped or
+    /// defaulted (for example a magnification that did not fit).
+    ValueClamped,
+    /// A well-formed record carried a feature this importer does not model, so it
+    /// was ignored while the rest of the element imported.
+    UnsupportedFeature,
+}
+
+impl WarningKind {
+    /// A stable, lowercase label for this kind, for logs and grouping.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::DegenerateGeometry => "degenerate-geometry",
+            Self::LimitExceeded => "limit-exceeded",
+            Self::ValueClamped => "value-clamped",
+            Self::UnsupportedFeature => "unsupported-feature",
+        }
+    }
+}
+
 impl From<IoError> for reticle_model::ModelError {
     /// Lowers a rich [`IoError`] onto the frozen [`reticle_model::ModelError`]
     /// surface. Dynamic detail collapses to a stable static category so the
