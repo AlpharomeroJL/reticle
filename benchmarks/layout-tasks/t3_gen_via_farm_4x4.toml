@@ -1,0 +1,5 @@
+id = "t3_gen_via_farm_4x4"
+tier = 3
+prompt = "Create a cell named top and drop a 4 by 4 via farm into it: run the via_farm generator over the mcon cut layer with four rows and four columns, bridged by the enclosing li1 and met1 plates."
+technology = "sky130.tech"
+checker = "generator:id=via_farm,cut=mcon,rows=4,cols=4"

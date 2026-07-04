@@ -1,0 +1,5 @@
+id = "t3_gen_via_farm_via_power"
+tier = 3
+prompt = "Create a cell named top and build a met1-to-met2 power via array: run the via_farm generator on the via cut layer with six rows and six columns so the met1 and met2 plates carry a dense 6 by 6 stitch."
+technology = "sky130.tech"
+checker = "generator:id=via_farm,cut=via,rows=6,cols=6"

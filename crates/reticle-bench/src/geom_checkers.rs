@@ -21,7 +21,7 @@
 use reticle_agent_api::Transcript;
 use reticle_extract::{DisjointSet, build_components, sky130_connection_rules};
 use reticle_geometry::{LayerId, Point, Rect, Shape as _};
-use reticle_model::{Document, DrawShape, ShapeKind};
+use reticle_model::{Document, DrawShape, RuleSet, ShapeKind};
 
 use crate::checker::{CheckFailure, CheckResult, Checker};
 use crate::params::{ParamError, ParsedChecker};
@@ -74,9 +74,9 @@ fn shapes_on_layer<'a>(
 /// parameter error that makes the task fail to compile.
 ///
 /// The recognized names are `shape_count`, `layer_area`, `boolean_result`,
-/// `array_pitch`, `contact_stack`, `via_chain`, `comb`, `guard_ring`, and
-/// `compound_cell`. An unrecognized name yields `Ok(None)` so the caller can fall
-/// through to the built-in registry.
+/// `array_pitch`, `contact_stack`, `via_chain`, `comb`, `guard_ring`,
+/// `compound_cell`, and `generator`. An unrecognized name yields `Ok(None)` so the
+/// caller can fall through to the built-in registry.
 ///
 /// # Errors
 ///
@@ -93,6 +93,7 @@ pub fn build(parsed: &ParsedChecker) -> Result<Option<Box<dyn Checker>>, ParamEr
         "comb" => Box::new(Comb::from_params(parsed)?),
         "guard_ring" => Box::new(GuardRing::from_params(parsed)?),
         "compound_cell" => Box::new(CompoundCell::from_params(parsed)?),
+        "generator" => Box::new(GeneratorCheck::from_params(parsed)?),
         _ => return Ok(None),
     };
     Ok(Some(checker))
@@ -870,6 +871,167 @@ impl Checker for CompoundCell {
 }
 
 // --------------------------------------------------------------------------------
+// generator (a parameterized-generator task, verified by re-running the generator)
+// --------------------------------------------------------------------------------
+
+/// Passes iff the graded document contains the geometry a named
+/// [`reticle_gen`] generator emits for the task's parameters, and the target cell is
+/// DRC-clean under the SKY130 subset.
+///
+/// Parameters (`generator:id=guard_ring,layer=li1,region_width=2000,...`): `id`
+/// (required, the generator id), plus any of that generator's own parameters by
+/// their schema field names. Any parameter the checker string omits takes the
+/// generator's schema default, so a task only needs to pin the parameters its prompt
+/// asks for (for example a `4x4` via farm pins `rows`/`cols`).
+///
+/// The test is generator-driven rather than hand-coded per structure: the checker
+/// re-runs the named generator with the resolved parameters into a scratch cell to
+/// get a *reference*, reduces it to a per-layer shape-count histogram (its
+/// fingerprint), and requires the graded document's target cell to carry at least
+/// that many shapes on each of those layers. Because generators are DRC-clean by
+/// construction, a model that reproduced the structure lands the same fingerprint;
+/// extra shapes (a larger design, labels) never make the check fail. The
+/// DRC-cleanliness half reuses the same SKY130 subset engine as [`crate::checkers::DrcClean`],
+/// so "clean" means exactly what it means for every other task.
+#[derive(Clone, Debug)]
+pub struct GeneratorCheck {
+    /// The generator id (matches the registry key and the `RunGenerator` id).
+    id: String,
+    /// The resolved generator parameters, as the JSON the registry consumes.
+    params: serde_json::Value,
+}
+
+impl GeneratorCheck {
+    /// Builds a generator checker from parsed parameters.
+    ///
+    /// Reads `id`, then resolves the generator's parameter object from the checker's
+    /// key/value pairs against that generator's [`reticle_gen::ParamSchema`]: each
+    /// schema field is taken from the checker string when present (parsed by its
+    /// field type) and from the schema default otherwise.
+    ///
+    /// # Errors
+    ///
+    /// [`ParamError`] if `id` is absent, names no registered generator, or a supplied
+    /// parameter does not parse as its field type.
+    pub fn from_params(p: &ParsedChecker) -> Result<Self, ParamError> {
+        let id = p
+            .get("id")
+            .ok_or_else(|| ParamError::Missing {
+                key: "id".to_owned(),
+            })?
+            .to_owned();
+        let registry = reticle_gen::Registry::with_builtins();
+        let schema = registry.schema(&id).ok_or_else(|| ParamError::Invalid {
+            key: "id".to_owned(),
+            value: id.clone(),
+            expected: "a registered generator id",
+        })?;
+        let params = resolve_generator_params(p, &schema)?;
+        Ok(Self { id, params })
+    }
+}
+
+impl Checker for GeneratorCheck {
+    fn check(&self, doc: &Document, _transcript: &Transcript) -> CheckResult {
+        let Some(cell_name) = target_cell(doc) else {
+            return fail("document has no cell to check");
+        };
+
+        // Build the reference geometry by running the generator itself, then reduce
+        // it to a per-layer shape-count fingerprint. The generator uses baked SKY130
+        // numbers, so a default technology is all it needs.
+        let registry = reticle_gen::Registry::with_builtins();
+        let tech = reticle_model::Technology::default();
+        let mut reference = reticle_model::Cell::new("__reference");
+        if let Err(e) = registry.generate(&self.id, &self.params, &tech, &mut reference) {
+            // A checker that cannot build its own reference is a task-authoring bug,
+            // surfaced as a failure rather than a panic.
+            return fail(format!(
+                "generator `{}` could not build a reference: {e}",
+                self.id
+            ));
+        }
+        let want = layer_histogram(&reference.shapes);
+
+        // The graded document must carry at least the reference count on every layer
+        // the generator touches (flattened, so a hierarchical answer still counts).
+        let have = layer_histogram(&doc.flatten(&cell_name));
+        let mut failures = Vec::new();
+        for (layer, want_count) in &want {
+            let have_count = have.get(layer).copied().unwrap_or(0);
+            if have_count < *want_count {
+                failures.push(CheckFailure::new(format!(
+                    "generator `{}` expects at least {want_count} shapes on layer {}/{}, found {have_count}",
+                    self.id, layer.layer, layer.datatype
+                )));
+            }
+        }
+
+        // The structure must also be DRC-clean under the SKY130 subset (the same
+        // engine the drc_clean checker uses).
+        let engine = reticle_drc::DrcEngine::new(reticle_drc::sky130_drc_rules());
+        for v in engine.check_cell(doc, &cell_name) {
+            failures.push(CheckFailure::new(format!(
+                "generated structure is not DRC-clean: {}: {}",
+                v.rule, v.message
+            )));
+        }
+
+        if failures.is_empty() {
+            CheckResult::Pass
+        } else {
+            CheckResult::Fail(failures)
+        }
+    }
+}
+
+/// Resolves a generator's full parameter object from a checker string plus its
+/// schema: each schema field is taken from the checker's key/value pairs when
+/// present (parsed by the field type) and from the schema default otherwise.
+fn resolve_generator_params(
+    p: &ParsedChecker,
+    schema: &reticle_gen::ParamSchema,
+) -> Result<serde_json::Value, ParamError> {
+    use reticle_gen::FieldType;
+    let mut obj = serde_json::Map::new();
+    for field in &schema.fields {
+        let value = match p.get(&field.name) {
+            None => field.default.clone(),
+            Some(raw) => match &field.ty {
+                FieldType::Int { .. } => {
+                    let n = raw.parse::<i64>().map_err(|_| ParamError::Invalid {
+                        key: field.name.clone(),
+                        value: raw.to_owned(),
+                        expected: "i64",
+                    })?;
+                    serde_json::Value::from(n)
+                }
+                FieldType::Bool => {
+                    let b = raw.parse::<bool>().map_err(|_| ParamError::Invalid {
+                        key: field.name.clone(),
+                        value: raw.to_owned(),
+                        expected: "bool",
+                    })?;
+                    serde_json::Value::from(b)
+                }
+                FieldType::Enum { .. } => serde_json::Value::from(raw.to_owned()),
+            },
+        };
+        obj.insert(field.name.clone(), value);
+    }
+    Ok(serde_json::Value::Object(obj))
+}
+
+/// A per-layer shape-count histogram of `shapes`.
+fn layer_histogram(shapes: &[DrawShape]) -> std::collections::BTreeMap<LayerId, u32> {
+    let mut hist = std::collections::BTreeMap::new();
+    for s in shapes {
+        *hist.entry(s.layer).or_insert(0) += 1;
+    }
+    hist
+}
+
+// --------------------------------------------------------------------------------
 // shared helpers
 // --------------------------------------------------------------------------------
 
@@ -978,6 +1140,7 @@ mod tests {
     use reticle_agent_api::Transcript;
     use reticle_geometry::{LayerId, Point, Polygon, Rect, Transform};
     use reticle_model::{ArrayInstance, Cell, Document, DrawShape, Instance, ShapeKind};
+    use serde_json::json;
 
     // SKY130 layers exercised by the tests.
     const MET1: LayerId = LayerId::new(68, 20);
@@ -1357,6 +1520,100 @@ mod tests {
         assert_fail("compound_cell:instances=2", &bad);
         // Bad: instances placed but the flattened shape count falls short.
         assert_fail("compound_cell:instances=2,min_shapes=5", &good);
+    }
+
+    // ---- generator --------------------------------------------------------------
+
+    /// A one-cell document named `top` holding exactly what generator `id` emits for
+    /// `params` (the reference geometry), so it is the canonical correct answer. Takes
+    /// `params` by value so call sites pass a `json!(...)` literal directly.
+    #[allow(clippy::needless_pass_by_value)]
+    fn doc_from_generator(id: &str, params: serde_json::Value) -> Document {
+        let registry = reticle_gen::Registry::with_builtins();
+        let tech = reticle_model::Technology::default();
+        let mut cell = Cell::new("top");
+        registry
+            .generate(id, &params, &tech, &mut cell)
+            .expect("generator produces reference geometry");
+        let mut doc = Document::new();
+        doc.insert_cell(cell);
+        doc.set_top_cells(vec!["top".into()]);
+        doc
+    }
+
+    #[test]
+    fn generator_two_way_via_farm() {
+        // Good: the document holds exactly the via farm the checker asks for, so its
+        // per-layer fingerprint matches and the geometry is DRC-clean.
+        let good = doc_from_generator("via_farm", json!({ "cut": "mcon", "rows": 4, "cols": 4 }));
+        assert_pass("generator:id=via_farm,cut=mcon,rows=4,cols=4", &good);
+
+        // Extra shapes never hurt: a 4x4 farm satisfies a checker that only asks for a
+        // 3x3 (the graded document has at least the reference count on every layer).
+        assert_pass("generator:id=via_farm,cut=mcon,rows=3,cols=3", &good);
+
+        // Bad: an empty document has none of the farm's cuts or plates.
+        let empty = doc_with(vec![]);
+        assert_fail("generator:id=via_farm,cut=mcon,rows=4,cols=4", &empty);
+
+        // Bad: a 3x3 farm falls short of a checker that pins a 4x4 (fewer cuts than the
+        // reference on the cut layer).
+        let smaller =
+            doc_from_generator("via_farm", json!({ "cut": "mcon", "rows": 3, "cols": 3 }));
+        assert_fail("generator:id=via_farm,cut=mcon,rows=4,cols=4", &smaller);
+    }
+
+    #[test]
+    fn generator_two_way_guard_ring() {
+        // Good: the exact guard ring the checker names.
+        let params = json!({
+            "layer": "li1", "region_width": 2000, "region_height": 2000,
+            "ring_width": 400, "taps": true,
+        });
+        let good = doc_from_generator("guard_ring", params.clone());
+        assert_pass(
+            "generator:id=guard_ring,layer=li1,region_width=2000,region_height=2000,ring_width=400,taps=true",
+            &good,
+        );
+
+        // Bad: the four ring strips are present but the li1 tap contacts (on the licon
+        // layer) are missing, so the taps=true fingerprint is not met. Build a ring
+        // with taps=false and grade it against the taps=true checker.
+        let no_taps = doc_from_generator(
+            "guard_ring",
+            json!({
+                "layer": "li1", "region_width": 2000, "region_height": 2000,
+                "ring_width": 400, "taps": false,
+            }),
+        );
+        assert_fail(
+            "generator:id=guard_ring,layer=li1,region_width=2000,region_height=2000,ring_width=400,taps=true",
+            &no_taps,
+        );
+
+        // Bad: a document with the right layer coverage but a DRC-dirty shape fails the
+        // cleanliness half. A single 100-wide li1 rect (below the li.1 min width) is
+        // added to an otherwise-correct ring; DRC flags it.
+        let mut dirty = doc_from_generator("guard_ring", params);
+        dirty
+            .cell_mut("top")
+            .unwrap()
+            .shapes
+            .push(rect(LI1, 5000, 5000, 5100, 5010));
+        assert_fail(
+            "generator:id=guard_ring,layer=li1,region_width=2000,region_height=2000,ring_width=400,taps=true",
+            &dirty,
+        );
+    }
+
+    #[test]
+    fn generator_checker_rejects_unknown_id_and_bad_params() {
+        // An unknown generator id fails to build (a task-authoring error).
+        assert!(build(&ParsedChecker::parse("generator:id=no_such")).is_err());
+        // A missing id is a build error too.
+        assert!(build(&ParsedChecker::parse("generator")).is_err());
+        // A non-numeric value for an integer field is a build error.
+        assert!(build(&ParsedChecker::parse("generator:id=via_farm,rows=lots")).is_err());
     }
 
     // ---- dispatch / param errors ------------------------------------------------

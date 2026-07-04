@@ -1,0 +1,5 @@
+id = "t3_gen_seal_ring"
+tier = 3
+prompt = "Create a cell named top and add a seal ring around a 100 um square die: run the seal_ring generator with the up_to_met3 stack, a 100000 by 100000 dbu die, and a 900 dbu ring width."
+technology = "sky130.tech"
+checker = "generator:id=seal_ring,stack=up_to_met3,die_width=100000,die_height=100000,ring_width=900"
