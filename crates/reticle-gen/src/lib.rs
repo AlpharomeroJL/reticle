@@ -64,6 +64,7 @@
 mod error;
 mod generator;
 mod guard_ring;
+mod pad_ring;
 mod registry;
 mod schema;
 mod seal_ring;
@@ -73,6 +74,7 @@ mod via_farm;
 pub use error::GenError;
 pub use generator::{ErasedGenerator, GenOutput, GenParams, Generator};
 pub use guard_ring::{GuardRing, GuardRingParams, RingLayer};
+pub use pad_ring::{PadRing, PadRingParams};
 pub use registry::{GeneratorInfo, Registry};
 pub use schema::{FieldSchema, FieldType, ParamSchema};
 pub use seal_ring::{SealRing, SealRingParams, SealStack};
