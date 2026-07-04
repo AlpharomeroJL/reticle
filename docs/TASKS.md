@@ -400,9 +400,22 @@ Each generator: a pure function from parameters + technology to geometry, DRC-cl
 by construction against the SKY130 subset, with property tests asserting cleanliness
 across randomized parameter sweeps.
 
-- [ ] Lane 2A: `reticle-gen` crate: `Generator` trait (typed param struct with
-  ranges/defaults, validate, generate into a cell), registry, serde param schemas.
-  First pair: guard ring + via farm.
+Batching (contract-first, like Wave 1): 2A froze the `reticle_gen` `Generator`
+contract first; Batch 2 = 2B, 2C, 2D fan out on it in parallel.
+
+- [x] Lane 2A: `reticle-gen` framework + first pair. done-gate-green, merged (lane
+  24ecbc6 into merge 03777e2; doc fix 36f92be; full `just ci` GREEN). New wasm-safe,
+  `forbid(unsafe)` crate: the `Generator` trait (typed `Params` with ranges/defaults,
+  `validate`, generate-into-cell), a blanket `ErasedGenerator` + `Registry` for generic
+  enumerate/invoke (the JSON path 2D and the agent use), serde `ParamSchema`/`FieldSchema`
+  types, and `GenError`. Guard-ring and via-farm generators, DRC-clean by construction
+  against the SKY130 subset, proven by 400-case cleanliness proptests over the real
+  `DrcEngine::new(sky130_drc_rules())` (zero violations) plus two-way validate tests; 16
+  tests. Workspace-registered. ADRs 0042, 0043. FROZEN contract for 2B/2C/2D:
+  `reticle_gen::{Generator, GenParams, GenOutput, GenError, Registry, GeneratorInfo,
+  ParamSchema, FieldSchema, FieldType, ErasedGenerator}`. Honest: SKY130-subset coverage
+  is partial and numbers are baked (the `Technology` arg is threaded but unused, so
+  generalizing later is non-breaking).
 - [ ] Lane 2B: pad ring (die-size aware, pad pitch, corner handling, power pads) +
   seal ring.
 - [ ] Lane 2C: decap/fill generator (density + keep-out aware) + probe-able
