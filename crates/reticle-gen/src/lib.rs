@@ -66,6 +66,7 @@ mod generator;
 mod guard_ring;
 mod registry;
 mod schema;
+mod seal_ring;
 mod sky130;
 mod via_farm;
 
@@ -74,4 +75,5 @@ pub use generator::{ErasedGenerator, GenOutput, GenParams, Generator};
 pub use guard_ring::{GuardRing, GuardRingParams, RingLayer};
 pub use registry::{GeneratorInfo, Registry};
 pub use schema::{FieldSchema, FieldType, ParamSchema};
+pub use seal_ring::{SealRing, SealRingParams, SealStack};
 pub use via_farm::{CutKind, ViaFarm, ViaFarmParams};
