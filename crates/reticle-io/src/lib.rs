@@ -30,7 +30,7 @@ pub mod gds;
 pub mod oasis;
 pub mod technology;
 
-pub use error::IoError;
-pub use gds::Gds;
+pub use error::{ImportWarning, IoError, WarningKind};
+pub use gds::{Gds, GdsImport};
 pub use oasis::Oasis;
 pub use technology::{parse_technology, write_technology};
