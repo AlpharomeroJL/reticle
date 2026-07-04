@@ -346,15 +346,30 @@ in-progress has its partial work on its worktree branch: resume it, never restar
   server round trip); `?gds=<url>` remote load (CORS-permitting, clear error
   otherwise); IndexedDB recent-files; progressive load + progress indicator +
   streaming-index past a measured size threshold + an honest over-ceiling message.
-- [ ] Lane 1C: shareable read-only sessions through the existing relay (one-click
-  share link; viewers get live read-only sync, independent pan/zoom, presence +
-  selection, follow-mode toggle); rate-limited room creation on the demo server,
-  sessions expire, no accounts. Make it feel instant.
-- [ ] Lane 1D: product-grade first contact. Start screen (open a file, drag-drop
-  target, the four worked scenarios, recent files, a "load an example chip" gallery
-  of 2-3 redistribution-cleared corpus designs); every failure path gets a
-  human-readable error surface (no silent/console-only failures); first-run tour
-  updated to include open and share.
+- [x] Lane 1C: shareable read-only sessions. done-gate-green, merged (lane ba6760a
+  into merge d186439; batch `just ci` GREEN at 1d2f7fe). Read-only viewer sync over
+  the existing relay: a viewer joins with `?mode=view` and receives the sharer's yrs
+  frames plus presence (cursor, selection, viewport) but never publishes, enforced
+  BOTH server-side (`JoinMode::View`, the relay drops viewer frames) AND app-side (no
+  publish path); a window-free `reticle_app::viewer::ViewerSession` with an
+  independent camera and a follow-mode toggle (`follow_camera` fits the sharer's
+  viewport). Rate-limited share-room creation with TTL expiry on the demo server via a
+  separate `ShareLimits` (frozen `LimitConfig` untouched), `POST /share`, 429 on
+  flood, 503 at capacity. ADRs 0038, 0039. Honest gap: the live socket pump of relay
+  frames into a `ViewerSession` inside the running eframe app is deferred (it would
+  touch 1B/1D app.rs regions); the read-only guarantee holds regardless, and the full
+  two-context browser flow is the Wave 1 merge-gate e2e.
+- [x] Lane 1D: product-grade first contact. done-gate-green, merged (lane beab210
+  into merge 2d80652; batch `just ci` GREEN at 1d2f7fe; `mdbook build` clean).
+  Extended Start screen (open-a-file, drag-drop hint, the four worked scenarios, a
+  recent-files section, an example-chip gallery embedding the real TinyTapeout sample
+  and a SKY130 cell via `include_bytes!`, opened through the 1A seam). One app-level
+  error/notification surface (`App::report_error`/`notify`, `crate::notify`) that
+  every silent/console-only failure routes through. First-run tour extended with open
+  and share steps. ADRs 0040, 0041. Seams for 1B: `App::recent_files`/`set_recent_files`
+  (1B feeds the IndexedDB-backed list), `report_error`/`notify` (1B/1C route errors
+  through). Honest gap: recent-files persistence is 1B's; no native file-picker (open
+  is drag-drop plus the gallery, matching the bytes-based seam).
 - [ ] Wave 1 merge gate: `just ci`, plus an e2e test that drops a corpus file in the
   browser and it renders, then creates a share link and a second context sees it live.
 
