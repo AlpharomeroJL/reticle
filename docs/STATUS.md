@@ -296,6 +296,34 @@ Honest limitations (v6):
 5. **Fuzzing still does not run on this Windows/MSVC host** (unchanged from v4/v5);
    parser and boolean robustness stay covered by the gate's proptests.
 
+### v6.0.1 (media truth pass, audited 2026-07-03)
+
+A presentation pass, no engine or agent features. It corrects three of the v6.0.0
+limitations above and grounds the README in re-measured numbers.
+
+- **Media is now real UI captures** (closes limitation 3). The README hero and the five
+  tour GIFs are full-window screenshots of the running application (panels plus canvas),
+  captured by a scripted demo mode in `reticle-app` (`--demo-script`) that drives the editor
+  through the same code paths the interactive UI uses, and assembled by `just capture-ui`.
+  The old offscreen canvas-only set is no longer what the README shows. The demo scripts are
+  committed under `crates/reticle-app/demo-scripts/`, so every capture is reproducible. The
+  egui `ViewportCommand::Screenshot` path was verified to yield a non-blank full-window frame
+  on this wgpu backend, so no Windows window-capture fallback was needed.
+- **The benchmark was re-run over the true 75-task suite, with committed records**
+  (updates limitations 1 and 2). Both local models ran the full v0.4.0 suite over Ollama:
+  `gpt-oss:16k` (MXFP4) **52/75 = 69%**, `qwen2.5-coder:16k` (Q4_K_M) **29/75 = 39%**, with
+  each task's `ResultRecord` and command transcript committed under `benchmarks/results/`.
+  The v6.0.0 table showed 50/75 and 25/75, which were the 63-task pass rates projected onto a
+  75 denominator; these are direct 75-task measurements instead. Because the transcripts are
+  now committed alongside the records, tool-surface failure mining can draft candidates from
+  them, which limitation 2 said it could not.
+- **README voice plus a gate.** The README was rewritten to lead with the measured fact and
+  carry a number or a link on every claim. `just check-style` gained a banned-word list for
+  README.md, so a marketing adjective fails the gate.
+
+The remaining v6.0.0 limitations (the local-model floor, the UI-plus-seam "fix violation"
+affordance, and fuzzing not linking on Windows/MSVC) are unchanged.
+
 ## Section 16 (definition of done), item by item
 
 | # | Item | Status | Evidence |

@@ -85,32 +85,31 @@ offline default and needs no key or network; the real `AnthropicModel` (in
 is set. Every result record carries the `model` field so mock and live runs are
 never conflated.
 
-## Current result: the mock machinery baseline
+## Current results: two local models
 
-The run below used the **deterministic `MockModel`** (no `ANTHROPIC_API_KEY` was
-set). It exercises the whole pipeline end to end for all 75 tasks: every task
-loads, runs through the loop, is graded by its two-way-tested checker, and is
-recorded.
+The runs below drove two local models through the whole 75-task suite over Ollama on
+the host, each task graded by its two-way-tested checker. The raw per-task
+`ResultRecord` files and their command transcripts are committed under
+[`benchmarks/results/`](https://github.com/AlpharomeroJL/reticle/tree/main/benchmarks/results);
+the rows here are computed from those records.
 
-| Tier | Tasks | Passed | Success rate | Mean iterations |
-| ---- | ----- | ------ | ------------ | --------------- |
-| 1 | 9 | 3 | 33% | 1.22 |
-| 2 | 11 | 0 | 0% | 1.00 |
-| 3 | 34 | 0 | 0% | 1.00 |
-| 4 | 11 | 0 | 0% | 1.00 |
-| 5 | 10 | 0 | 0% | 1.00 |
-| all | 75 | 3 | 4% | 1.03 |
+| Model | Quantization | Tier 1 | Tier 2 | Tier 3 | Tier 4 | Tier 5 | Overall |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `gpt-oss:16k` (20B) | MXFP4 | 9/9 | 11/11 | 19/34 | 5/11 | 8/10 | **52/75 (69%)** |
+| `qwen2.5-coder:16k` (14B) | Q4_K_M | 6/9 | 8/11 | 6/34 | 3/11 | 6/10 | **29/75 (39%)** |
 
-This is a **machinery baseline, not a measure of a language model's layout
-ability.** The `MockModel` is scripted to solve only the three sample tasks
-(`t1_place_met1_rect`, `t1_drc_clean_met1`, `t1_intent_connect`) that exist to
-prove the harness end to end; it has no scripted solution for the other 72
-authored tasks, so it fails them by construction. A real model run (with a key)
-is what produces a meaningful success rate across the authored tasks; those
-numbers will be recorded here, labeled with the model id, when a keyed run is
-performed. Publishing the 4% mock figure as if it were a model score would be
-dishonest, so it is labeled as what it is: proof that all 75 tasks and their
-checkers run.
+These are small quantized local models, so the numbers are a realistic floor, not a
+ceiling. The gap has a concrete cause: `gpt-oss:16k` returns native tool calls, while
+`qwen2.5-coder:16k` often ignores the forced tool choice and embeds the call in message
+text, which a text fallback recovers less reliably. Both paths are handled and
+regression-tested. Local model outputs are not deterministic between runs; the
+transcript-replay determinism (replaying a recorded transcript to a fixed
+`document_hash`) is unaffected and is a committed test.
+
+The deterministic `MockModel` (no key, no network) solves only the three sample tasks
+(`t1_place_met1_rect`, `t1_drc_clean_met1`, `t1_intent_connect`) that prove the harness
+end to end; `just bench-agent` runs it and reports 3/75, a machinery baseline that shows
+all 75 tasks and their checkers execute, not a model score.
 
 ## Growing the suite
 
@@ -149,8 +148,6 @@ alongside the backend, model, and quantization of each source run, so a failure
 mined from a local (Ollama) run is never conflated with a mock or frontier one.
 
 The tool surface is read from a run's command **transcript**. The committed
-local-model result sets under `benchmarks/results/` are plain result records
-with no transcript, so mining them recovers the backend provenance but not the
-per-tool signature: those runs cluster only by "it failed". Recovering the full
-DRC, geometric, intent, and tool-surface signature from a local run needs the
-command transcript the local runner does not yet persist.
+local-model sets under `benchmarks/results/` include each task's transcript
+alongside its result record, so mining them recovers the full DRC, geometric,
+intent, and tool-surface signature, not just the backend provenance.
