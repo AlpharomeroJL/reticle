@@ -89,6 +89,20 @@ impl DemoError {
     }
 }
 
+impl From<crate::share::ShareRejection> for DemoError {
+    /// Maps a share-room creation refusal onto the matching submit-path status, so
+    /// share creation and session submission report capacity refusals the same way.
+    ///
+    /// A creation flood is `429` (like a submit flood); the live-room ceiling is
+    /// `503` (like the global session cap): both are retryable.
+    fn from(reason: crate::share::ShareRejection) -> Self {
+        match reason {
+            crate::share::ShareRejection::RateLimited => DemoError::RateLimited,
+            crate::share::ShareRejection::AtCapacity => DemoError::GlobalConcurrency,
+        }
+    }
+}
+
 /// The JSON body returned for a rejected request.
 #[derive(Serialize)]
 struct ErrorBody {
