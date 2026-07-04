@@ -60,6 +60,21 @@ impl Status {
     }
 }
 
+/// A Start-screen click, collected inside the layout closure and applied after it
+/// returns (see [`App::apply_start_action`]).
+///
+/// Recording the intent rather than acting inline lets each Start-screen section be
+/// a plain closure over `ui` without also mutably borrowing `self`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum StartAction {
+    /// Enter one of the four worked scenarios.
+    EnterUseCase(UseCase),
+    /// Load a bundled example chip through the open seam.
+    LoadExample(crate::startscreen::ExampleChip),
+    /// Dismiss the Start screen and keep the demo document.
+    SkipToEditor,
+}
+
 /// The button a tour overlay press requested this frame.
 ///
 /// Collected inside the overlay closure and applied after it returns so the borrow
@@ -103,11 +118,19 @@ impl TourTargets {
     /// on scroll position; that keeps the highlight robust.
     fn rect_for(&self, target: TourTarget) -> Option<EguiRect> {
         match target {
+            // The open affordance and the drawing tools both live on the toolbar, so
+            // they highlight the toolbar rectangle (the tour points at "the toolbar
+            // control" rather than a sub-rect that shifts as the row wraps).
+            TourTarget::OpenAffordance | TourTarget::Toolbar | TourTarget::DrawTools => {
+                self.toolbar
+            }
             TourTarget::Canvas => self.canvas,
             TourTarget::LayerPanel => self.layers,
-            TourTarget::Toolbar | TourTarget::DrawTools => self.toolbar,
             TourTarget::Minimap => self.minimap.or(self.canvas),
-            TourTarget::DrcPanel
+            // The Share section sits in the right-hand column alongside the panels
+            // below, so it highlights the whole column like they do.
+            TourTarget::ShareSection
+            | TourTarget::DrcPanel
             | TourTarget::NetHighlight
             | TourTarget::AgentPanel
             | TourTarget::OpsPanel
@@ -301,6 +324,18 @@ pub struct App {
     /// [`App::open_warnings_window`] draws until the user dismisses it. Empty when
     /// the last open was clean or none has happened.
     open_warnings: Vec<crate::open::OpenWarning>,
+    /// The app-wide notification (toast) queue: the single human-readable surface
+    /// every failure path reports through (see [`crate::notify`]). Import errors,
+    /// open-seam warnings, session-load and technology-parse failures, and the
+    /// example gallery all route here via [`App::report_error`]/[`App::notify`], so
+    /// nothing fails silently or only in the console. Drawn by
+    /// [`App::notifications_area`]. Sibling lanes (browser open, share) route their
+    /// failures through the same methods.
+    notifications: crate::notify::Notifications,
+    /// The recent-files list the Start screen displays. This app only *renders* it;
+    /// the persistence behind it (`IndexedDB` on the web) feeds it via
+    /// [`App::set_recent_files`]. Empty until a backend supplies entries.
+    recent_files: Vec<crate::startscreen::RecentFile>,
     /// The last world position under the cursor, for the status readout.
     cursor_world: Option<Point>,
     /// Rolling frame-time meter behind the status-bar fps readout.
@@ -506,6 +541,8 @@ impl App {
             share_room: crate::share::room_id(demo::TOP_CELL),
             status: Status::default(),
             open_warnings: Vec::new(),
+            notifications: crate::notify::Notifications::new(),
+            recent_files: Vec::new(),
             cursor_world: None,
             frame_meter: FrameMeter::default(),
             start_view,
@@ -646,11 +683,22 @@ impl App {
         if self.open_warnings.is_empty() {
             self.status
                 .set(format!("Opened document ({cell_count} cells)"));
+            self.notifications.info(
+                format!("Opened document ({cell_count} cells)"),
+                String::new(),
+            );
         } else {
             self.status.set(format!(
                 "Opened document ({cell_count} cells, {} warning(s))",
                 self.open_warnings.len()
             ));
+            // Every warning also rides the shared notification surface, so a headless
+            // caller (or a user who dismissed the warnings window) still sees that
+            // parts were skipped. The window remains for the itemized detail.
+            for w in &self.open_warnings {
+                self.notifications
+                    .warning(w.summary.clone(), w.detail.clone());
+            }
         }
     }
 
@@ -665,6 +713,173 @@ impl App {
     /// Clears the stored open-warnings (dismisses the warnings window).
     pub fn clear_open_warnings(&mut self) {
         self.open_warnings.clear();
+    }
+
+    /// Reports a hard failure to the app's one human-readable error surface.
+    ///
+    /// This is the single sink every failure path routes through (see
+    /// [`crate::notify`]): it queues an error notification with a one-line `summary`
+    /// and a longer `detail`, which the toast area draws until the user dismisses it.
+    /// No failure is silent, and none is only in the console.
+    ///
+    /// Concurrent lanes route their own failures here too (a browser file that will
+    /// not open, a share link that cannot be formed), so all first-contact errors
+    /// converge on one consistent surface.
+    pub fn report_error(&mut self, summary: impl Into<String>, detail: impl Into<String>) {
+        self.notifications.error(summary, detail);
+    }
+
+    /// Posts a neutral, informational notice to the notification surface.
+    ///
+    /// The non-error companion to [`report_error`](Self::report_error): the toast
+    /// auto-dismisses after a few seconds. Use it for "opened", "copied", or similar
+    /// confirmations that need to be visible without demanding a dismissal.
+    pub fn notify(&mut self, summary: impl Into<String>, detail: impl Into<String>) {
+        self.notifications.info(summary, detail);
+    }
+
+    /// The live notification queue (for the toast area and for tests).
+    #[must_use]
+    pub fn notifications(&self) -> &crate::notify::Notifications {
+        &self.notifications
+    }
+
+    /// Opens a document from `bytes`, routing any failure to the error surface.
+    ///
+    /// The infallible companion to [`open_document_bytes`](Self::open_document_bytes):
+    /// it runs the same hardened seam, but instead of returning the
+    /// [`OpenError`](crate::open::OpenError) it reports it through
+    /// [`report_error`](Self::report_error) and returns whether the open succeeded.
+    /// This is what the Start screen's open button, the example gallery, and the
+    /// drag-and-drop handler call, so every user-facing open surfaces its own error
+    /// with no `Result` to thread through the egui glue. `source` names what was
+    /// opened (a file name, or an example title) for the error's summary.
+    pub fn open_bytes_reporting(
+        &mut self,
+        bytes: &[u8],
+        format: crate::open::DocFormat,
+        source: &str,
+    ) -> bool {
+        match crate::open::open_document_bytes(bytes, format) {
+            Ok(outcome) => {
+                self.open_outcome(outcome);
+                true
+            }
+            Err(e) => {
+                self.report_error(format!("Could not open {source}"), e.to_string());
+                false
+            }
+        }
+    }
+
+    /// Opens one of the bundled [`ExampleChip`](crate::startscreen::ExampleChip)
+    /// gallery designs, routing any failure to the error surface.
+    ///
+    /// Runs the chip's bytes through the same seam as every other open and installs
+    /// the result, or reports a clean error if a committed design ever fails to
+    /// import (a unit test guards against that). Returns whether it opened.
+    pub fn open_example_chip(&mut self, chip: crate::startscreen::ExampleChip) -> bool {
+        match chip.open() {
+            Ok(outcome) => {
+                self.open_outcome(outcome);
+                self.notify(format!("Loaded example: {}", chip.title()), String::new());
+                true
+            }
+            Err(e) => {
+                self.report_error(
+                    format!("Could not load example: {}", chip.title()),
+                    e.to_string(),
+                );
+                false
+            }
+        }
+    }
+
+    /// The recent-files list the Start screen displays.
+    ///
+    /// This app only renders the list; a persistence backend (`IndexedDB` on the web)
+    /// supplies it through [`set_recent_files`](Self::set_recent_files). Empty until
+    /// one does.
+    #[must_use]
+    pub fn recent_files(&self) -> &[crate::startscreen::RecentFile] {
+        &self.recent_files
+    }
+
+    /// Replaces the recent-files list the Start screen renders.
+    ///
+    /// The seam a persistence backend feeds through: it owns the storage (loading and
+    /// saving the entries), and hands the current list here for display. Kept a plain
+    /// setter so this crate carries no storage dependency.
+    pub fn set_recent_files(&mut self, recent: Vec<crate::startscreen::RecentFile>) {
+        self.recent_files = recent;
+    }
+
+    /// Opens any files dropped onto the window this frame, one per drop.
+    ///
+    /// This is the drag-and-drop half of the open affordance, and it works on both
+    /// platforms: on the web a dropped file carries its `bytes`, on native it carries
+    /// a `path` this reads. The format is inferred from the file name
+    /// ([`DocFormat::from_extension`](crate::open::DocFormat::from_extension)); an
+    /// unrecognized extension, a path that cannot be read, or bytes that will not
+    /// import are all reported through the notification surface rather than dropped
+    /// silently. A successful open installs the document and dismisses the Start
+    /// screen (via [`open_outcome`](Self::open_outcome)).
+    fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+        let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        if dropped.is_empty() {
+            return;
+        }
+        for file in dropped {
+            let display = if file.name.is_empty() {
+                // Native drops may carry only a path; show its file name.
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    file.path.as_ref().and_then(|p| p.file_name()).map_or_else(
+                        || "dropped file".to_owned(),
+                        |n| n.to_string_lossy().into_owned(),
+                    )
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    "dropped file".to_owned()
+                }
+            } else {
+                file.name.clone()
+            };
+
+            // Classify by extension; without a known one we cannot pick an importer.
+            let Some(format) = crate::open::DocFormat::from_extension(&display) else {
+                self.report_error(
+                    format!("Could not open {display}"),
+                    "unrecognized file type; open a GDSII (.gds) or OASIS (.oas) file",
+                );
+                continue;
+            };
+
+            // Obtain the bytes: dropped in memory on wasm, read from the path on
+            // native.
+            if let Some(bytes) = &file.bytes {
+                self.open_bytes_reporting(bytes, format, &display);
+                continue;
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(path) = &file.path {
+                match std::fs::read(path) {
+                    Ok(bytes) => {
+                        self.open_bytes_reporting(&bytes, format, &display);
+                    }
+                    Err(e) => {
+                        self.report_error(format!("Could not read {display}"), e.to_string());
+                    }
+                }
+                continue;
+            }
+            // Neither bytes nor a readable path came with the drop.
+            self.report_error(
+                format!("Could not open {display}"),
+                "the dropped item carried no readable data",
+            );
+        }
     }
 
     /// Arms a one-shot full-window screenshot smoke test (native launcher only).
@@ -1233,6 +1448,19 @@ impl App {
                 }
             }
             ui.separator();
+            // The open affordance the first-run tour points at. It returns to the
+            // Start screen, which holds the file-open guidance, the drag-and-drop
+            // target, the example-chip gallery, and recent files, so opening a design
+            // works the same on native and on the web (where there is no filesystem
+            // dialog). Dragging a file onto the window opens it directly (see
+            // `handle_dropped_files`).
+            if ui
+                .button("Open")
+                .on_hover_text("Open a design, or drag a GDSII/OASIS file onto the window")
+                .clicked()
+            {
+                self.start_screen = true;
+            }
             if ui.button("Fit").clicked() {
                 self.fit_requested = true;
             }
@@ -1483,16 +1711,14 @@ impl App {
         };
         (canvas_screen, targets)
     }
-    /// Draws the Start screen: the worked-use-case chooser shown at startup.
+    /// A click the Start screen recorded this frame, applied after the layout closure
+    /// so the borrow of `self` inside the egui closure is released first.
     ///
-    /// Lists the four [`UseCase`]s as cards (title, one-line description, and a
-    /// Start button) plus a link to skip straight to the editor. A click is recorded
-    /// into a local and acted on after the layout closure so the borrow of `self`
-    /// through the egui closure is released first; entering a use case installs its
-    /// document or opens the theater and dismisses this screen.
+    /// Collecting the intent and acting on it afterwards is the same pattern the tour
+    /// overlay uses; it lets each Start-screen section be a plain closure over `ui`
+    /// without also borrowing `self` mutably to run the action inline.
     fn start_screen_ui(&mut self, ui: &mut egui::Ui) {
-        let mut chosen: Option<UseCase> = None;
-        let mut skip = false;
+        let mut action: Option<StartAction> = None;
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
@@ -1501,45 +1727,187 @@ impl App {
                     ui.vertical_centered(|ui| {
                         ui.heading("Welcome to Reticle");
                         ui.label(
-                            "Pick a worked example to get started, or skip to a blank editor.",
+                            "Open your own design, load an example chip, or pick a \
+                             worked scenario. You can skip to a blank editor anytime.",
                         );
                     });
                     ui.add_space(12.0);
-                    // One card per scenario, in offer order.
-                    for use_case in UseCase::ALL {
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.vertical(|ui| {
-                                    ui.strong(use_case.title());
-                                    ui.label(use_case.description());
-                                });
-                                // Push the Start button to the right edge of the card.
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if ui.button("Start").clicked() {
-                                            chosen = Some(use_case);
-                                        }
-                                    },
-                                );
-                            });
-                        });
-                        ui.add_space(6.0);
-                    }
-                    ui.add_space(6.0);
+
+                    Self::start_open_section(ui, &mut action);
+                    ui.add_space(10.0);
+                    Self::start_recent_section(ui, &self.recent_files, &mut action);
+                    ui.add_space(10.0);
+                    Self::start_gallery_section(ui, &mut action);
+                    ui.add_space(10.0);
+                    Self::start_scenarios_section(ui, &mut action);
+
+                    ui.add_space(10.0);
                     ui.vertical_centered(|ui| {
                         if ui.link("Skip to the editor").clicked() {
-                            skip = true;
+                            action = Some(StartAction::SkipToEditor);
                         }
                     });
+                    ui.add_space(12.0);
                 });
         });
-        if let Some(use_case) = chosen {
-            self.enter_use_case(use_case);
-        } else if skip {
-            // Dismiss the chooser and keep the demo document already loaded.
-            self.start_screen = false;
-            self.status.set("Editor");
+        self.apply_start_action(action);
+    }
+
+    /// Draws the "open a file" section: a prominent drag-and-drop target hint and the
+    /// supported formats. There is no synchronous file dialog on the web, so the
+    /// honest primary affordance is drag-and-drop, which
+    /// [`handle_dropped_files`](Self::handle_dropped_files) opens directly; this
+    /// section makes that target and the accepted formats visible.
+    fn start_open_section(ui: &mut egui::Ui, _action: &mut Option<StartAction>) {
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.strong("Open a file");
+            ui.add_space(4.0);
+            // The drag-drop target hint: a dashed-feeling framed area with the call to
+            // action. Dropping anywhere on the window works; this names where and what.
+            egui::Frame::group(ui.style())
+                .fill(ui.visuals().faint_bg_color)
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new("Drag a layout file here to open it").strong(),
+                        );
+                        ui.label(
+                            egui::RichText::new("or drop it anywhere on the window")
+                                .weak()
+                                .small(),
+                        );
+                        ui.add_space(6.0);
+                    });
+                });
+            ui.add_space(2.0);
+            ui.label(
+                egui::RichText::new("Supported: GDSII (.gds) and OASIS (.oas)")
+                    .weak()
+                    .small(),
+            );
+        });
+    }
+
+    /// Draws the recent-files section from the app's `recent_files` list.
+    ///
+    /// This app only renders the list; a persistence backend feeds it (see
+    /// [`set_recent_files`](Self::set_recent_files)). When empty it shows a short
+    /// placeholder rather than an empty box, so the section still reads as intentional
+    /// on a first run.
+    fn start_recent_section(
+        ui: &mut egui::Ui,
+        recent: &[crate::startscreen::RecentFile],
+        _action: &mut Option<StartAction>,
+    ) {
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.strong("Recent files");
+            ui.add_space(4.0);
+            if recent.is_empty() {
+                ui.label(
+                    egui::RichText::new("Files you open will appear here.")
+                        .weak()
+                        .small(),
+                );
+            } else {
+                for r in recent {
+                    ui.horizontal(|ui| {
+                        ui.monospace(&r.name);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.weak(r.format.label());
+                        });
+                    });
+                }
+            }
+        });
+    }
+
+    /// Draws the example-chip gallery: one card per bundled
+    /// [`ExampleChip`](crate::startscreen::ExampleChip), each with a Load button that
+    /// opens the compiled-in design through the seam.
+    fn start_gallery_section(ui: &mut egui::Ui, action: &mut Option<StartAction>) {
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.strong("Load an example chip");
+            ui.label(
+                egui::RichText::new("Redistribution-cleared real designs, built in.")
+                    .weak()
+                    .small(),
+            );
+            ui.add_space(4.0);
+            for chip in crate::startscreen::ExampleChip::ALL {
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.strong(chip.title());
+                            ui.label(chip.description());
+                            ui.label(egui::RichText::new(chip.attribution()).weak().small());
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Load").clicked() {
+                                *action = Some(StartAction::LoadExample(chip));
+                            }
+                        });
+                    });
+                });
+                ui.add_space(4.0);
+            }
+        });
+    }
+
+    /// Draws the four worked-scenario cards (title, one-line description, Start
+    /// button), the same [`UseCase`]s the Start screen has always offered.
+    fn start_scenarios_section(ui: &mut egui::Ui, action: &mut Option<StartAction>) {
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.strong("Worked scenarios");
+            ui.label(
+                egui::RichText::new("Drop straight into one capability with a prepared start.")
+                    .weak()
+                    .small(),
+            );
+            ui.add_space(4.0);
+            for use_case in UseCase::ALL {
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.strong(use_case.title());
+                            ui.label(use_case.description());
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Start").clicked() {
+                                *action = Some(StartAction::EnterUseCase(use_case));
+                            }
+                        });
+                    });
+                });
+                ui.add_space(4.0);
+            }
+        });
+    }
+
+    /// Applies the [`StartAction`] a Start-screen section recorded this frame.
+    ///
+    /// Split from the layout closure so the mutable-`self` work (installing a
+    /// document, opening the theater, dismissing the screen) runs after the immutable
+    /// borrow inside the egui closure has ended.
+    fn apply_start_action(&mut self, action: Option<StartAction>) {
+        match action {
+            Some(StartAction::EnterUseCase(use_case)) => self.enter_use_case(use_case),
+            Some(StartAction::LoadExample(chip)) => {
+                self.open_example_chip(chip);
+            }
+            Some(StartAction::SkipToEditor) => {
+                // Dismiss the chooser and keep the demo document already loaded.
+                self.start_screen = false;
+                self.status.set("Editor");
+            }
+            None => {}
         }
     }
 
@@ -2792,6 +3160,55 @@ impl App {
             });
         if !open {
             self.open_warnings.clear();
+        }
+    }
+
+    /// Draws the notification toast area: the app's one human-readable error and
+    /// notice surface (see [`crate::notify`]).
+    ///
+    /// A stack of toasts anchored bottom-right, newest at the bottom, each colored by
+    /// severity with its summary, an optional detail, and a close button. Errors stay
+    /// until dismissed; informational and warning toasts auto-expire (aged by
+    /// [`Notifications::advance`](crate::notify::Notifications::advance) in the frame
+    /// loop). A dismissal is collected and applied after the layout closure so the
+    /// borrow of `self` ends first.
+    fn notifications_area(&mut self, ctx: &egui::Context) {
+        if self.notifications.is_empty() {
+            return;
+        }
+        let mut dismiss: Option<usize> = None;
+        egui::Area::new(egui::Id::new("notifications_area"))
+            .anchor(Align2::RIGHT_BOTTOM, Vec2::new(-12.0, -12.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                for (index, note) in self.notifications.iter().enumerate() {
+                    let accent = severity_color(note.severity);
+                    egui::Frame::popup(ui.style())
+                        .stroke(Stroke::new(1.5, accent))
+                        .inner_margin(egui::Margin::same(10))
+                        .show(ui, |ui| {
+                            ui.set_max_width(360.0);
+                            ui.horizontal(|ui| {
+                                ui.colored_label(accent, note.severity.label());
+                                ui.strong(&note.summary);
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui.small_button("x").clicked() {
+                                            dismiss = Some(index);
+                                        }
+                                    },
+                                );
+                            });
+                            if note.has_detail() {
+                                ui.label(egui::RichText::new(&note.detail).small().weak());
+                            }
+                        });
+                    ui.add_space(6.0);
+                }
+            });
+        if let Some(index) = dismiss {
+            self.notifications.dismiss(index);
         }
     }
 
@@ -4997,22 +5414,33 @@ impl eframe::App for App {
             crate::viewexport::Theme::Light => egui::Visuals::light(),
         });
 
+        // Sample this frame's duration up front: both the Start screen and the editor
+        // age notification toasts by it, so it is computed before either branch.
+        let dt = ctx.input(|i| i.stable_dt).max(0.0);
+
+        // Opening by drag-and-drop works whether the Start screen or the editor is
+        // showing, so a dropped file is handled before the branch. A failed open
+        // reports through the notification surface (see `handle_dropped_files`).
+        self.handle_dropped_files(&ctx);
+        // Age the toasts and drop any that have expired (errors persist).
+        self.notifications.advance(dt);
+
         // The Start screen greets a first-time user with the four worked use cases.
         // While it is showing it owns the whole frame: it draws the chooser and
-        // returns, so the editor panels and canvas are not built underneath it.
+        // returns, so the editor panels and canvas are not built underneath it. The
+        // notification toasts are still drawn over it so a failed open (from a drop or
+        // the gallery) is visible.
         if self.start_screen {
             self.start_screen_ui(ui);
+            self.notifications_area(&ctx);
             ctx.request_repaint();
             return;
         }
 
         self.handle_shortcuts(&ctx);
 
-        // Sample this frame's duration for the status-bar fps readout. `stable_dt`
-        // is egui's smoothed inter-frame time, clamped so a long stall does not spike.
-        let dt = ctx.input(|i| i.stable_dt);
         self.frame_meter
-            .record(std::time::Duration::from_secs_f32(dt.max(0.0)));
+            .record(std::time::Duration::from_secs_f32(dt));
 
         // Advance the agent run by this frame's dt so narration and the agent
         // cursor animate while the panel is running. Each verify step the run
@@ -5069,6 +5497,8 @@ impl eframe::App for App {
         self.keymap_window(&ctx);
         self.replay_window(&ctx);
         self.open_warnings_window(&ctx);
+        // The app-wide notification toasts, over the panels and windows.
+        self.notifications_area(&ctx);
 
         // Draw the first-run tour overlay last so its card and highlight sit over
         // everything else. Suppressed during a demo capture so onboarding chrome does
@@ -5282,6 +5712,19 @@ fn egui_rect_of(screen: &ScreenRect) -> EguiRect {
         Pos2::new(screen.left, screen.top),
         Vec2::new(screen.width, screen.height),
     )
+}
+
+/// The accent color for a notification severity in the toast area.
+///
+/// Blue for a neutral notice, amber for a recoverable warning, red for a hard
+/// failure. Kept beside the toast drawing so the color mapping lives with the egui
+/// glue rather than in the pure [`crate::notify`] model.
+fn severity_color(severity: crate::notify::Severity) -> Color32 {
+    match severity {
+        crate::notify::Severity::Info => Color32::from_rgb(120, 170, 235),
+        crate::notify::Severity::Warning => Color32::from_rgb(230, 190, 90),
+        crate::notify::Severity::Error => Color32::from_rgb(235, 110, 100),
+    }
 }
 
 /// The display name of the layer row at `index`, or an empty string.
@@ -5745,6 +6188,117 @@ mod tests {
         assert!(!app.start_screen());
         assert_eq!(app.top_cell, "SANDBOX");
         assert!(app.history.document().cell("SANDBOX").is_some());
+    }
+
+    #[test]
+    fn an_import_error_is_surfaced_as_a_queued_error_notification() {
+        // The error-sink contract: a failed open reports through the notification
+        // surface instead of failing silently. Feed bytes that are not GDSII and
+        // assert an Error notification naming the source is queued.
+        let mut app = App::new();
+        assert!(app.notifications().is_empty());
+        let opened = app.open_bytes_reporting(
+            b"definitely not a gds",
+            crate::open::DocFormat::Gds,
+            "junk.gds",
+        );
+        assert!(!opened, "bad bytes do not open");
+        assert_eq!(app.notifications().len(), 1);
+        let note = app.notifications().iter().next().expect("a notification");
+        assert_eq!(note.severity, crate::notify::Severity::Error);
+        assert!(
+            note.summary.contains("junk.gds"),
+            "the error names what failed to open"
+        );
+        assert!(!note.detail.is_empty(), "the error carries a reason");
+        // The editor was left untouched (still the demo top cell).
+        assert_eq!(app.top_cell, crate::demo::TOP_CELL);
+    }
+
+    #[test]
+    fn loading_an_example_chip_installs_it_and_leaves_the_start_screen() {
+        // The gallery load path: bytes to an opened, installed document via the seam,
+        // dismissing the Start screen, with a confirming notice and no error.
+        let mut app = App::new();
+        assert!(app.start_screen());
+        let opened = app.open_example_chip(crate::startscreen::ExampleChip::TinyTapeoutMin);
+        assert!(opened, "the bundled sample opens");
+        assert!(!app.start_screen(), "loading dismisses the Start screen");
+        assert_eq!(app.top_cell, "TT_MIN_TOP");
+        assert!(
+            app.history.document().cell("TT_MIN_TOP").is_some(),
+            "the sample's top cell is installed"
+        );
+        // A clean import posts an info notice, never an error.
+        assert!(
+            app.notifications()
+                .iter()
+                .all(|n| n.severity != crate::notify::Severity::Error),
+            "a clean example load queues no error"
+        );
+    }
+
+    #[test]
+    fn a_clean_open_notifies_info_and_a_warning_open_queues_a_warning() {
+        // A clean open posts an info notice and no warnings window; an open that
+        // yields import warnings routes each warning through the same surface.
+        use reticle_model::{Cell, Document, DrawShape, Exporter, ShapeKind};
+        let mut clean = Document::new();
+        let mut cell = Cell::new("CLEAN");
+        cell.shapes.push(DrawShape::new(
+            reticle_geometry::LayerId::new(3, 0),
+            ShapeKind::Rect(reticle_geometry::Rect::new(
+                reticle_geometry::Point::new(0, 0),
+                reticle_geometry::Point::new(100, 100),
+            )),
+        ));
+        clean.insert_cell(cell);
+        clean.set_top_cells(vec!["CLEAN".to_owned()]);
+        let bytes = reticle_io::Gds.export(&clean).expect("export");
+
+        let mut app = App::new();
+        assert!(app.open_bytes_reporting(&bytes, crate::open::DocFormat::Gds, "clean.gds"));
+        assert!(
+            app.open_warnings().is_empty(),
+            "a clean file has no warnings"
+        );
+        assert_eq!(app.notifications().len(), 1);
+        assert_eq!(
+            app.notifications().iter().next().unwrap().severity,
+            crate::notify::Severity::Info
+        );
+    }
+
+    #[test]
+    fn report_error_and_notify_are_the_public_error_surface() {
+        // The methods sibling lanes route through: report_error queues an error that
+        // persists, notify queues an auto-expiring info notice.
+        let mut app = App::new();
+        app.report_error("share failed", "the room name was empty");
+        app.notify("copied", "");
+        assert_eq!(app.notifications().len(), 2);
+        assert_eq!(
+            app.notifications().max_severity(),
+            Some(crate::notify::Severity::Error)
+        );
+    }
+
+    #[test]
+    fn recent_files_accessor_round_trips_what_a_backend_feeds() {
+        // The shape Lane 1B feeds: set a recent list, read it back for the Start
+        // screen to render.
+        let mut app = App::new();
+        assert!(
+            app.recent_files().is_empty(),
+            "empty until a backend feeds it"
+        );
+        app.set_recent_files(vec![
+            crate::startscreen::RecentFile::new("adder.gds", crate::open::DocFormat::Gds),
+            crate::startscreen::RecentFile::new("ring.oas", crate::open::DocFormat::Oasis),
+        ]);
+        assert_eq!(app.recent_files().len(), 2);
+        assert_eq!(app.recent_files()[0].name, "adder.gds");
+        assert_eq!(app.recent_files()[1].format, crate::open::DocFormat::Oasis);
     }
 
     #[test]
