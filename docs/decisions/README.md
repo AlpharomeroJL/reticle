@@ -47,3 +47,5 @@ superseded decision is marked and linked to its replacement.
 | [0039](0039-share-rooms-rate-limit-and-ttl.md) | Share rooms on the demo server: rate-limited creation and a TTL |
 | [0040](0040-app-notification-error-surface.md) | One app-level notification surface every failure path reports through |
 | [0041](0041-start-screen-first-contact.md) | Product-grade first contact: gallery, drag-drop, and a tour that covers open |
+| [0042](0042-generator-trait-typed-and-erased.md) | Generator framework: a typed trait plus a type-erased registry path |
+| [0043](0043-generators-drc-clean-by-construction.md) | Generators are DRC-clean by construction, proven by the real DRC engine |
