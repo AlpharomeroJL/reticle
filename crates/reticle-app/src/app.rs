@@ -294,6 +294,9 @@ pub struct App {
     share_server: String,
     /// The room name in the Share section; sanitized into the link.
     share_room: String,
+    /// The page origin the read-only viewer link points at (where the web bundle
+    /// is served). Empty yields a relative viewer link (see [`crate::share`]).
+    share_page: String,
     /// The most recent status-bar message.
     status: Status,
     /// Non-fatal warnings from the most recent document open (see [`crate::open`]).
@@ -504,6 +507,7 @@ impl App {
             layer_query: String::new(),
             share_server: crate::share::DEFAULT_SERVER.to_owned(),
             share_room: crate::share::room_id(demo::TOP_CELL),
+            share_page: String::new(),
             status: Status::default(),
             open_warnings: Vec::new(),
             cursor_world: None,
@@ -3048,13 +3052,17 @@ impl App {
         );
     }
 
-    /// Draws the Share section: the relay host, the room, and the composed
-    /// join link with a copy button.
+    /// Draws the Share section: the relay host, the room, the collaborator join
+    /// link, and a read-only viewer link, each with a copy button.
     ///
-    /// The link format lives in [`crate::share`] (unit-tested there); this is
-    /// glue. The link targets the relay's only route, `GET /ws/{room}`, so a
-    /// collaborator who opens a client against it lands in this session's
-    /// room.
+    /// The link formats live in [`crate::share`] (unit-tested there); this is glue.
+    /// The collaborator link targets the relay's `GET /ws/{room}` route, so anyone
+    /// who opens a client against it edits alongside this session. The **viewer**
+    /// link is a page URL carrying `?view=viewer` (ADR 0038): whoever opens it in
+    /// the web bundle joins the same room read-only, applying this session's live
+    /// edits but never sending any back, and can toggle follow-mode to ride along
+    /// with this session's viewport. Room-creation on the demo server is
+    /// rate-limited and the room expires (see `reticle-demo`).
     fn share_section(&mut self, ui: &mut egui::Ui) {
         ui.heading("Share");
         ui.horizontal(|ui| {
@@ -3065,12 +3073,32 @@ impl App {
             ui.label("Room:");
             ui.text_edit_singleline(&mut self.share_room);
         });
+
+        // The collaborator (read-write) join link.
         let link = crate::share::room_link(&self.share_server, &self.share_room);
         ui.monospace(&link);
         if ui.button("Copy link").clicked() {
             ui.ctx().copy_text(link);
             self.status.set("Share link copied");
         }
+
+        ui.separator();
+
+        // The read-only viewer link: a page URL that opens the bundle read-only,
+        // joined to this room. The page origin is optional; empty yields a relative
+        // link that resolves against wherever the bundle is loaded.
+        ui.horizontal(|ui| {
+            ui.label("Viewer page:");
+            ui.text_edit_singleline(&mut self.share_page);
+        });
+        let viewer_link =
+            crate::share::viewer_link(&self.share_page, &self.share_server, &self.share_room);
+        ui.monospace(&viewer_link);
+        if ui.button("Copy read-only viewer link").clicked() {
+            ui.ctx().copy_text(viewer_link);
+            self.status.set("Read-only viewer link copied");
+        }
+        ui.label("Viewers see live edits, pan and zoom independently, and can follow your view.");
     }
 
     /// Draws the view and export section: theme toggle, camera bookmarks, and the
