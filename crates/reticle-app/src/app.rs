@@ -6532,6 +6532,65 @@ mod tests {
     }
 
     #[test]
+    fn dropping_a_corpus_gds_opens_and_renders_it() {
+        // The Wave 1 merge-gate drop path, end to end at the app level: a real corpus
+        // file arrives as an egui dropped file (the shape eframe hands the app from a
+        // browser or a native drop), and `handle_dropped_files` classifies it, opens it
+        // through the hardened seam, installs it, dismisses the Start screen, and records
+        // it in the recent list, with no error surfaced. The browser DOM-to-egui event
+        // translation is eframe's own, exercised by the boot e2e; this proves the app's
+        // half deterministically and headlessly.
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("repo root is two levels above the crate")
+            .join("corpus")
+            .join("tinytapeout")
+            .join("real_tinytapeout_min.gds");
+        let bytes = std::fs::read(&path).expect("the committed corpus sample is present");
+
+        let mut app = App::new();
+        assert!(app.start_screen(), "starts on the Start screen");
+        assert!(app.recent_files().is_empty(), "no recent files yet");
+
+        let ctx = egui::Context::default();
+        let mut raw = egui::RawInput::default();
+        raw.dropped_files.push(egui::DroppedFile {
+            name: "real_tinytapeout_min.gds".to_owned(),
+            bytes: Some(bytes.into()),
+            ..Default::default()
+        });
+        ctx.begin_pass(raw);
+        app.handle_dropped_files(&ctx);
+        let _ = ctx.end_pass();
+
+        assert!(
+            !app.start_screen(),
+            "a successful drop dismisses the Start screen"
+        );
+        assert_eq!(
+            app.top_cell, "TT_MIN_TOP",
+            "the dropped design's top cell is framed"
+        );
+        assert!(
+            app.history.document().cell("TT_MIN_TOP").is_some(),
+            "the dropped design is installed"
+        );
+        assert_eq!(
+            app.recent_files().len(),
+            1,
+            "the drop is recorded in the recent list"
+        );
+        assert_eq!(app.recent_files()[0].name, "real_tinytapeout_min.gds");
+        assert!(
+            app.notifications()
+                .iter()
+                .all(|n| n.severity != crate::notify::Severity::Error),
+            "a clean drop surfaces no error"
+        );
+    }
+
+    #[test]
     fn a_clean_open_notifies_info_and_a_warning_open_queues_a_warning() {
         // A clean open posts an info notice and no warnings window; an open that
         // yields import warnings routes each warning through the same surface.
