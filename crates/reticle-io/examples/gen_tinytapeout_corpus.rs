@@ -461,7 +461,7 @@ fn normalize_dates(bytes: &mut [u8]) {
     while i + 4 <= bytes.len() {
         let len = u16::from_be_bytes([bytes[i], bytes[i + 1]]) as usize;
         if len < 4 || i + len > bytes.len() {
-            break; // malformed or trailing bytes; stop rather than mis-index
+            break; // malformed or trailing bytes; stop rather than index past the end
         }
         let rtype = bytes[i + 2];
         if (rtype == BGNLIB || rtype == BGNSTR) && len == 4 + stamp.len() {
