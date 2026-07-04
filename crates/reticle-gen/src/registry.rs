@@ -11,11 +11,13 @@ use reticle_model::{Cell, Technology};
 use serde_json::Value;
 
 use crate::error::GenError;
+use crate::fill::FillGen;
 use crate::generator::{ErasedGenerator, GenOutput};
 use crate::guard_ring::GuardRing;
 use crate::pad_ring::PadRing;
 use crate::schema::ParamSchema;
 use crate::seal_ring::SealRing;
+use crate::test_structure::TestStructure;
 use crate::via_farm::ViaFarm;
 
 /// Enumerable metadata for one registered generator: enough to list it, describe it,
@@ -53,7 +55,8 @@ impl Registry {
     }
 
     /// Creates a registry preloaded with the crate's built-in generators: the
-    /// [`GuardRing`], the [`ViaFarm`], the [`PadRing`], and the [`SealRing`].
+    /// [`GuardRing`], the [`ViaFarm`], the [`PadRing`], the [`SealRing`], the
+    /// [`FillGen`], and the [`TestStructure`].
     #[must_use]
     pub fn with_builtins() -> Self {
         let mut reg = Self::new();
@@ -61,6 +64,8 @@ impl Registry {
         reg.register(ViaFarm);
         reg.register(PadRing);
         reg.register(SealRing);
+        reg.register(FillGen);
+        reg.register(TestStructure);
         reg
     }
 

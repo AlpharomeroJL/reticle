@@ -51,3 +51,5 @@ superseded decision is marked and linked to its replacement.
 | [0043](0043-generators-drc-clean-by-construction.md) | Generators are DRC-clean by construction, proven by the real DRC engine |
 | [0044](0044-pad-ring-generator-on-the-subset.md) | Pad-ring generator: die-aware I/O ring on the subset, power pads as via staples |
 | [0045](0045-seal-ring-generator-on-the-subset.md) | Seal-ring generator: a stacked-metal-plus-cut barrier on the subset |
+| [0046](0046-density-aware-fill-honest-coverage.md) | Density-aware fill: approach a target, report the honest coverage |
+| [0047](0047-probe-able-test-structures-subset-scope.md) | Probe-able test structures, scoped to what the DRC subset can vouch for |

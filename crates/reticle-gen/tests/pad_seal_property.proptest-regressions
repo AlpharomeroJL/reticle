@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc fa331ad6bc12fe6d7d1f47be1bbcbe86953838f99e0a378d0c7b2034087cadd1 # shrinks to params = PadRingParams { die_width: 4200, die_height: 2900, pad_pitch: 1300, pad_size: 1000, power_pads: 0 }
