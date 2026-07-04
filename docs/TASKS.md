@@ -388,11 +388,18 @@ in-progress has its partial work on its worktree branch: resume it, never restar
   asserts the full classify/open/install/dismiss/record chain with no error, headless
   and deterministic (the browser DOM-to-egui translation is eframe's own, exercised by
   the boot e2e). STILL OUTSTANDING (honest, not run): (a) a true browser Playwright
-  drop-file spec, and (b) the share-link-live-in-a-second-context e2e, which needs the
-  viewer socket-pump wiring Lane 1C deferred (relay frames into a live `ViewerSession`
-  in the eframe loop, it would have collided with 1B/1D app.rs regions) plus a
-  relay-backed e2e harness (the current e2e serves a static bundle). The read-only
-  guarantee itself is proven server-side and app-side by Rust tests.
+  drop-file spec, and (b) the share-link-live-in-a-second-context e2e. Scoping
+  correction from a code read: the interactive editor has NO live relay WebSocket
+  client today, the share feature is link-generation only (`share.rs` composes the
+  `ws://` URL) and `ViewerSession` (1C) can `apply_frame`/`apply_presence` but nothing
+  dials the socket to feed it. So (b) is a real client-side collaboration feature to
+  build, a wasm `web_sys::WebSocket` path for BOTH the sharer (publish CRDT frames plus
+  presence to the room) and the viewer (subscribe, feed `ViewerSession`, render
+  read-only with follow-mode), plus a relay-backed two-context e2e harness (the current
+  e2e serves a static bundle). It is wasm-WebSocket-heavy and hard to verify headlessly,
+  so it wants its own focused lane, not a concurrent pile-on. The read-only guarantee
+  itself is already proven server-side (relay drops viewer frames) and app-side (no
+  publish path) by Rust tests; what is missing is the live client transport.
 
 ## Wave 2: the generator layer (parallel, 4 lanes) [not-started]
 
