@@ -47,10 +47,16 @@
 //! [`GuardRing`] draws on the interconnect layers the subset carries rules for
 //! (`li1`, `met1`, `met2`, `met3`) and lines an `li1` ring with `licon` taps; the
 //! [`ViaFarm`] bridges the adjacent metal-stack pairs the subset carries cut and
-//! enclosure rules for (`mcon`, `via`, `via2`). Cut-to-cut spacing has no rule in
-//! the subset, so the farm's pitch is a conservative choice rather than a checked
-//! constraint (noted at the call site). See the `sky130` numbers module for exactly
-//! which values are baked in and the test that ties them to the committed deck.
+//! enclosure rules for (`mcon`, `via`, `via2`). The [`FillGen`] tiles a region on
+//! those same interconnect layers, honoring keep-outs and approaching a target
+//! coverage density; the subset carries no maximum-density rule, so the target is a
+//! fill objective and the achieved density is reported honestly rather than claimed.
+//! The [`TestStructure`] emits the classic probe-able tiles (van der Pauw cross,
+//! contact chain, comb, serpentine) from axis-aligned rectangles and `mcon` contacts
+//! on the subset's layers. Cut-to-cut spacing has no rule in the subset, so an array
+//! pitch is a conservative choice rather than a checked constraint (noted at the call
+//! site). See the `sky130` numbers module for exactly which values are baked in and
+//! the test that ties them to the committed deck.
 //!
 //! # Purity and portability
 //!
@@ -62,6 +68,7 @@
 #![forbid(unsafe_code)]
 
 mod error;
+mod fill;
 mod generator;
 mod guard_ring;
 mod pad_ring;
@@ -69,13 +76,16 @@ mod registry;
 mod schema;
 mod seal_ring;
 mod sky130;
+mod test_structure;
 mod via_farm;
 
 pub use error::GenError;
+pub use fill::{FillGen, FillLayer, FillParams, KeepOut};
 pub use generator::{ErasedGenerator, GenOutput, GenParams, Generator};
 pub use guard_ring::{GuardRing, GuardRingParams, RingLayer};
 pub use pad_ring::{PadRing, PadRingParams};
 pub use registry::{GeneratorInfo, Registry};
 pub use schema::{FieldSchema, FieldType, ParamSchema};
 pub use seal_ring::{SealRing, SealRingParams, SealStack};
+pub use test_structure::{StructureKind, StructureLayer, TestStructure, TestStructureParams};
 pub use via_farm::{CutKind, ViaFarm, ViaFarmParams};

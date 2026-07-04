@@ -141,8 +141,12 @@ fn valid_pad_ring() -> impl Strategy<Value = PadRingParams> {
         .prop_map(|(pad_size, pitch_spare, extra_w, extra_h, want_power)| {
             // Pitch must be at least pad_size + met3 spacing (300).
             let pad_pitch = pad_size + 300 + pitch_spare;
-            let die_width = 3 * pad_size + 1_200 + extra_w;
-            let die_height = 2 * pad_size + 900 + extra_h;
+            // The die must fit the ring geometry (3 pads across, 2 down, plus margins)
+            // AND clear validate's DIE_MIN range floor (10_000). For a small pad_size,
+            // 3*pad_size+1_200 falls below that floor, so clamp up to it; the geometry
+            // margin still holds because 10_000 exceeds what a small pad needs.
+            let die_width = (3 * pad_size + 1_200 + extra_w).max(10_000);
+            let die_height = (2 * pad_size + 900 + extra_h).max(10_000);
             let mut p = PadRingParams {
                 die_width,
                 die_height,
