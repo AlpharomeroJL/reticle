@@ -13,11 +13,24 @@ categories = ["parser-implementations", "encoding", "science"]
 [lints]
 workspace = true
 
+[features]
+# Tooling-only helpers compiled into the corpus-generator example
+# (`examples/gen_tinytapeout_corpus.rs`). Off by default so normal builds and the
+# published crate carry none of it; it is turned on only to regenerate the
+# committed corpus under `corpus/tinytapeout/`.
+corpus-tools = []
+
 [dependencies]
 gds21 = "0.2.0"
 reticle-geometry = { workspace = true }
 reticle-model = { workspace = true }
 # Wave 1 wires `gds21` (GDSII) and, later, VLSIR/layout21 interop (ADR 0004).
+
+# The corpus generator (synthesizing malformed GDSII and minimizing a real fetched
+# design) is an example gated behind `corpus-tools`, so it never affects the crate.
+[[example]]
+name = "gen_tinytapeout_corpus"
+required-features = ["corpus-tools"]
 
 [dev-dependencies]
 # `gds21` again so integration tests can hand-build foreign GDSII byte streams
