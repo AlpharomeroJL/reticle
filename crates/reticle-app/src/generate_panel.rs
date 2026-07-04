@@ -3,7 +3,7 @@
 //!
 //! The panel is a thin driver over [`reticle_gen`]'s registry. It lists the built-in
 //! generators from [`Registry::with_builtins`], and for the selected one it renders a
-//! form straight from the generator's [`ParamSchema`](reticle_gen::ParamSchema):
+//! form straight from the generator's [`ParamSchema`]:
 //! an [`Int`](reticle_gen::FieldType::Int) field becomes a bounded
 //! [`DragValue`](egui::DragValue), a [`Bool`](reticle_gen::FieldType::Bool) a
 //! checkbox, and an [`Enum`](reticle_gen::FieldType::Enum) a combo box. The field
