@@ -356,9 +356,15 @@ pub fn context_tools() -> Vec<ToolSpec> {
     ]
 }
 
-/// The full advertised catalog: command tools followed by context tools.
+/// The full advertised catalog: command tools, then generator tools, then context
+/// tools.
+///
+/// The generator tools ([`crate::generators::generator_tools`]) sit between the
+/// command tools and the context tools; each is named for a built-in generator id
+/// and maps to a `RunGenerator` command rather than a one-to-one command tool.
 pub fn all_tools() -> Vec<ToolSpec> {
     let mut tools = command_tools();
+    tools.extend(crate::generators::generator_tools());
     tools.extend(context_tools());
     tools
 }
@@ -525,12 +531,13 @@ mod tests {
         assert_eq!(cmd, AgentCommand::CreateCell { name: "x".into() });
     }
 
-    /// The advertised catalog is command tools plus the three context tools, with
-    /// unique names.
+    /// The advertised catalog is command tools, the generator tools, and the three
+    /// context tools, with unique names.
     #[test]
     fn catalog_is_complete_and_unique() {
         let all = all_tools();
-        assert_eq!(all.len(), command_tools().len() + 3);
+        let generators = crate::generators::generator_tools().len();
+        assert_eq!(all.len(), command_tools().len() + generators + 3);
         let mut names: Vec<_> = all.iter().map(|t| t.name).collect();
         names.sort_unstable();
         let mut deduped = names.clone();

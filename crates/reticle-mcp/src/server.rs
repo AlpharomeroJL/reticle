@@ -181,8 +181,12 @@ impl Server {
             _ => {}
         }
 
-        // Otherwise it must be a command tool.
-        let Some(parsed) = tools::to_command(name, &arguments) else {
+        // Otherwise it is a generator tool (mapped to a RunGenerator command) or a
+        // one-to-one command tool. A generator id resolves first; if the name is not
+        // a generator, fall through to the command-tool retag path.
+        let Some(parsed) = crate::generators::to_generator_command(name, &arguments)
+            .or_else(|| tools::to_command(name, &arguments))
+        else {
             return tool_err(
                 id,
                 &json!({ "code": "invalid_argument", "message": format!("unknown tool: {name}") }),
@@ -521,5 +525,55 @@ mod tests {
         assert_eq!(r["result"]["isError"], false);
         assert_eq!(structured(&r)["rules"][0]["name"], "width_68_20");
         assert_eq!(structured(&r)["rules"][0]["kind"], "width");
+    }
+
+    /// A generator tool (`via_farm`) applies through the server: the cell is split
+    /// out of the arguments, the run maps to a `RunGenerator`, and the geometry lands.
+    #[test]
+    fn generator_tool_applies_and_reports() {
+        let mut s = Server::default();
+        let created = call(
+            &mut s,
+            &call_tool(1, "create_cell", json!({ "name": "top" })),
+        );
+        assert_eq!(created["result"]["isError"], false);
+
+        // A default 3x3 mcon farm: 9 cuts plus two plates = 11 shapes.
+        let farm = call(
+            &mut s,
+            &call_tool(
+                2,
+                "via_farm",
+                json!({ "cell": "top", "cut": "mcon", "rows": 3, "cols": 3 }),
+            ),
+        );
+        let payload = structured(&farm);
+        assert_eq!(payload["result"], "ok", "via_farm applied: {farm}");
+        assert_eq!(
+            payload["affected"].as_array().unwrap().len(),
+            11,
+            "9 cuts plus two plates"
+        );
+    }
+
+    /// A generator tool with out-of-range parameters is a tool error (the generator's
+    /// own validation), not a panic, and the code is `invalid_argument`.
+    #[test]
+    fn generator_tool_rejects_bad_params() {
+        let mut s = Server::default();
+        call(
+            &mut s,
+            &call_tool(1, "create_cell", json!({ "name": "top" })),
+        );
+        let bad = call(
+            &mut s,
+            &call_tool(
+                2,
+                "via_farm",
+                json!({ "cell": "top", "cut": "mcon", "rows": 0, "cols": 3 }),
+            ),
+        );
+        assert_eq!(bad["result"]["isError"], true);
+        assert_eq!(structured(&bad)["code"], "invalid_argument");
     }
 }

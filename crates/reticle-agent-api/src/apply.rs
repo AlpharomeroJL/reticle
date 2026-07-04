@@ -74,6 +74,7 @@ impl Session {
 
     /// The command dispatch, without transcript bookkeeping (that lives in
     /// [`apply`](Self::apply)).
+    #[allow(clippy::too_many_lines)]
     fn dispatch(&mut self, cmd: AgentCommand) -> CommandResult {
         match cmd {
             AgentCommand::CreateCell { name } => self.create_cell(name),
@@ -174,6 +175,11 @@ impl Session {
                 cut_size,
                 default_enclosure,
             ),
+            AgentCommand::RunGenerator {
+                cell,
+                generator_id,
+                params,
+            } => self.run_generator(&cell, &generator_id, &params),
         }
     }
 
@@ -746,6 +752,46 @@ impl Session {
         Ok(self.ok(new_ids))
     }
 
+    /// Runs a parameterized generator by id, appending its geometry to `cell`.
+    ///
+    /// The generator is driven through [`reticle_gen::Registry::generate`] against a
+    /// scratch cell that carries only the newly generated shapes, using the live
+    /// document's technology. Each produced shape is then committed to `cell` through
+    /// a normal [`Edit::AddShape`], so the generated structure lands on the undo
+    /// history and replays from the transcript exactly like a hand-drawn shape, and a
+    /// stable id is allocated per shape. A bad id or bad parameters become an
+    /// [`ErrorCode::InvalidArgument`] error before anything is committed.
+    fn run_generator(
+        &mut self,
+        cell: &str,
+        generator_id: &str,
+        params: &serde_json::Value,
+    ) -> CommandResult {
+        self.require_cell(cell)?;
+
+        // Generate into a scratch cell so nothing touches the live document until the
+        // generator has succeeded; validation and geometry building happen here.
+        let registry = reticle_gen::Registry::with_builtins();
+        let tech = self.document().technology().clone();
+        let mut scratch = Cell::new("__generator_scratch");
+        registry
+            .generate(generator_id, params, &tech, &mut scratch)
+            .map_err(|e| map_gen_err(&e))?;
+
+        // Commit each generated shape as a normal AddShape edit: undoable, replayable,
+        // and id-allocated exactly like build_via_stack's shapes.
+        let mut new_ids = Vec::with_capacity(scratch.shapes.len());
+        for shape in scratch.shapes {
+            let slot = self.document().cell(cell).map_or(0, |c| c.shapes.len());
+            self.commit(Edit::AddShape {
+                cell: cell.to_owned(),
+                shape,
+            })?;
+            new_ids.push(self.alloc.allocate(cell, ElementKind::Shape, slot));
+        }
+        Ok(self.ok(new_ids))
+    }
+
     // ----- queries ----------------------------------------------------------
 
     fn query_shapes(
@@ -1099,6 +1145,16 @@ fn map_model_err(e: reticle_model::ModelError) -> AgentError {
 /// A `NoSuchElement` error naming the id.
 fn no_such_element(id: ElementId) -> AgentError {
     AgentError::new(ErrorCode::NoSuchElement, format!("no such element {id}"))
+}
+
+/// Maps a [`reticle_gen::GenError`] to an [`AgentError`].
+///
+/// Every generator failure is a client-supplied-argument problem (an unknown id, a
+/// malformed parameter blob, or a value out of the schema's range), so all map to
+/// [`ErrorCode::InvalidArgument`] carrying the generator's own precise message, which
+/// names the offending field.
+fn map_gen_err(e: &reticle_gen::GenError) -> AgentError {
+    AgentError::new(ErrorCode::InvalidArgument, e.to_string())
 }
 
 /// Whether two rectangles overlap or merely touch (shared edge or corner), the

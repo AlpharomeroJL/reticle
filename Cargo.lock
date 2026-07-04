@@ -4002,6 +4002,7 @@ dependencies = [
  "proptest",
  "reticle-drc",
  "reticle-extract",
+ "reticle-gen",
  "reticle-geometry",
  "reticle-io",
  "reticle-model",
@@ -4177,6 +4178,7 @@ name = "reticle-mcp"
 version = "6.0.1"
 dependencies = [
  "reticle-agent-api",
+ "reticle-gen",
  "reticle-geometry",
  "reticle-model",
  "serde",
