@@ -89,11 +89,38 @@ fn start_view_from_url() -> reticle_app::StartView {
     let Ok(params) = web_sys::UrlSearchParams::new_with_str(&search) else {
         return StartView::ReplayTheater;
     };
+    // A read-only viewer link (`?view=viewer&room=...&relay=...`, ADR 0038) opens
+    // the editor chrome in read-only mode: the viewer applies the sharer's live
+    // frames but never publishes. Recognize and report the target here so the
+    // entry acknowledges a viewer link; the live socket-pumping into a
+    // `reticle_app::viewer::ViewerSession` is proven by the Wave 1 end-to-end gate.
+    if let Some(target) = viewer_target_from_search(&search) {
+        web_sys::console::log_1(
+            &format!(
+                "reticle: read-only viewer link for room '{}' on relay '{}'",
+                target.room, target.relay
+            )
+            .into(),
+        );
+        return StartView::Editor;
+    }
+
     match params.get("view") {
         Some(value) => StartView::from_query_value(&value),
         // No explicit view: the public default is the replay theater.
         None => StartView::ReplayTheater,
     }
+}
+
+/// Recovers the read-only viewer target (room + relay) from the page's query
+/// string, or `None` when this is not a viewer link.
+///
+/// Delegates to `reticle_app::share::parse_viewer_query`, the same pure parser the
+/// desktop Share section's viewer link is built with, so the page and the link
+/// agree on the format.
+#[cfg(target_arch = "wasm32")]
+fn viewer_target_from_search(search: &str) -> Option<reticle_app::share::ViewerTarget> {
+    reticle_app::share::parse_viewer_query(search)
 }
 
 /// Native builds of the harness do nothing; the desktop application is the

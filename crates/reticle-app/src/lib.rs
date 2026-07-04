@@ -104,6 +104,7 @@ pub mod tool;
 pub mod tour;
 pub mod usecases;
 pub mod view3d;
+pub mod viewer;
 pub mod viewexport;
 pub mod viewports;
 pub mod xsection;
