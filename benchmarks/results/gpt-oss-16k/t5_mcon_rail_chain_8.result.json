@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t5_mcon_rail_chain_8",
+    "model": "gpt-oss:16k",
+    "suite_version": "0.4.0",
+    "success": true,
+    "iterations": 1,
+    "first_proposal_violations": 13,
+    "final_violations": 13,
+    "wall_ms": 67634,
+    "backend": "ollama",
+    "quantization": "MXFP4"
+  }
+]

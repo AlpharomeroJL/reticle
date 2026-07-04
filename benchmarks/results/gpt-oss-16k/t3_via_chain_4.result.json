@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_via_chain_4",
+    "model": "gpt-oss:16k",
+    "suite_version": "0.4.0",
+    "success": false,
+    "iterations": 2,
+    "first_proposal_violations": 0,
+    "final_violations": 8,
+    "wall_ms": 68140,
+    "backend": "ollama",
+    "quantization": "MXFP4"
+  }
+]
