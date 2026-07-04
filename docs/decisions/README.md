@@ -39,3 +39,5 @@ superseded decision is marked and linked to its replacement.
 | [0031](0031-wave3-agent-command-expansion.md) | Wave 3 expands the AgentCommand surface for the Wave 2 tools |
 | [0032](0032-transcript-plan-log.md) | Transcript gains an additive per-iteration plan log |
 | [0033](0033-v7-housekeeping-media-and-changelog.md) | v7 housekeeping: prune offscreen media, regroup the changelog |
+| [0034](0034-import-hardening-and-warnings.md) | GDSII import hardening: contain panics, degrade to structured warnings |
+| [0035](0035-document-open-seam.md) | The document-open seam: bytes plus a format hint, warnings alongside |
