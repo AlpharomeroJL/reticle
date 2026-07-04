@@ -39,6 +39,20 @@ impl Presence {
         }
     }
 
+    /// Returns this presence with its viewport set to `viewport`.
+    ///
+    /// The viewport is the world-space (DBU) rectangle the actor currently sees. A
+    /// sharer publishes it on every presence update so a viewer following the
+    /// sharer (read-only follow-mode, ADR 0038) can frame the same region without
+    /// the sharer having to send any camera-specific message: the viewport already
+    /// travels on the frozen `Presence.viewport` proto field (field 6), so this is
+    /// additive and round-trips unchanged.
+    #[must_use]
+    pub fn with_viewport(mut self, viewport: Rect) -> Self {
+        self.viewport = viewport;
+        self
+    }
+
     /// Encodes this presence into its proto message form.
     #[must_use]
     pub fn to_proto(&self) -> v1::Presence {
@@ -198,7 +212,25 @@ fn rect_from_proto(r: v1::Rect) -> Rect {
 
 #[cfg(test)]
 mod tests {
-    use super::Awareness;
+    use super::{Awareness, Presence};
+    use reticle_geometry::{Point, Rect};
+
+    #[test]
+    fn viewport_survives_proto_round_trip_for_follow_mode() {
+        // Follow-mode depends on the sharer's viewport reaching the viewer intact.
+        // A non-default viewport must survive the proto round-trip exactly, on the
+        // additive `Presence.viewport` field.
+        let viewport = Rect::new(Point::new(-1000, -2000), Point::new(3000, 4000));
+        let sharer = Presence::new("sharer").with_viewport(viewport);
+        assert_eq!(sharer.viewport, viewport, "with_viewport sets the viewport");
+
+        let decoded = Presence::from_proto(&sharer.to_proto());
+        assert_eq!(
+            decoded.viewport, viewport,
+            "the sharer's viewport must survive the proto round-trip"
+        );
+        assert_eq!(sharer, decoded, "the whole presence round-trips");
+    }
 
     #[test]
     fn status_slot_is_last_write_wins_per_actor() {
