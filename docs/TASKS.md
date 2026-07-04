@@ -342,10 +342,20 @@ in-progress has its partial work on its worktree branch: resume it, never restar
   Honest gaps: OASIS carries no warnings yet (no warning channel); `MAX_SHAPE_VERTICES`
   is defense-in-depth, not a live limit; the real sample is re-exported through our
   writer (size/license hygiene), labeled in NOTICE.md.
-- [ ] Lane 1B: drag-and-drop + URL open in the browser (wasm file handling, no
-  server round trip); `?gds=<url>` remote load (CORS-permitting, clear error
-  otherwise); IndexedDB recent-files; progressive load + progress indicator +
-  streaming-index past a measured size threshold + an honest over-ceiling message.
+- [x] Lane 1B: drag-and-drop + URL open in the browser. done-gate-green, merged
+  (lane b3bb842 into merge cab97c4; full `just ci` GREEN on main at cab97c4). New
+  `reticle_app::webopen`: egui `dropped_files` drop-to-open (no server round trip),
+  `?gds=<url>` remote load via `web_sys` fetch with a human-readable CORS/network
+  error, IndexedDB recent-files (load at startup, persist after each open), a
+  size-banded progressive load (`LoadPlan`/`LoadProgress`) with an in-memory/streaming
+  split and an honest over-ceiling refusal. Measured browser ceiling 256 MiB,
+  streaming threshold 32 MiB (orchestrator folds the ceiling into docs/PERF.md at Wave
+  5). ADRs 0036, 0037. Orchestrator reconciliation at merge: 1B and 1D both added
+  `recent_files`/`handle_dropped_files`, so `webopen::RecentFile`/`RecentFiles` became
+  canonical (dropped `startscreen::RecentFile`, rewired the Start-screen recent
+  section), one drop handler kept. Honest gap: the `web_sys` fetch and IndexedDB glue
+  compile wasm-clean but their runtime behaviour is proven by the Wave 1 e2e, not
+  headless unit tests (16 pure-logic tests cover the decisions).
 - [x] Lane 1C: shareable read-only sessions. done-gate-green, merged (lane ba6760a
   into merge d186439; batch `just ci` GREEN at 1d2f7fe). Read-only viewer sync over
   the existing relay: a viewer joins with `?mode=view` and receives the sharer's yrs
@@ -370,8 +380,17 @@ in-progress has its partial work on its worktree branch: resume it, never restar
   (1B feeds the IndexedDB-backed list), `report_error`/`notify` (1B/1C route errors
   through). Honest gap: recent-files persistence is 1B's; no native file-picker (open
   is drag-drop plus the gallery, matching the bytes-based seam).
-- [ ] Wave 1 merge gate: `just ci`, plus an e2e test that drops a corpus file in the
-  browser and it renders, then creates a share link and a second context sees it live.
+- [~] Wave 1 merge gate: all four lanes merged and reconciled on main; `just ci` GREEN
+  at cab97c4 (fmt, clippy -D warnings, full test suite, doctests, doc-build, wasm
+  build, deny, typos), `mdbook build` clean. OUTSTANDING (orchestrator close-out): the
+  browser e2e that (a) drops a corpus file and it renders and (b) creates a share link
+  a second context sees live. Half (a) needs a Playwright drop-file spec against the
+  trunk bundle. Half (b) additionally needs the viewer socket-pump wiring that Lane 1C
+  deferred (pumping relay frames into a live `ViewerSession` in the eframe update loop,
+  it would have collided with 1B/1D app.rs regions) plus a relay-backed e2e harness
+  (the current e2e serves a static bundle). Tracked as the first Wave 1 close-out item;
+  the read-only guarantee itself is already proven server-side and app-side by Rust
+  tests. No fabrication: the e2e is not yet run.
 
 ## Wave 2: the generator layer (parallel, 4 lanes) [not-started]
 
