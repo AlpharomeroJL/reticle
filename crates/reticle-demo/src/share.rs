@@ -9,7 +9,7 @@
 //! Two abuse controls apply, mirroring the rest of the demo (ADR 0039):
 //!
 //! * **Creation is rate-limited per source IP** with the same sliding-window
-//!   [`RateLimiter`](crate::rate::RateLimiter) the submit path uses, so one client
+//!   [`RateLimiter`] the submit path uses, so one client
 //!   cannot mint an unbounded number of rooms.
 //! * **Rooms expire.** Each room is stamped with a creation instant and a TTL;
 //!   [`ShareRooms::create`] sweeps expired rooms first, and [`ShareRooms::is_live`]
@@ -18,7 +18,7 @@
 //!
 //! The registry is time-injectable ([`ShareRooms::create_at`] / [`is_live_at`])
 //! so the rate-limit and TTL behaviour is tested without sleeping, exactly like
-//! the [`RateLimiter`](crate::rate::RateLimiter) itself.
+//! the [`RateLimiter`] itself.
 //!
 //! [`is_live_at`]: ShareRooms::is_live_at
 
