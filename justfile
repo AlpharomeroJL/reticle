@@ -80,11 +80,11 @@ wasm-build:
 
 # ---- Supply chain: licenses + advisories ----
 deny:
-    cargo deny check
+    cargo deny check --config .config/deny.toml
 
 # ---- Spelling ----
 typos:
-    typos
+    typos --config .config/typos.toml
 
 # ---- Style: the voice rule forbids em-dashes (U+2014) ----
 check-style:
