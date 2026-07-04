@@ -1,12 +1,13 @@
 //! The embedded first-run tour state machine.
 //!
 //! A dismissable overlay walks a new user through the editor's real panels in
-//! order, one step at a time: the canvas and pan/zoom, the layer manager, the
-//! measure tool, running DRC and click-to-zoom, net highlighting, the minimap, and
-//! the agent/replay theater. Each step names the actual control it points at so the
-//! egui layer can draw a highlight box around that region. A second, optional
-//! chapter covers the Wave 2 tools (drawing, boolean/transform, productivity,
-//! snapping, layer/technology editing, search, and view/export).
+//! order, one step at a time: opening a design, the canvas and pan/zoom, the layer
+//! manager, the measure tool, running DRC and click-to-zoom, net highlighting, the
+//! minimap, the agent/replay theater, and sharing a session by link. Each step names
+//! the actual control it points at so the egui layer can draw a highlight box around
+//! that region. A second, optional chapter covers the Wave 2 tools (drawing,
+//! boolean/transform, productivity, snapping, layer/technology editing, search, and
+//! view/export).
 //!
 //! This module is deliberately **pure and egui-free**: it is the ordered list of
 //! steps, the current position, and the transitions between them (next, skip,
@@ -40,8 +41,9 @@
 /// the last [`Chapter::Core`] step advances into the first [`Chapter::Wave2`] step.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Chapter {
-    /// The core walkthrough: canvas, layers, measure, DRC, net highlight, minimap,
-    /// and the agent/replay theater. Always shown.
+    /// The core walkthrough: opening a design, canvas, layers, measure, DRC, net
+    /// highlight, minimap, the agent/replay theater, and sharing a session. Always
+    /// shown.
     Core,
     /// The optional second chapter covering the Wave 2 tools.
     Wave2,
@@ -66,12 +68,17 @@ impl Chapter {
 /// coordinates and stays robust as the layout is resized or rearranged.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum TourTarget {
+    /// The open affordance: the toolbar's Open control (and the drag-and-drop
+    /// target). This is how a real design gets into the editor.
+    OpenAffordance,
     /// The central layout canvas (pan/zoom happen here).
     Canvas,
     /// The left-hand layer manager panel.
     LayerPanel,
     /// The toolbar row where tools (including Measure) are selected.
     Toolbar,
+    /// The Share section in the right-hand column, which mints a session link.
+    ShareSection,
     /// The DRC panel in the right-hand column.
     DrcPanel,
     /// The net-highlight control (part of the right-hand column).
@@ -118,6 +125,15 @@ pub struct TourStep {
 
 /// The ordered core-chapter steps, always shown.
 const CORE_STEPS: &[TourStep] = &[
+    TourStep {
+        id: "open",
+        chapter: Chapter::Core,
+        target: TourTarget::OpenAffordance,
+        title: "Open a design",
+        body: "Bring in your own layout with Open on the toolbar, or just drag a \
+               GDSII or OASIS file onto the window. The Start screen also has example \
+               chips to load in one click.",
+    },
     TourStep {
         id: "canvas",
         chapter: Chapter::Core,
@@ -172,7 +188,15 @@ const CORE_STEPS: &[TourStep] = &[
         target: TourTarget::AgentPanel,
         title: "Agent and replay",
         body: "The agent panel runs a scripted edit session, and the replay theater \
-               plays a recorded run back step by step. That is the core tour.",
+               plays a recorded run back step by step.",
+    },
+    TourStep {
+        id: "share",
+        chapter: Chapter::Core,
+        target: TourTarget::ShareSection,
+        title: "Share a session",
+        body: "The Share section mints a relay link for this session. Copy it to open \
+               the same design together in a browser. That is the core tour.",
     },
 ];
 
@@ -437,9 +461,11 @@ mod tests {
         assert!(tour.is_first_run());
         assert!(!tour.is_finished());
         let step = tour.current().expect("a first step");
-        assert_eq!(step.id, "canvas");
+        // The tour opens on the open affordance (first contact is getting a design
+        // in), which precedes the canvas step.
+        assert_eq!(step.id, "open");
         assert_eq!(step.chapter, Chapter::Core);
-        assert_eq!(step.target, TourTarget::Canvas);
+        assert_eq!(step.target, TourTarget::OpenAffordance);
     }
 
     #[test]
@@ -565,7 +591,7 @@ mod tests {
         tour.relaunch(true);
         assert!(tour.is_active());
         assert!(!tour.is_first_run(), "a relaunch is not a first run");
-        assert_eq!(tour.current().unwrap().id, "canvas");
+        assert_eq!(tour.current().unwrap().id, "open");
         assert_eq!(
             tour.progress(),
             Some((1, CORE_STEPS.len() + WAVE2_STEPS.len()))
@@ -609,7 +635,7 @@ mod tests {
         let mut relaunched = next_launch;
         relaunched.relaunch(true);
         assert!(relaunched.is_active());
-        assert_eq!(relaunched.current().unwrap().id, "canvas");
+        assert_eq!(relaunched.current().unwrap().id, "open");
     }
 
     #[test]
@@ -643,5 +669,48 @@ mod tests {
     fn chapter_labels_are_stable() {
         assert_eq!(Chapter::Core.label(), "Getting started");
         assert_eq!(Chapter::Wave2.label(), "Wave 2 tools");
+    }
+
+    #[test]
+    fn the_core_tour_opens_with_open_and_covers_share() {
+        // The first-contact tour must point at the open affordance first and cover
+        // the share section, so a new user learns how a design gets in and how a
+        // session gets out.
+        let open = CORE_STEPS
+            .iter()
+            .find(|s| s.id == "open")
+            .expect("an open step");
+        assert_eq!(open.target, TourTarget::OpenAffordance);
+        assert_eq!(open.chapter, Chapter::Core);
+        // Open leads the tour: a fresh first run starts on it.
+        assert_eq!(Tour::first_run().current().map(|s| s.id), Some("open"));
+
+        let share = CORE_STEPS
+            .iter()
+            .find(|s| s.id == "share")
+            .expect("a share step");
+        assert_eq!(share.target, TourTarget::ShareSection);
+        assert_eq!(share.chapter, Chapter::Core);
+
+        // Both targets are distinct from every other step's target where it matters:
+        // exactly one step points at the open affordance and one at the share section.
+        let all = all_steps();
+        assert_eq!(
+            all.iter()
+                .filter(|s| s.target == TourTarget::OpenAffordance)
+                .count(),
+            1
+        );
+        assert_eq!(
+            all.iter()
+                .filter(|s| s.target == TourTarget::ShareSection)
+                .count(),
+            1
+        );
+        // No em dash in the new copy (the style gate).
+        for s in [open, share] {
+            assert!(!s.title.contains('\u{2014}'));
+            assert!(!s.body.contains('\u{2014}'));
+        }
     }
 }

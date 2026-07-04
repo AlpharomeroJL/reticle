@@ -43,3 +43,5 @@ superseded decision is marked and linked to its replacement.
 | [0035](0035-document-open-seam.md) | The document-open seam: bytes plus a format hint, warnings alongside |
 | [0038](0038-read-only-viewer-sync.md) | Read-only session viewers: live sync, an independent camera, and follow-mode |
 | [0039](0039-share-rooms-rate-limit-and-ttl.md) | Share rooms on the demo server: rate-limited creation and a TTL |
+| [0040](0040-app-notification-error-surface.md) | One app-level notification surface every failure path reports through |
+| [0041](0041-start-screen-first-contact.md) | Product-grade first contact: gallery, drag-drop, and a tour that covers open |
