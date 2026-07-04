@@ -32,6 +32,14 @@ reticle-sync = { workspace = true }
 reticle-drc = { workspace = true }
 reticle-extract = { workspace = true }
 
+# The Generate panel (`crate::generate_panel`) drives the parameterized layout
+# generators: it lists them from the registry, builds a typed form from each
+# generator's schema, previews the geometry live, and places it as one undo-integrated
+# edit. `reticle-gen` is pure geometry (no filesystem/GPU/threads) and compiles for
+# wasm32, so the panel and its live preview work in the browser too; the dependency is
+# unconditional.
+reticle-gen = { workspace = true }
+
 # The agent panel and the replay theater drive the frozen agent command API
 # (`Session`, `Transcript`, `AgentCommand`). `reticle-agent-api` builds for wasm32
 # (its `render_png` command degrades to a clean error there rather than calling the

@@ -88,6 +88,7 @@ pub mod demoscript;
 pub mod draw;
 pub mod drc_panel;
 pub mod fps;
+pub mod generate_panel;
 pub mod grid;
 pub mod history;
 pub mod inspector;

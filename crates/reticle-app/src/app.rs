@@ -292,6 +292,11 @@ pub struct App {
     /// move-by-delta, and via-stack dialog fields.
     productivity: ProductivityState,
 
+    /// The Generate panel state: the parameterized-generator catalog, the selected
+    /// generator, and its typed form values. Drives the live preview overlay and the
+    /// undo-integrated placement (see [`crate::generate_panel`]).
+    generate: crate::generate_panel::GeneratePanelState,
+
     /// The search / selection-depth panel: filter query bar, saved selection
     /// sets, select-similar, and the cell/instance outline tree.
     search: SearchState,
@@ -544,6 +549,7 @@ impl App {
             netlight: Netlight::new(),
             view3d: crate::view3d::View3d::new(),
             productivity: ProductivityState::new(),
+            generate: crate::generate_panel::GeneratePanelState::new(),
             search: SearchState {
                 outline,
                 ..SearchState::default()
@@ -1917,6 +1923,8 @@ impl App {
                         ui.separator();
                         self.ops_panel(ui);
                         self.productivity_panel(ui);
+                        ui.separator();
+                        self.generate_section(ui);
                         self.snap_panel(ui);
                         ui.separator();
                         self.view_export_panel(ui);
@@ -2941,6 +2949,105 @@ impl App {
                     }
                 });
         });
+    }
+
+    /// Draws the Generate side panel: pick a parameterized layout generator, fill a
+    /// form built from its schema, preview the geometry live on the canvas, and place
+    /// it into the document as one undo step.
+    ///
+    /// The panel is thin glue over [`crate::generate_panel::GeneratePanelState`]: the
+    /// combo box selects the generator, [`params_form`](crate::generate_panel::GeneratePanelState::params_form)
+    /// renders the typed widgets from the schema, and the Generate button routes
+    /// through [`generate_apply`](Self::generate_apply). The live preview is drawn on
+    /// the canvas by [`generate_preview_shapes`](Self::generate_preview_shapes), not
+    /// here.
+    fn generate_section(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Generate");
+
+        // Pick the generator by title; the catalog comes straight from the registry.
+        let selected_title = self.generate.selected_info().title;
+        egui::ComboBox::from_id_salt("generate_pick")
+            .selected_text(selected_title)
+            .show_ui(ui, |ui| {
+                let count = self.generate.infos().len();
+                for i in 0..count {
+                    let title = self.generate.infos()[i].title;
+                    let is_sel = self.generate.selected() == i;
+                    if ui.selectable_label(is_sel, title).clicked() {
+                        self.generate.select(i);
+                    }
+                }
+            });
+
+        // A one-line description of the selected generator.
+        ui.label(self.generate.selected_info().description)
+            .on_hover_text(self.generate.selected_id());
+
+        ui.separator();
+
+        // The typed parameter form (Int drag, Bool checkbox, Enum combo).
+        self.generate.params_form(ui);
+
+        ui.checkbox(&mut self.generate.preview, "Live preview");
+
+        // Report the generated shape count, or the generator's validation error so the
+        // user sees why a parameter is rejected.
+        let tech = self.history.document().technology().clone();
+        match self.generate.generate_into_scratch(&tech) {
+            Ok(shapes) => {
+                ui.label(format!("Generates {} shape(s)", shapes.len()));
+                if ui.button("Generate").clicked() {
+                    self.generate_apply();
+                }
+            }
+            Err(err) => {
+                ui.colored_label(egui::Color32::from_rgb(255, 140, 90), err);
+                ui.add_enabled(false, egui::Button::new("Generate"));
+            }
+        }
+        if ui.button("Reset to defaults").clicked() {
+            self.generate.reset_selected_to_defaults();
+        }
+    }
+
+    /// Places the selected generator's geometry into the top cell as one undo step.
+    ///
+    /// The whole generated structure is applied through
+    /// [`History::apply_group`](crate::history::History::apply_group) as a single
+    /// logical undo step, so one Undo removes all of it, matching the ADR 0048
+    /// undo-integration requirement. On a validation error nothing is placed and the
+    /// message is shown in the status bar.
+    fn generate_apply(&mut self) {
+        let tech = self.history.document().technology().clone();
+        let edits = match self.generate.placement_edits(&self.top_cell, &tech) {
+            Ok(edits) => edits,
+            Err(err) => {
+                self.status.set(format!("Generate failed: {err}"));
+                return;
+            }
+        };
+        if edits.is_empty() {
+            self.status.set("Generate: produced no geometry");
+            return;
+        }
+        let n = edits.len();
+        let title = self.generate.selected_info().title;
+        if self.history.apply_group(edits).is_ok() {
+            self.rebuild_scene();
+            self.status.set(format!("Generated {title} ({n} shape(s))"));
+        } else {
+            self.status.set("Generate: edit failed");
+        }
+    }
+
+    /// The live-preview shapes for the Generate panel, or an empty list when the
+    /// preview is off or the current parameters do not generate.
+    ///
+    /// Drawn as an overlay by the canvas (see [`draw_generate_preview`](Self::draw_generate_preview)),
+    /// so the user sees the generated structure before committing it.
+    fn generate_preview_shapes(&self) -> Vec<DrawShape> {
+        let tech = self.history.document().technology().clone();
+        self.generate.preview_shapes(&tech)
     }
 
     /// The live array-preview shapes for the current selection and array parameters,
@@ -4324,6 +4431,7 @@ impl App {
         // Engine-driven overlays on top of the geometry.
         self.draw_net_highlight(&painter, &screen, viewport);
         self.draw_array_preview(&painter, &screen, viewport);
+        self.draw_generate_preview(&painter, &screen, viewport);
         self.draw_drc_markers(&painter, &screen);
 
         // User guides under the ruler bars, then the rulers cover their ends.
@@ -5115,6 +5223,30 @@ impl App {
         let color = Color32::from_rgb(180, 210, 120);
         let stroke = Stroke::new(1.5, color);
         let fill = Color32::from_rgba_unmultiplied(180, 210, 120, 40);
+        for shape in &preview {
+            if !shape.bounding_box().intersects(&viewport) {
+                continue;
+            }
+            self.draw_shape_outline(painter, screen, shape, stroke, fill);
+        }
+    }
+
+    /// Draws the Generate panel's live preview as a canvas overlay: the geometry the
+    /// selected generator produces for the current form values, in a distinct accent.
+    ///
+    /// The shapes come from [`generate_preview_shapes`](Self::generate_preview_shapes),
+    /// so this is empty unless the preview toggle is on and the parameters currently
+    /// generate. Only shapes intersecting `viewport` are drawn. The structure is
+    /// placed with its lower-left at the world origin (where the generators emit it),
+    /// so the overlay shows exactly what a Generate places.
+    fn draw_generate_preview(&self, painter: &egui::Painter, screen: &ScreenRect, viewport: Rect) {
+        let preview = self.generate_preview_shapes();
+        if preview.is_empty() {
+            return;
+        }
+        let color = Color32::from_rgb(120, 190, 235);
+        let stroke = Stroke::new(1.5, color);
+        let fill = Color32::from_rgba_unmultiplied(120, 190, 235, 40);
         for shape in &preview {
             if !shape.bounding_box().intersects(&viewport) {
                 continue;
