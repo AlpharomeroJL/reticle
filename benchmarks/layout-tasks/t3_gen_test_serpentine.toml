@@ -1,0 +1,5 @@
+id = "t3_gen_test_serpentine"
+tier = 3
+prompt = "Create a cell named top and add a serpentine test structure on met1: run the test_structure generator with the serpentine kind, a 400 dbu feature width, 3000 dbu bars, and eight bars."
+technology = "sky130.tech"
+checker = "generator:id=test_structure,kind=serpentine,layer=met1,feature_width=400,feature_length=3000,count=8"

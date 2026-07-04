@@ -1,0 +1,5 @@
+id = "t3_gen_fill_decap"
+tier = 3
+prompt = "Create a cell named top and fill a 10000 by 10000 dbu region with li1 decap fill at 60 percent density: run the fill generator on li1 with 400 dbu tiles and a target density of 600 per-mille."
+technology = "sky130.tech"
+checker = "generator:id=fill,layer=li1,region_width=10000,region_height=10000,tile=400,target_density_permille=600"

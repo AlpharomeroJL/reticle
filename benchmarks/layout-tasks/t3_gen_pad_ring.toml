@@ -1,0 +1,5 @@
+id = "t3_gen_pad_ring"
+tier = 3
+prompt = "Create a cell named top and generate an I/O pad ring around a 200 um square die: run the pad_ring generator with a 200000 by 200000 dbu die, a 100000 dbu pad pitch, 60000 dbu pads, and four reinforced power pads."
+technology = "sky130.tech"
+checker = "generator:id=pad_ring,die_width=200000,die_height=200000,pad_pitch=100000,pad_size=60000,power_pads=4"

@@ -4043,6 +4043,7 @@ dependencies = [
  "reticle-agent-api",
  "reticle-drc",
  "reticle-extract",
+ "reticle-gen",
  "reticle-geometry",
  "reticle-model",
  "serde",

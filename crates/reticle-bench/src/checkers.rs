@@ -218,8 +218,9 @@ impl CheckerRegistry {
     ///   checker name (typically `intent`), regardless of the name.
     /// - A task whose checker string names a geometric checker
     ///   (`shape_count`, `layer_area`, `boolean_result`, `array_pitch`, `contact_stack`,
-    ///   `via_chain`, `comb`, `guard_ring`, `compound_cell`) with parameters after a `:`
-    ///   gets that checker, built from the parsed parameters, bound under the full string.
+    ///   `via_chain`, `comb`, `guard_ring`, `compound_cell`, `generator`) with parameters
+    ///   after a `:` gets that checker, built from the parsed parameters, bound under the
+    ///   full string.
     /// - A parameterized `rect_present:layer=L/D` gets a [`RectPresent`] on that layer.
     ///
     /// Anything else is left to the default checkers (`rect_present`, `drc_clean`).
