@@ -49,3 +49,5 @@ superseded decision is marked and linked to its replacement.
 | [0041](0041-start-screen-first-contact.md) | Product-grade first contact: gallery, drag-drop, and a tour that covers open |
 | [0042](0042-generator-trait-typed-and-erased.md) | Generator framework: a typed trait plus a type-erased registry path |
 | [0043](0043-generators-drc-clean-by-construction.md) | Generators are DRC-clean by construction, proven by the real DRC engine |
+| [0044](0044-pad-ring-generator-on-the-subset.md) | Pad-ring generator: die-aware I/O ring on the subset, power pads as via staples |
+| [0045](0045-seal-ring-generator-on-the-subset.md) | Seal-ring generator: a stacked-metal-plus-cut barrier on the subset |
