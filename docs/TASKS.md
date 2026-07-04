@@ -381,16 +381,18 @@ in-progress has its partial work on its worktree branch: resume it, never restar
   through). Honest gap: recent-files persistence is 1B's; no native file-picker (open
   is drag-drop plus the gallery, matching the bytes-based seam).
 - [~] Wave 1 merge gate: all four lanes merged and reconciled on main; `just ci` GREEN
-  at cab97c4 (fmt, clippy -D warnings, full test suite, doctests, doc-build, wasm
-  build, deny, typos), `mdbook build` clean. OUTSTANDING (orchestrator close-out): the
-  browser e2e that (a) drops a corpus file and it renders and (b) creates a share link
-  a second context sees live. Half (a) needs a Playwright drop-file spec against the
-  trunk bundle. Half (b) additionally needs the viewer socket-pump wiring that Lane 1C
-  deferred (pumping relay frames into a live `ViewerSession` in the eframe update loop,
-  it would have collided with 1B/1D app.rs regions) plus a relay-backed e2e harness
-  (the current e2e serves a static bundle). Tracked as the first Wave 1 close-out item;
-  the read-only guarantee itself is already proven server-side and app-side by Rust
-  tests. No fabrication: the e2e is not yet run.
+  (fmt, clippy -D warnings, full test suite, doctests, doc-build, wasm build, deny,
+  typos), `mdbook build` clean. Drop path (a) PROVEN at the app level: a committed
+  integration test (`app::tests::dropping_a_corpus_gds_opens_and_renders_it`, a3b87cf)
+  drives `handle_dropped_files` with the real corpus file as an egui dropped file and
+  asserts the full classify/open/install/dismiss/record chain with no error, headless
+  and deterministic (the browser DOM-to-egui translation is eframe's own, exercised by
+  the boot e2e). STILL OUTSTANDING (honest, not run): (a) a true browser Playwright
+  drop-file spec, and (b) the share-link-live-in-a-second-context e2e, which needs the
+  viewer socket-pump wiring Lane 1C deferred (relay frames into a live `ViewerSession`
+  in the eframe loop, it would have collided with 1B/1D app.rs regions) plus a
+  relay-backed e2e harness (the current e2e serves a static bundle). The read-only
+  guarantee itself is proven server-side and app-side by Rust tests.
 
 ## Wave 2: the generator layer (parallel, 4 lanes) [not-started]
 
