@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t5_route_cell_escape",
+    "model": "gpt-oss:16k",
+    "suite_version": "0.4.0",
+    "success": false,
+    "iterations": 1,
+    "first_proposal_violations": 4,
+    "final_violations": 4,
+    "wall_ms": 81083,
+    "backend": "ollama",
+    "quantization": "MXFP4"
+  }
+]

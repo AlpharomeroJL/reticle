@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_intent_met1_wire",
+    "model": "gpt-oss:16k",
+    "suite_version": "0.4.0",
+    "success": true,
+    "iterations": 1,
+    "first_proposal_violations": 2,
+    "final_violations": 2,
+    "wall_ms": 9569,
+    "backend": "ollama",
+    "quantization": "MXFP4"
+  }
+]

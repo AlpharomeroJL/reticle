@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_via_stack_li_m1",
+    "model": "qwen2.5-coder:16k",
+    "suite_version": "0.4.0",
+    "success": true,
+    "iterations": 1,
+    "first_proposal_violations": 4,
+    "final_violations": 4,
+    "wall_ms": 13438,
+    "backend": "ollama",
+    "quantization": "Q4_K_M"
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_guard_ring_nwell",
+    "model": "qwen2.5-coder:16k",
+    "suite_version": "0.4.0",
+    "success": false,
+    "iterations": 4,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 25336,
+    "backend": "ollama",
+    "quantization": "Q4_K_M"
+  }
+]

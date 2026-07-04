@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_via_stack_li_m1",
+    "model": "gpt-oss:16k",
+    "suite_version": "0.4.0",
+    "success": false,
+    "iterations": 2,
+    "first_proposal_violations": 6,
+    "final_violations": 9,
+    "wall_ms": 125751,
+    "backend": "ollama",
+    "quantization": "MXFP4"
+  }
+]

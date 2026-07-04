@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t2_poly_over_diff",
+    "model": "qwen2.5-coder:16k",
+    "suite_version": "0.4.0",
+    "success": false,
+    "iterations": 1,
+    "first_proposal_violations": 1,
+    "final_violations": 1,
+    "wall_ms": 13907,
+    "backend": "ollama",
+    "quantization": "Q4_K_M"
+  }
+]
