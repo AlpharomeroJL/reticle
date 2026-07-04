@@ -41,3 +41,5 @@ superseded decision is marked and linked to its replacement.
 | [0033](0033-v7-housekeeping-media-and-changelog.md) | v7 housekeeping: prune offscreen media, regroup the changelog |
 | [0034](0034-import-hardening-and-warnings.md) | GDSII import hardening: contain panics, degrade to structured warnings |
 | [0035](0035-document-open-seam.md) | The document-open seam: bytes plus a format hint, warnings alongside |
+| [0040](0040-app-notification-error-surface.md) | One app-level notification surface every failure path reports through |
+| [0041](0041-start-screen-first-contact.md) | Product-grade first contact: gallery, drag-drop, and a tour that covers open |
