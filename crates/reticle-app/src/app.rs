@@ -296,6 +296,11 @@ pub struct App {
     share_room: String,
     /// The most recent status-bar message.
     status: Status,
+    /// Non-fatal warnings from the most recent document open (see [`crate::open`]).
+    /// Populated by [`App::open_outcome`]; drives the small warnings window that
+    /// [`App::open_warnings_window`] draws until the user dismisses it. Empty when
+    /// the last open was clean or none has happened.
+    open_warnings: Vec<crate::open::OpenWarning>,
     /// The last world position under the cursor, for the status readout.
     cursor_world: Option<Point>,
     /// Rolling frame-time meter behind the status-bar fps readout.
@@ -500,6 +505,7 @@ impl App {
             share_server: crate::share::DEFAULT_SERVER.to_owned(),
             share_room: crate::share::room_id(demo::TOP_CELL),
             status: Status::default(),
+            open_warnings: Vec::new(),
             cursor_world: None,
             frame_meter: FrameMeter::default(),
             start_view,
@@ -589,6 +595,76 @@ impl App {
         self.netlight.clear();
         self.drc.clear();
         self.fit_requested = true;
+    }
+
+    /// Opens a layout document from `bytes` and loads it into the editor.
+    ///
+    /// This is the app-facing wrapper over the document-open seam
+    /// ([`crate::open::open_document_bytes`]): it imports through the hardened path
+    /// (so no input can panic or hang), and on success installs the opened document
+    /// as the live layout (replacing whatever was open), frames its top cell,
+    /// dismisses the Start screen, and records any non-fatal warnings so the
+    /// warnings window surfaces them. It takes bytes, not a path, so the same call
+    /// works on native and on wasm.
+    ///
+    /// Other file-open entry points (a Start screen's open button, an example
+    /// gallery, drag-and-drop) route through this, or call the seam directly and
+    /// hand the [`OpenOutcome`](crate::open::OpenOutcome) to [`open_outcome`](Self::open_outcome).
+    ///
+    /// # Errors
+    ///
+    /// Returns the seam's [`OpenError`](crate::open::OpenError) unchanged when the
+    /// bytes cannot be opened; the editor is left untouched in that case.
+    pub fn open_document_bytes(
+        &mut self,
+        bytes: &[u8],
+        format: crate::open::DocFormat,
+    ) -> Result<(), crate::open::OpenError> {
+        let outcome = crate::open::open_document_bytes(bytes, format)?;
+        self.open_outcome(outcome);
+        Ok(())
+    }
+
+    /// Loads an already-produced [`OpenOutcome`](crate::open::OpenOutcome) into the
+    /// editor.
+    ///
+    /// Installs the document, frames its top cell, dismisses the Start screen, and
+    /// stashes the outcome's warnings so the warnings window shows them. Split from
+    /// [`open_document_bytes`](Self::open_document_bytes) so a caller that ran the
+    /// seam itself (for example to inspect the warnings first) can still load the
+    /// result through the same path.
+    pub fn open_outcome(&mut self, outcome: crate::open::OpenOutcome) {
+        let crate::open::OpenOutcome {
+            document,
+            top_cell,
+            warnings,
+        } = outcome;
+        let cell_count = document.cell_count();
+        self.install_document(document, top_cell);
+        self.open_warnings = warnings;
+        self.start_screen = false;
+        if self.open_warnings.is_empty() {
+            self.status
+                .set(format!("Opened document ({cell_count} cells)"));
+        } else {
+            self.status.set(format!(
+                "Opened document ({cell_count} cells, {} warning(s))",
+                self.open_warnings.len()
+            ));
+        }
+    }
+
+    /// The non-fatal warnings from the most recent document open (empty when the
+    /// last open was clean or none has happened). Read by the warnings window and
+    /// exposed so a richer error surface (owned by another lane) can render them.
+    #[must_use]
+    pub fn open_warnings(&self) -> &[crate::open::OpenWarning] {
+        &self.open_warnings
+    }
+
+    /// Clears the stored open-warnings (dismisses the warnings window).
+    pub fn clear_open_warnings(&mut self) {
+        self.open_warnings.clear();
     }
 
     /// Arms a one-shot full-window screenshot smoke test (native launcher only).
@@ -2678,6 +2754,44 @@ impl App {
                 .clone_into(&mut self.replay_error);
             }
             Err(message) => self.replay_error = message,
+        }
+    }
+
+    /// Draws the document-open warnings window, when the last open produced any.
+    ///
+    /// A deliberately minimal, non-panicking surface: it lists each warning's
+    /// summary with its detail on hover, and closing it clears the list. This is
+    /// the small warnings surface the seam's contract promises; a richer,
+    /// comprehensive error surface belongs to another lane, which routes its opens
+    /// through the same seam and reads [`open_warnings`](Self::open_warnings).
+    fn open_warnings_window(&mut self, ctx: &egui::Context) {
+        if self.open_warnings.is_empty() {
+            return;
+        }
+        let mut open = true;
+        let title = format!("Import warnings ({})", self.open_warnings.len());
+        egui::Window::new(title)
+            .id(egui::Id::new("open_warnings_window"))
+            .open(&mut open)
+            .default_size([420.0, 220.0])
+            .show(ctx, |ui| {
+                ui.label("The document opened, but some parts were skipped or adjusted:");
+                ui.separator();
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for w in &self.open_warnings {
+                        ui.colored_label(Color32::from_rgb(230, 190, 90), &w.summary)
+                            .on_hover_text(&w.detail);
+                    }
+                });
+                ui.separator();
+                if ui.button("Dismiss").clicked() {
+                    // Emptying the list closes the window next frame; setting the
+                    // local flag closes it this frame.
+                    self.open_warnings.clear();
+                }
+            });
+        if !open {
+            self.open_warnings.clear();
         }
     }
 
@@ -4954,6 +5068,7 @@ impl eframe::App for App {
         }
         self.keymap_window(&ctx);
         self.replay_window(&ctx);
+        self.open_warnings_window(&ctx);
 
         // Draw the first-run tour overlay last so its card and highlight sit over
         // everything else. Suppressed during a demo capture so onboarding chrome does

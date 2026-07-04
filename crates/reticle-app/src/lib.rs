@@ -37,6 +37,9 @@
 //! * [`tech_editor`], the upgraded layer manager (reorder, recolor, fill style,
 //!   solo) and the technology editor that validates and round-trips the tech file.
 //! * [`netlight`], cached connectivity extraction for net highlighting.
+//! * [`open`], the document-open seam: bytes plus a format hint to an opened
+//!   document with structured, non-fatal warnings (native and wasm; the contract
+//!   other file-open entry points route through).
 //! * [`productivity`], clipboard/duplicate/array/move-delta/via-stack editing logic
 //!   behind the productivity side panel, every edit undo-integrated.
 //! * [`inspector`], the read-only properties summary of the selection.
@@ -85,6 +88,7 @@ pub mod layers;
 pub mod measure;
 pub mod minimap;
 pub mod netlight;
+pub mod open;
 pub mod ops;
 pub mod outline;
 pub mod productivity;
@@ -105,3 +109,4 @@ pub mod viewports;
 pub mod xsection;
 
 pub use app::{App, StartView};
+pub use open::{DocFormat, OpenError, OpenOutcome, OpenWarning, open_document_bytes};
