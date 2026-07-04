@@ -1,16 +1,41 @@
 # Worked use cases
 
-Reticle opens on a Start screen that offers four worked examples. Each one drops
-you straight into a prepared starting point for a different part of the tool, so a
-capability is one click away rather than behind a blank document. Pick one to begin,
-or skip to a blank editor.
+Reticle opens on a Start screen that is a first-time visitor's whole first contact:
+it can open your own file, load an example chip, show recent files, and offer four
+worked scenarios. Each scenario drops you straight into a prepared starting point for
+a different part of the tool, so a capability is one click away rather than behind a
+blank document. You can skip to a blank editor at any time, and reach the Start screen
+again with Open on the toolbar.
 
-The scenarios are built by the `reticle_app::usecases` module. Everything they set
-up is deterministic and self-contained: the SKY130 cell and its technology are
-compiled into the binary, so the scenarios behave identically in the native
-application and in the browser, where there is no filesystem. The chooser itself is
-skipped for the deployed web replay build, which drops a public visitor straight
-into the theater instead.
+The scenarios are built by the `reticle_app::usecases` module and the rest of the
+screen by `reticle_app::startscreen`. Everything is deterministic and self-contained:
+the SKY130 cell, its technology, and the example designs are compiled into the binary,
+so the Start screen behaves identically in the native application and in the browser,
+where there is no filesystem. The chooser itself is skipped for the deployed web
+replay build, which drops a public visitor straight into the theater instead.
+
+## Opening a file, examples, and recent files
+
+Above the scenarios the Start screen offers three more ways in:
+
+- **Open a file.** Drag a GDSII (`.gds`) or OASIS (`.oas`) file onto the window, from
+  the Start screen or the editor, and it opens immediately. There is no filesystem
+  behind the browser build, so drag-and-drop is the primary open path there; a dropped
+  file's bytes are read directly. Anything that cannot open, an unrecognized
+  extension, an unreadable path, or bytes that are not the claimed format, is reported
+  on the notification surface rather than failing in silence.
+- **Load an example chip.** A gallery of redistribution-cleared real designs, each
+  built into the binary and opened through the same hardened path as any other file:
+  a minimized real Tiny Tapeout 03 sample (a few SkyWater standard cells under a small
+  top, Apache-2.0) and the single SKY130 `inv_1` inverter cell. This is the no-install
+  way to open a real chip on the web.
+- **Recent files.** Files you have opened are listed for one-click return. The list is
+  display-only in the app; a persistence backend supplies it (on the web, from browser
+  storage).
+
+Every one of these routes through the same document-open seam and the same error
+surface, so opening a real design and never crashing is proven in one place. The
+[file formats](io.md) chapter covers the import path behind them.
 
 ## 1. Inspect a SKY130 cell
 
