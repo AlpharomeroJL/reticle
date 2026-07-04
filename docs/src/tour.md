@@ -9,22 +9,28 @@ been shown, and can be relaunched at any time from the Help menu.
 ## What the tour covers
 
 The tour is split into two chapters. The first is the core walkthrough and always
-runs; the second covers the Wave 2 tools and is optional.
+runs; it opens with how a design gets in and closes with how a session is shared. The
+second covers the Wave 2 tools and is optional.
 
 **Chapter 1, getting started:**
 
-1. **The canvas.** Pan by dragging and zoom toward the cursor by scrolling; Fit
+1. **Open a design.** Bring in your own layout with Open on the toolbar, or drag a
+   GDSII or OASIS file onto the window; the Start screen also loads example chips in
+   one click.
+2. **The canvas.** Pan by dragging and zoom toward the cursor by scrolling; Fit
    frames the whole design.
-2. **Layers.** The left-hand layer manager toggles visibility and filters layers by
+3. **Layers.** The left-hand layer manager toggles visibility and filters layers by
    name.
-3. **Measure.** Pick the Measure tool from the toolbar and click two points to read
+4. **Measure.** Pick the Measure tool from the toolbar and click two points to read
    a distance in database units and microns.
-4. **Design-rule checking.** Run DRC and click a violation to zoom straight to it.
-5. **Net highlight.** Light up every shape connected to a net across the design.
-6. **Minimap.** The overview panel frames the current view; click inside it to jump
+5. **Design-rule checking.** Run DRC and click a violation to zoom straight to it.
+6. **Net highlight.** Light up every shape connected to a net across the design.
+7. **Minimap.** The overview panel frames the current view; click inside it to jump
    the camera.
-7. **Agent and replay.** The agent panel runs a scripted edit session and the replay
+8. **Agent and replay.** The agent panel runs a scripted edit session and the replay
    theater plays a recorded run back step by step.
+9. **Share a session.** The Share section mints a relay link so the same design can
+   be opened together in a browser.
 
 **Chapter 2, Wave 2 tools:**
 

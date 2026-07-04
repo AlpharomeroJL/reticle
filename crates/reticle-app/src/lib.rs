@@ -58,6 +58,11 @@
 //!   Start screen (inspect a SKY130 cell, find and fix a violation, watch the
 //!   agent, build with the new tools), each preparing a starting document or the
 //!   replay theater.
+//! * [`startscreen`], the Start-screen model: the example-chip gallery of
+//!   redistribution-cleared designs (compiled in, opened through the seam) and the
+//!   recent-files display shape.
+//! * [`notify`], the app-wide notification (toast) queue: the single human-readable
+//!   surface every failure path reports through (pure, severity-tagged, bounded).
 //! * [`app`], the [`eframe::App`] implementation that draws it all.
 //!
 //! The public [`App`] type is the frozen Wave 0 contract; it is now a real
@@ -88,6 +93,7 @@ pub mod layers;
 pub mod measure;
 pub mod minimap;
 pub mod netlight;
+pub mod notify;
 pub mod open;
 pub mod ops;
 pub mod outline;
@@ -98,6 +104,7 @@ pub mod selection;
 pub mod session;
 pub mod share;
 pub mod snap;
+pub mod startscreen;
 pub mod store;
 pub mod tech_editor;
 pub mod tool;
@@ -110,4 +117,6 @@ pub mod viewports;
 pub mod xsection;
 
 pub use app::{App, StartView};
+pub use notify::{Notification, Notifications, Severity};
 pub use open::{DocFormat, OpenError, OpenOutcome, OpenWarning, open_document_bytes};
+pub use startscreen::{ExampleChip, RecentFile};
