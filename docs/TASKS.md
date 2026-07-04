@@ -423,10 +423,21 @@ contract first; Batch 2 = 2B, 2C, 2D fan out on it in parallel.
   ParamSchema, FieldSchema, FieldType, ErasedGenerator}`. Honest: SKY130-subset coverage
   is partial and numbers are baked (the `Technology` arg is threaded but unused, so
   generalizing later is non-breaking).
-- [ ] Lane 2B: pad ring (die-size aware, pad pitch, corner handling, power pads) +
-  seal ring.
-- [ ] Lane 2C: decap/fill generator (density + keep-out aware) + probe-able
-  test-structure generator (van der Pauw crosses, contact chains, comb/serpentine).
+- [x] Lane 2B: pad ring + seal ring. done-gate-green, merged (merge 03777e2-era
+  base; lane merged, `just ci` GREEN). `pad_ring` (die-size aware, pad pitch, corner
+  handling via a column-owns-corner topology, power pads reinforced to met2 by a
+  bounded via staple) and `seal_ring` (a closed stacked-metal frame with stitched cuts
+  on the chosen stack). 400-case cleanliness proptests (zero violations, caught+fixed a
+  real m3.2 corner bug) + two-way validate. ADRs 0044, 0045. Honest: neither is
+  tape-out-real (the subset has no pad/passivation/seal-marker layers).
+- [x] Lane 2C: density-aware fill + probe-able test structures. done-gate-green, merged
+  (lane daa4f71 into merge 2b06a2d; full `just ci` GREEN). `fill` (a keep-out-respecting
+  grid that approaches a target density and reports the honest achieved coverage, since
+  the subset has no max-density rule) and `test_structure` (van der Pauw, contact chain,
+  comb, serpentine). 400-case cleanliness + density/keep-out + two-way validate proptests
+  (zero violations, caught+fixed a serpentine li.3 bug). ADRs 0046, 0047. Orchestrator
+  union-merged 2B+2C in lib.rs/registry.rs (all six generators registered) and fixed a
+  seed-dependent 2B strategy flake (die below DIE_MIN), stable at 3000 cases.
 - [ ] Lane 2D: Generate panel in the app (pick generator, typed param form + live
   preview, place into document, undo-integrated); each generator as an agent + MCP
   tool with tight schemas; +8 benchmark tasks (suite to 83) exercising generators
