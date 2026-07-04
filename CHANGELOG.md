@@ -3,6 +3,21 @@
 All notable changes to Reticle are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com), and the project uses
 [conventional commits](https://www.conventionalcommits.org).
+## [6.0.1] - 2026-07-04
+
+### Documentation
+
+- V6.0.0 shipped (Wave 5 gauntlet, re-audit, tag, release, gh-pages redeploy)
+- Implementation plan for v6.0.1 README and media truth pass
+- README and book in an engineer's voice; banned-word gate
+
+### Other
+
+- Prove egui viewport screenshot capture path (demo-capture spike)
+- Scripted demo-capture mode (--demo-script) for real UI media
+- Capture-ui assembles README media from demo scripts
+- Demo editing/query/3D actions and six real UI captures
+- 75-task v0.4.0 re-run of gpt-oss:16k and qwen2.5-coder:16k
 ## [6.0.0] - 2026-07-03
 
 ### Features
@@ -82,11 +97,13 @@ All notable changes to Reticle are documented here. The format follows
 - Credibility chapters (positioning/benchmark/sky130) and README overhaul
 - 75-task v0.4.0 two-model results and tables (gpt-oss 50/75=67%, qwen 25/75=33%)
 - Regenerate hero (2560x1440) and browse GIF for v6.0.0 (deterministic capture-media)
+- V6.0.0 (version bump, CHANGELOG, STATUS re-audit)
+- Fix a typo carried into the CHANGELOG from an old commit subject
 ## [5.0.0] - 2026-07-03
 
 ### Bug Fixes
 
-- Fix remaining typos flagged by the gate (unparsable, reword mischecking)
+- Fix remaining typos flagged by the gate (unparsable, reword mis-checking)
 
 ### Performance
 
