@@ -1,0 +1,24 @@
+[package]
+name = "reticle-gen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Parameterized, DRC-clean-by-construction layout generators for Reticle (SKY130 subset)."
+keywords = ["eda", "layout", "generator", "pcell", "sky130"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+reticle-geometry = { workspace = true }
+reticle-model = { workspace = true }
+reticle-drc = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+proptest = "1.11.0"
