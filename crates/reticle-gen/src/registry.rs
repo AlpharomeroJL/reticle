@@ -13,7 +13,9 @@ use serde_json::Value;
 use crate::error::GenError;
 use crate::generator::{ErasedGenerator, GenOutput};
 use crate::guard_ring::GuardRing;
+use crate::pad_ring::PadRing;
 use crate::schema::ParamSchema;
+use crate::seal_ring::SealRing;
 use crate::via_farm::ViaFarm;
 
 /// Enumerable metadata for one registered generator: enough to list it, describe it,
@@ -51,12 +53,14 @@ impl Registry {
     }
 
     /// Creates a registry preloaded with the crate's built-in generators: the
-    /// [`GuardRing`] and the [`ViaFarm`].
+    /// [`GuardRing`], the [`ViaFarm`], the [`PadRing`], and the [`SealRing`].
     #[must_use]
     pub fn with_builtins() -> Self {
         let mut reg = Self::new();
         reg.register(GuardRing);
         reg.register(ViaFarm);
+        reg.register(PadRing);
+        reg.register(SealRing);
         reg
     }
 
