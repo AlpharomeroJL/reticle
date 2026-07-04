@@ -286,3 +286,149 @@ and book, `just smoke-pages` PASS on the live site. Working demo:
 https://alpharomerojl.github.io/reticle/ . Two-model 75-task v0.4.0 local benchmark:
 gpt-oss:16k MXFP4 50/75 = 67%; qwen2.5-coder:16k Q4_K_M 25/75 = 33%. Repository
 visibility unchanged.
+
+# Reticle v7.0.0 run tracker (The Product Packet)
+
+Extends the tracker above for the v7.0.0 packet: the viewer wedge (open, inspect,
+share, generate IC layout in a browser with no install), a parameterized generator
+layer, a Claude Code agent-system backend, and a TinyTapeout tape-out oracle whose
+proof artifact is a Reticle-generated tile that passes TinyTapeout's own precheck.
+
+Orchestration is unchanged from v6 ([ADR 0028](decisions/0028-v6-subagent-worktree-orchestration.md),
+[ADR 0030](decisions/0030-orchestrator-creates-lane-worktrees.md)): the orchestrator
+on main creates each lane's worktree itself with `just lane <name>` before spawning,
+each lane subagent is pinned to `D:\dev\reticle-lanes\<name>` with its own
+`CARGO_TARGET_DIR=D:\dev\reticle-target-<name>` and never edits/builds/runs git
+outside it; the orchestrator merges at wave boundaries, re-runs `just ci` on main,
+runs `just e2e`/`just smoke-pages` at wave merges and release, and does all
+outward-facing deploy and live model/precheck runs itself. Concurrency cap: four
+lanes. Honesty rules unchanged: measured or honestly-labeled numbers only, no AI
+attribution, no backdated history, no em-dashes, README banned-word gate stays.
+Repository visibility unchanged. Mandatory lane procedure: `just lane <name>`, spawn
+pinned subagent, merge + `just ci` at the wave boundary, `just lane-done <name>`.
+Before each fan-out, prune stale worktrees/branches (`git worktree list`,
+`git branch --list 'lane/*'`).
+
+Resume protocol (same as above): read this file, `git log --oneline -15`, and
+`git worktree list`, then continue from the first unfinished item. A lane
+in-progress has its partial work on its worktree branch: resume it, never restart.
+
+## Housekeeping (immediate) [DONE]
+
+- [x] Removed the eight unreferenced offscreen canvas-only assets (`agent.gif`,
+  `agent.png`, `browse.gif`, `collab.png`, `drc.png`, `minimap.png`, `route.png`,
+  `stack3d.png`; ~6 MB), keeping the referenced `hero.png` + five `tour-*.gif` and
+  the offscreen harness `xtask/src/media.rs`. Remapped `cliff.toml` so domain
+  prefixes group into meaningful CHANGELOG sections and `merge:`/`wip:` are skipped;
+  verified by a git-cliff dry-run over full history. [ADR 0033](decisions/0033-v7-housekeeping-media-and-changelog.md).
+
+## Wave 1: the viewer wedge (parallel, 4 lanes) [not-started]
+
+- [ ] Lane 1A: open-anything import hardening. Fetch a corpus of real TinyTapeout
+  submitted GDS (scripted fetch, provenance + licenses recorded, commit only
+  minimized interesting failure samples). Run the corpus through import; fix every
+  crash/hang/misrender; malformed records degrade to structured UI warnings, never
+  panics. Bar: 100% opens or fails with a clear message, zero panics.
+- [ ] Lane 1B: drag-and-drop + URL open in the browser (wasm file handling, no
+  server round trip); `?gds=<url>` remote load (CORS-permitting, clear error
+  otherwise); IndexedDB recent-files; progressive load + progress indicator +
+  streaming-index past a measured size threshold + an honest over-ceiling message.
+- [ ] Lane 1C: shareable read-only sessions through the existing relay (one-click
+  share link; viewers get live read-only sync, independent pan/zoom, presence +
+  selection, follow-mode toggle); rate-limited room creation on the demo server,
+  sessions expire, no accounts. Make it feel instant.
+- [ ] Lane 1D: product-grade first contact. Start screen (open a file, drag-drop
+  target, the four worked scenarios, recent files, a "load an example chip" gallery
+  of 2-3 redistribution-cleared corpus designs); every failure path gets a
+  human-readable error surface (no silent/console-only failures); first-run tour
+  updated to include open and share.
+- [ ] Wave 1 merge gate: `just ci`, plus an e2e test that drops a corpus file in the
+  browser and it renders, then creates a share link and a second context sees it live.
+
+## Wave 2: the generator layer (parallel, 4 lanes) [not-started]
+
+Each generator: a pure function from parameters + technology to geometry, DRC-clean
+by construction against the SKY130 subset, with property tests asserting cleanliness
+across randomized parameter sweeps.
+
+- [ ] Lane 2A: `reticle-gen` crate: `Generator` trait (typed param struct with
+  ranges/defaults, validate, generate into a cell), registry, serde param schemas.
+  First pair: guard ring + via farm.
+- [ ] Lane 2B: pad ring (die-size aware, pad pitch, corner handling, power pads) +
+  seal ring.
+- [ ] Lane 2C: decap/fill generator (density + keep-out aware) + probe-able
+  test-structure generator (van der Pauw crosses, contact chains, comb/serpentine).
+- [ ] Lane 2D: Generate panel in the app (pick generator, typed param form + live
+  preview, place into document, undo-integrated); each generator as an agent + MCP
+  tool with tight schemas; +8 benchmark tasks (suite to 83) exercising generators
+  through natural language, checkers two-way tested.
+
+## Wave 3: Claude Code as an agent-system backend (serial then parallel) [not-started]
+
+- [ ] Serial: server-side transcript capture in `reticle-mcp` (record every command
+  and result as a session-transcript JSONL regardless of client; closes the local
+  mining gap).
+- [ ] Lane 3A: harness backend that drives Claude Code non-interactively
+  (`claude -p <task> --mcp-config <generated>`; verify the current CLI flags from the
+  installed CLI's help at build time, do not guess); one session per task; server
+  enforces command budgets and captures the transcript; detect absence of the CLI or
+  an unauthenticated session and skip with an honest not-run marker.
+- [ ] Lane 3B: honest labeling + the run. Row labeled "Claude Code (<model reported
+  by the CLI>)", never a bare-model comparison; README + benchmark chapter explain
+  the agent-system vs bare-model distinction. If the CLI is present and authenticated
+  at bench time, run the full 83-task suite and publish the row alongside the two
+  local rows (note it consumes operator subscription quota, and how to re-run). Mine
+  all transcripts incl. the new server-side local ones; promote only two-way-tested
+  candidates.
+
+## Wave 4: the tape-out oracle, TTSKY26c readiness (parallel, 3 lanes) [not-started]
+
+Fetch TinyTapeout's live docs/tooling at build time; their specs move, do not trust
+this packet's summary over their repos.
+
+- [ ] Lane 4A: pull the current TinyTapeout GDS-mode die template (tile dims, pin
+  locations/layers, power rails, keep-outs, cell naming); encode as a Reticle
+  technology+template bundle; "New TinyTapeout tile" in the Start screen creates a
+  correctly framed, pinned, locked document; validate against their published example
+  submissions.
+- [ ] Lane 4B: integrate TinyTapeout's own precheck (Magic + KLayout, Linux-native,
+  via a pinned Docker container with WSL as documented fallback; `just tt-precheck
+  <gds>`); wire it as an agent-loop verifier whose structured failures are parsed and
+  fed back like DRC violations; an e2e-style test proves a known-good example passes
+  and a seeded violation fails with a parsed, actionable report.
+- [ ] Lane 4C: `docs/src/tapeout.md` (honest plan: what GDS-mode submission is/is
+  not, TTSKY26c dates, current costs, submission mechanics) + a worked in-repo
+  example: an agent-generated test-structure tile in the TT template that passes
+  `just tt-precheck` clean, committed with its transcript. This is the packet's proof
+  artifact; a paid submission remains a separate operator decision.
+
+## Wave 5: presentation to product grade (parallel, 2 lanes) [not-started]
+
+- [ ] Lane 5A: README restructure as a product page in plain engineering register
+  (hero, one-line measured fact, three job-shaped sections with the share-link GIF /
+  generator GIF / three-row table, then live demo, quickstart, how it works, honest
+  limits, license); keep the voice rules + banned-word gate; new UI-harness captures
+  for the share-link flow and the Generate panel; book landing mirrors it.
+- [ ] Lane 5B: profile and fix the top interaction-latency offenders on the corpus
+  (open time, first-frame, pan under load on wasm), measured before/after in PERF.md;
+  a scripted 30-minute browser soak (open, interact, share) with zero leaks or
+  degradations asserted by heap and frame-time bounds.
+
+## Wave 6: gauntlet, audit, release (serial) [not-started]
+
+- [ ] Full gauntlet: `just ci`; `just e2e` (both GPU modes, subpath, plus the new
+  drop-and-share and generator tests); `just smoke-pages` live; corpus regression;
+  replay determinism incl. server-side transcripts; abuse tests incl. share-room
+  limits; fresh-clone smoke; key/attribution greps.
+- [ ] Skeptical STATUS re-audit, every new subsystem itemized with evidence; the
+  benchmark chapter reconciled with all three rows honestly labeled; interview-defense
+  notes updated (generators, the agent-system distinction, the precheck oracle).
+- [ ] Tag and release `v7.0.0`; redeploy; verify the deployed URL and all README
+  media serve; final terse summary: demo URL, the three-row table, precheck status of
+  the example tile, what remains stubbed.
+
+### Frozen-surface manifest (recorded at Wave 2 contract point)
+
+Not yet frozen. `reticle-gen` `Generator` trait + param schemas freeze at the Wave 2
+batch-1 merge; the server-side transcript JSONL schema freezes at the Wave 3 serial
+step; the TT template bundle format freezes at the Wave 4A merge.

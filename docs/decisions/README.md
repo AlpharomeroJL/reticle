@@ -38,3 +38,4 @@ superseded decision is marked and linked to its replacement.
 | [0030](0030-orchestrator-creates-lane-worktrees.md) | Lane worktrees are created by the orchestrator before spawning |
 | [0031](0031-wave3-agent-command-expansion.md) | Wave 3 expands the AgentCommand surface for the Wave 2 tools |
 | [0032](0032-transcript-plan-log.md) | Transcript gains an additive per-iteration plan log |
+| [0033](0033-v7-housekeeping-media-and-changelog.md) | v7 housekeeping: prune offscreen media, regroup the changelog |
