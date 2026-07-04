@@ -335,10 +335,25 @@ pub struct App {
     /// [`App::notifications_area`]. Sibling lanes (browser open, share) route their
     /// failures through the same methods.
     notifications: crate::notify::Notifications,
-    /// The recent-files list the Start screen displays. This app only *renders* it;
-    /// the persistence behind it (`IndexedDB` on the web) feeds it via
-    /// [`App::set_recent_files`]. Empty until a backend supplies entries.
-    recent_files: Vec<crate::startscreen::RecentFile>,
+    /// The recently opened files, most-recent first (see [`crate::webopen`]). Owned
+    /// here so a Start screen can render reopen rows; the browser build persists it to
+    /// `IndexedDB` across reloads. On native it is an in-session list, unused by the
+    /// desktop UI, kept so the model is identical on both targets.
+    recent_files: crate::webopen::RecentFiles,
+    /// The progress of an in-flight progressive (big-file / remote) open in the
+    /// browser build (see [`crate::webopen::LoadProgress`]). `Idle` when nothing is
+    /// loading; drives the progress indicator and the load-failure message.
+    load_progress: crate::webopen::LoadProgress,
+    /// The mailbox async browser tasks (a `?gds=` fetch, an `IndexedDB` recent-load)
+    /// post their results into for the synchronous `update` loop to apply (see
+    /// [`crate::webopen::WebOpenInbox`]). Present on both targets so the field type is
+    /// uniform; only ever fed on wasm.
+    web_open: crate::webopen::WebOpenInbox,
+    /// Whether the one-shot browser open path (recent-list load plus any `?gds=`
+    /// fetch) has been kicked off. Guards it to the first wasm frame. Only read on
+    /// wasm (native never spawns the path), so it is dead there by design.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    web_open_started: bool,
     /// The last world position under the cursor, for the status readout.
     cursor_world: Option<Point>,
     /// Rolling frame-time meter behind the status-bar fps readout.
@@ -546,7 +561,10 @@ impl App {
             status: Status::default(),
             open_warnings: Vec::new(),
             notifications: crate::notify::Notifications::new(),
-            recent_files: Vec::new(),
+            recent_files: crate::webopen::RecentFiles::new(),
+            load_progress: crate::webopen::LoadProgress::Idle,
+            web_open: crate::webopen::WebOpenInbox::new(),
+            web_open_started: false,
             cursor_world: None,
             frame_meter: FrameMeter::default(),
             start_view,
@@ -799,90 +817,317 @@ impl App {
         }
     }
 
-    /// The recent-files list the Start screen displays.
+    /// The recently opened files, most-recent first.
     ///
-    /// This app only renders the list; a persistence backend (`IndexedDB` on the web)
-    /// supplies it through [`set_recent_files`](Self::set_recent_files). Empty until
-    /// one does.
+    /// A Start screen (a sibling lane) renders these as reopen rows; the browser build
+    /// persists the list to `IndexedDB` so it survives a reload. This is the read side
+    /// of the loosely-coupled contract: this lane owns recording and persistence, the
+    /// Start screen only reads. Empty until a file is opened through the browser open
+    /// path.
     #[must_use]
-    pub fn recent_files(&self) -> &[crate::startscreen::RecentFile] {
-        &self.recent_files
+    pub fn recent_files(&self) -> &[crate::webopen::RecentFile] {
+        self.recent_files.entries()
     }
 
-    /// Replaces the recent-files list the Start screen renders.
+    /// Records `file` at the front of the recent list (deduping and capping per
+    /// [`crate::webopen::RecentFiles`]).
     ///
-    /// The seam a persistence backend feeds through: it owns the storage (loading and
-    /// saving the entries), and hands the current list here for display. Kept a plain
-    /// setter so this crate carries no storage dependency.
-    pub fn set_recent_files(&mut self, recent: Vec<crate::startscreen::RecentFile>) {
-        self.recent_files = recent;
+    /// The browser open path calls this after a successful open (a drop, a `?gds=`
+    /// fetch, or a reopen). It updates only the in-memory model; the wasm layer
+    /// persists the list to `IndexedDB` separately via the wasm-only
+    /// `webopen::store_recent_files` so the pure model stays testable.
+    pub fn record_recent_file(&mut self, file: crate::webopen::RecentFile) {
+        self.recent_files.record(file);
     }
 
-    /// Opens any files dropped onto the window this frame, one per drop.
+    /// Replaces the whole recent list, e.g. with the one loaded from `IndexedDB` at
+    /// startup on the browser build.
+    pub fn set_recent_files(&mut self, recents: crate::webopen::RecentFiles) {
+        self.recent_files = recents;
+    }
+
+    /// The current progressive-load progress (see [`crate::webopen::LoadProgress`]).
+    #[must_use]
+    pub fn load_progress(&self) -> &crate::webopen::LoadProgress {
+        &self.load_progress
+    }
+
+    /// Sets the progressive-load progress, driving the progress indicator and the
+    /// load-failure message. The wasm fetch/streaming path updates this as bytes
+    /// arrive and the index builds.
+    pub fn set_load_progress(&mut self, progress: crate::webopen::LoadProgress) {
+        self.load_progress = progress;
+    }
+
+    /// Handles files dropped onto the page (browser) or window (native) this frame.
     ///
-    /// This is the drag-and-drop half of the open affordance, and it works on both
-    /// platforms: on the web a dropped file carries its `bytes`, on native it carries
-    /// a `path` this reads. The format is inferred from the file name
-    /// ([`DocFormat::from_extension`](crate::open::DocFormat::from_extension)); an
-    /// unrecognized extension, a path that cannot be read, or bytes that will not
-    /// import are all reported through the notification surface rather than dropped
-    /// silently. A successful open installs the document and dismisses the Start
-    /// screen (via [`open_outcome`](Self::open_outcome)).
-    fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+    /// egui surfaces dropped files with their bytes on web (`DroppedFile::bytes`) and
+    /// their `name` on both targets. For each dropped file we classify the format from
+    /// the name via [`crate::webopen::classify_drop`], apply the big-file
+    /// size-band decision ([`crate::webopen::LoadPlan`]) so an oversized file is
+    /// refused with an honest message instead of exhausting wasm memory, and open the
+    /// bytes through the seam ([`open_document_bytes`](Self::open_document_bytes)),
+    /// recording the file in the recent list on success. A drop of a non-layout file,
+    /// or a failed import, sets a clear status message rather than doing nothing.
+    ///
+    /// Only the first successfully-classified dropped file is opened (opening several
+    /// layouts at once has no meaning in a single-document editor); extra drops are
+    /// ignored. On native, `bytes` may be absent (egui gives a path there instead); in
+    /// that case we read the path so a desktop drag-and-drop also works.
+    ///
+    /// Returns `true` when a drop was consumed (opened, refused, or reported), so the
+    /// caller can, for instance, dismiss the Start screen.
+    fn handle_dropped_files(&mut self, ctx: &egui::Context) -> bool {
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
         if dropped.is_empty() {
-            return;
+            return false;
         }
         for file in dropped {
-            let display = if file.name.is_empty() {
-                // Native drops may carry only a path; show its file name.
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    file.path.as_ref().and_then(|p| p.file_name()).map_or_else(
-                        || "dropped file".to_owned(),
-                        |n| n.to_string_lossy().into_owned(),
-                    )
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    "dropped file".to_owned()
-                }
-            } else {
-                file.name.clone()
-            };
-
-            // Classify by extension; without a known one we cannot pick an importer.
-            let Some(format) = crate::open::DocFormat::from_extension(&display) else {
-                self.report_error(
-                    format!("Could not open {display}"),
-                    "unrecognized file type; open a GDSII (.gds) or OASIS (.oas) file",
-                );
+            let Some(format) = crate::webopen::classify_drop(&file.name) else {
                 continue;
             };
-
-            // Obtain the bytes: dropped in memory on wasm, read from the path on
-            // native.
-            if let Some(bytes) = &file.bytes {
-                self.open_bytes_reporting(bytes, format, &display);
-                continue;
+            let bytes = Self::dropped_file_bytes(&file);
+            let Some(bytes) = bytes else {
+                self.status
+                    .set(format!("Could not read the dropped file {}", file.name));
+                return true;
+            };
+            let plan = crate::webopen::LoadPlan::for_size(bytes.len() as u64);
+            if let Some(message) = plan.refusal_message() {
+                self.status.set(message.clone());
+                self.load_progress = crate::webopen::LoadProgress::failed(message);
+                return true;
             }
-            #[cfg(not(target_arch = "wasm32"))]
-            if let Some(path) = &file.path {
-                match std::fs::read(path) {
-                    Ok(bytes) => {
-                        self.open_bytes_reporting(&bytes, format, &display);
-                    }
-                    Err(e) => {
-                        self.report_error(format!("Could not read {display}"), e.to_string());
-                    }
+            match self.open_document_bytes(&bytes, format) {
+                Ok(()) => {
+                    self.record_recent_file(crate::webopen::RecentFile::local(
+                        file.name.clone(),
+                        bytes.len() as u64,
+                    ));
+                    self.load_progress = crate::webopen::LoadProgress::Idle;
+                    self.persist_recent_files();
                 }
-                continue;
+                Err(e) => {
+                    self.status.set(e.to_string());
+                    self.load_progress = crate::webopen::LoadProgress::failed(e.to_string());
+                }
             }
-            // Neither bytes nor a readable path came with the drop.
-            self.report_error(
-                format!("Could not open {display}"),
-                "the dropped item carried no readable data",
-            );
+            return true;
+        }
+        // Every dropped file was a non-layout type: tell the user rather than
+        // silently ignoring the gesture.
+        self.status
+            .set("Drop a .gds or .oas file to open it".to_owned());
+        true
+    }
+
+    /// The bytes of a dropped file: from egui's in-memory `bytes` (always the source
+    /// on web), or by reading the file path on native where egui provides a path
+    /// instead. `None` when neither is available or the path read fails.
+    fn dropped_file_bytes(file: &egui::DroppedFile) -> Option<Vec<u8>> {
+        if let Some(bytes) = &file.bytes {
+            return Some(bytes.to_vec());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(path) = &file.path {
+            return std::fs::read(path).ok();
+        }
+        None
+    }
+
+    /// Whether a file is currently being dragged over the page, so the UI can show a
+    /// "drop to open" affordance. Reads egui's per-frame `hovered_files`.
+    fn is_file_hovering(ctx: &egui::Context) -> bool {
+        ctx.input(|i| !i.raw.hovered_files.is_empty())
+    }
+
+    /// Draws the full-screen "drop a .gds or .oas file to open it" affordance shown
+    /// while a file is dragged over the page, so the drop target is obvious.
+    ///
+    /// A dimming veil plus a dashed border and a centered prompt, painted on a
+    /// foreground layer so it sits over the canvas and panels. Purely visual; the
+    /// actual open happens in [`handle_dropped_files`](Self::handle_dropped_files) when
+    /// the file is released.
+    fn draw_drop_affordance(ctx: &egui::Context) {
+        // The full page rectangle this frame. `raw.screen_rect` is what egui fills in
+        // from the platform each frame; fall back to a unit rect if a headless frame
+        // ever lacks it (the affordance is purely cosmetic, so a missing size just
+        // draws nothing meaningful rather than panicking).
+        let screen = ctx
+            .input(|i| i.raw.screen_rect)
+            .unwrap_or_else(|| EguiRect::from_min_size(Pos2::ZERO, Vec2::splat(1.0)));
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("drop_affordance"),
+        ));
+        // Dim the page and draw an inset dashed frame to read as a drop zone.
+        painter.rect_filled(screen, 0.0, Color32::from_rgba_unmultiplied(8, 10, 16, 180));
+        let inset = screen.shrink(24.0);
+        painter.rect_stroke(
+            inset,
+            12.0,
+            Stroke::new(3.0, Color32::from_rgb(120, 170, 255)),
+            StrokeKind::Inside,
+        );
+        painter.text(
+            screen.center(),
+            Align2::CENTER_CENTER,
+            "Drop a .gds or .oas file to open it",
+            FontId::proportional(22.0),
+            Color32::from_rgb(220, 230, 245),
+        );
+    }
+
+    /// Draws the progressive-load progress indicator, or the last load-failure
+    /// message, over the page (browser open path).
+    ///
+    /// While a load is active ([`LoadProgress::is_active`](crate::webopen::LoadProgress::is_active))
+    /// it shows a small centered card with a determinate bar (when the fetch total is
+    /// known) or an indeterminate "working" note. A failed load shows a dismissible
+    /// human-readable message (a CORS/network failure, an oversize refusal, a parse
+    /// error), so a failure is never console-only and never a silent hang. `Idle` and
+    /// `Done` draw nothing.
+    fn draw_load_progress(&mut self, ctx: &egui::Context) {
+        use crate::webopen::LoadProgress;
+        match &self.load_progress {
+            LoadProgress::Idle | LoadProgress::Done => {}
+            LoadProgress::Fetching { .. } | LoadProgress::Indexing => {
+                let fraction = self.load_progress.fraction();
+                let label = match &self.load_progress {
+                    LoadProgress::Fetching { received, total } if *total > 0 => {
+                        format!(
+                            "Downloading... {} / {} MiB",
+                            received / (1024 * 1024),
+                            total / (1024 * 1024)
+                        )
+                    }
+                    LoadProgress::Fetching { received, .. } => {
+                        format!("Downloading... {} MiB", received / (1024 * 1024))
+                    }
+                    _ => "Building the index...".to_owned(),
+                };
+                egui::Window::new("Opening")
+                    .id(egui::Id::new("load_progress_window"))
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+                    .show(ctx, |ui| {
+                        ui.label(label);
+                        let bar = match fraction {
+                            Some(f) => egui::ProgressBar::new(f).show_percentage(),
+                            // Indeterminate: an animated bar with no fixed fraction.
+                            None => egui::ProgressBar::new(0.0).animate(true),
+                        };
+                        ui.add(bar);
+                    });
+                ctx.request_repaint();
+            }
+            LoadProgress::Failed { message } => {
+                let message = message.clone();
+                let mut open = true;
+                egui::Window::new("Could not open the file")
+                    .id(egui::Id::new("load_failed_window"))
+                    .collapsible(false)
+                    .resizable(false)
+                    .open(&mut open)
+                    .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+                    .show(ctx, |ui| {
+                        ui.colored_label(Color32::from_rgb(240, 150, 150), &message);
+                        ui.separator();
+                        if ui.button("Dismiss").clicked() {
+                            self.load_progress = LoadProgress::Idle;
+                        }
+                    });
+                if !open {
+                    self.load_progress = LoadProgress::Idle;
+                }
+            }
+        }
+    }
+
+    /// Drives the browser open path: on the first wasm frame it kicks off the recent
+    /// list load and any `?gds=` fetch; every frame it applies whatever those async
+    /// tasks have posted to the [`web_open`](Self::web_open) inbox.
+    ///
+    /// This is the single bridge between the async fetch/`IndexedDB` tasks and the
+    /// synchronous editor loop. The tasks post [`WebOpenEvent`](crate::webopen::WebOpenEvent)s;
+    /// here, on the main thread, we install a fetched document through the seam, adopt
+    /// a restored recent list, update the progress indicator, or record a failure, all
+    /// via the same App methods a native open uses. On native the inbox is always empty
+    /// and nothing is ever spawned, so this compiles to a cheap no-op.
+    fn drive_web_open(&mut self, ctx: &egui::Context) {
+        #[cfg(target_arch = "wasm32")]
+        if !self.web_open_started {
+            self.web_open_started = true;
+            crate::webopen::start_web_open(&self.web_open, ctx.clone());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = ctx;
+
+        for event in self.web_open.drain() {
+            self.apply_web_open_event(event);
+        }
+    }
+
+    /// Applies one [`WebOpenEvent`](crate::webopen::WebOpenEvent) on the main thread.
+    ///
+    /// Split out so the mapping from an async result to an editor action is one small,
+    /// readable place: progress updates the indicator, an `Opened` event imports the
+    /// bytes through the seam and records the recent entry (persisting the updated list
+    /// back to `IndexedDB` on wasm), a restored list is adopted wholesale, and a failure
+    /// becomes both a status line and the load-failure card.
+    fn apply_web_open_event(&mut self, event: crate::webopen::WebOpenEvent) {
+        use crate::webopen::WebOpenEvent;
+        match event {
+            WebOpenEvent::Progress(progress) => {
+                self.load_progress = progress;
+            }
+            WebOpenEvent::Opened {
+                bytes,
+                format,
+                recent,
+            } => match self.open_document_bytes(&bytes, format) {
+                Ok(()) => {
+                    self.record_recent_file(recent);
+                    self.load_progress = crate::webopen::LoadProgress::Idle;
+                    self.persist_recent_files();
+                }
+                Err(e) => {
+                    self.status.set(e.to_string());
+                    self.load_progress = crate::webopen::LoadProgress::failed(e.to_string());
+                }
+            },
+            WebOpenEvent::Failed(message) => {
+                self.status.set(message.clone());
+                self.load_progress = crate::webopen::LoadProgress::failed(message);
+            }
+            WebOpenEvent::RecentsLoaded(recents) => {
+                // Adopt the persisted list, but keep anything opened this session ahead
+                // of it by re-recording current entries on top (most-recent-first is
+                // preserved because `record` moves each to the front).
+                let session = self.recent_files.entries().to_vec();
+                let mut merged = recents;
+                for file in session.into_iter().rev() {
+                    merged.record(file);
+                }
+                self.recent_files = merged;
+            }
+        }
+    }
+
+    /// Persists the recent-files list to `IndexedDB` (wasm only; a no-op on native).
+    ///
+    /// Spawned fire-and-forget so a slow or blocked write never stalls a frame; losing
+    /// persistence is tolerable (the in-memory list is still correct for the session).
+    /// On native this compiles to an empty body, so `self` is unused there by design.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(clippy::unused_self))]
+    fn persist_recent_files(&self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let recents = self.recent_files.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                crate::webopen::store_recent_files(&recents).await;
+            });
         }
     }
 
@@ -1739,7 +1984,7 @@ impl App {
 
                     Self::start_open_section(ui, &mut action);
                     ui.add_space(10.0);
-                    Self::start_recent_section(ui, &self.recent_files, &mut action);
+                    Self::start_recent_section(ui, self.recent_files.entries(), &mut action);
                     ui.add_space(10.0);
                     Self::start_gallery_section(ui, &mut action);
                     ui.add_space(10.0);
@@ -1803,7 +2048,7 @@ impl App {
     /// on a first run.
     fn start_recent_section(
         ui: &mut egui::Ui,
-        recent: &[crate::startscreen::RecentFile],
+        recent: &[crate::webopen::RecentFile],
         _action: &mut Option<StartAction>,
     ) {
         egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -1818,10 +2063,17 @@ impl App {
                 );
             } else {
                 for r in recent {
+                    // Integer-only size formatting keeps clippy's precision-loss lint
+                    // quiet; a sub-KiB file simply reads as "0 KiB".
+                    let size = if r.size >= 1024 * 1024 {
+                        format!("{} MiB", r.size / (1024 * 1024))
+                    } else {
+                        format!("{} KiB", r.size / 1024)
+                    };
                     ui.horizontal(|ui| {
                         ui.monospace(&r.name);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.weak(r.format.label());
+                            ui.weak(size);
                         });
                     });
                 }
@@ -5446,10 +5698,23 @@ impl eframe::App for App {
         // age notification toasts by it, so it is computed before either branch.
         let dt = ctx.input(|i| i.stable_dt).max(0.0);
 
-        // Opening by drag-and-drop works whether the Start screen or the editor is
-        // showing, so a dropped file is handled before the branch. A failed open
-        // reports through the notification surface (see `handle_dropped_files`).
+        // Drive the browser open path: kick off the `?gds=` fetch and the IndexedDB
+        // recent-list load on the first wasm frame, and apply whatever those async
+        // tasks have posted since last frame. A no-op on native.
+        self.drive_web_open(&ctx);
+
+        // Open a file dropped onto the page (browser) or window (native) before
+        // anything else this frame, so a drop works from any view including the Start
+        // screen and the replay theater. The seam hardens the import, so a bad drop
+        // cannot panic; an oversized or non-layout drop sets a clear status. While a
+        // file is dragged over, draw a "drop to open" affordance.
         self.handle_dropped_files(&ctx);
+        if Self::is_file_hovering(&ctx) {
+            Self::draw_drop_affordance(&ctx);
+        }
+        // Surface an active or failed progressive/remote load (its progress bar and
+        // any failure message) over every view.
+        self.draw_load_progress(&ctx);
         // Age the toasts and drop any that have expired (errors persist).
         self.notifications.advance(dt);
 
@@ -6320,13 +6585,16 @@ mod tests {
             app.recent_files().is_empty(),
             "empty until a backend feeds it"
         );
-        app.set_recent_files(vec![
-            crate::startscreen::RecentFile::new("adder.gds", crate::open::DocFormat::Gds),
-            crate::startscreen::RecentFile::new("ring.oas", crate::open::DocFormat::Oasis),
-        ]);
+        let mut recents = crate::webopen::RecentFiles::new();
+        recents.record(crate::webopen::RecentFile::local("adder.gds", 1_024));
+        recents.record(crate::webopen::RecentFile::local("ring.oas", 2_048));
+        app.set_recent_files(recents);
         assert_eq!(app.recent_files().len(), 2);
-        assert_eq!(app.recent_files()[0].name, "adder.gds");
-        assert_eq!(app.recent_files()[1].format, crate::open::DocFormat::Oasis);
+        // `record` moves each new entry to the front, so the most-recently recorded
+        // ("ring.oas") is first and the earlier one ("adder.gds") follows.
+        assert_eq!(app.recent_files()[0].name, "ring.oas");
+        assert_eq!(app.recent_files()[1].name, "adder.gds");
+        assert_eq!(app.recent_files()[1].size, 1_024);
     }
 
     #[test]

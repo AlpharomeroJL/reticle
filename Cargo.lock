@@ -4018,6 +4018,7 @@ dependencies = [
  "eframe",
  "egui-wgpu",
  "image",
+ "js-sys",
  "reticle-agent-api",
  "reticle-drc",
  "reticle-extract",
@@ -4028,6 +4029,9 @@ dependencies = [
  "reticle-render",
  "reticle-sync",
  "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

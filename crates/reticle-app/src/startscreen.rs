@@ -136,32 +136,10 @@ impl ExampleChip {
     }
 }
 
-/// One entry in the Start screen's recent-files list.
-///
-/// The Start screen only *displays* this; the persistence behind it (`IndexedDB` on
-/// the web, and any native store) is a separate concern that feeds the app's
-/// `recent_files` list. Keeping the shape here, minimal and owned, lets the Start
-/// screen render a recent list before any persistence backend exists, and lets that
-/// backend fill the same shape later without changing the rendering.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct RecentFile {
-    /// The display name of the file (typically its base name, for example
-    /// `adder.gds`).
-    pub name: String,
-    /// The format the file was opened as, so the row can show a `GDSII`/`OASIS` tag.
-    pub format: DocFormat,
-}
-
-impl RecentFile {
-    /// A recent-file entry with a display name and its format.
-    #[must_use]
-    pub fn new(name: impl Into<String>, format: DocFormat) -> Self {
-        Self {
-            name: name.into(),
-            format,
-        }
-    }
-}
+// The recent-files list is displayed by the Start screen but its entry type and
+// persistence live in `crate::webopen` (Lane 1B): `webopen::RecentFile` carries the
+// name, byte size, and optional source URL, and `RecentFiles` owns dedup, cap, and
+// IndexedDB persistence. The Start screen renders `App::recent_files()` directly.
 
 #[cfg(test)]
 mod tests {
@@ -238,13 +216,5 @@ mod tests {
         for chip in ExampleChip::ALL {
             assert_eq!(chip.format(), DocFormat::Gds);
         }
-    }
-
-    #[test]
-    fn recent_file_carries_a_name_and_format() {
-        let r = RecentFile::new("adder.gds", DocFormat::Gds);
-        assert_eq!(r.name, "adder.gds");
-        assert_eq!(r.format, DocFormat::Gds);
-        assert_eq!(r.format.label(), "GDSII");
     }
 }

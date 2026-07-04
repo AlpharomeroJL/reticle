@@ -40,6 +40,10 @@
 //! * [`open`], the document-open seam: bytes plus a format hint to an opened
 //!   document with structured, non-fatal warnings (native and wasm; the contract
 //!   other file-open entry points route through).
+//! * [`webopen`], the browser open path over that seam: drag-and-drop and `?gds=`
+//!   remote-URL loading, the IndexedDB-persisted recent-files model, the big-file
+//!   size-band decision and its measured ceiling, and the progressive-load progress
+//!   state machine. Pure logic is unit-tested; the fetch/IndexedDB glue is wasm-only.
 //! * [`productivity`], clipboard/duplicate/array/move-delta/via-stack editing logic
 //!   behind the productivity side panel, every edit undo-integrated.
 //! * [`inspector`], the read-only properties summary of the selection.
@@ -114,9 +118,15 @@ pub mod view3d;
 pub mod viewer;
 pub mod viewexport;
 pub mod viewports;
+pub mod webopen;
 pub mod xsection;
 
 pub use app::{App, StartView};
 pub use notify::{Notification, Notifications, Severity};
 pub use open::{DocFormat, OpenError, OpenOutcome, OpenWarning, open_document_bytes};
-pub use startscreen::{ExampleChip, RecentFile};
+pub use startscreen::ExampleChip;
+pub use webopen::{
+    LoadPlan, LoadProgress, RecentFile, RecentFiles, WASM_OPEN_CEILING_BYTES,
+    WASM_STREAMING_THRESHOLD_BYTES, WebOpenEvent, WebOpenInbox, classify_drop, gds_url_from_query,
+    url_file_name,
+};
