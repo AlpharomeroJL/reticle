@@ -7153,6 +7153,55 @@ mod tests {
         assert!(app.array_preview_shapes().is_empty());
     }
 
+    /// The Generate section renders headlessly without panicking: the schema-driven
+    /// form (drag values, checkbox, combo box) and the live-preview readout all build
+    /// inside a real egui pass. This exercises the UI path the unit tests in
+    /// `generate_panel` cannot (they cover the pure logic only).
+    #[test]
+    fn generate_section_renders_without_panic() {
+        let mut app = App::new();
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        egui::Window::new("generate test").show(&ctx, |ui| {
+            app.generate_section(ui);
+        });
+        let _ = ctx.end_pass();
+        // The default selection generates a non-empty preview.
+        assert!(!app.generate_preview_shapes().is_empty());
+    }
+
+    /// Generating through the app places the whole structure as one undo step: the
+    /// scene grows by the generated shape count, and a single Undo removes all of it.
+    #[test]
+    fn generate_apply_places_structure_as_one_undo_step() {
+        let mut app = App::new();
+        // Select the via farm and set a known 3x3 mcon array (9 cuts + 2 plates).
+        let farm = app
+            .generate
+            .infos()
+            .iter()
+            .position(|i| i.id == "via_farm")
+            .expect("via_farm registered");
+        app.generate.select(farm);
+        app.generate.selected_params_mut()["rows"] = serde_json::Value::from(3);
+        app.generate.selected_params_mut()["cols"] = serde_json::Value::from(3);
+
+        let before = app.scene.len();
+        app.generate_apply();
+        assert_eq!(
+            app.scene.len(),
+            before + 11,
+            "the generated structure (9 cuts + 2 plates) is placed"
+        );
+        // One Undo removes the entire generated structure (apply_group is one step).
+        app.run_command(Command::Undo, None);
+        assert_eq!(
+            app.scene.len(),
+            before,
+            "a single undo removes the whole generated structure"
+        );
+    }
+
     #[test]
     fn cut_removes_direct_shapes_and_fills_clipboard() {
         let mut app = App::new();
