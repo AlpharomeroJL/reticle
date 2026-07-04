@@ -324,11 +324,24 @@ in-progress has its partial work on its worktree branch: resume it, never restar
 
 ## Wave 1: the viewer wedge (parallel, 4 lanes) [not-started]
 
-- [ ] Lane 1A: open-anything import hardening. Fetch a corpus of real TinyTapeout
-  submitted GDS (scripted fetch, provenance + licenses recorded, commit only
-  minimized interesting failure samples). Run the corpus through import; fix every
-  crash/hang/misrender; malformed records degrade to structured UI warnings, never
-  panics. Bar: 100% opens or fails with a clear message, zero panics.
+- [x] Lane 1A: open-anything import hardening. done-gate-green, merged (lane
+  fb633e0 into merge a49b20e; post-merge typos fix b45f1d7; `just ci` GREEN on
+  main). Hardened `reticle-io` GDS import: 256 MiB size cap before allocation, safe
+  `std::panic::catch_unwind` containing gds21's two panic vectors (zero-length string
+  record, out-of-range date), degenerate-shape skipping, structured `ImportWarning`
+  (`WarningKind` non_exhaustive) so malformed records degrade instead of panicking;
+  still wasm32-clean. Established the document-open seam `reticle_app::open`
+  (`open_document_bytes(bytes, DocFormat) -> Result<OpenOutcome, OpenError>`, byte-in
+  and platform-neutral, warnings alongside) plus `App::open_document_bytes` /
+  `open_outcome` / `open_warnings` (the contract 1B and 1D build on). Corpus under
+  `corpus/tinytapeout/`: a scripted real-GDS fetch (`scripts/fetch-tinytapeout-gds.ps1`,
+  TinyTapeout 03, Apache-2.0, provenance in NOTICE.md), a minimized real sample plus 8
+  synthesized malformed/degenerate GDS. Success-bar test
+  `reticle-app::corpus_open::every_corpus_file_opens_or_fails_cleanly` iterates the
+  corpus asserting Ok-or-clean-Err, zero panics, finite bbox. ADRs 0034, 0035.
+  Honest gaps: OASIS carries no warnings yet (no warning channel); `MAX_SHAPE_VERTICES`
+  is defense-in-depth, not a live limit; the real sample is re-exported through our
+  writer (size/license hygiene), labeled in NOTICE.md.
 - [ ] Lane 1B: drag-and-drop + URL open in the browser (wasm file handling, no
   server round trip); `?gds=<url>` remote load (CORS-permitting, clear error
   otherwise); IndexedDB recent-files; progressive load + progress indicator +
