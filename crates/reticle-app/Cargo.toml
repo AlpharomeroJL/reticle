@@ -54,3 +54,24 @@ reticle-io = { workspace = true }
 # `image` build so the lockfile gains no new version.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+
+# The browser open path (`crate::webopen`, wasm only) fetches a `?gds=` URL and
+# persists the recent-files list in IndexedDB, so it needs the wasm-bindgen glue and
+# the specific `web-sys` interfaces (fetch/Response and the IndexedDB API). These are
+# already in the lockfile via `eframe`/the `web` crate, so pinning the same versions
+# adds no new dependency; they build only for wasm32, keeping the native graph clean.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Response",
+    "IdbFactory",
+    "IdbOpenDbRequest",
+    "IdbDatabase",
+    "IdbTransaction",
+    "IdbTransactionMode",
+    "IdbObjectStore",
+    "IdbRequest",
+] }
