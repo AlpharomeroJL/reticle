@@ -438,10 +438,26 @@ contract first; Batch 2 = 2B, 2C, 2D fan out on it in parallel.
   (zero violations, caught+fixed a serpentine li.3 bug). ADRs 0046, 0047. Orchestrator
   union-merged 2B+2C in lib.rs/registry.rs (all six generators registered) and fixed a
   seed-dependent 2B strategy flake (die below DIE_MIN), stable at 3000 cases.
-- [ ] Lane 2D: Generate panel in the app (pick generator, typed param form + live
-  preview, place into document, undo-integrated); each generator as an agent + MCP
-  tool with tight schemas; +8 benchmark tasks (suite to 83) exercising generators
-  through natural language, checkers two-way tested.
+- [x] Lane 2D: Generate panel + agent/MCP surface + benchmark. done-gate-green, merged
+  (lane into merge on main; full `just ci` GREEN). reticle-app `generate_panel.rs`: a
+  schema-driven typed form (Int to a clamped drag, Bool to a checkbox, Enum to a combo)
+  from each `ParamSchema`, a live preview, and undo-integrated placement via
+  `History::apply_group` (app.rs additive-only, 181/0). Agent surface: an additive
+  `RunGenerator { cell, generator_id, params }` `AgentCommand` (ADR 0048; non_exhaustive
+  serde-tagged enum, old transcripts still deserialize) whose apply records `AddShape`
+  edits so a run is transcript-replayable and undoable, round-trip and replay-hash tests
+  extended; reticle-mcp advertises one tool per generator from the registry schemas (ADR
+  0049, `ParamSchema` to JSON schema). Benchmark: 8 `t3_gen_*` tasks across all six
+  generators (suite 75 to 83, manifest v0.5.0) plus a two-way-tested `GeneratorCheck`
+  (per-layer shape fingerprint plus DRC-clean). ADRs 0048, 0049, 0050; new
+  `docs/src/generators.md`. 741 tests across the four crates. Honest: `fill` keepouts
+  have no scalar schema field (ADR 0046) so they are not panel-editable.
+
+**Wave 2 complete: the generator layer is real. Six DRC-clean-by-construction
+generators (guard ring, via farm, pad ring, seal ring, density-aware fill, probe-able
+test structures) behind a typed `Generator` trait + registry, exposed in the Generate
+panel, as per-generator agent/MCP tools via an additive `RunGenerator` command, and in
+the 83-task v0.5.0 benchmark. All merged, `just ci` GREEN.**
 
 ## Wave 3: Claude Code as an agent-system backend (serial then parallel) [not-started]
 
