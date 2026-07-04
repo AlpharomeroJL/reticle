@@ -93,7 +93,7 @@ small quantized local models, so the numbers are a floor, not an upper bound. Se
 
 ## Performance
 
-Measured on an RTX 4060 Ti; [PERF.md](PERF.md) has the methodology and the full table.
+Measured on an RTX 4060 Ti; [PERF.md](docs/PERF.md) has the methodology and the full table.
 
 | Operation | Measured |
 |---|---:|

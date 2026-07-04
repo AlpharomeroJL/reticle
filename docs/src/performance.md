@@ -2,7 +2,7 @@
 
 Every performance claim in Reticle is a measured number, not an aspiration. This
 chapter describes how the numbers are produced so they can be reproduced and
-trusted; the numbers themselves live in `PERF.md` at the repository root.
+trusted; the numbers themselves live in `docs/PERF.md`.
 
 ## How measurements are taken
 
