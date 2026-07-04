@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-cff64d34.js";
+            window.path_to_searchindex_js = "searchindex-fd65c002.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-16d5da84.js"></script>
@@ -179,31 +179,37 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="introduction"><a class="header" href="#introduction">Introduction</a></h1>
-<p>Reticle is a browser-native, GPU-accelerated editor for very large hierarchical
-2D layout scenes, written in Rust and compiled to both native and WebAssembly. It
-renders and edits integrated-circuit geometry: rectangles, polygons, and paths on
-named layers, organized into cells, instances, and arrays, so a small cell placed
-thousands of times yields effectively billions of leaf shapes that still browse at
-interactive frame rates.</p>
-<p>On top of the geometry sit CAD-style pan, zoom, select, measure, and annotate
-tools, a design-rule checker, a router, connectivity extraction, GDSII and OASIS
-import and export, embedded scripting, and real-time multi-user collaboration.</p>
+<p>A local 20B model solves 52 of 75 design-rule-verified layout tasks in
+this editor’s command API. The editor itself runs in your browser.</p>
+<p>Reticle is an editor for very large hierarchical 2D layout scenes, the kind a chip’s
+physical design is made of. It renders and edits integer-coordinate geometry (rectangles,
+polygons, and paths on named layers) organized into cells, instances, and arrays. A cell
+placed thousands of times expands to billions of leaf shapes that still browse at 60 fps,
+because the hierarchy is never flattened for viewing. It is written in Rust and compiled to
+native and to WebAssembly from one codebase.</p>
+<p>On top of the geometry sit pan, zoom, select, measure, and annotate tools; a full drawing
+and vertex-editing suite; boolean and transform operations; a design-rule checker; a
+router; connectivity extraction; GDSII and OASIS import and export; embedded scripting; and
+real-time multi-user collaboration. On top of that sits an agent layer: a serializable
+command API, a propose-verify-correct harness graded by objective checkers, an MCP server,
+and the benchmark whose number opens this page.</p>
 <h2 id="why-it-exists"><a class="header" href="#why-it-exists">Why it exists</a></h2>
-<p>Reticle works the exact problem a semiconductor tooling team solves: visualizing
-and editing massive layout geometry at interactive speed. That single problem
-pulls together performance engineering, computational geometry, GPU rendering,
-spatial indexing, schema evolution, and distributed collaboration.</p>
+<p>Reticle works the exact problem a semiconductor tooling team solves: visualizing and editing
+massive layout geometry at interactive speed. That one problem pulls together performance
+engineering, computational geometry, GPU rendering, spatial indexing, schema evolution, and
+distributed collaboration, with a checker-graded agent layer on top.</p>
 <h2 id="the-north-star"><a class="header" href="#the-north-star">The north-star</a></h2>
-<p>Open a dense chip-like layout of over one million polygons in a browser, pan and
-zoom at 60 fps, measure a spacing, run an incremental design-rule check and jump to
-a violation, drop an annotation, and watch a second user’s cursor and edits appear
-live.</p>
+<p>Open a dense chip-like layout of over one million polygons in a browser. Pan and zoom at
+60 fps. Run an incremental design-rule check and jump to a violation. Draw a polygon and
+boolean-union it against a neighbor. Watch a second user’s cursor and edits appear live, and
+watch an agent build under the same checks a person would.</p>
 <h2 id="how-this-book-is-organized"><a class="header" href="#how-this-book-is-organized">How this book is organized</a></h2>
 <p>The <strong>Design</strong> chapters walk through each subsystem in dependency order, from the
-exact-integer geometry core up through rendering, checking, routing, and
-collaboration. The <strong>Reference</strong> chapters cover how performance is measured, how to
-use the application, and how to contribute. Every subsystem is a separate crate;
-see <a href="#architecture">Architecture</a> for the crate graph.</p>
+exact-integer geometry core up through rendering, checking, routing, and collaboration. The
+<strong>Automation and agents</strong> chapters cover the command API, the verify loop, the MCP server,
+and the benchmark. The <strong>Reference</strong> chapters cover how performance is measured, how to use
+the application, and how to contribute. Every subsystem is a separate crate; see
+<a href="#architecture">Architecture</a> for the crate graph.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="positioning"><a class="header" href="#positioning">Positioning</a></h1>
 <p>This chapter is an honest map of where Reticle sits among layout tools. It states
@@ -1656,36 +1662,34 @@ offline default and needs no key or network; the real <code>AnthropicModel</code
 <code>reticle-agent</code>) runs the same tasks against a live model when <code>ANTHROPIC_API_KEY</code>
 is set. Every result record carries the <code>model</code> field so mock and live runs are
 never conflated.</p>
-<h2 id="current-result-the-mock-machinery-baseline"><a class="header" href="#current-result-the-mock-machinery-baseline">Current result: the mock machinery baseline</a></h2>
-<p>The run below used the <strong>deterministic <code>MockModel</code></strong> (no <code>ANTHROPIC_API_KEY</code> was
-set). It exercises the whole pipeline end to end for all 75 tasks: every task
-loads, runs through the loop, is graded by its two-way-tested checker, and is
-recorded.</p>
+<h2 id="current-results-two-local-models"><a class="header" href="#current-results-two-local-models">Current results: two local models</a></h2>
+<p>The runs below drove two local models through the whole 75-task suite over Ollama on
+the host, each task graded by its two-way-tested checker. The raw per-task
+<code>ResultRecord</code> files and their command transcripts are committed under
+<a href="https://github.com/AlpharomeroJL/reticle/tree/main/benchmarks/results"><code>benchmarks/results/</code></a>;
+the rows here are computed from those records.</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Tier</th><th>Tasks</th><th>Passed</th><th>Success rate</th><th>Mean iterations</th></tr>
+<tr><th>Model</th><th>Quantization</th><th style="text-align: right">Tier 1</th><th style="text-align: right">Tier 2</th><th style="text-align: right">Tier 3</th><th style="text-align: right">Tier 4</th><th style="text-align: right">Tier 5</th><th style="text-align: right">Overall</th></tr>
 </thead>
 <tbody>
-<tr><td>1</td><td>9</td><td>3</td><td>33%</td><td>1.22</td></tr>
-<tr><td>2</td><td>11</td><td>0</td><td>0%</td><td>1.00</td></tr>
-<tr><td>3</td><td>34</td><td>0</td><td>0%</td><td>1.00</td></tr>
-<tr><td>4</td><td>11</td><td>0</td><td>0%</td><td>1.00</td></tr>
-<tr><td>5</td><td>10</td><td>0</td><td>0%</td><td>1.00</td></tr>
-<tr><td>all</td><td>75</td><td>3</td><td>4%</td><td>1.03</td></tr>
+<tr><td><code>gpt-oss:16k</code> (20B)</td><td>MXFP4</td><td style="text-align: right">9/9</td><td style="text-align: right">11/11</td><td style="text-align: right">19/34</td><td style="text-align: right">5/11</td><td style="text-align: right">8/10</td><td style="text-align: right"><strong>52/75 (69%)</strong></td></tr>
+<tr><td><code>qwen2.5-coder:16k</code> (14B)</td><td>Q4_K_M</td><td style="text-align: right">6/9</td><td style="text-align: right">8/11</td><td style="text-align: right">6/34</td><td style="text-align: right">3/11</td><td style="text-align: right">6/10</td><td style="text-align: right"><strong>29/75 (39%)</strong></td></tr>
 </tbody>
 </table>
 </div>
-<p>This is a <strong>machinery baseline, not a measure of a language model’s layout
-ability.</strong> The <code>MockModel</code> is scripted to solve only the three sample tasks
-(<code>t1_place_met1_rect</code>, <code>t1_drc_clean_met1</code>, <code>t1_intent_connect</code>) that exist to
-prove the harness end to end; it has no scripted solution for the other 72
-authored tasks, so it fails them by construction. A real model run (with a key)
-is what produces a meaningful success rate across the authored tasks; those
-numbers will be recorded here, labeled with the model id, when a keyed run is
-performed. Publishing the 4% mock figure as if it were a model score would be
-dishonest, so it is labeled as what it is: proof that all 75 tasks and their
-checkers run.</p>
+<p>These are small quantized local models, so the numbers are a realistic floor, not a
+ceiling. The gap has a concrete cause: <code>gpt-oss:16k</code> returns native tool calls, while
+<code>qwen2.5-coder:16k</code> often ignores the forced tool choice and embeds the call in message
+text, which a text fallback recovers less reliably. Both paths are handled and
+regression-tested. Local model outputs are not deterministic between runs; the
+transcript-replay determinism (replaying a recorded transcript to a fixed
+<code>document_hash</code>) is unaffected and is a committed test.</p>
+<p>The deterministic <code>MockModel</code> (no key, no network) solves only the three sample tasks
+(<code>t1_place_met1_rect</code>, <code>t1_drc_clean_met1</code>, <code>t1_intent_connect</code>) that prove the harness
+end to end; <code>just bench-agent</code> runs it and reports 3/75, a machinery baseline that shows
+all 75 tasks and their checkers execute, not a model score.</p>
 <h2 id="growing-the-suite"><a class="header" href="#growing-the-suite">Growing the suite</a></h2>
 <p>Failure mining (<code>reticle-bench</code>’s <code>mining</code> module) turns real run failures into
 candidate tasks with provenance and two-way vectors; <code>just bench-promote &lt;id&gt;</code>
@@ -1719,11 +1723,9 @@ that tool. Every drafted candidate carries its tool surface in its provenance,
 alongside the backend, model, and quantization of each source run, so a failure
 mined from a local (Ollama) run is never conflated with a mock or frontier one.</p>
 <p>The tool surface is read from a run’s command <strong>transcript</strong>. The committed
-local-model result sets under <code>benchmarks/results/</code> are plain result records
-with no transcript, so mining them recovers the backend provenance but not the
-per-tool signature: those runs cluster only by “it failed”. Recovering the full
-DRC, geometric, intent, and tool-surface signature from a local run needs the
-command transcript the local runner does not yet persist.</p>
+local-model sets under <code>benchmarks/results/</code> include each task’s transcript
+alongside its result record, so mining them recovers the full DRC, geometric,
+intent, and tool-surface signature, not just the backend provenance.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="benchmark-methodology"><a class="header" href="#benchmark-methodology">Benchmark methodology</a></h1>
 <p>This chapter is the credibility account of the agent benchmark: how a run is scored,
