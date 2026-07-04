@@ -28,16 +28,43 @@ trim = true
 conventional_commits = true
 filter_unconventional = false
 split_commits = false
+# Reticle uses conventional TYPES (feat/fix/perf/...) and also DOMAIN prefixes that
+# name a subsystem (app:, render:, io:, agent:, bench:, drc:, ...). The parsers below
+# route both into meaningful, product-shaped CHANGELOG sections. Order is match
+# priority (first match wins); the zero-padded `<!-- NN -->` prefix is stripped by the
+# body template's `striptags` and only fixes section ORDER (git-cliff sorts groups as
+# strings, so two-digit padding keeps section 10+ after section 9, not after 1).
 commit_parsers = [
-    { message = "^feat", group = "<!-- 0 -->Features" },
-    { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
-    { message = "^perf", group = "<!-- 2 -->Performance" },
-    { message = "^refactor", group = "<!-- 3 -->Refactoring" },
-    { message = "^doc", group = "<!-- 4 -->Documentation" },
-    { message = "^test", group = "<!-- 5 -->Testing" },
-    { message = "^ci|^build", group = "<!-- 6 -->Build and tooling" },
-    { message = "^chore", group = "<!-- 7 -->Chores" },
-    { message = ".*", group = "<!-- 8 -->Other" },
+    # Process bookkeeping: not changelog-worthy.
+    { message = "^merge", skip = true },
+    { message = "^wip", skip = true },
+
+    # Conventional change types.
+    { message = "^feat", group = "<!-- 00 -->Features" },
+    { message = "^fix", group = "<!-- 01 -->Bug fixes" },
+    { message = "^perf", group = "<!-- 02 -->Performance" },
+
+    # Domain prefixes, grouped by product-facing subsystem.
+    { message = "^app", group = "<!-- 03 -->Editor and app" },
+    { message = "^render", group = "<!-- 04 -->Rendering engine" },
+    { message = "^(geometry|model|index)", group = "<!-- 05 -->Geometry, model, and indexing" },
+    { message = "^io", group = "<!-- 06 -->Formats and I/O" },
+    { message = "^(drc|extract|route)", group = "<!-- 07 -->Verification: DRC, extraction, routing" },
+    { message = "^sync", group = "<!-- 08 -->Collaboration and sync" },
+    { message = "^(agent|mcp)", group = "<!-- 09 -->Agent, MCP, and tools" },
+    { message = "^gen", group = "<!-- 10 -->Generators" },
+    { message = "^bench", group = "<!-- 11 -->Benchmark suite" },
+    { message = "^(demo|web|e2e|cli|server|pages)", group = "<!-- 12 -->Demo, web, and server" },
+    { message = "^(tt|tapeout)", group = "<!-- 13 -->Tape-out" },
+    { message = "^(doc|media)", group = "<!-- 14 -->Documentation and media" },
+
+    # Remaining conventional types and tooling.
+    { message = "^refactor", group = "<!-- 15 -->Refactoring" },
+    { message = "^test", group = "<!-- 16 -->Testing" },
+    { message = "^(ci|build|xtask|deny|lane|chore|style)", group = "<!-- 17 -->Build, tooling, and CI" },
+
+    # Anything else (release markers, wave milestones, ...).
+    { message = ".*", group = "<!-- 18 -->Other" },
 ]
 protect_breaking_commits = false
 filter_commits = false
