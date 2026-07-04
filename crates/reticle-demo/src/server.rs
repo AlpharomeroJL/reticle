@@ -46,11 +46,12 @@ use axum::http::HeaderMap;
 use axum::http::request::Parts;
 use axum::routing::{get, post};
 
-use crate::api::{CancelRequest, StatusResponse, SubmitRequest, SubmitResponse};
+use crate::api::{CancelRequest, ShareResponse, StatusResponse, SubmitRequest, SubmitResponse};
 use crate::error::DemoError;
 use crate::harness::{Budget, Harness, SessionHandle};
 use crate::limits::LimitConfig;
 use crate::rate::RateLimiter;
+use crate::share::{ShareLimits, ShareRooms};
 use crate::vocab::offending_words;
 
 /// The header a trusted front proxy sets to the real client IP, and the header
@@ -83,6 +84,8 @@ struct StateInner {
     sessions: Mutex<HashMap<String, SessionHandle>>,
     next_id: AtomicU64,
     harness: Arc<dyn Harness>,
+    /// Registry of read-only share rooms, with its own creation rate-limit and TTL.
+    share: ShareRooms,
 }
 
 impl std::fmt::Debug for DemoState {
@@ -98,8 +101,8 @@ impl std::fmt::Debug for DemoState {
 }
 
 impl DemoState {
-    /// Builds state from a limit configuration and a harness.
-    fn new(limits: LimitConfig, harness: Arc<dyn Harness>) -> Self {
+    /// Builds state from a limit configuration, share limits, and a harness.
+    fn new(limits: LimitConfig, share_limits: ShareLimits, harness: Arc<dyn Harness>) -> Self {
         let rate = RateLimiter::new(limits.per_ip_rate_per_min, Duration::from_secs(60));
         Self {
             inner: Arc::new(StateInner {
@@ -110,6 +113,7 @@ impl DemoState {
                 sessions: Mutex::new(HashMap::new()),
                 next_id: AtomicU64::new(1),
                 harness,
+                share: ShareRooms::new(share_limits),
             }),
         }
     }
@@ -118,6 +122,12 @@ impl DemoState {
     #[must_use]
     pub fn limits(&self) -> &LimitConfig {
         &self.inner.limits
+    }
+
+    /// The share-room registry, exposed for assertions in tests.
+    #[must_use]
+    pub fn share(&self) -> &ShareRooms {
+        &self.inner.share
     }
 
     /// The number of sessions currently counted as active across the server.
@@ -261,16 +271,32 @@ pub struct DemoServer {
 }
 
 impl DemoServer {
-    /// Builds a demo server enforcing `limits`, using the default mock harness.
+    /// Builds a demo server enforcing `limits`, using the default mock harness and
+    /// the default [`ShareLimits`].
     #[must_use]
     pub fn new(limits: LimitConfig) -> Self {
         Self::with_harness(limits, crate::harness::MockHarness::default())
     }
 
-    /// Builds a demo server enforcing `limits` with a specific harness.
+    /// Builds a demo server enforcing `limits` with a specific harness and the
+    /// default [`ShareLimits`].
     pub fn with_harness<H: Harness>(limits: LimitConfig, harness: H) -> Self {
+        Self::with_harness_and_share(limits, ShareLimits::default(), harness)
+    }
+
+    /// Builds a demo server enforcing `limits` and `share_limits` with a specific
+    /// harness.
+    ///
+    /// This is the full constructor; [`DemoServer::new`] and
+    /// [`DemoServer::with_harness`] default the share limits. Tests use it to drive
+    /// tight share-room rate and TTL settings.
+    pub fn with_harness_and_share<H: Harness>(
+        limits: LimitConfig,
+        share_limits: ShareLimits,
+        harness: H,
+    ) -> Self {
         Self {
-            state: DemoState::new(limits, Arc::new(harness)),
+            state: DemoState::new(limits, share_limits, Arc::new(harness)),
         }
     }
 
@@ -282,13 +308,14 @@ impl DemoServer {
 
     /// Builds the axum [`Router`] with state attached.
     ///
-    /// Routes: `POST /submit`, `GET /status/{id}`, `POST /cancel`. This router
-    /// can be driven directly in-process (for example with
+    /// Routes: `POST /submit`, `POST /share`, `GET /status/{id}`, `POST /cancel`.
+    /// This router can be driven directly in-process (for example with
     /// `tower::ServiceExt::oneshot`); for a live deployment prefer
     /// [`DemoServer::into_make_service`], which attaches peer addresses.
     pub fn router(self) -> Router {
         Router::new()
             .route("/submit", post(submit))
+            .route("/share", post(share))
             .route("/status/{id}", get(status))
             .route("/cancel", post(cancel))
             .with_state(self.state)
@@ -381,6 +408,24 @@ async fn submit(
     Ok(Json(SubmitResponse { session_id, room }))
 }
 
+/// `POST /share`: create a read-only share room for this source IP.
+///
+/// Creation is rate-limited per IP and the room expires after the configured TTL
+/// (see [`ShareRooms`]). No prompt, no budget, no agent loop: a share room is
+/// only a relay room id that viewers join read-only (`?mode=view`). The refusal
+/// reasons map onto the same statuses as a session flood (`429`) or a full server
+/// (`503`).
+async fn share(
+    State(state): State<DemoState>,
+    MaybePeer(peer): MaybePeer,
+    headers: HeaderMap,
+) -> Result<Json<ShareResponse>, DemoError> {
+    let ip = client_ip(&headers, peer);
+    let room = state.inner.share.create(&ip)?;
+    let ttl_secs = state.inner.share.limits().room_ttl.as_secs();
+    Ok(Json(ShareResponse { room, ttl_secs }))
+}
+
 /// `GET /status/{id}`: return the session's current status, or `404`.
 async fn status(
     State(state): State<DemoState>,
@@ -418,7 +463,11 @@ impl DemoState {
     /// Constructs a state directly for unit tests in this crate.
     #[cfg(test)]
     fn for_test(limits: LimitConfig) -> Self {
-        Self::new(limits, Arc::new(crate::harness::MockHarness::default()))
+        Self::new(
+            limits,
+            ShareLimits::default(),
+            Arc::new(crate::harness::MockHarness::default()),
+        )
     }
 }
 

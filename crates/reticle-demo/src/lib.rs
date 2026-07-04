@@ -55,13 +55,17 @@ mod harness;
 mod limits;
 mod rate;
 mod server;
+mod share;
 mod vocab;
 
-pub use api::{CancelRequest, SessionState, StatusResponse, SubmitRequest, SubmitResponse};
+pub use api::{
+    CancelRequest, SessionState, ShareResponse, StatusResponse, SubmitRequest, SubmitResponse,
+};
 pub use error::DemoError;
 pub use harness::{Budget, CancelToken, Harness, MockHarness, SessionHandle};
 pub use limits::LimitConfig;
 pub use server::{CLIENT_IP_HEADER, DemoServer, DemoState, UNKNOWN_IP};
+pub use share::{ShareLimits, ShareRejection, ShareRooms};
 
 #[cfg(test)]
 mod tests {

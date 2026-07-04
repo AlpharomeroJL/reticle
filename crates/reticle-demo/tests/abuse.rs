@@ -25,8 +25,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use reticle_demo::{
-    CLIENT_IP_HEADER, DemoServer, LimitConfig, MockHarness, SessionState, StatusResponse,
-    SubmitResponse,
+    CLIENT_IP_HEADER, DemoServer, LimitConfig, MockHarness, SessionState, ShareLimits,
+    ShareResponse, StatusResponse, SubmitResponse,
 };
 use tower::ServiceExt;
 
@@ -227,6 +227,92 @@ async fn off_vocabulary_prompt_gets_400() {
     assert!(
         text.contains("poem"),
         "the rejection should name the off-vocabulary word, got: {text}"
+    );
+}
+
+// ---- Share rooms: creation rate-limit and TTL ---------------------------
+
+/// Builds a `POST /share` request attributed to `ip`.
+fn share_request(ip: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/share")
+        .header("content-type", "application/json")
+        .header(CLIENT_IP_HEADER, ip)
+        .body(Body::empty())
+        .expect("build share request")
+}
+
+#[tokio::test]
+async fn share_room_creation_is_accepted_and_names_a_room() {
+    // A generous share config: creation succeeds and returns a room plus a TTL.
+    let share_limits = ShareLimits {
+        per_ip_create_per_min: 5,
+        room_ttl: std::time::Duration::from_secs(600),
+        max_live_rooms: 64,
+    };
+    let server =
+        DemoServer::with_harness_and_share(base_limits(), share_limits, MockHarness::default());
+
+    let (status, body) = send(&server, share_request("10.0.0.1")).await;
+    assert_eq!(status, StatusCode::OK, "a share create is accepted");
+    let resp: ShareResponse = serde_json::from_slice(&body).expect("decode share response");
+    assert!(resp.room.starts_with("share-"), "room id is a share room");
+    assert_eq!(resp.ttl_secs, 600, "the TTL is reported to the client");
+    // The room is tracked as live on the server.
+    assert!(server.state().share().is_live(&resp.room));
+}
+
+#[tokio::test]
+async fn share_room_creation_floods_get_429() {
+    // Two creations per minute per IP; the third is rate-limited.
+    let share_limits = ShareLimits {
+        per_ip_create_per_min: 2,
+        room_ttl: std::time::Duration::from_secs(600),
+        max_live_rooms: 64,
+    };
+    let server =
+        DemoServer::with_harness_and_share(base_limits(), share_limits, MockHarness::default());
+
+    for i in 0..2 {
+        let (status, _) = send(&server, share_request("10.0.0.1")).await;
+        assert_eq!(status, StatusCode::OK, "share create {i} is accepted");
+    }
+    // The third from the same IP in the window is refused with 429.
+    let (status, _) = send(&server, share_request("10.0.0.1")).await;
+    assert_eq!(
+        status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "a share-creation flood is rate-limited"
+    );
+    // A fresh IP has its own creation budget.
+    let (status, _) = send(&server, share_request("10.0.0.2")).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a different IP can still create a room"
+    );
+}
+
+#[tokio::test]
+async fn share_rooms_at_capacity_get_503() {
+    // Only one live share room server-wide; the second create is refused.
+    let share_limits = ShareLimits {
+        per_ip_create_per_min: 100,
+        room_ttl: std::time::Duration::from_secs(600),
+        max_live_rooms: 1,
+    };
+    let server =
+        DemoServer::with_harness_and_share(base_limits(), share_limits, MockHarness::default());
+
+    let (status, _) = send(&server, share_request("10.0.0.1")).await;
+    assert_eq!(status, StatusCode::OK);
+    // The live-room ceiling is reached: the next create is 503 (retryable).
+    let (status, _) = send(&server, share_request("10.0.0.2")).await;
+    assert_eq!(
+        status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "at the live-room ceiling, a share create is refused with 503"
     );
 }
 
