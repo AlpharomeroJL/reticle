@@ -41,3 +41,5 @@ superseded decision is marked and linked to its replacement.
 | [0033](0033-v7-housekeeping-media-and-changelog.md) | v7 housekeeping: prune offscreen media, regroup the changelog |
 | [0034](0034-import-hardening-and-warnings.md) | GDSII import hardening: contain panics, degrade to structured warnings |
 | [0035](0035-document-open-seam.md) | The document-open seam: bytes plus a format hint, warnings alongside |
+| [0036](0036-browser-open-path-drop-url-indexeddb.md) | The browser open path: drop, `?gds=` URL, and an IndexedDB recent list |
+| [0037](0037-browser-big-file-bands-and-measured-ceiling.md) | Browser big-file bands: an in-memory/streaming split and a measured ceiling |
