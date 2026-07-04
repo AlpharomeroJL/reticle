@@ -1,0 +1,5 @@
+id = "t3_gen_test_vdp"
+tier = 3
+prompt = "Create a cell named top and add a van der Pauw test structure on li1: run the test_structure generator with the van_der_pauw kind, a 400 dbu feature width, and 2000 dbu arms."
+technology = "sky130.tech"
+checker = "generator:id=test_structure,kind=van_der_pauw,layer=li1,feature_width=400,feature_length=2000,count=8"

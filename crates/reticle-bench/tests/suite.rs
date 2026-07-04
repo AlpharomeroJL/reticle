@@ -33,10 +33,11 @@ fn load() -> (reticle_bench::SuiteManifest, Vec<BenchTask>) {
 #[test]
 fn suite_loads_and_is_versioned() {
     let (manifest, tasks) = load();
-    assert_eq!(manifest.version, "0.4.0", "suite version bumped to 0.4.0");
-    // 63 (v0.3.0) + 12 Wave-3 tasks (boolean, array-with-pitch, via-stack, refinement).
-    assert_eq!(manifest.tasks.len(), 75, "manifest lists every task");
-    assert_eq!(tasks.len(), 75, "every listed task loaded");
+    assert_eq!(manifest.version, "0.5.0", "suite version bumped to 0.5.0");
+    // 75 (v0.4.0) + 8 generator tasks (guard ring, two via farms, fill, two test
+    // structures, pad ring, seal ring), checked by the `generator` checker.
+    assert_eq!(manifest.tasks.len(), 83, "manifest lists every task");
+    assert_eq!(tasks.len(), 83, "every listed task loaded");
 }
 
 #[test]

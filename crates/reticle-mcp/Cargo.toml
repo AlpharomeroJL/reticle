@@ -21,5 +21,6 @@ path = "src/bin/reticle-mcp.rs"
 reticle-agent-api = { workspace = true }
 reticle-geometry = { workspace = true }
 reticle-model = { workspace = true }
+reticle-gen = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

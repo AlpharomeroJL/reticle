@@ -245,4 +245,27 @@ pub enum AgentCommand {
         /// The enclosure margin (DBU) to use for a layer with no enclosure rule.
         default_enclosure: i32,
     },
+    /// Run a parameterized layout generator by id, appending its geometry to a cell.
+    ///
+    /// The `generator_id` selects one of the built-in generators
+    /// ([`reticle_gen::Registry::with_builtins`]: `guard_ring`, `via_farm`,
+    /// `pad_ring`, `seal_ring`, `fill`, `test_structure`), and `params` is that
+    /// generator's own JSON parameter object (validated by the generator before any
+    /// geometry is emitted). The generated shapes are appended to `cell` as normal
+    /// edits, so the run is transcript-replayable and undoable exactly like any other
+    /// mutating command. Returns the new shapes' stable element ids.
+    ///
+    /// This is the Wave 2D additive amendment to the frozen surface (ADR 0048): the
+    /// enum is `#[non_exhaustive]` and serde-tagged by `op`, so the new variant does
+    /// not break existing recorded transcripts.
+    RunGenerator {
+        /// The cell that gains the generated geometry. Must already exist.
+        cell: String,
+        /// The generator id (the registry key and MCP tool name).
+        generator_id: String,
+        /// The generator's own parameters, as a JSON object. Seed it from the
+        /// generator's schema defaults and constrain it to the schema's ranges; the
+        /// generator validates it and fails with `invalid_argument` on a bad value.
+        params: serde_json::Value,
+    },
 }

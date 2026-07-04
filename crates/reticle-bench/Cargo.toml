@@ -22,6 +22,10 @@ reticle-model = { workspace = true }
 reticle-agent-api = { workspace = true }
 reticle-drc = { workspace = true }
 reticle-extract = { workspace = true }
+# The generator registry: the `generator` checker re-runs the named generator to
+# build a reference fingerprint (per-layer shape histogram) it verifies the graded
+# document against, so the checker consumes the same generators the task exercises.
+reticle-gen = { workspace = true }
 # Geometry primitives (LayerId/Point/Rect) and the Shape trait: the geometric
 # checkers read shape bounding boxes and compare layers directly, so the library
 # depends on the geometry crate (not only the tests).
