@@ -21,6 +21,7 @@ members = [
     "crates/reticle-drc",
     "crates/reticle-route",
     "crates/reticle-extract",
+    "crates/reticle-gen",
     "crates/reticle-sync",
     "crates/reticle-server",
     "crates/reticle-script",
@@ -63,6 +64,7 @@ reticle-render = { path = "crates/reticle-render", version = "6.0.0" }
 reticle-drc = { path = "crates/reticle-drc", version = "6.0.0" }
 reticle-route = { path = "crates/reticle-route", version = "6.0.0" }
 reticle-extract = { path = "crates/reticle-extract", version = "6.0.0" }
+reticle-gen = { path = "crates/reticle-gen", version = "6.0.0" }
 reticle-sync = { path = "crates/reticle-sync", version = "6.0.0" }
 reticle-server = { path = "crates/reticle-server", version = "6.0.0" }
 reticle-script = { path = "crates/reticle-script", version = "6.0.0" }
