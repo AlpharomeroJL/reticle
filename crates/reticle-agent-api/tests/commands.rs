@@ -727,6 +727,14 @@ fn build_program() -> Vec<AgentCommand> {
             column_pitch: 50,
             row_pitch: 0,
         },
+        // A generator run must replay deterministically like every other command:
+        // its appended shapes are recorded as normal edits, so the replayed document
+        // hash matches the live one.
+        AgentCommand::RunGenerator {
+            cell: "top".into(),
+            generator_id: "via_farm".into(),
+            params: serde_json::json!({ "cut": "mcon", "rows": 2, "cols": 2 }),
+        },
     ]
 }
 
@@ -1155,6 +1163,128 @@ fn via_stack_on_missing_cell_errors() {
             center: PointArg { x: 0, y: 0 },
             cut_size: 40,
             default_enclosure: 5,
+        })
+        .expect_err("missing cell rejected");
+    assert_eq!(err.code, ErrorCode::NoSuchCell);
+}
+
+// ===== RunGenerator (Wave 2D generator surface) =============================
+
+/// The number of shapes currently in `cell`, read through the public query surface.
+fn shape_count(s: &mut Session, cell: &str) -> usize {
+    let value = data(s.apply(AgentCommand::QueryShapes {
+        cell: cell.into(),
+        layer: None,
+        region: None,
+    }));
+    value["shapes"].as_array().map_or(0, Vec::len)
+}
+
+#[test]
+fn run_generator_appends_geometry_as_undoable_edits() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let rev_before = s.revision();
+
+    // A via farm with defaults: a 3x3 mcon grid (9 cuts) plus two enclosing plates.
+    let ids = affected(s.apply(AgentCommand::RunGenerator {
+        cell: "top".into(),
+        generator_id: "via_farm".into(),
+        params: serde_json::json!({ "cut": "mcon", "rows": 3, "cols": 3 }),
+    }));
+    assert_eq!(ids.len(), 11, "9 cuts plus a lower and an upper plate");
+    assert_eq!(shape_count(&mut s, "top"), 11);
+
+    // Each appended shape is its own recorded AddShape edit, so the revision advanced
+    // by exactly the shape count: the structure sits on the undo history as 11 steps
+    // (the app layer groups them into one logical undo via History::apply_group).
+    assert_eq!(s.revision(), rev_before + 11);
+
+    // Every returned id addresses a real shape (they were freshly allocated).
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), ids.len(), "ids are unique");
+}
+
+#[test]
+fn run_generator_output_is_drc_clean() {
+    // Generators are DRC-clean by construction; a run through the command surface
+    // must land geometry the DRC command then reports zero violations on.
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    s.apply(AgentCommand::RunGenerator {
+        cell: "top".into(),
+        generator_id: "guard_ring".into(),
+        params: serde_json::json!({
+            "layer": "li1", "region_width": 2000, "region_height": 2000,
+            "ring_width": 400, "taps": true,
+        }),
+    })
+    .expect("guard ring generates");
+
+    // The session's default technology carries the SKY130 subset rules the generator
+    // targets, so DRC over the generated cell finds nothing.
+    let report = data(s.apply(AgentCommand::RunDrc {
+        cell: "top".into(),
+        region: None,
+    }));
+    assert_eq!(
+        report["count"], 0,
+        "generated guard ring is DRC-clean: {report}"
+    );
+}
+
+#[test]
+fn run_generator_rejects_an_unknown_id() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    let rev = s.revision();
+    let err = s
+        .apply(AgentCommand::RunGenerator {
+            cell: "top".into(),
+            generator_id: "no_such_generator".into(),
+            params: serde_json::json!({}),
+        })
+        .expect_err("unknown generator rejected");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        s.revision(),
+        rev,
+        "a rejected run leaves the revision alone"
+    );
+    assert_eq!(shape_count(&mut s, "top"), 0, "nothing was committed");
+}
+
+#[test]
+fn run_generator_rejects_out_of_range_params() {
+    let mut s = Session::new();
+    s.apply(AgentCommand::CreateCell { name: "top".into() })
+        .unwrap();
+    // rows = 0 is below the via-farm minimum of 1; the generator's own validate
+    // rejects it and nothing is committed.
+    let err = s
+        .apply(AgentCommand::RunGenerator {
+            cell: "top".into(),
+            generator_id: "via_farm".into(),
+            params: serde_json::json!({ "cut": "mcon", "rows": 0, "cols": 3 }),
+        })
+        .expect_err("out-of-range rows rejected");
+    assert_eq!(err.code, ErrorCode::InvalidArgument);
+    assert_eq!(shape_count(&mut s, "top"), 0);
+}
+
+#[test]
+fn run_generator_on_missing_cell_errors() {
+    let mut s = Session::new();
+    let err = s
+        .apply(AgentCommand::RunGenerator {
+            cell: "ghost".into(),
+            generator_id: "via_farm".into(),
+            params: serde_json::json!({ "cut": "mcon", "rows": 3, "cols": 3 }),
         })
         .expect_err("missing cell rejected");
     assert_eq!(err.code, ErrorCode::NoSuchCell);

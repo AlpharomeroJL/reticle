@@ -409,6 +409,87 @@ fn stdio_server_drives_a_full_session() {
     // or a no_such_cell error exercises the tool.
     assert!(del_cell["result"]["isError"].is_boolean());
 
+    // ----- generator tools (one per built-in generator) --------------------
+    // Each generator tool takes a target `cell` plus the generator's own params and
+    // maps to a RunGenerator command. A fresh cell isolates the generated geometry.
+    // The generators emit on the SKY130 subset layers regardless of the session's
+    // demo technology, so these run without setting SKY130. Driving all six keeps
+    // the coverage assertion satisfied and proves the generator surface end to end.
+    h.call("create_cell", json!({ "name": "gens" }));
+
+    // A default guard ring (li1 with taps): its footprint is well-formed geometry.
+    let guard = h.call(
+        "guard_ring",
+        json!({ "cell": "gens", "layer": "li1", "region_width": 2000,
+                "region_height": 2000, "ring_width": 400, "taps": true }),
+    );
+    let guard_ids = h.ok_payload(&guard)["affected"].as_array().unwrap().len();
+    assert!(guard_ids >= 4, "a ring is at least four strips: {guard}");
+
+    // A 3x3 mcon via farm: nine cuts plus a lower and upper plate.
+    let farm = h.call(
+        "via_farm",
+        json!({ "cell": "gens", "cut": "mcon", "rows": 3, "cols": 3 }),
+    );
+    assert_eq!(
+        h.ok_payload(&farm)["affected"].as_array().unwrap().len(),
+        11,
+        "9 cuts plus two plates: {farm}"
+    );
+
+    // The remaining four generators, driven with schema-default-shaped params.
+    let pad = h.call(
+        "pad_ring",
+        json!({ "cell": "gens", "die_width": 200_000, "die_height": 200_000,
+                "pad_pitch": 100_000, "pad_size": 60_000, "power_pads": 4 }),
+    );
+    assert_eq!(h.ok_payload(&pad)["result"], "ok", "pad_ring: {pad}");
+
+    let seal = h.call(
+        "seal_ring",
+        json!({ "cell": "gens", "stack": "up_to_met3", "die_width": 100_000,
+                "die_height": 100_000, "ring_width": 900 }),
+    );
+    assert_eq!(h.ok_payload(&seal)["result"], "ok", "seal_ring: {seal}");
+
+    let fill = h.call(
+        "fill",
+        json!({ "cell": "gens", "layer": "li1", "region_width": 10_000,
+                "region_height": 10_000, "tile": 400, "target_density_permille": 400 }),
+    );
+    assert_eq!(h.ok_payload(&fill)["result"], "ok", "fill: {fill}");
+
+    let test_struct = h.call(
+        "test_structure",
+        json!({ "cell": "gens", "kind": "van_der_pauw", "layer": "li1",
+                "feature_width": 400, "feature_length": 2000, "count": 8 }),
+    );
+    assert_eq!(
+        h.ok_payload(&test_struct)["result"],
+        "ok",
+        "test_structure: {test_struct}"
+    );
+
+    // The generated geometry is DRC-clean by construction; run DRC over the cell to
+    // prove the generator surface lands clean layout end to end. (The demo tech
+    // carries only a met1 spacing rule, but the generators satisfy the full subset,
+    // so the check is trivially clean here; the strong check is in reticle-gen.)
+    let gen_drc = h.call("run_drc", json!({ "cell": "gens" }));
+    assert_eq!(
+        h.ok_payload(&gen_drc)["count"],
+        0,
+        "generated cell is clean"
+    );
+
+    // A generator tool with an out-of-range parameter is a well-formed tool error
+    // (the generator's own validation), never a crash.
+    let bad_gen = h.call(
+        "via_farm",
+        json!({ "cell": "gens", "cut": "mcon", "rows": 0, "cols": 3 }),
+    );
+    assert_eq!(bad_gen["result"]["isError"], true);
+    assert_eq!(Harness::payload(&bad_gen)["code"], "invalid_argument");
+
     // ----- coverage assertion: every advertised tool was called ------------
     let missing: Vec<&String> = advertised.difference(&h.called).collect();
     assert!(

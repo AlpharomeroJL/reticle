@@ -1,0 +1,5 @@
+id = "t3_gen_guard_ring"
+tier = 3
+prompt = "Create a cell named top and place a guard ring around it: run the guard_ring generator on li1 with a 2000 by 2000 dbu opening, a 400 dbu ring width, and substrate tap contacts enabled."
+technology = "sky130.tech"
+checker = "generator:id=guard_ring,layer=li1,region_width=2000,region_height=2000,ring_width=400,taps=true"

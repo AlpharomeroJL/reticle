@@ -28,6 +28,7 @@
 
 - [Agent API and harness](agent.md)
 - [In-app agent UX](agent-ux.md)
+- [Layout generators](generators.md)
 - [MCP server](mcp.md)
 - [Agent benchmark suite](benchmarks.md)
   - [Benchmark methodology](benchmark.md)

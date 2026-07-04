@@ -6,7 +6,11 @@
 //! *tool* with a JSON input schema and a model-facing description, and three
 //! read-only *context* tools sit alongside them
 //! ([`get_technology_rules`](tools), [`get_document_summary`](tools), and
-//! [`get_render_region`](tools)).
+//! [`get_render_region`](tools)). One further family, the *generator* tools
+//! ([`generators`]), advertises each built-in [`reticle_gen`] layout generator as
+//! its own tool (`guard_ring`, `via_farm`, and the rest), schema'd from the
+//! generator's parameters and mapped to a
+//! [`RunGenerator`](reticle_agent_api::AgentCommand::RunGenerator) command.
 //!
 //! # Transport
 //!
@@ -36,6 +40,7 @@
 
 mod base64;
 mod context;
+pub mod generators;
 mod schema;
 mod server;
 pub mod tools;

@@ -79,6 +79,17 @@ mod tests {
                 cell: "top".into(),
                 region: None,
             },
+            AgentCommand::RunGenerator {
+                cell: "top".into(),
+                generator_id: "guard_ring".into(),
+                params: serde_json::json!({
+                    "layer": "li1",
+                    "region_width": 2000,
+                    "region_height": 2000,
+                    "ring_width": 400,
+                    "taps": true,
+                }),
+            },
             AgentCommand::ExportGds,
         ];
         for cmd in cmds {
@@ -86,6 +97,27 @@ mod tests {
             let back: AgentCommand = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(cmd, back, "command must round-trip: {json}");
         }
+    }
+
+    /// A `RunGenerator` command written before this variant existed is irrelevant
+    /// (it is new), but the additive change must not perturb the existing tagged
+    /// forms: an older transcript's commands still deserialize. This asserts the new
+    /// variant serializes under its own `op` tag and carries an opaque params object,
+    /// so a transcript recording it round-trips byte-for-byte.
+    #[test]
+    fn run_generator_round_trip_and_tag() {
+        let cmd = AgentCommand::RunGenerator {
+            cell: "top".into(),
+            generator_id: "via_farm".into(),
+            params: serde_json::json!({ "cut": "mcon", "rows": 3, "cols": 3 }),
+        };
+        let json = serde_json::to_string(&cmd).expect("serialize");
+        assert!(
+            json.contains(r#""op":"run_generator""#),
+            "tagged by op: {json}"
+        );
+        let back: AgentCommand = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(cmd, back);
     }
 
     /// The `op` tag is present and in `snake_case`.

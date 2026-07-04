@@ -53,3 +53,6 @@ superseded decision is marked and linked to its replacement.
 | [0045](0045-seal-ring-generator-on-the-subset.md) | Seal-ring generator: a stacked-metal-plus-cut barrier on the subset |
 | [0046](0046-density-aware-fill-honest-coverage.md) | Density-aware fill: approach a target, report the honest coverage |
 | [0047](0047-probe-able-test-structures-subset-scope.md) | Probe-able test structures, scoped to what the DRC subset can vouch for |
+| [0048](0048-wave2d-run-generator-command.md) | Wave 2D adds a RunGenerator command to drive the generators from the agent |
+| [0049](0049-mcp-generator-tools.md) | MCP advertises each generator as its own tool |
+| [0050](0050-generate-panel-schema-form-and-preview.md) | The Generate panel: a schema-driven form with a live preview |
