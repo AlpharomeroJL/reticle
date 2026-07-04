@@ -3,10 +3,10 @@
 //! Beyond the one-command-per-tool surface in [`crate::tools`], the built-in
 //! [`reticle_gen`] generators are advertised as their own family of tools. Iterating
 //! [`reticle_gen::Registry::with_builtins`]'s [`infos`](reticle_gen::Registry::infos)
-//! yields one [`ToolSpec`](crate::tools::ToolSpec) per generator, named for the
+//! yields one [`ToolSpec`] per generator, named for the
 //! generator id (`guard_ring`, `via_farm`, `pad_ring`, `seal_ring`, `fill`,
 //! `test_structure`), described by the generator's title and description, and
-//! schema'd by converting the generator's own [`ParamSchema`](reticle_gen::ParamSchema)
+//! schema'd by converting the generator's own [`ParamSchema`]
 //! into a tight model-facing JSON Schema that carries every field's type, range, and
 //! default.
 //!
@@ -54,7 +54,7 @@ pub fn generator_tools() -> Vec<ToolSpec> {
 ///
 /// The result is an `object` schema whose properties are, in order: a required
 /// `cell` string (the target cell, which is not a generator parameter), then one
-/// property per [`FieldSchema`], mapped by [`field_to_json`]. Every generator field
+/// property per [`FieldSchema`], mapped by its field type. Every generator field
 /// is required, matching the generator's own `#[serde(default)]` structs (a form or a
 /// model should supply them all rather than relying on silent defaults), and the
 /// `cell` field is required too. `additionalProperties` is left permissive so an
