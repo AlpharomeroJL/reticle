@@ -4234,6 +4234,7 @@ dependencies = [
  "reticle-model",
  "reticle-proto",
  "reticle-sync",
+ "serde",
  "tokio",
  "tokio-tungstenite",
 ]

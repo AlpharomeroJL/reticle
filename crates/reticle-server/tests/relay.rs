@@ -44,6 +44,13 @@ async fn connect(addr: SocketAddr, room: &str) -> Client {
     socket
 }
 
+/// Connects a **read-only** WebSocket client (`?mode=view`) to a room.
+async fn connect_viewer(addr: SocketAddr, room: &str) -> Client {
+    let url = format!("ws://{addr}/ws/{room}?mode=view");
+    let (socket, _response) = connect_async(url).await.expect("viewer connect");
+    socket
+}
+
 /// Sends `payload` as a binary WebSocket frame.
 async fn send_binary(client: &mut Client, payload: &[u8]) {
     client
@@ -147,6 +154,75 @@ async fn late_joiner_receives_initial_state() {
     let second = recv_binary(&mut bob, RECV_TIMEOUT).await;
     assert_eq!(first.as_deref(), Some(b"update-1".as_slice()));
     assert_eq!(second.as_deref(), Some(b"update-2".as_slice()));
+}
+
+/// A read-only viewer (`?mode=view`) receives the sharer's live frames, but the
+/// frames the viewer itself sends are dropped: they never reach another peer, so
+/// a viewer cannot mutate the shared session.
+#[tokio::test]
+async fn read_only_viewer_receives_but_cannot_publish() {
+    let addr = spawn_relay().await;
+
+    // The sharer edits; the viewer joins read-only; a second editor observes the
+    // room so we can prove the viewer's frame never fans out.
+    let mut sharer = connect(addr, "shared").await;
+    let mut viewer = connect_viewer(addr, "shared").await;
+    let mut other = connect(addr, "shared").await;
+
+    tokio::time::sleep(SUBSCRIBE_GRACE).await;
+
+    // The sharer's edit reaches the read-only viewer.
+    send_binary(&mut sharer, b"sharer-frame").await;
+    let seen = recv_binary(&mut viewer, RECV_TIMEOUT).await;
+    assert_eq!(
+        seen.as_deref(),
+        Some(b"sharer-frame".as_slice()),
+        "a read-only viewer must receive the sharer's live frames"
+    );
+    // The other editor also saw it (drain it so its buffer is clean below).
+    let other_seen = recv_binary(&mut other, RECV_TIMEOUT).await;
+    assert_eq!(other_seen.as_deref(), Some(b"sharer-frame".as_slice()));
+
+    // The viewer tries to publish an edit. It must not reach the other editor.
+    send_binary(&mut viewer, b"viewer-edit").await;
+    let leaked = recv_binary(&mut other, NEGATIVE_TIMEOUT).await;
+    assert_eq!(
+        leaked, None,
+        "a read-only viewer's frame must never be broadcast to other peers"
+    );
+}
+
+/// A read-only viewer's frame is not even recorded in the room log: a peer that
+/// joins *after* the viewer tried to publish replays only the sharer's frame.
+#[tokio::test]
+async fn read_only_viewer_frame_is_not_recorded_in_the_log() {
+    let addr = spawn_relay().await;
+
+    let mut sharer = connect(addr, "log-room").await;
+    let mut viewer = connect_viewer(addr, "log-room").await;
+    tokio::time::sleep(SUBSCRIBE_GRACE).await;
+
+    // The sharer records one real frame; the viewer attempts to record another.
+    send_binary(&mut sharer, b"real-frame").await;
+    send_binary(&mut viewer, b"ignored-viewer-frame").await;
+
+    // Let the relay process both before a late joiner reads the log.
+    tokio::time::sleep(SUBSCRIBE_GRACE).await;
+
+    // A late joiner replays the log: it must contain exactly the sharer's frame,
+    // and nothing from the viewer.
+    let mut latecomer = connect(addr, "log-room").await;
+    let first = recv_binary(&mut latecomer, RECV_TIMEOUT).await;
+    assert_eq!(
+        first.as_deref(),
+        Some(b"real-frame".as_slice()),
+        "the log replays the sharer's frame"
+    );
+    let second = recv_binary(&mut latecomer, NEGATIVE_TIMEOUT).await;
+    assert_eq!(
+        second, None,
+        "the viewer's dropped frame must not appear in the replayed log"
+    );
 }
 
 /// A no-op custom [`reticle_server::Persist`] hook is accepted via

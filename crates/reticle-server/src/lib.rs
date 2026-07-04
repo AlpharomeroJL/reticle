@@ -30,6 +30,17 @@
 //! close frames are handled by axum and this loop respectively. The relay never
 //! inspects payload contents.
 //!
+//! # Read-only viewers
+//!
+//! A connection may join a room **read-only** by passing the query flag
+//! `GET /ws/{room}?mode=view` (see [`JoinMode`], ADR 0038). A read-only peer
+//! still receives everything the room broadcasts (the sharer's live frames and
+//! the replayed log), but any binary frame it sends is dropped: it is never
+//! recorded in the room log and never fanned out to other peers, so a viewer's
+//! edits can never mutate the shared document. This is a server-side backstop for
+//! the app-side rule that a viewer simply never publishes; both together make a
+//! shared session safe to hand to an untrusted viewer.
+//!
 //! # Example
 //!
 //! ```no_run
@@ -50,10 +61,11 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{Path, State, WebSocketUpgrade};
+use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::response::Response;
 use axum::routing::any;
 use futures_util::{SinkExt, StreamExt};
+use serde::Deserialize;
 use tokio::sync::broadcast;
 
 /// Capacity of each room's broadcast channel, in messages.
@@ -70,6 +82,60 @@ pub const DEFAULT_ADDR: &str = "127.0.0.1:3030";
 
 /// The environment variable read by [`bind_address`] to override [`DEFAULT_ADDR`].
 pub const ADDR_ENV: &str = "RETICLE_SERVER_ADDR";
+
+/// How a connection participates in its room.
+///
+/// The default is [`JoinMode::Edit`]: the peer both receives room traffic and may
+/// publish. [`JoinMode::View`] is a read-only join (`?mode=view`): the peer
+/// receives everything but its own frames are dropped, so a viewer can watch a
+/// shared session live without ever mutating it (ADR 0038).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum JoinMode {
+    /// Full participant: receives and publishes. The default when no flag is given.
+    #[default]
+    Edit,
+    /// Read-only viewer: receives room traffic, but frames it sends are dropped.
+    View,
+}
+
+impl JoinMode {
+    /// Whether a connection in this mode is allowed to publish frames into the room.
+    #[must_use]
+    pub fn can_publish(self) -> bool {
+        matches!(self, JoinMode::Edit)
+    }
+
+    /// Parses the `mode` query value into a [`JoinMode`].
+    ///
+    /// `view` (or `viewer`, or `readonly`/`read-only`/`ro`) selects
+    /// [`JoinMode::View`]; anything else, including an absent value, selects
+    /// [`JoinMode::Edit`]. Case-insensitive, so the flag is forgiving.
+    #[must_use]
+    pub fn from_query_value(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "view" | "viewer" | "readonly" | "read-only" | "ro" => JoinMode::View,
+            _ => JoinMode::Edit,
+        }
+    }
+}
+
+/// The `GET /ws/{room}` query parameters. Only `mode` is recognized; unknown keys
+/// are ignored so the route stays forgiving of extra query state a link may carry.
+#[derive(Debug, Default, Deserialize)]
+struct JoinQuery {
+    /// The join mode flag; absent means [`JoinMode::Edit`].
+    #[serde(default)]
+    mode: Option<String>,
+}
+
+impl JoinQuery {
+    /// Resolves the [`JoinMode`] this query selects.
+    fn join_mode(&self) -> JoinMode {
+        self.mode
+            .as_deref()
+            .map_or(JoinMode::Edit, JoinMode::from_query_value)
+    }
+}
 
 /// A persistence hook invoked once per relayed update.
 ///
@@ -262,12 +328,17 @@ impl RelayState {
 }
 
 /// axum handler for `GET /ws/{room}`: upgrades the connection and joins `room`.
+///
+/// The optional `?mode=view` query flag joins the connection read-only (see
+/// [`JoinMode`]); without it the connection is a full participant.
 async fn ws_handler(
     ws: WebSocketUpgrade,
     Path(room): Path<String>,
+    Query(query): Query<JoinQuery>,
     State(state): State<RelayState>,
 ) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(socket, room, state))
+    let mode = query.join_mode();
+    ws.on_upgrade(move |socket| handle_socket(socket, room, mode, state))
 }
 
 /// Drives one peer connection for the lifetime of its socket.
@@ -282,7 +353,12 @@ async fn ws_handler(
 ///
 /// Before live forwarding starts, the room's existing update log is replayed to
 /// the client so a late joiner catches up.
-async fn handle_socket(socket: WebSocket, room: String, state: RelayState) {
+///
+/// When `mode` is [`JoinMode::View`] the receive loop still runs (so pings and a
+/// clean close are handled) but every binary frame the client sends is dropped:
+/// it is neither recorded in the room log nor broadcast, so a read-only viewer
+/// cannot mutate the shared document.
+async fn handle_socket(socket: WebSocket, room: String, mode: JoinMode, state: RelayState) {
     let conn_id = state.allocate_conn_id();
     let (sender, mut receiver, backlog) = state.join(&room);
 
@@ -321,6 +397,11 @@ async fn handle_socket(socket: WebSocket, room: String, state: RelayState) {
     while let Some(Ok(message)) = ws_rx.next().await {
         match message {
             Message::Binary(payload) => {
+                // A read-only viewer's frames are dropped: never logged, never
+                // broadcast, so the viewer cannot mutate the shared document.
+                if !mode.can_publish() {
+                    continue;
+                }
                 state.record(&room, &payload);
                 // A send error means every receiver has dropped; the room is
                 // effectively empty, so continue logging without broadcasting.
@@ -400,5 +481,38 @@ mod tests {
         assert!(format!("{state:?}").contains("RelayState"));
         let rooms = state.rooms.lock().unwrap();
         assert!(format!("{:?}", rooms.get("doc-debug").unwrap()).contains("Room"));
+    }
+
+    #[test]
+    fn join_mode_parses_view_flags_case_insensitively() {
+        for flag in ["view", "View", "VIEWER", "readonly", "read-only", "ro"] {
+            assert_eq!(
+                JoinMode::from_query_value(flag),
+                JoinMode::View,
+                "{flag:?} should be a read-only join"
+            );
+        }
+        // Anything else (including the edit flag and junk) is a full participant.
+        for flag in ["", "edit", "rw", "nonsense"] {
+            assert_eq!(JoinMode::from_query_value(flag), JoinMode::Edit);
+        }
+    }
+
+    #[test]
+    fn join_mode_publish_permission() {
+        assert!(JoinMode::Edit.can_publish(), "an editor may publish");
+        assert!(!JoinMode::View.can_publish(), "a viewer may not publish");
+        assert_eq!(JoinMode::default(), JoinMode::Edit);
+    }
+
+    #[test]
+    fn join_query_resolves_mode() {
+        // An absent mode is Edit; a present view flag is View.
+        let none = JoinQuery { mode: None };
+        assert_eq!(none.join_mode(), JoinMode::Edit);
+        let view = JoinQuery {
+            mode: Some("view".to_owned()),
+        };
+        assert_eq!(view.join_mode(), JoinMode::View);
     }
 }
