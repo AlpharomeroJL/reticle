@@ -17,6 +17,7 @@ workspace = true
 reticle-proto = { workspace = true }
 axum = { version = "0.8.9", features = ["ws"] }
 futures-util = "0.3.32"
+serde = { workspace = true, features = ["derive"] }
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "net", "time"] }
 
 [dev-dependencies]

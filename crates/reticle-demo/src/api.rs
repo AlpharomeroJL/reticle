@@ -59,3 +59,17 @@ pub struct CancelRequest {
     /// The session to cancel.
     pub session_id: String,
 }
+
+/// The response to creating a share room: the room viewers join read-only, and
+/// how long it lives.
+///
+/// A viewer joins this room on the relay with the read-only flag (`?mode=view`,
+/// enforced by `reticle-server`'s `JoinMode`) and applies the sharer's live frames
+/// without ever publishing. The room expires after `ttl_secs` (ADR 0039).
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct ShareResponse {
+    /// The relay room id viewers join read-only to watch the shared session.
+    pub room: String,
+    /// The room's time-to-live in whole seconds, after which it expires.
+    pub ttl_secs: u64,
+}
