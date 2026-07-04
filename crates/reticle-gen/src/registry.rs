@@ -1,7 +1,7 @@
 //! The generator registry: enumerate and invoke generators by id, generically.
 //!
 //! The [`Registry`] maps a generator id to its type-erased handle
-//! ([`ErasedGenerator`](crate::ErasedGenerator)) and its metadata. It is how the app
+//! ([`ErasedGenerator`]) and its metadata. It is how the app
 //! (lane 2D) builds the Generate panel and how the agent lists tools: iterate
 //! [`Registry::infos`] to enumerate what exists and its schema, then call
 //! [`Registry::generate`] with an id and JSON parameters to drive one, all without
