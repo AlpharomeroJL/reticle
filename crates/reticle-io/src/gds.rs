@@ -43,6 +43,7 @@
 //! boundaries so a `Rect` survives as a `Rect`.
 
 use crate::IoError;
+use crate::error::{ImportWarning, WarningKind};
 use gds21::{
     GdsArrayRef, GdsBoundary, GdsElement, GdsLibrary, GdsPath, GdsPoint, GdsStrans, GdsStruct,
     GdsStructRef, GdsTextElem, GdsUnits,
@@ -60,8 +61,39 @@ use reticle_model::{
 /// Implements [`Importer`] (bytes to [`Document`]) and [`Exporter`]
 /// ([`Document`] to bytes) using the [`gds21`] library. See the [module
 /// docs](self) for the full mapping.
+///
+/// # Robustness
+///
+/// [`Gds::import`] never panics and never hangs, whatever bytes it is handed.
+/// `gds21` reads from an in-memory cursor and every record consumes at least four
+/// bytes, so parsing a finite slice terminates and allocates O(input) memory; the
+/// few inputs that make `gds21` itself panic (a zero-length string record, an
+/// out-of-range date field) are contained with [`std::panic::catch_unwind`] and
+/// returned as [`IoError`]. Before parsing, an input larger than
+/// [`MAX_INPUT_BYTES`] is rejected outright so a hostile length can never force a
+/// huge allocation. After parsing, geometry that survived `gds21` but is
+/// degenerate or oversized is *not* fatal: [`Gds::import_with_warnings`] drops or
+/// clamps it and records an [`ImportWarning`], so a real-world file with a stray
+/// bad element still opens. See [`import_with_warnings`](Gds::import_with_warnings).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Gds;
+
+/// The largest GDSII input this importer will attempt to parse, in bytes
+/// (256 MiB). A stream at or under this bound parses within a bounded allocation;
+/// a larger one is refused with a clear [`IoError`] rather than risking an
+/// out-of-memory abort on a hostile or truncated-huge input. Real published tiles
+/// (the Tiny Tapeout and Sky130 corpora) are a few megabytes, far under this
+/// ceiling.
+pub const MAX_INPUT_BYTES: usize = 256 * 1024 * 1024;
+
+/// The largest number of vertices a single boundary or path is allowed to carry
+/// into the model. A conformant GDSII XY record is length-limited by its 16-bit
+/// header (at most a few thousand points), but a re-encoded or crafted stream can
+/// present more; past this bound the shape is skipped with a
+/// [`WarningKind::LimitExceeded`] warning rather than materialized. This is a
+/// defense-in-depth ceiling, not a live limit: a single conformant record can never
+/// reach it.
+pub const MAX_SHAPE_VERTICES: usize = 200_000;
 
 /// Default GDSII layout version written on export (matches `gds21`'s own default).
 const GDS_VERSION: i16 = 3;
@@ -74,13 +106,65 @@ const USER_UNIT_METERS: f64 = 1e-6;
 /// the ubiquitous GDSII default.
 const DEFAULT_DBU_PER_MICRON: i64 = 1000;
 
+/// The result of a GDSII import that kept its non-fatal warnings.
+///
+/// Returned by [`Gds::import_with_warnings`]. The [`document`](GdsImport::document)
+/// is always well-formed and safe to use; [`warnings`](GdsImport::warnings) lists
+/// every recoverable problem that was skipped, clamped, or defaulted during the
+/// import (empty for a clean file). The frozen [`Importer::import`] path discards
+/// the warnings and returns only the document, so callers that want to surface
+/// what was dropped call this method instead.
+#[derive(Debug, Clone)]
+pub struct GdsImport {
+    /// The imported document. Always valid, even when warnings are present.
+    pub document: Document,
+    /// Recoverable problems found during import, in encounter order.
+    pub warnings: Vec<ImportWarning>,
+}
+
 impl Importer for Gds {
     fn import(&self, bytes: &[u8]) -> Result<Document> {
+        // The frozen trait method returns only the document; warnings are dropped
+        // here (callers wanting them use `import_with_warnings`).
+        Ok(self.import_with_warnings(bytes)?.document)
+    }
+}
+
+impl Gds {
+    /// Imports GDSII `bytes` into a [`Document`], keeping every non-fatal warning.
+    ///
+    /// This is the hardened import entry point. It never panics and never hangs on
+    /// any input (see the [type docs](Gds#robustness)):
+    ///
+    /// * An input larger than [`MAX_INPUT_BYTES`] is refused up front with an
+    ///   [`IoError`], so a hostile length cannot force a huge allocation.
+    /// * `gds21` parses from an in-memory cursor where every record consumes at
+    ///   least four bytes, so parsing a finite slice terminates. The handful of
+    ///   inputs that panic `gds21` internally are contained with
+    ///   [`std::panic::catch_unwind`] (safe Rust, no `unsafe`) and returned as an
+    ///   `Err`.
+    /// * Geometry that parsed but is degenerate (too few vertices, zero area) or
+    ///   oversized (more than [`MAX_SHAPE_VERTICES`] points) is not fatal: it is
+    ///   skipped or clamped and an [`ImportWarning`] is recorded, so one bad
+    ///   element does not sink an otherwise-good file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`reticle_model::ModelError`] (via [`IoError`]) when the input is
+    /// too large, is not GDSII, or is malformed past recovery.
+    pub fn import_with_warnings(&self, bytes: &[u8]) -> Result<GdsImport> {
+        if bytes.len() > MAX_INPUT_BYTES {
+            return Err(IoError::Malformed(
+                "GDSII input exceeds the maximum accepted size (256 MiB)",
+            )
+            .into());
+        }
+
         // `gds21` panics on a few malformed inputs (for example a zero-length
-        // string record indexes `data[len - 1]`). Contain any such panic so
-        // `import` upholds its contract of returning `Err` rather than
-        // unwinding across the FFI-like boundary. `catch_unwind` is safe Rust;
-        // no `unsafe` is required.
+        // string record indexes `data[len - 1]`, and an out-of-range date field
+        // panics chrono). Contain any such panic so import upholds its contract of
+        // returning `Err` rather than unwinding across this parser boundary.
+        // `catch_unwind` is safe Rust; no `unsafe` is required.
         let owned = bytes.to_vec();
         let parsed = std::panic::catch_unwind(move || GdsLibrary::from_bytes(owned));
         let lib = match parsed {
@@ -90,7 +174,58 @@ impl Importer for Gds {
                 return Err(IoError::Malformed("gds21 panicked while parsing GDSII bytes").into());
             }
         };
-        Ok(library_to_document(&lib))
+
+        let mut warnings = Warnings::new();
+        let document = library_to_document(&lib, &mut warnings);
+        Ok(GdsImport {
+            document,
+            warnings: warnings.into_vec(),
+        })
+    }
+}
+
+/// A bounded accumulator for [`ImportWarning`]s raised during an import.
+///
+/// Deduplicates by category so a pathological file (say, ten thousand degenerate
+/// boundaries) yields one representative warning per category with a running
+/// count, not ten thousand warnings that would themselves be a memory hazard.
+struct Warnings {
+    /// One entry per [`WarningKind`] seen: the first warning of that kind and how
+    /// many total were folded into it.
+    seen: Vec<(WarningKind, ImportWarning, usize)>,
+}
+
+impl Warnings {
+    fn new() -> Self {
+        Self { seen: Vec::new() }
+    }
+
+    /// Records one warning, folding repeats of the same kind into a single entry
+    /// with a count so the list stays small and bounded.
+    fn push(&mut self, w: ImportWarning) {
+        if let Some(entry) = self.seen.iter_mut().find(|(k, ..)| *k == w.kind) {
+            entry.2 += 1;
+        } else {
+            let kind = w.kind;
+            self.seen.push((kind, w, 1));
+        }
+    }
+
+    /// Flattens the accumulator into the final warning list, appending the folded
+    /// repeat count to each entry's detail so nothing is hidden.
+    fn into_vec(self) -> Vec<ImportWarning> {
+        self.seen
+            .into_iter()
+            .map(|(_, mut w, count)| {
+                if count > 1 {
+                    w.detail = format!(
+                        "{} ({} occurrences of this kind; first shown)",
+                        w.detail, count
+                    );
+                }
+                w
+            })
+            .collect()
     }
 }
 
@@ -103,8 +238,9 @@ impl Exporter for Gds {
     }
 }
 
-/// Converts a parsed [`GdsLibrary`] into a Reticle [`Document`].
-fn library_to_document(lib: &GdsLibrary) -> Document {
+/// Converts a parsed [`GdsLibrary`] into a Reticle [`Document`], recording any
+/// non-fatal problems into `warnings`.
+fn library_to_document(lib: &GdsLibrary, warnings: &mut Warnings) -> Document {
     let mut doc = Document::new();
 
     // Recover the database resolution from the UNITS record.
@@ -119,7 +255,7 @@ fn library_to_document(lib: &GdsLibrary) -> Document {
     let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for strukt in &lib.structs {
-        let cell = struct_to_cell(strukt, &mut referenced);
+        let cell = struct_to_cell(strukt, &mut referenced, warnings);
         doc.insert_cell(cell);
     }
 
@@ -164,20 +300,36 @@ fn library_to_document(lib: &GdsLibrary) -> Document {
     doc
 }
 
-/// Converts one [`GdsStruct`] to a [`Cell`], recording referenced cell names.
-fn struct_to_cell(strukt: &GdsStruct, referenced: &mut std::collections::HashSet<String>) -> Cell {
+/// Converts one [`GdsStruct`] to a [`Cell`], recording referenced cell names and
+/// folding any degenerate/oversized geometry into `warnings` (skipping it) rather
+/// than materializing it.
+fn struct_to_cell(
+    strukt: &GdsStruct,
+    referenced: &mut std::collections::HashSet<String>,
+    warnings: &mut Warnings,
+) -> Cell {
     let mut cell = Cell::new(strukt.name.clone());
     for elem in &strukt.elems {
         match elem {
-            GdsElement::GdsBoundary(b) => cell.shapes.push(boundary_to_shape(b)),
-            GdsElement::GdsPath(p) => cell.shapes.push(path_to_shape(p)),
+            GdsElement::GdsBoundary(b) => {
+                if let Some(shape) = boundary_to_shape(b, &strukt.name, warnings) {
+                    cell.shapes.push(shape);
+                }
+            }
+            GdsElement::GdsPath(p) => {
+                if let Some(shape) = path_to_shape(p, &strukt.name, warnings) {
+                    cell.shapes.push(shape);
+                }
+            }
             GdsElement::GdsStructRef(sref) => {
                 referenced.insert(sref.name.clone());
-                cell.instances.push(struct_ref_to_instance(sref));
+                cell.instances
+                    .push(struct_ref_to_instance(sref, &strukt.name, warnings));
             }
             GdsElement::GdsArrayRef(aref) => {
                 referenced.insert(aref.name.clone());
-                cell.arrays.push(array_ref_to_array(aref));
+                cell.arrays
+                    .push(array_ref_to_array(aref, &strukt.name, warnings));
             }
             GdsElement::GdsTextElem(text) => cell.labels.push(text_elem_to_label(text)),
             // Node and Box carry no drawn fill geometry we model in Wave 1. They
@@ -205,19 +357,55 @@ fn text_elem_to_label(text: &GdsTextElem) -> Label {
 }
 
 /// Maps a GDSII boundary to a rectangle when its ring is an axis-aligned box,
-/// otherwise to a polygon.
-fn boundary_to_shape(b: &GdsBoundary) -> DrawShape {
+/// otherwise to a polygon. Returns `None` (with a recorded warning) for a boundary
+/// too degenerate to draw or one carrying an implausible number of vertices.
+fn boundary_to_shape(b: &GdsBoundary, cell: &str, warnings: &mut Warnings) -> Option<DrawShape> {
     let layer = layer_id(b.layer, b.datatype);
+
+    // Guard the vertex count before allocating the point vector: a crafted or
+    // re-encoded XY record can present far more points than a real polygon needs.
+    if b.xy.len() > MAX_SHAPE_VERTICES {
+        warnings.push(ImportWarning::new(
+            WarningKind::LimitExceeded,
+            "boundary skipped: too many vertices",
+            format!(
+                "cell '{cell}', layer {}/{}: boundary has {} vertices (limit {MAX_SHAPE_VERTICES}); skipped",
+                b.layer,
+                b.datatype,
+                b.xy.len()
+            ),
+        ));
+        return None;
+    }
+
     let mut pts: Vec<Point> = b.xy.iter().map(gds_point_to_point).collect();
     // GDSII repeats the first vertex as the last to close the ring. Drop the
     // duplicate closing vertex so our (implicitly closed) polygon is canonical.
     if pts.len() >= 2 && pts.first() == pts.last() {
         pts.pop();
     }
+
+    // A ring needs at least three distinct vertices to bound any area. Fewer than
+    // that is a degenerate boundary (a point or a sliver); skip it with a warning
+    // rather than pushing a zero-area shape that no tool can use.
+    if pts.len() < 3 {
+        warnings.push(ImportWarning::new(
+            WarningKind::DegenerateGeometry,
+            "boundary skipped: fewer than 3 vertices",
+            format!(
+                "cell '{cell}', layer {}/{}: boundary ring has {} distinct vertices; skipped",
+                b.layer,
+                b.datatype,
+                pts.len()
+            ),
+        ));
+        return None;
+    }
+
     if let Some(rect) = axis_aligned_rect(&pts) {
-        DrawShape::new(layer, ShapeKind::Rect(rect))
+        Some(DrawShape::new(layer, ShapeKind::Rect(rect)))
     } else {
-        DrawShape::new(layer, ShapeKind::Polygon(Polygon::new(pts)))
+        Some(DrawShape::new(layer, ShapeKind::Polygon(Polygon::new(pts))))
     }
 }
 
@@ -246,21 +434,59 @@ fn axis_aligned_rect(pts: &[Point]) -> Option<Rect> {
     }
 }
 
-/// Maps a GDSII path to a [`ShapeKind::Path`].
-fn path_to_shape(p: &GdsPath) -> DrawShape {
+/// Maps a GDSII path to a [`ShapeKind::Path`]. Returns `None` (with a recorded
+/// warning) for a path with too few points to draw a centre-line or one carrying
+/// an implausible number of vertices.
+fn path_to_shape(p: &GdsPath, cell: &str, warnings: &mut Warnings) -> Option<DrawShape> {
     let layer = layer_id(p.layer, p.datatype);
+
+    if p.xy.len() > MAX_SHAPE_VERTICES {
+        warnings.push(ImportWarning::new(
+            WarningKind::LimitExceeded,
+            "path skipped: too many vertices",
+            format!(
+                "cell '{cell}', layer {}/{}: path has {} points (limit {MAX_SHAPE_VERTICES}); skipped",
+                p.layer,
+                p.datatype,
+                p.xy.len()
+            ),
+        ));
+        return None;
+    }
+
+    // A path centre-line needs at least two points to have any length.
+    if p.xy.len() < 2 {
+        warnings.push(ImportWarning::new(
+            WarningKind::DegenerateGeometry,
+            "path skipped: fewer than 2 points",
+            format!(
+                "cell '{cell}', layer {}/{}: path has {} points; skipped",
+                p.layer,
+                p.datatype,
+                p.xy.len()
+            ),
+        ));
+        return None;
+    }
+
     let points: Vec<Point> = p.xy.iter().map(gds_point_to_point).collect();
     let width = p.width.unwrap_or(0);
     // Reticle's default endcap (`Flat`) corresponds to GDSII path-type 0. Path
     // types 1/2 (round/square) are not distinguished in Wave 1; width and the
     // centre-line are preserved, which is what round-trips through our writer.
     let path = Path::new(points, width, reticle_geometry::Endcap::Flat);
-    DrawShape::new(layer, ShapeKind::Path(path))
+    Some(DrawShape::new(layer, ShapeKind::Path(path)))
 }
 
 /// Maps a GDSII struct reference to an [`Instance`].
-fn struct_ref_to_instance(sref: &GdsStructRef) -> Instance {
-    let transform = strans_to_transform(sref.strans.as_ref(), gds_point_to_point(&sref.xy));
+fn struct_ref_to_instance(sref: &GdsStructRef, cell: &str, warnings: &mut Warnings) -> Instance {
+    let transform = strans_to_transform(
+        sref.strans.as_ref(),
+        gds_point_to_point(&sref.xy),
+        cell,
+        &sref.name,
+        warnings,
+    );
     Instance {
         cell: sref.name.clone(),
         transform,
@@ -272,11 +498,23 @@ fn struct_ref_to_instance(sref: &GdsStructRef) -> Instance {
 /// The three `xy` points are, per the GDSII spec: the array origin, a point
 /// `columns` column-pitches away, and a point `rows` row-pitches away. We derive
 /// the axis-aligned pitches from those deltas.
-fn array_ref_to_array(aref: &GdsArrayRef) -> ArrayInstance {
+fn array_ref_to_array(aref: &GdsArrayRef, cell: &str, warnings: &mut Warnings) -> ArrayInstance {
     let origin = gds_point_to_point(&aref.xy[0]);
     let col_end = gds_point_to_point(&aref.xy[1]);
     let row_end = gds_point_to_point(&aref.xy[2]);
 
+    // GDSII stores counts as i16; a negative count is meaningless. Clamp to zero
+    // and note it rather than trusting a wrapped value.
+    if aref.cols < 0 || aref.rows < 0 {
+        warnings.push(ImportWarning::new(
+            WarningKind::ValueClamped,
+            "array counts clamped: negative repetition",
+            format!(
+                "cell '{cell}', array of '{}': cols={} rows={} contained a negative count, clamped to 0",
+                aref.name, aref.cols, aref.rows
+            ),
+        ));
+    }
     let cols = u32::try_from(aref.cols.max(0)).unwrap_or(0);
     let rows = u32::try_from(aref.rows.max(0)).unwrap_or(0);
 
@@ -292,7 +530,7 @@ fn array_ref_to_array(aref: &GdsArrayRef) -> ArrayInstance {
         0
     };
 
-    let transform = strans_to_transform(aref.strans.as_ref(), origin);
+    let transform = strans_to_transform(aref.strans.as_ref(), origin, cell, &aref.name, warnings);
     ArrayInstance {
         cell: aref.name.clone(),
         transform,
@@ -304,8 +542,14 @@ fn array_ref_to_array(aref: &GdsArrayRef) -> ArrayInstance {
 }
 
 /// Builds a Reticle [`Transform`] from an optional GDSII [`GdsStrans`] plus the
-/// instance's translation.
-fn strans_to_transform(strans: Option<&GdsStrans>, translation: Point) -> Transform {
+/// instance's translation. `cell`/`target` name the placement for any warning.
+fn strans_to_transform(
+    strans: Option<&GdsStrans>,
+    translation: Point,
+    cell: &str,
+    target: &str,
+    warnings: &mut Warnings,
+) -> Transform {
     let mut transform = Transform {
         translation,
         ..Transform::IDENTITY
@@ -313,7 +557,7 @@ fn strans_to_transform(strans: Option<&GdsStrans>, translation: Point) -> Transf
     if let Some(s) = strans {
         transform.orientation = orientation_from_strans(s);
         if let Some(mag) = s.mag {
-            transform.magnification = magnification_from_f64(mag);
+            transform.magnification = magnification_from_f64(mag, cell, target, warnings);
         }
     }
     transform
@@ -346,17 +590,53 @@ fn orientation_from_strans(s: &GdsStrans) -> Orientation {
 ///
 /// Unit magnification is by far the common case and is represented exactly.
 /// Other values are scaled by `1_000_000` and stored as `n / 1_000_000`, which is
-/// well within DBU precision for the placement magnitudes GDSII permits.
-fn magnification_from_f64(mag: f64) -> Magnification {
+/// well within DBU precision for the placement magnitudes GDSII permits. A value
+/// that is non-finite, non-positive, or too large to scale into the rational is
+/// not representable; it falls back to unity and records a [`WarningKind::ValueClamped`]
+/// warning rather than silently distorting the placement.
+fn magnification_from_f64(
+    mag: f64,
+    cell: &str,
+    target: &str,
+    warnings: &mut Warnings,
+) -> Magnification {
     const SCALE: f64 = 1_000_000.0;
-    if (mag - 1.0).abs() < f64::EPSILON || mag <= 0.0 {
+    if (mag - 1.0).abs() < f64::EPSILON {
+        return Magnification::UNITY;
+    }
+    if !mag.is_finite() || mag <= 0.0 {
+        warnings.push(ImportWarning::new(
+            WarningKind::ValueClamped,
+            "magnification defaulted to 1.0",
+            format!(
+                "cell '{cell}', placement of '{target}': magnification {mag} is not a usable positive value; using 1.0"
+            ),
+        ));
         return Magnification::UNITY;
     }
     let num = (mag * SCALE).round();
     if num <= 0.0 || num > f64::from(u32::MAX) {
+        warnings.push(ImportWarning::new(
+            WarningKind::ValueClamped,
+            "magnification defaulted to 1.0",
+            format!(
+                "cell '{cell}', placement of '{target}': magnification {mag} is outside the representable range; using 1.0"
+            ),
+        ));
         return Magnification::UNITY;
     }
-    Magnification::new(num as u32, SCALE as u32).unwrap_or(Magnification::UNITY)
+    if let Some(m) = Magnification::new(num as u32, SCALE as u32) {
+        m
+    } else {
+        warnings.push(ImportWarning::new(
+            WarningKind::ValueClamped,
+            "magnification defaulted to 1.0",
+            format!(
+                "cell '{cell}', placement of '{target}': magnification {mag} could not be represented; using 1.0"
+            ),
+        ));
+        Magnification::UNITY
+    }
 }
 
 // ---------------------------------------------------------------------------
