@@ -474,14 +474,28 @@ Wave 4's Dockerized precheck are runnable once quota returns. RESUME after Jul 7
 re-read this file, spawn Lane 3A (build the backend, verify `claude` non-interactive MCP
 flags from the installed CLI help), then decide 3B run scope with the operator.
 
-- [ ] Serial: server-side transcript capture in `reticle-mcp` (record every command
-  and result as a session-transcript JSONL regardless of client; closes the local
-  mining gap). Orchestrator is doing this directly (subagents blocked).
-- [ ] Lane 3A: harness backend that drives Claude Code non-interactively
-  (`claude -p <task> --mcp-config <generated>`; verify the current CLI flags from the
-  installed CLI's help at build time, do not guess); one session per task; server
-  enforces command budgets and captures the transcript; detect absence of the CLI or
-  an unauthenticated session and skip with an honest not-run marker.
+- [x] Serial: server-side transcript capture in `reticle-mcp`. DONE (orchestrator
+  direct, subagents blocked; `just ci` GREEN; commits 64c7069 feature, c3cb510 an
+  incidental crossbeam-epoch bump for the freshly-published RUSTSEC-2026-0204).
+  `Server::with_transcript(budget, Box<dyn Write>)` streams every applied command as a
+  session-transcript JSONL (one `CommandRecord` per line, flushed per request,
+  crash-safe) at the single dispatch chokepoint, so it captures command/generator/
+  context tools and (since `Session::apply` records failures) failed commands too;
+  the binary enables it via `RETICLE_MCP_TRANSCRIPT`, `Server::new` still captures
+  nothing. A test drives successes and failures and asserts the captured JSONL replays
+  to the same document as direct application. Closes the mining/replay gap for a raw
+  MCP client (Lane 3A) and local runs. ADR 0051.
+- [ ] Lane 3A: harness backend that drives Claude Code non-interactively; one session
+  per task; server enforces command budgets and captures the transcript (via the
+  serial step's `RETICLE_MCP_TRANSCRIPT`); detect absence of the CLI or an
+  unauthenticated session and skip with an honest not-run marker. BLOCKED on the
+  weekly quota for any real run until Jul 7 9am. VERIFIED CLI flags (claude v2.1.197,
+  captured 2026-07-06, no quota): `-p`/`--print` (non-interactive), `--mcp-config
+  <configs...>` (point at a generated config that launches `reticle-mcp` with
+  `RETICLE_MCP_TRANSCRIPT` set), `--strict-mcp-config` (only that server),
+  `--model <model>` (the row label reports what the CLI used), `--output-format
+  stream-json` (parse the result), `--allowed-tools <tools...>`, `--append-system-prompt`,
+  `--permission-mode`. Build against these, not guesses.
 - [ ] Lane 3B: honest labeling + the run. Row labeled "Claude Code (<model reported
   by the CLI>)", never a bare-model comparison; README + benchmark chapter explain
   the agent-system vs bare-model distinction. If the CLI is present and authenticated
