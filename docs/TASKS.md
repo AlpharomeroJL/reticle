@@ -459,11 +459,24 @@ test structures) behind a typed `Generator` trait + registry, exposed in the Gen
 panel, as per-generator agent/MCP tools via an additive `RunGenerator` command, and in
 the 83-task v0.5.0 benchmark. All merged, `just ci` GREEN.**
 
-## Wave 3: Claude Code as an agent-system backend (serial then parallel) [not-started]
+## Wave 3: Claude Code as an agent-system backend (serial then parallel) [in-progress]
+
+INCIDENT (weekly quota limit, 2026-07-06): the Wave 3 serial subagent was killed by
+an Anthropic WEEKLY limit ("resets Jul 7, 9am America/Chicago") after a few tool calls
+(it did NO work; `lane/v7-3serial` was at main and was removed clean, nothing lost).
+Effect: subagent lanes cannot be spawned until the reset. The main orchestrator session
+still has capacity, so it does the self-contained, no-runtime-quota serial step DIRECTLY
+(no delegation possible). Steps needing Claude quota at runtime are blocked until reset:
+Lane 3A's Claude Code smoke run and Lane 3B's full 83-task suite run (83 `claude -p`
+sessions on the operator's subscription). Environment for the reset: Claude CLI v2.1.197,
+Docker v29.5.3, and WSL/Ubuntu are all present (verified 2026-07-06), so Wave 3A/3B and
+Wave 4's Dockerized precheck are runnable once quota returns. RESUME after Jul 7 9am:
+re-read this file, spawn Lane 3A (build the backend, verify `claude` non-interactive MCP
+flags from the installed CLI help), then decide 3B run scope with the operator.
 
 - [ ] Serial: server-side transcript capture in `reticle-mcp` (record every command
   and result as a session-transcript JSONL regardless of client; closes the local
-  mining gap).
+  mining gap). Orchestrator is doing this directly (subagents blocked).
 - [ ] Lane 3A: harness backend that drives Claude Code non-interactively
   (`claude -p <task> --mcp-config <generated>`; verify the current CLI flags from the
   installed CLI's help at build time, do not guess); one session per task; server
