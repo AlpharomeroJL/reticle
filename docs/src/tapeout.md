@@ -18,12 +18,17 @@ truth over this page.
   parameterized generators (guard ring, via farm, pad ring, seal ring, density fill,
   probe-able test structures) that are DRC-clean by construction against that subset.
   Those are what a tile's content would be made of.
-- **Planned, not yet built** (the rest of this wave): a Reticle technology-plus-template
-  bundle that frames a correctly-shaped TinyTapeout tile (Lane 4A); a wrapper that runs
+- **Built in this wave**: a Reticle technology-plus-template bundle that frames a
+  correctly-shaped TinyTapeout tile (Lane 4A). "New TinyTapeout tile" on the Start
+  screen now opens the `tt_um_reticle_tile` template: the 1x2 die outline, the six
+  `ua[0]`..`ua[5]` analog pins on met4, and the VDPWR/VGND/VAPWR power straps, all at
+  coordinates transcribed from TinyTapeout's own analog DEF template and init script
+  (see below).
+- **Planned, not yet built** (the rest of this wave): a wrapper that runs
   TinyTapeout's own precheck as an external oracle, `just tt-precheck <gds>` (Lane 4B);
   and the worked in-repo example, an agent-generated test-structure tile in the TT
   template that passes `just tt-precheck` clean, committed with its transcript (the
-  packet's proof artifact). This page is the plan; those are the remaining work.
+  packet's proof artifact). Those are the remaining work.
 
 No shuttle purchase is in scope for this project. A paid submission is the operator's
 own decision, which the tooling above is meant to make straightforward at any time.
@@ -71,10 +76,30 @@ designs are slightly narrower):
   floating digital output pins.
 - **Naming:** the top macro name must start with `tt_um_` and be unique on the shuttle.
 
-Encoding exactly this as a Reticle technology-plus-template bundle, so "New TinyTapeout
-tile" in the Start screen opens a correctly framed, pinned, locked document, is Lane
-4A. It will be validated against TinyTapeout's published example submissions rather
-than this summary.
+## The template bundle (Lane 4A)
+
+"New TinyTapeout tile" on the Start screen loads a document whose frame is
+transcribed from TinyTapeout's own files, not this summary. The bundle has two
+wasm-safe halves:
+
+- a technology file, `tech/tinytapeout-sky130.tech`, that names met4 and its
+  pin/label purposes, adds a `tt_boundary` marker (SKY130 areaid.sc, `81/4`) for the
+  tile outline, and puts the met5 prohibition on record; and
+- a pure-Rust builder, `reticle_app::tinytapeout::tile_document()`, that constructs
+  the `tt_um_reticle_tile` cell: the 1x2 die outline
+  (`( 0 0 )`..`( 161000 225760 )` DBU), the six `ua[0]`..`ua[5]` analog pins on met4
+  (each a `( -450 -500 )( 450 500 )` port at the DEF's `PLACED` x centers), and the
+  VDPWR/VGND/VAPWR met4 power straps (y 5 um to 220.76 um, 2 um wide, at x = 1, 4,
+  and 7 um).
+
+The coordinates come from `tt_analog_1x2.def` and `magic_init_project.tcl` in
+`TinyTapeout/tt-support-tools`. The Reticle model has no per-shape lock, so the frame
+is documented as the fixed part the user must not move rather than mechanically
+locked. The bundle is validated by a test that matches the die area, the six pin
+rectangles, and the strap geometry against numbers extracted from those TinyTapeout
+files (committed as small fixtures with their source URLs), and cross-checked against
+a real published GDS-mode submission, `tt_um_analog_mux`, for the shared 1x2 height
+and the met4-top / no-met5 rule.
 
 ## Submission mechanics and the precheck oracle
 
