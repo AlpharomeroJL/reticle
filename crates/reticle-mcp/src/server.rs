@@ -83,10 +83,33 @@ impl Default for Budget {
 }
 
 /// An MCP server over one Reticle [`Session`] with a command [`Budget`].
-#[derive(Debug)]
+///
+/// Built with [`Server::new`] it captures no transcript (the default). Built with
+/// [`Server::with_transcript`] it streams every command the session applies, whatever
+/// client drove it, to the given writer as a session-transcript JSONL (one
+/// [`reticle_agent_api::CommandRecord`] per line), flushed after each request so a
+/// crash still leaves a valid partial transcript. That closes the mining/replay gap
+/// for clients the harness does not control (a raw MCP client, for example Claude
+/// Code) and for local runs.
 pub struct Server {
     session: Session,
     budget: Budget,
+    /// The optional transcript sink; `None` disables capture (the default).
+    transcript_out: Option<Box<dyn Write>>,
+    /// How many of the session's transcript records have already been written to the
+    /// sink, so each flush appends only the new ones.
+    written: usize,
+}
+
+impl std::fmt::Debug for Server {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // `Box<dyn Write>` is not `Debug`, so summarize the capture state instead.
+        f.debug_struct("Server")
+            .field("budget_remaining", &self.budget.remaining())
+            .field("records", &self.session.transcript().len())
+            .field("capturing", &self.transcript_out.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Default for Server {
@@ -96,13 +119,55 @@ impl Default for Server {
 }
 
 impl Server {
-    /// A server with a fresh session and the given command budget.
+    /// A server with a fresh session and the given command budget. Captures no
+    /// transcript; use [`Server::with_transcript`] to persist one.
     #[must_use]
     pub fn new(budget: Budget) -> Self {
         Self {
             session: Session::new(),
             budget,
+            transcript_out: None,
+            written: 0,
         }
+    }
+
+    /// A server that streams every applied command to `out` as a session-transcript
+    /// JSONL, so a client the harness does not control still leaves a replay-verifiable,
+    /// mineable transcript. One `CommandRecord` per line, flushed after each request.
+    #[must_use]
+    pub fn with_transcript(budget: Budget, out: Box<dyn Write>) -> Self {
+        Self {
+            session: Session::new(),
+            budget,
+            transcript_out: Some(out),
+            written: 0,
+        }
+    }
+
+    /// Streams any transcript records the session added since the last flush to the
+    /// sink, a no-op when capture is off. Called after each request so the JSONL grows
+    /// one line per applied command (and per session-applying context tool) and stays
+    /// crash-safe. The session and the sink are never borrowed at once.
+    fn flush_new_records(&mut self) {
+        if self.transcript_out.is_none() {
+            return;
+        }
+        let records = self.session.transcript();
+        if self.written >= records.len() {
+            return;
+        }
+        let lines: Vec<String> = records[self.written..]
+            .iter()
+            .filter_map(|record| serde_json::to_string(record).ok())
+            .collect();
+        let total = records.len();
+        if let Some(out) = self.transcript_out.as_mut() {
+            for line in &lines {
+                let _ = writeln!(out, "{line}");
+            }
+            let _ = out.flush();
+        }
+        self.written = total;
     }
 
     /// The remaining command budget.
@@ -146,6 +211,10 @@ impl Server {
             "tools/call" => self.handle_call(&id, &msg),
             other => rpc_error(&id, METHOD_NOT_FOUND, &format!("method not found: {other}")),
         };
+        // Persist any commands the session just applied, whatever the dispatch path
+        // (a command tool, a generator tool, or a session-applying context tool), to
+        // the transcript sink when capture is on.
+        self.flush_new_records();
         Some(response)
     }
 
