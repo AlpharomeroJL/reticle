@@ -504,10 +504,21 @@ flags from the installed CLI help), then decide 3B run scope with the operator.
   all transcripts incl. the new server-side local ones; promote only two-way-tested
   candidates.
 
-## Wave 4: the tape-out oracle, TTSKY26c readiness (parallel, 3 lanes) [not-started]
+## Wave 4: the tape-out oracle, TTSKY26c readiness (parallel, 3 lanes) [in-progress]
 
 Fetch TinyTapeout's live docs/tooling at build time; their specs move, do not trust
 this packet's summary over their repos.
+
+VERIFIED live facts (fetched from tinytapeout.com 2026-07-06, no quota, for 4A/4B/4C):
+TTSKY26c is the current open SKY130 shuttle (launched 2026-05-26, CLOSES 2026-09-07,
+delivery 2027-03-27 to 2027-05-12). GDS-mode tile footprints: 1x2 about 160x225um or
+2x2 about 334x225um (approximate; 3.3V narrower). Pins: `ua[0..5]` (max 6, in order) on
+met4, at locations matching a TinyTapeout DEF template. Power: VGND, VDPWR (1.8V),
+optional VAPWR (3.3V) as vertical met4 stripes >=1.2um wide, bottom-10um to top-10um.
+Metal 5 forbidden (TT power grid). No floating digital output pins. Top macro name
+`tt_um_*`, unique on the shuttle. The precheck (Magic + KLayout) lives in
+`TinyTapeout/tt-support-tools` (its `precheck` module), confirmed present. For 4A the
+exact per-pin DEF coordinates still need pulling from the shuttle's template repo.
 
 - [ ] Lane 4A: pull the current TinyTapeout GDS-mode die template (tile dims, pin
   locations/layers, power rails, keep-outs, cell naming); encode as a Reticle
@@ -519,11 +530,16 @@ this packet's summary over their repos.
   <gds>`); wire it as an agent-loop verifier whose structured failures are parsed and
   fed back like DRC violations; an e2e-style test proves a known-good example passes
   and a seeded violation fails with a parsed, actionable report.
-- [ ] Lane 4C: `docs/src/tapeout.md` (honest plan: what GDS-mode submission is/is
-  not, TTSKY26c dates, current costs, submission mechanics) + a worked in-repo
-  example: an agent-generated test-structure tile in the TT template that passes
-  `just tt-precheck` clean, committed with its transcript. This is the packet's proof
-  artifact; a paid submission remains a separate operator decision.
+- [~] Lane 4C: `docs/src/tapeout.md`. The HONEST PLAN half is DONE (commit 7692f0b,
+  orchestrator direct, no quota; wired into SUMMARY under a Tape-out section; book +
+  check-style + typos green): what GDS-mode submission is versus the digital HDL flow,
+  TTSKY26c dates, pricing via their calculator, the tile template constraints, and the
+  precheck as the authoritative external oracle, all grounded in the fetched facts
+  above and clearly marking built versus planned. STILL OUTSTANDING: the worked in-repo
+  example (a test-structure tile in the TT template that passes `just tt-precheck`
+  clean, committed with its transcript), which needs Lane 4A (the template bundle) and
+  Lane 4B (the precheck wrapper) first. A paid submission remains a separate operator
+  decision.
 
 ## Wave 5: presentation to product grade (parallel, 2 lanes) [not-started]
 
