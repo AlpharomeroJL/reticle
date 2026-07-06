@@ -46,3 +46,41 @@ mod server;
 pub mod tools;
 
 pub use server::{Budget, Server};
+
+/// The names of every tool this server advertises, in catalog order (command tools,
+/// then generator tools, then context tools).
+///
+/// This is the single source of truth for the tool surface, exposed so an out-of-process
+/// driver (for example a harness that hands an MCP client an allowlist) can name exactly
+/// the tools this server serves without duplicating the list and letting it drift. The
+/// names here are the bare tool names (`create_cell`, `add_rect`, ...); a specific MCP
+/// client may namespace them by server (Claude Code uses `mcp__<server>__<tool>`), which
+/// is the caller's concern, not this crate's.
+#[must_use]
+pub fn tool_names() -> Vec<&'static str> {
+    tools::all_tools().iter().map(|t| t.name).collect()
+}
+
+#[cfg(test)]
+mod lib_tests {
+    use super::tool_names;
+
+    #[test]
+    fn tool_names_covers_the_advertised_catalog_without_drift() {
+        let names = tool_names();
+        // The full catalog is command tools + generator tools + context tools; it is
+        // non-trivial and free of blanks or duplicates.
+        assert!(
+            names.len() > 30,
+            "the catalog should advertise the whole command/generator/context surface, got {}",
+            names.len()
+        );
+        assert!(names.iter().all(|n| !n.is_empty()), "no blank tool names");
+        let unique: std::collections::BTreeSet<_> = names.iter().collect();
+        assert_eq!(unique.len(), names.len(), "tool names must be unique");
+        // A few load-bearing names an out-of-process allowlist depends on.
+        for expected in ["create_cell", "add_rect", "run_drc", "export_gds"] {
+            assert!(names.contains(&expected), "catalog must include {expected}");
+        }
+    }
+}

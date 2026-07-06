@@ -22,6 +22,14 @@
 //!   [`Debug`](std::fmt::Debug) / [`Display`](std::fmt::Display) / serialize path, plus
 //!   a text scrubber.
 //! - [`run`]: the propose-verify-correct loop and the four-artifact writer.
+//! - [`claude_code`]: the `claude-code` backend, which drives Claude Code as an external
+//!   *agent system* (not a [`ModelClient`](reticle_bench::model::ModelClient)): per task it
+//!   generates an MCP config that launches `reticle-mcp` with server-side transcript
+//!   capture and a budget, runs `claude -p` non-interactively over that server, then
+//!   replays the captured transcript and runs the task's checker into a
+//!   [`ResultRecord`](reticle_bench::ResultRecord) labeled `backend = "claude-code"`. A
+//!   missing or unauthenticated CLI is recorded as an honest not-run, never a fabricated
+//!   result.
 //! - [`collab`]: the [`AgentCollaborator`] bridge that mirrors the agent's edits onto
 //!   the `reticle-sync` CRDT under [`AGENT_ACTOR`](reticle_agent_api::AGENT_ACTOR) as
 //!   atomic per-step transactions, and publishes cursor/selection presence plus an
@@ -38,6 +46,7 @@
 //! [`ResultRecord`](reticle_bench::ResultRecord) so mock, local, and frontier runs are
 //! never conflated (authorized by ADR 0029).
 
+pub mod claude_code;
 pub mod collab;
 pub mod context_pack;
 pub mod model;
@@ -45,6 +54,10 @@ pub mod ollama;
 pub mod redact;
 pub mod run;
 
+pub use claude_code::{
+    ClaudeCodeConfig, ClaudeRunner, ClaudeTaskOutcome, NotRunRecord, SystemClaudeRunner,
+    run_claude_code_task,
+};
 pub use collab::{AgentCollaborator, Pacing, StepReport};
 pub use context_pack::{ContextPack, DEFAULT_SHAPE_CAP, token_estimate, whole_document_context};
 pub use model::{AnthropicModel, BuildError, DEFAULT_BASE_URL, DEFAULT_MODEL, HttpTransport};
