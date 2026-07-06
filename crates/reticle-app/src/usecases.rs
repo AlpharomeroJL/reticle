@@ -1,11 +1,11 @@
-//! The four bundled worked use-case scenarios offered from the Start screen.
+//! The bundled worked use-case scenarios offered from the Start screen.
 //!
 //! Reticle ships several deep capabilities (layer inspection and a 3D stack, the
-//! DRC engine, the agent replay theater, and the draw/boolean/array/via-stack
-//! editing tools), but a first-time visitor does not know where to begin. This
-//! module packages four *worked scenarios* that each drop the user straight into a
-//! prepared starting point for one capability, so the value is one click away
-//! rather than behind a blank document.
+//! DRC engine, the agent replay theater, the draw/boolean/array/via-stack editing
+//! tools, and a ready-framed Tiny Tapeout tile), but a first-time visitor does not
+//! know where to begin. This module packages a set of *worked scenarios* that each
+//! drop the user straight into a prepared starting point for one capability, so the
+//! value is one click away rather than behind a blank document.
 //!
 //! Each scenario is described by a [`UseCase`] variant carrying a
 //! [`title`](UseCase::title) and a [`description`](UseCase::description), and it
@@ -31,6 +31,9 @@
 //! * [`UseCase::BuildWithTools`] loads a small starter document with a couple of
 //!   labeled shapes on the SKY130 metal layers, a blank canvas of sorts for trying
 //!   draw, boolean, array, and via-stack. See [`starter_document`].
+//! * [`UseCase::NewTinyTapeoutTile`] loads the correctly framed Tiny Tapeout SKY130
+//!   GDS-mode tile (die outline, the six `ua[*]` analog pins on met4, and the power
+//!   straps) for the user to fill in and submit. See [`crate::tinytapeout`].
 //!
 //! # Portability
 //!
@@ -64,7 +67,7 @@ const MET1: LayerId = LayerId::new(68, 20);
 /// via-stack has a second metal to reach.
 const MET2: LayerId = LayerId::new(69, 20);
 
-/// One of the four bundled worked use-case scenarios.
+/// One of the bundled worked use-case scenarios.
 ///
 /// The variant order is the order the Start screen offers them. Every scenario is
 /// enumerable through [`UseCase::ALL`] and prepared through [`UseCase::prepare`].
@@ -82,15 +85,20 @@ pub enum UseCase {
     /// Build with the new tools: a small starter document for trying draw, boolean,
     /// array, and via-stack, guided.
     BuildWithTools,
+    /// New Tiny Tapeout tile: load the correctly framed SKY130 GDS-mode tile template
+    /// (die area, the six analog pins on met4, and the power straps) to fill in and
+    /// submit. See [`crate::tinytapeout`].
+    NewTinyTapeoutTile,
 }
 
 impl UseCase {
     /// Every scenario, in the order the Start screen offers them.
-    pub const ALL: [UseCase; 4] = [
+    pub const ALL: [UseCase; 5] = [
         UseCase::InspectCell,
         UseCase::FindAndFixViolation,
         UseCase::WatchTheAgent,
         UseCase::BuildWithTools,
+        UseCase::NewTinyTapeoutTile,
     ];
 
     /// A short title for the chooser button.
@@ -101,6 +109,7 @@ impl UseCase {
             UseCase::FindAndFixViolation => "Find and fix a violation",
             UseCase::WatchTheAgent => "Watch the agent work",
             UseCase::BuildWithTools => "Build with the new tools",
+            UseCase::NewTinyTapeoutTile => "New TinyTapeout tile",
         }
     }
 
@@ -125,6 +134,10 @@ impl UseCase {
                 "Start from a small seed layout and try the new editing tools: draw, \
                  boolean, array, and via-stack, on the SKY130 metal layers."
             }
+            UseCase::NewTinyTapeoutTile => {
+                "Open a correctly framed TinyTapeout SKY130 tile: the 1x2 die outline, \
+                 six analog pins on met4, and the power straps, ready to fill in."
+            }
         }
     }
 
@@ -148,6 +161,10 @@ impl UseCase {
             UseCase::BuildWithTools => Scenario::LoadDocument {
                 document: starter_document(),
                 top_cell: STARTER_TOP.to_owned(),
+            },
+            UseCase::NewTinyTapeoutTile => Scenario::LoadDocument {
+                document: crate::tinytapeout::tile_document(),
+                top_cell: crate::tinytapeout::TT_TILE_TOP.to_owned(),
             },
         }
     }
@@ -308,13 +325,13 @@ mod tests {
     const M1_MIN_WIDTH_DBU: i64 = 140;
 
     #[test]
-    fn all_four_are_enumerable_and_unique() {
-        assert_eq!(UseCase::ALL.len(), 4);
+    fn all_are_enumerable_and_unique() {
+        assert_eq!(UseCase::ALL.len(), 5);
         // Titles and descriptions are all present, non-empty, and distinct.
         let mut titles: Vec<&str> = UseCase::ALL.iter().map(|c| c.title()).collect();
         titles.sort_unstable();
         titles.dedup();
-        assert_eq!(titles.len(), 4, "titles must be distinct");
+        assert_eq!(titles.len(), 5, "titles must be distinct");
         for uc in UseCase::ALL {
             assert!(!uc.title().is_empty(), "{uc:?} has a title");
             assert!(!uc.description().is_empty(), "{uc:?} has a description");
@@ -358,6 +375,21 @@ mod tests {
             .filter(|uc| matches!(uc.prepare(), Scenario::OpenReplayTheater))
             .collect();
         assert_eq!(theater, vec![UseCase::WatchTheAgent]);
+    }
+
+    #[test]
+    fn new_tinytapeout_tile_loads_the_framed_template() {
+        // The TinyTapeout scenario prepares the tt_um_reticle_tile document with the
+        // TinyTapeout technology; the tinytapeout module owns the geometry assertions.
+        match UseCase::NewTinyTapeoutTile.prepare() {
+            Scenario::LoadDocument { document, top_cell } => {
+                assert_eq!(top_cell, crate::tinytapeout::TT_TILE_TOP);
+                assert!(top_cell.starts_with("tt_um_"), "top macro name is tt_um_*");
+                assert!(document.cell(&top_cell).is_some(), "tile top cell present");
+                assert_eq!(document.technology().name, "tinytapeout_sky130");
+            }
+            Scenario::OpenReplayTheater => panic!("the tile scenario loads a document"),
+        }
     }
 
     #[test]

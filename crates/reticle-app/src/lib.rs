@@ -112,6 +112,7 @@ pub mod snap;
 pub mod startscreen;
 pub mod store;
 pub mod tech_editor;
+pub mod tinytapeout;
 pub mod tool;
 pub mod tour;
 pub mod usecases;
