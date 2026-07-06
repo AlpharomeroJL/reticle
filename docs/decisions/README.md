@@ -56,3 +56,4 @@ superseded decision is marked and linked to its replacement.
 | [0048](0048-wave2d-run-generator-command.md) | Wave 2D adds a RunGenerator command to drive the generators from the agent |
 | [0049](0049-mcp-generator-tools.md) | MCP advertises each generator as its own tool |
 | [0050](0050-generate-panel-schema-form-and-preview.md) | The Generate panel: a schema-driven form with a live preview |
+| [0051](0051-server-side-transcript-capture.md) | Server-side transcript capture in reticle-mcp, for clients the harness does not control |
