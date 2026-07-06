@@ -67,7 +67,7 @@ impl Status {
 /// a plain closure over `ui` without also mutably borrowing `self`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum StartAction {
-    /// Enter one of the four worked scenarios.
+    /// Enter one of the worked scenarios.
     EnterUseCase(UseCase),
     /// Load a bundled example chip through the open seam.
     LoadExample(crate::startscreen::ExampleChip),
@@ -369,7 +369,7 @@ pub struct App {
     start_view: StartView,
     /// Whether the Start screen (the worked-use-case chooser) is currently shown.
     /// Set on startup for the editor default so a first-time user is offered the
-    /// four scenarios; cleared once one is chosen or dismissed, and never shown for
+    /// worked scenarios; cleared once one is chosen or dismissed, and never shown for
     /// the replay-theater start view (that visitor lands straight in the theater).
     /// See [`crate::usecases`] and [`App::start_screen`].
     start_screen: bool,
@@ -2123,8 +2123,8 @@ impl App {
         });
     }
 
-    /// Draws the four worked-scenario cards (title, one-line description, Start
-    /// button), the same [`UseCase`]s the Start screen has always offered.
+    /// Draws the worked-scenario cards (title, one-line description, Start
+    /// button), one per [`UseCase`] the Start screen offers.
     fn start_scenarios_section(ui: &mut egui::Ui, action: &mut Option<StartAction>) {
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -5850,7 +5850,7 @@ impl eframe::App for App {
         // Age the toasts and drop any that have expired (errors persist).
         self.notifications.advance(dt);
 
-        // The Start screen greets a first-time user with the four worked use cases.
+        // The Start screen greets a first-time user with the worked use cases.
         // While it is showing it owns the whole frame: it draws the chooser and
         // returns, so the editor panels and canvas are not built underneath it. The
         // notification toasts are still drawn over it so a failed open (from a drop or
