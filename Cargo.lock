@@ -3987,6 +3987,7 @@ dependencies = [
  "reticle-drc",
  "reticle-extract",
  "reticle-geometry",
+ "reticle-mcp",
  "reticle-model",
  "reticle-sync",
  "serde",
