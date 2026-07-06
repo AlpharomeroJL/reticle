@@ -3,12 +3,21 @@
 //! Drives one layout task through the propose-verify-correct loop against a live model,
 //! then writes the four artifacts (transcript, GDS, PNG, result record). The task is
 //! either a benchmark TOML file (`--task`) or an inline prompt (`--prompt` plus a
-//! `--checker`). Two backends are selectable with `--backend`:
+//! `--checker`). Three backends are selectable with `--backend`:
 //!
 //! - `anthropic` (default): the Anthropic Messages API; key from `ANTHROPIC_API_KEY`.
 //! - `ollama`: an OpenAI-compatible Chat Completions endpoint (Ollama by default);
 //!   configured entirely from the environment (`RETICLE_MODEL_BASE_URL`,
 //!   `RETICLE_MODEL_NAME`, optional `RETICLE_MODEL_API_KEY`).
+//! - `claude-code`: Claude Code driven non-interactively as an external *agent system*
+//!   (not a `ModelClient`: it brings its own loop). Per task the runner writes an MCP
+//!   config launching `reticle-mcp` with server-side transcript capture and a budget,
+//!   runs `claude -p` over it, then replays the captured transcript and runs the checker.
+//!   The `claude` and `reticle-mcp` binaries are overridable with `RETICLE_CLAUDE_BIN` /
+//!   `RETICLE_MCP_BIN`. A missing or unauthenticated CLI is recorded as an honest not-run
+//!   (a `<id>.notrun.json` artifact), never a fabricated pass or fail. `--model` picks the
+//!   model (an alias like `sonnet` or a full id); `--command-budget` becomes the MCP
+//!   server's per-session budget; `--iterations` is unused (Claude Code owns its loop).
 //!
 //! ```text
 //! # A benchmark task file, technology resolved next to it (Anthropic backend):
@@ -132,6 +141,14 @@ enum Backend {
     Anthropic,
     /// An OpenAI-compatible Chat Completions endpoint (Ollama by default).
     Ollama,
+    /// Claude Code driven non-interactively as an external *agent system*: per task the
+    /// runner generates an MCP config that launches `reticle-mcp` (with server-side
+    /// transcript capture and a command budget), runs `claude -p` over that server, then
+    /// replays the captured transcript and runs the task's checker. Unlike the other two
+    /// backends this is not a `ModelClient`: Claude Code brings its own reasoning loop. A
+    /// missing or unauthenticated CLI is recorded as an honest not-run, never a fabricated
+    /// pass or fail. See [`reticle_agent::claude_code`].
+    ClaudeCode,
 }
 
 impl Backend {
@@ -140,6 +157,7 @@ impl Backend {
         match self {
             Backend::Anthropic => "anthropic",
             Backend::Ollama => "ollama",
+            Backend::ClaudeCode => reticle_agent::claude_code::BACKEND_LABEL,
         }
     }
 }
@@ -174,6 +192,14 @@ fn run_single(cli: &Cli) -> Result<bool, String> {
 
     // `for_task` already yields a `String` error, which `?` propagates directly.
     let registry = CheckerRegistry::for_task(&task)?;
+
+    // The Claude-Code backend is an external agent system, not a `ModelClient`: it does
+    // not run the propose-verify-correct loop. Route it to its own driver, which returns
+    // a ran-or-not-run outcome rather than a loop record.
+    if cli.backend == Backend::ClaudeCode {
+        let outcome = run_claude_one(cli, &task, &technology, &registry)?;
+        return Ok(claude_report(&task, &outcome));
+    }
 
     let options = LoopOptions {
         max_iterations: cli.iterations,
@@ -217,6 +243,11 @@ fn run_suite(cli: &Cli) -> Result<bool, String> {
         return Err("no task matched the suite selection".into());
     }
 
+    // The Claude-Code backend has its own suite driver (ran-or-not-run per task, no loop).
+    if cli.backend == Backend::ClaudeCode {
+        return run_claude_suite(cli, &suite_dir, &manifest, &selected);
+    }
+
     let options = LoopOptions {
         max_iterations: cli.iterations,
         command_budget: cli.command_budget,
@@ -257,6 +288,185 @@ fn run_suite(cli: &Cli) -> Result<bool, String> {
     Ok(flat.iter().all(|r| r.success))
 }
 
+/// Builds the Claude-Code backend config from the CLI and environment.
+///
+/// The `claude` and `reticle-mcp` binary paths come from the environment
+/// ([`RETICLE_CLAUDE_BIN`](reticle_agent::claude_code::ENV_CLAUDE_BIN) /
+/// [`RETICLE_MCP_BIN`](reticle_agent::claude_code::ENV_MCP_BIN)), defaulting to `claude` on
+/// `PATH` and a sibling `reticle-mcp`. The `--model` flag chooses the model (an alias like
+/// `sonnet` or a full id); the `--command-budget` flag becomes the MCP server's per-session
+/// budget. Artifacts land under `--out-dir`.
+fn build_claude_config(cli: &Cli) -> reticle_agent::ClaudeCodeConfig {
+    reticle_agent::ClaudeCodeConfig::from_env(
+        cli.model.clone(),
+        cli.command_budget,
+        cli.out_dir.clone(),
+        cli.suite_version.clone(),
+    )
+}
+
+/// Drives one task through the Claude-Code backend, measuring wall time.
+fn run_claude_one(
+    cli: &Cli,
+    task: &BenchTask,
+    technology: &str,
+    registry: &CheckerRegistry,
+) -> Result<reticle_agent::ClaudeTaskOutcome, String> {
+    let config = build_claude_config(cli);
+    let runner = reticle_agent::SystemClaudeRunner;
+    let started = Instant::now();
+    let outcome =
+        reticle_agent::run_claude_code_task(task, &config, registry, technology, &runner, 0)
+            .map_err(|e| e.to_string())?;
+    let wall_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    // Re-stamp the measured wall time onto a ran record and rewrite its result artifact so
+    // the on-disk record matches the printed one (a not-run carries no wall time).
+    restamp_claude_wall(outcome, wall_ms)
+}
+
+/// Re-stamps a ran outcome's `wall_ms` with the measured duration and rewrites its result
+/// artifact; a not-run is returned unchanged.
+fn restamp_claude_wall(
+    outcome: reticle_agent::ClaudeTaskOutcome,
+    wall_ms: u64,
+) -> Result<reticle_agent::ClaudeTaskOutcome, String> {
+    use reticle_agent::ClaudeTaskOutcome::{NotRun, Ran};
+    match outcome {
+        Ran {
+            mut record,
+            artifacts,
+        } => {
+            record.wall_ms = wall_ms;
+            rewrite_result(&artifacts.result, &record)?;
+            Ok(Ran { record, artifacts })
+        }
+        other @ NotRun { .. } => Ok(other),
+    }
+}
+
+/// Suite mode for the Claude-Code backend: drives every selected task, writes the ran
+/// records to an aggregate results JSON (not-runs are recorded separately, never as
+/// pass/fail rows), and prints a Markdown summary plus a not-run tally. Returns whether
+/// every task that *ran* passed (a suite that is entirely not-run returns `false`, since
+/// nothing was verified).
+fn run_claude_suite(
+    cli: &Cli,
+    suite_dir: &Path,
+    manifest: &reticle_bench::SuiteManifest,
+    selected: &[BenchTask],
+) -> Result<bool, String> {
+    let config = build_claude_config(cli);
+    let runner = reticle_agent::SystemClaudeRunner;
+
+    let mut rows: Vec<(Tier, reticle_bench::ResultRecord)> = Vec::new();
+    let mut not_run: Vec<reticle_agent::NotRunRecord> = Vec::new();
+    for task in selected {
+        let technology = resolve_suite_technology(suite_dir, task)?;
+        let registry = CheckerRegistry::for_task(task)?;
+        let started = Instant::now();
+        let outcome =
+            reticle_agent::run_claude_code_task(task, &config, &registry, &technology, &runner, 0)
+                .map_err(|e| e.to_string())?;
+        let wall_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+        let outcome = restamp_claude_wall(outcome, wall_ms)?;
+        claude_report(task, &outcome);
+        match outcome {
+            reticle_agent::ClaudeTaskOutcome::Ran { record, .. } => {
+                rows.push((task.tier, record));
+            }
+            reticle_agent::ClaudeTaskOutcome::NotRun { record, .. } => not_run.push(record),
+        }
+    }
+
+    // Aggregate results file (ran records only) plus a Markdown summary, mirroring the
+    // other backends' writer shape. Not-runs are tallied separately and never counted as
+    // pass/fail.
+    let flat: Vec<reticle_bench::ResultRecord> = rows.iter().map(|(_, r)| r.clone()).collect();
+    let file_name = format!("suite-{}.json", reticle_agent::claude_code::BACKEND_LABEL);
+    let written = reticle_bench::write_records(&cli.results_dir, &file_name, &flat)
+        .map_err(|e| e.to_string())?;
+    let summary = reticle_bench::summarize(&rows);
+    print!("{}", summary.to_markdown(&manifest.version));
+    println!(
+        "\nWrote {} ran record(s) to {}",
+        flat.len(),
+        written.display()
+    );
+    if !not_run.is_empty() {
+        // Persist the honest not-run list so a broken environment is auditable, and print
+        // a tally so a reader is not misled into thinking those tasks passed or failed.
+        let notrun_file = format!(
+            "suite-{}-notrun.json",
+            reticle_agent::claude_code::BACKEND_LABEL
+        );
+        let notrun_path = write_notrun_list(&cli.results_dir, &notrun_file, &not_run)?;
+        println!(
+            "Not run (CLI absent or unauthenticated): {} task(s); recorded honestly in {}",
+            not_run.len(),
+            notrun_path.display()
+        );
+        for record in &not_run {
+            println!("  not-run {}: {}", record.task_id, record.reason);
+        }
+    }
+
+    // A task that ran and passed counts as a pass; a not-run is neither. The suite is a
+    // success only if at least one task ran and every task that ran passed.
+    Ok(!flat.is_empty() && flat.iter().all(|r| r.success))
+}
+
+/// Writes the honest not-run list as a pretty JSON array under `dir/file_name`.
+fn write_notrun_list(
+    dir: &Path,
+    file_name: &str,
+    records: &[reticle_agent::NotRunRecord],
+) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+    let json = serde_json::to_string_pretty(records)
+        .map_err(|e| format!("serializing not-run records: {e}"))?;
+    let path = dir.join(file_name);
+    std::fs::write(&path, json).map_err(|e| format!("writing {}: {e}", path.display()))?;
+    Ok(path)
+}
+
+/// Prints a human-readable summary of a Claude-Code task outcome and returns whether it
+/// counts as a pass (a not-run is not a pass).
+fn claude_report(task: &BenchTask, outcome: &reticle_agent::ClaudeTaskOutcome) -> bool {
+    use reticle_agent::ClaudeTaskOutcome::{NotRun, Ran};
+    match outcome {
+        Ran { record, artifacts } => {
+            println!("task:        {}", task.id);
+            println!("backend:     {}", record.backend);
+            println!("model:       {}", record.model);
+            println!(
+                "result:      {}",
+                if record.success { "PASS" } else { "FAIL" }
+            );
+            println!("applied:     {}", record.iterations);
+            println!("violations:  final={}", record.final_violations);
+            println!("wall_ms:     {}", record.wall_ms);
+            println!("artifacts:");
+            println!("  mcp config {}", artifacts.config.display());
+            println!("  transcript {}", artifacts.transcript.display());
+            println!("  result     {}", artifacts.result.display());
+            record.success
+        }
+        NotRun {
+            record,
+            notrun_path,
+            ..
+        } => {
+            println!("task:        {}", task.id);
+            println!("backend:     {}", record.backend);
+            println!("model:       {}", record.model);
+            println!("result:      NOT RUN");
+            println!("reason:      {}", record.reason);
+            println!("  not-run    {}", notrun_path.display());
+            false
+        }
+    }
+}
+
 /// Builds the selected backend's model from the CLI and environment.
 ///
 /// Returns a boxed [`ModelClient`] so both backends flow through one type; the concrete
@@ -286,6 +496,15 @@ fn build_model(cli: &Cli) -> Result<DynModel, String> {
             }
             Ok(DynModel::Ollama(model))
         }
+        // The Claude-Code backend is not a `ModelClient` and is dispatched to its own
+        // driver in `run_single`/`run_suite` before `build_model` is ever called, so this
+        // arm is unreachable; return a clear error rather than panicking if the routing
+        // ever regresses.
+        Backend::ClaudeCode => Err(
+            "internal error: the claude-code backend does not build a ModelClient; \
+             it must be routed to run_claude_one / run_claude_suite"
+                .to_owned(),
+        ),
     }
 }
 

@@ -126,6 +126,24 @@ bench-agent *args:
 bench-agent-ollama *args:
     cargo run -p reticle-agent -- --backend ollama --suite benchmarks/layout-tasks {{args}}
 
+# Run the whole agent suite through CLAUDE CODE as an external agent system. Per
+# task this writes an MCP config launching reticle-mcp (server-side transcript
+# capture + budget), runs `claude -p` over it, then replays the captured
+# transcript and runs the task's checker. Requires the `claude` CLI on PATH and an
+# authenticated session; a missing or unauthenticated CLI is recorded as an honest
+# not-run (never a fabricated pass/fail). Optional env: RETICLE_CLAUDE_BIN (the
+# claude executable), RETICLE_MCP_BIN (the reticle-mcp executable). Pass through
+# extra flags to scope or pick the model, e.g.
+#   just bench-agent-claude-code --task t1_drc_clean_met1 --model sonnet
+# A single-task smoke:
+#   cargo run -p reticle-agent -- --backend claude-code --task benchmarks/layout-tasks/t1_drc_clean_met1.toml
+# Writes suite-claude-code.json (ran records) and, if anything did not run,
+# suite-claude-code-notrun.json under scratch/agent-suite-results, plus a summary.
+# NOTE: hits the real Claude Code CLI (consumes quota; non-deterministic) and is
+# NOT part of `just ci`.
+bench-agent-claude-code *args:
+    cargo run -p reticle-agent -- --backend claude-code --suite benchmarks/layout-tasks {{args}}
+
 # Promote a mined candidate task (benchmarks/layout-tasks/candidates/<id>.toml)
 # into the live suite. Refuses unless the candidate's checker passes its
 # two-way vectors (accepts the good document, rejects the bad one); on success

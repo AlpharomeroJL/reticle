@@ -32,6 +32,11 @@ reticle-bench = { workspace = true }
 # reticle-sync CRDT under AGENT_ACTOR, as atomic per-step transactions, and
 # publishes cursor/selection presence plus AgentStatus over the awareness layer.
 reticle-sync = { workspace = true }
+# The `claude_code` backend generates the MCP config that launches the `reticle-mcp`
+# server (transcript capture + budget) and needs the authoritative tool-name list
+# (`reticle_mcp::tool_names`) to build Claude Code's `--allowed-tools` allowlist without
+# it drifting from what the server actually serves.
+reticle-mcp = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 # The runner binary's argument parser; version matched to reticle-cli / reticle-bench.
