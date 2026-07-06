@@ -33,6 +33,10 @@
 - [Agent benchmark suite](benchmarks.md)
   - [Benchmark methodology](benchmark.md)
 
+# Tape-out
+
+- [TinyTapeout submission](tapeout.md)
+
 # Reference
 
 - [Performance methodology](performance.md)
