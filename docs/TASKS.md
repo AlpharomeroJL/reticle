@@ -461,6 +461,12 @@ the 83-task v0.5.0 benchmark. All merged, `just ci` GREEN.**
 
 ## Wave 3: Claude Code as an agent-system backend (serial then parallel) [in-progress]
 
+UPDATE (2026-07-06): the operator upgraded their plan, so the weekly limit is reset;
+subagent lanes and Claude Code runs are available again and the intended lane-based
+flow resumes (Lane 3A, then 3B with the full 83-task run authorized). The incident note
+below is kept as the honest record of the interruption and the orchestrator-direct
+serial step done during it.
+
 INCIDENT (weekly quota limit, 2026-07-06): the Wave 3 serial subagent was killed by
 an Anthropic WEEKLY limit ("resets Jul 7, 9am America/Chicago") after a few tool calls
 (it did NO work; `lane/v7-3serial` was at main and was removed clean, nothing lost).
