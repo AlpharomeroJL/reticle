@@ -1,0 +1,27 @@
+# Coordinates extracted verbatim from TinyTapeout's canonical analog 1x2 tile DEF
+# template, tt_analog_1x2.def. Units are DBU (1 dbu = 1 nm), per the file's
+# "UNITS DISTANCE MICRONS 1000". Source (fetched 2026-07-06):
+#   https://raw.githubusercontent.com/TinyTapeout/tt-support-tools/main/tech/sky130A/def/analog/tt_analog_1x2.def
+# Format: "key value" lines; "#" comments. Read by tests/tinytapeout_validation.rs.
+#
+# DESIGN tt_um_template ; DIEAREA ( 0 0 ) ( 161000 225760 ) ;
+die_min_x 0
+die_min_y 0
+die_max_x 161000
+die_max_y 225760
+#
+# Every ua[n] pin is on met4 with PORT ( -450 -500 ) ( 450 500 ), PLACED ( x 500 ).
+# So the absolute rectangle is ( x-450, 0 ) .. ( x+450, 1000 ).
+ua_port_half_w 450
+ua_port_half_h 500
+ua_placed_y 500
+ua_layer met4
+#
+# ua[n] PLACED x centers, verbatim from the DEF (pins used in order from 0; the
+# analog spec caps usable analog pins at 6, so ua[0]..ua[5] are the template's).
+ua0_x 152260
+ua1_x 132940
+ua2_x 113620
+ua3_x 94300
+ua4_x 74980
+ua5_x 55660

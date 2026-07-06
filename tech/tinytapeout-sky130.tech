@@ -1,0 +1,54 @@
+# TinyTapeout GDS-mode (analog / custom-layout) SKY130 technology for Reticle.
+#
+# This extends the SKY130 layer table (tech/sky130.tech) with exactly what a
+# TinyTapeout analog tile frame needs: the met4 signal/pin/label purposes the
+# ua[*] analog pins live on, the met4 power straps, and a tile-boundary marker
+# layer. It is the technology half of the "New TinyTapeout tile" bundle; the
+# geometry half is the tt_um_reticle_tile template document built in
+# crates/reticle-app/src/tinytapeout.rs.
+#
+# PROVENANCE (fetched 2026-07-06; the shuttle is TTSKY26c, closing 2026-09-07):
+#   Tile die area, the ua[*] pin rectangles on met4, and their coordinates:
+#     https://raw.githubusercontent.com/TinyTapeout/tt-support-tools/main/tech/sky130A/def/analog/tt_analog_1x2.def
+#     DIEAREA ( 0 0 ) ( 161000 225760 ) ;  (1 dbu = 1 nm, so 161.0 x 225.76 um)
+#     ua[n] PORT LAYER met4 ( -450 -500 ) ( 450 500 ), PLACED ( x 500 ).
+#   Power straps (met4 vertical stripes) and their nets/positions:
+#     https://raw.githubusercontent.com/TinyTapeout/tt-support-tools/main/tech/sky130A/def/analog/magic_init_project.tcl
+#     box $x 5um $x 220.76um ; box width 2um ; paint met4 ; for VDPWR@1um, VGND@4um,
+#     and (3v3 template) VAPWR@7um. Minimum strap width 1.2 um.
+#   SKY130 GDS layer:datatype numbers (met4 71/20, its pin/label purposes, met5
+#   72/20) and the areaid.sc 81:4 identifier used here as the tile-boundary marker:
+#     https://skywater-pdk.readthedocs.io/en/main/rules/layers.html
+#     (generated from docs/rules/gds_layers.csv in github.com/google/skywater-pdk)
+#
+# The met4 drawing/pin/label triples and met5 keep numbers identical to
+# tech/sky130.tech so a tile built here overlays the same SKY130 stack. Only the
+# tt_boundary layer is new to this file.
+
+technology tinytapeout_sky130
+dbu_per_micron 1000
+
+# --- Tile boundary marker ---
+# SKY130 areaid.sc (81/4), the standard "this area is a design tile" identifier,
+# used here to draw the TinyTapeout tile outline. It is a marker layer, not a
+# conductor, so it carries no width/spacing rule.
+layer 81 4 tt_boundary FFD54088
+
+# --- met4: the layer every TinyTapeout analog pin and power strap lives on ---
+layer 71 20 met4      C2903A90
+layer 71 16 met4_pin  C2903AC0
+layer 71 5  met4_label FFFFFFFF
+
+# --- met5: FORBIDDEN in TinyTapeout tiles (its power grid uses it) ---
+# Declared only so the layer is named if it ever appears; a TinyTapeout tile must
+# draw NOTHING here. The technology-file format has no "keep-out" rule kind, so
+# this constraint is documented here and enforced by the template's validation
+# test (crates/reticle-app tinytapeout tests: no shape or strap on met5).
+layer 72 20 met5      6A6AAD90
+
+# --- met4 minimum widths that the frame itself must satisfy ---
+# The ua[*] pin ports are 900 nm wide (met4 min width in SKY130 is 300 nm), and
+# the power straps are 2000 nm wide (TinyTapeout requires at least 1200 nm). This
+# single width rule is the SKY130 met4 minimum (m4.1 = 0.30 um); it is what a DRC
+# pass over the frame checks the pins and straps against.
+rule width 71 20 300

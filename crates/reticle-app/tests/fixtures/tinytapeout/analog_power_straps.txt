@@ -1,0 +1,19 @@
+# Power-strap geometry extracted verbatim from TinyTapeout's official analog init
+# script, magic_init_project.tcl. Units are DBU (1 dbu = 1 nm). Source (fetched
+# 2026-07-06):
+#   https://raw.githubusercontent.com/TinyTapeout/tt-support-tools/main/tech/sky130A/def/analog/magic_init_project.tcl
+#
+# Each strap is: box $x 5um $x 220.76um ; box width 2um ; paint met4.
+# So the strap spans y 5000..220760 and is 2000 nm wide (half-width 1000), on met4.
+# The minimum allowed width is 1.2um (1200 dbu), noted in the script.
+strap_layer met4
+strap_bottom_y 5000
+strap_top_y 220760
+strap_width 2000
+strap_min_width 1200
+#
+# Per-net x centers, from the script's POWER_STRIPES list:
+#   VDPWR 1um, VGND 4um, and (3v3 template) VAPWR 7um.
+vdpwr_x 1000
+vgnd_x 4000
+vapwr_x 7000

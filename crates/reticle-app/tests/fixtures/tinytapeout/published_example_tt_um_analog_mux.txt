@@ -1,0 +1,19 @@
+# Cross-check facts extracted from a REAL published TinyTapeout GDS-mode submission,
+# tt_um_analog_mux, used to validate the template against a real design (not just
+# TinyTapeout's own template). Units are DBU (1 dbu = 1 nm). Sources (fetched
+# 2026-07-06):
+#   https://raw.githubusercontent.com/TinyTapeout/tt-analog-mux/main/config.json
+#   https://raw.githubusercontent.com/TinyTapeout/tt-analog-mux/main/def/tt_block_1x2.def
+#
+# config.json: "DESIGN_NAME": "tt_um_analog_mux", "DIE_AREA": "0 0 168.36 225.76",
+#   "RT_MAX_LAYER": "met4", and the comment "don't use power rings or met5".
+design_name tt_um_analog_mux
+config_die_max_x 168360
+config_die_max_y 225760
+top_routing_layer met4
+met5_forbidden true
+#
+# Its committed floorplan DEF def/tt_block_1x2.def: DESIGN tt_um_template ;
+#   DIEAREA ( 0 0 ) ( 168360 225760 ) ;  (same 1x2 family, same 225.76um height).
+def_die_max_x 168360
+def_die_max_y 225760
