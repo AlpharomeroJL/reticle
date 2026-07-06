@@ -657,7 +657,7 @@ pub fn run_claude_code_task<R: ClaudeRunner>(
 /// Reconstructs the document from the captured transcript, runs the checker, and builds
 /// the [`ResultRecord`].
 ///
-/// The transcript is `reticle-mcp`'s server-side capture: one [`CommandRecord`] JSON
+/// The transcript is `reticle-mcp`'s server-side capture: one [`CommandRecord`](reticle_agent_api::CommandRecord) JSON
 /// object per line, no trailer. We rebuild the session by re-applying each record's
 /// `command` in order (the same replay contract as
 /// [`reticle_agent_api::replay`], but reading the raw per-line records the server
@@ -705,7 +705,7 @@ fn evaluate_transcript(
 /// Rebuilds a [`Session`] by replaying the `command` field of each JSONL line in the
 /// server-captured transcript, returning the session and the number of commands applied.
 ///
-/// A line that is not a well-formed [`CommandRecord`] (or lacks a `command`) is skipped
+/// A line that is not a well-formed [`CommandRecord`](reticle_agent_api::CommandRecord) (or lacks a `command`) is skipped
 /// rather than aborting, so a partially written or trailer-bearing file still replays what
 /// it can. A missing file is treated as an empty transcript (zero commands), not an error:
 /// the session then holds an empty document the checker fails honestly.
