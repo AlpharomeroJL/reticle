@@ -47,6 +47,16 @@ clap = { version = "4.6.1", features = ["derive"] }
 # by default so no OpenSSL system dependency.
 ureq = { version = "=3.3.0", features = ["json"] }
 
+# The live-room run mode (`live` module) connects an AgentCollaborator to a real relay
+# room over a native WebSocket, using exactly the browser transport's binary framing
+# (`reticle_sync::frame`). Versions match `reticle-server` so the workspace resolves one
+# copy. Native only: this async stack does not build for `wasm32`, and the `live` module
+# is `#[cfg(not(target_arch = "wasm32"))]`, so scope the deps to non-wasm targets.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio-tungstenite = "0.29.0"
+futures-util = "0.3.32"
+
 [dev-dependencies]
 # Geometry primitives and extraction/intent types used only to build documents
 # and intent specs in tests (the library takes geometry through reticle-model).

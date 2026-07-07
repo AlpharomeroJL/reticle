@@ -1,7 +1,7 @@
 //! Bridging the agent's edits onto the collaboration layer.
 //!
 //! The propose-verify-correct harness ([`crate::run`]) edits a private
-//! [`Session`](reticle_agent_api::Session). To let a human watch and edit alongside
+//! [`Session`]. To let a human watch and edit alongside
 //! the agent in real time, [`AgentCollaborator`] mirrors those edits onto a
 //! [`SyncDocument`] (a `yrs` CRDT) under the [`AGENT_ACTOR`] identity.
 //!
@@ -23,27 +23,42 @@
 //!
 //! # Which commands become CRDT edits
 //!
-//! Only the geometry-creating commands change what a human sees on the canvas, so
-//! only those are mirrored: [`CreateCell`](AgentCommand::CreateCell),
+//! The geometry-creating commands change what a human sees on the canvas, so those
+//! are mirrored: [`CreateCell`](AgentCommand::CreateCell),
 //! [`AddRect`](AgentCommand::AddRect), [`AddPolygon`](AgentCommand::AddPolygon),
 //! [`AddPath`](AgentCommand::AddPath),
 //! [`PlaceInstance`](AgentCommand::PlaceInstance),
 //! [`PlaceArray`](AgentCommand::PlaceArray), and
 //! [`DeleteCell`](AgentCommand::DeleteCell). Read-only commands (DRC, queries,
 //! export, render) and technology/session commands produce no drawing and are not
-//! mirrored. Id-addressed edits (`TransformShapes`, `DeleteShapes`) address the
-//! command surface's [`ElementId`](reticle_agent_api::ElementId)s, which do not map
-//! to CRDT element ids; they are left to a future extension rather than applied
-//! incorrectly.
+//! mirrored.
+//!
+//! The id-addressed edits [`TransformShapes`](AgentCommand::TransformShapes) and
+//! [`DeleteShapes`](AgentCommand::DeleteShapes) are mirrored too (ADR 0022's
+//! documented gap, now closed). They address the command surface's stable
+//! [`ElementId`]s, which are *not* the CRDT's `actor:counter` element ids; the
+//! bridge closes that gap by learning the association at create time. The
+//! collaborator drives an authoritative internal [`Session`] in lockstep with the
+//! mirror: applying each command there both validates it and hands back the
+//! [`ElementId`]s it assigned, and the bridge records `ElementId -> CRDT id` for
+//! every shape it creates. A later `TransformShapes` resolves each addressed
+//! [`ElementId`] to its CRDT id and overwrites that record's geometry in place (the
+//! shape keeps its identity and *moves*); a `DeleteShapes` removes the record. An
+//! id the bridge never learned (a shape created before the collaborator attached, or
+//! one the internal session rejected) cannot be resolved: it is skipped and recorded
+//! in [`StepReport::skipped`] rather than applied incorrectly or dropped silently.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use reticle_agent_api::args::{
     EndcapArg, LayerArg, OrientationArg, PointArg, RectArg, TransformArg,
 };
-use reticle_agent_api::{AGENT_ACTOR, AgentCommand, AgentStatus};
+use reticle_agent_api::{
+    AGENT_ACTOR, AgentCommand, AgentResponse, AgentStatus, ElementId, Session,
+};
 use reticle_geometry::{
-    Endcap, LayerId, Magnification, Orientation, Path, Point, Polygon, Rect, Transform,
+    Endcap, LayerId, Magnification, Orientation, Path, Point, Polygon, Rect, Shape as _, Transform,
 };
 use reticle_model::{ArrayInstance, DrawShape, Instance, ShapeKind};
 use reticle_sync::{Presence, StepEdit, SyncDocument};
@@ -92,6 +107,13 @@ pub struct StepReport {
     pub placed: Vec<String>,
     /// The cursor location published for this step (document DBU coordinates).
     pub cursor: Point,
+    /// Warnings for id-addressed edits (`TransformShapes`, `DeleteShapes`) this step
+    /// could not mirror because the addressed [`ElementId`] was never learned by the
+    /// bridge: a shape created before the collaborator attached, or one the internal
+    /// session rejected. Each entry names the unresolved id. Empty on a step whose
+    /// every addressed id resolved (or that addressed none). The addressed edit is
+    /// skipped for that id only; the rest of the step still commits.
+    pub skipped: Vec<String>,
 }
 
 /// Mirrors an agent's edits onto a [`SyncDocument`] under [`AGENT_ACTOR`].
@@ -106,6 +128,15 @@ pub struct StepReport {
 pub struct AgentCollaborator {
     sync: SyncDocument,
     pacing: Pacing,
+    /// The authoritative command session, driven in lockstep with the mirror. It
+    /// validates each command and, for every element it creates, hands back the
+    /// stable [`ElementId`] that a later id-addressed edit will name; it is also the
+    /// source of the replay-verifiable transcript.
+    session: Session,
+    /// The learned association from the session's stable [`ElementId`] to the CRDT
+    /// record it mirrors, for the shapes this collaborator created. Populated at
+    /// create-mirror time and consulted to resolve `TransformShapes` / `DeleteShapes`.
+    element_map: HashMap<ElementId, Mirrored>,
     /// The most recent cursor location, carried across steps so a no-placement step
     /// does not reset it to the origin.
     cursor: Point,
@@ -113,6 +144,19 @@ pub struct AgentCollaborator {
     color_rgba: u32,
     /// A human-readable display name for the agent's presence.
     display_name: String,
+}
+
+/// One shape the collaborator created and mirrored: the CRDT element id it lives
+/// under, its owning cell, and a snapshot of its current geometry (kept current
+/// through in-place transforms so the next transform composes on the moved shape).
+#[derive(Clone, Debug)]
+struct Mirrored {
+    /// The CRDT (`actor:counter`) element id the shape record is keyed by.
+    crdt_id: String,
+    /// The owning cell's name (needed to re-encode the record on a transform).
+    cell: String,
+    /// The shape's current geometry, updated after each mirrored transform.
+    shape: DrawShape,
 }
 
 impl Default for AgentCollaborator {
@@ -133,6 +177,8 @@ impl AgentCollaborator {
         Self {
             sync: SyncDocument::new(AGENT_ACTOR),
             pacing,
+            session: Session::new(),
+            element_map: HashMap::new(),
             cursor: Point::ORIGIN,
             color_rgba: Self::DEFAULT_COLOR_RGBA,
             display_name: "Reticle agent".to_owned(),
@@ -179,6 +225,37 @@ impl AgentCollaborator {
         self.sync.actor()
     }
 
+    /// The authoritative internal [`Session`] the mirror is driven from.
+    ///
+    /// It holds the same command history the agent applied (its
+    /// [`transcript`](Session::transcript) is replay-verifiable) and the document the
+    /// commands built. A caller records the demo transcript from here, or reads back a
+    /// DRC result the loop produced.
+    #[must_use]
+    pub fn session(&self) -> &Session {
+        &self.session
+    }
+
+    /// How many stable [`ElementId`] -> CRDT associations the collaborator currently
+    /// holds (the shapes it created and can still resolve for a transform or delete).
+    #[must_use]
+    pub fn tracked_id_count(&self) -> usize {
+        self.element_map.len()
+    }
+
+    /// Drops every learned [`ElementId`] -> CRDT association, as if this collaborator
+    /// had just attached to an already-in-progress document whose shapes it did not
+    /// create.
+    ///
+    /// The internal [`Session`] and the mirrored [`SyncDocument`] are untouched: the
+    /// geometry stays, only the id map is forgotten. A subsequent `TransformShapes` /
+    /// `DeleteShapes` the session still accepts will therefore find no CRDT id to
+    /// resolve and be recorded in [`StepReport::skipped`] rather than silently doing
+    /// nothing, which is exactly the attach-mid-session case this models.
+    pub fn forget_element_ids(&mut self) {
+        self.element_map.clear();
+    }
+
     /// Applies one logical agent step (the batch of commands from one propose
     /// iteration) as a single atomic CRDT transaction, then publishes the agent's
     /// cursor and selection over the awareness layer.
@@ -197,20 +274,44 @@ impl AgentCollaborator {
     ) -> StepReport {
         self.pacing.wait();
 
+        // Drive the authoritative session in lockstep first: each command is applied
+        // there (validating it and advancing the transcript), and the ElementId(s) it
+        // assigned are captured so the mirror can associate a created shape's CRDT id
+        // with the stable id a later TransformShapes/DeleteShapes will name. A command
+        // the session rejects yields no ids; the geometry-creating commands still
+        // mirror (a peer may hold a cell this agent's private session does not), but no
+        // association is recorded for them.
+        let commands: Vec<&AgentCommand> = commands.into_iter().collect();
+        let affected: Vec<Vec<ElementId>> = commands
+            .iter()
+            .map(|cmd| match self.session.apply((*cmd).clone()) {
+                Ok(AgentResponse::Ok { affected, .. }) => affected,
+                _ => Vec::new(),
+            })
+            .collect();
+
         let mut cursor = self.cursor;
-        // Apply the whole batch inside one transaction; `placed` collects the ids of
-        // shapes/placements created, in order, and `cursor` tracks the last location.
+        let mut skipped: Vec<String> = Vec::new();
+        // The step closure borrows `self.sync`; the id map is a disjoint field, borrowed
+        // here so both live across the one atomic transaction.
+        let map = &mut self.element_map;
+        let skip = &mut skipped;
+        let cursor_ref = &mut cursor;
         let placed = self.sync.step(|edit| {
             let mut placed = Vec::new();
-            for command in commands {
-                mirror_command(edit, command, &mut placed, &mut cursor);
+            for (command, ids) in commands.iter().zip(affected.iter()) {
+                mirror_command(edit, command, ids, map, &mut placed, skip, cursor_ref);
             }
             placed
         });
 
         self.cursor = cursor;
         self.publish_presence(&placed, cursor);
-        StepReport { placed, cursor }
+        StepReport {
+            placed,
+            cursor,
+            skipped,
+        }
     }
 
     /// Publishes the agent's presence (cursor at `cursor`, selection = `selection`)
@@ -253,15 +354,22 @@ impl AgentCollaborator {
     }
 }
 
-/// Mirrors one command onto the shared step transaction, recording any placed id and
-/// updating the running cursor to the placement location.
+/// Mirrors one command onto the shared step transaction.
 ///
-/// Only geometry-creating commands draw; every other command is a no-op on the CRDT
-/// (it changes no visible geometry). See the [module docs](self) for the rationale.
+/// Geometry-creating commands draw and record a placed id; for the ones that create a
+/// single shape, the session's [`ElementId`] (`affected`) is associated with the new
+/// CRDT id in `map` so a later transform or delete can resolve it. The id-addressed
+/// edits ([`TransformShapes`](AgentCommand::TransformShapes),
+/// [`DeleteShapes`](AgentCommand::DeleteShapes)) resolve each addressed id through
+/// `map`, mirroring the move or delete, and record any unresolved id in `skipped`.
+/// Every other command is a no-op on the CRDT. See the [module docs](self).
 fn mirror_command(
     edit: &mut StepEdit,
     command: &AgentCommand,
+    affected: &[ElementId],
+    map: &mut HashMap<ElementId, Mirrored>,
     placed: &mut Vec<String>,
+    skipped: &mut Vec<String>,
     cursor: &mut Point,
 ) {
     match command {
@@ -270,11 +378,16 @@ fn mirror_command(
         }
         AgentCommand::DeleteCell { name } => {
             edit.remove_cell(name);
+            // The cell's shapes are gone; forget any ids that addressed them so a later
+            // edit does not resolve a stale record.
+            map.retain(|_, m| m.cell != *name);
         }
         AgentCommand::AddRect { cell, layer, rect } => {
             let r = to_rect(*rect);
-            let id = edit.add_rect(cell, to_layer(*layer), r);
+            let shape = DrawShape::new(to_layer(*layer), ShapeKind::Rect(r));
+            let id = edit.add_shape(cell, &shape);
             *cursor = rect_center(r);
+            track(map, affected, &id, cell, shape);
             placed.push(id);
         }
         AgentCommand::AddPolygon {
@@ -289,6 +402,7 @@ fn mirror_command(
             if let Some(c) = center {
                 *cursor = c;
             }
+            track(map, affected, &id, cell, shape);
             placed.push(id);
         }
         AgentCommand::AddPath {
@@ -306,6 +420,7 @@ fn mirror_command(
             if let Some(p) = last {
                 *cursor = p;
             }
+            track(map, affected, &id, cell, shape);
             placed.push(id);
         }
         AgentCommand::PlaceInstance {
@@ -349,12 +464,137 @@ fn mirror_command(
                 placed.push(id);
             }
         }
+        AgentCommand::TransformShapes { ids, transform } => {
+            mirror_transform(edit, ids, *transform, affected, map, skipped, cursor);
+        }
+        AgentCommand::DeleteShapes { ids } => {
+            mirror_delete(edit, ids, affected, map, skipped);
+        }
         // Every other command draws no geometry: read-only queries and reports, DRC,
-        // routing, extraction, IO, technology, and session persistence. Id-addressed
-        // edits are intentionally not mirrored (see the module docs). The match is
+        // routing, extraction, IO, technology, and session persistence. The match is
         // exhaustive over the non-exhaustive enum via this arm.
         _ => {}
     }
+}
+
+/// Mirrors a `TransformShapes` onto the CRDT: resolve each addressed id and move that
+/// record's geometry in place, or record a skip for one the bridge never learned.
+///
+/// Mirrors only when the session applied the whole batch (its transform is
+/// all-or-nothing); `to_transform` returning `Err` mirrors that acceptance, since the
+/// session rejects the same bad magnification.
+fn mirror_transform(
+    edit: &mut StepEdit,
+    ids: &[ElementId],
+    transform: TransformArg,
+    affected: &[ElementId],
+    map: &mut HashMap<ElementId, Mirrored>,
+    skipped: &mut Vec<String>,
+    cursor: &mut Point,
+) {
+    let xform = if affected.is_empty() {
+        None
+    } else {
+        to_transform(transform).ok()
+    };
+    for id in ids {
+        match (xform.as_ref(), map.get_mut(id)) {
+            (Some(x), Some(m)) => {
+                let moved = transform_shape(x, &m.shape);
+                edit.set_shape(&m.cell, &m.crdt_id, &moved);
+                *cursor = shape_anchor(&moved);
+                m.shape = moved;
+            }
+            _ => skipped.push(unresolved(*id)),
+        }
+    }
+}
+
+/// Mirrors a `DeleteShapes` onto the CRDT: resolve each addressed id and remove that
+/// record, or record a skip for one the bridge never learned.
+///
+/// Mirrors only when the session applied the delete (it validates every id up front, so
+/// the batch is all-or-nothing); the map is consulted and mutated only then, so a
+/// rejected batch leaves every learned id intact.
+fn mirror_delete(
+    edit: &mut StepEdit,
+    ids: &[ElementId],
+    affected: &[ElementId],
+    map: &mut HashMap<ElementId, Mirrored>,
+    skipped: &mut Vec<String>,
+) {
+    let accepted = !affected.is_empty();
+    for id in ids {
+        let entry = if accepted { map.remove(id) } else { None };
+        match entry {
+            Some(m) => edit.remove_shape(&m.crdt_id),
+            None => skipped.push(unresolved(*id)),
+        }
+    }
+}
+
+/// Records the association from the session's [`ElementId`] for a just-created shape
+/// to the CRDT id it was mirrored under, so a later transform or delete can resolve
+/// it. A create the session rejected has no id in `affected`, so nothing is recorded.
+fn track(
+    map: &mut HashMap<ElementId, Mirrored>,
+    affected: &[ElementId],
+    crdt_id: &str,
+    cell: &str,
+    shape: DrawShape,
+) {
+    if let Some(&id) = affected.first() {
+        map.insert(
+            id,
+            Mirrored {
+                crdt_id: crdt_id.to_owned(),
+                cell: cell.to_owned(),
+                shape,
+            },
+        );
+    }
+}
+
+/// The warning recorded for an id-addressed edit the bridge could not resolve.
+fn unresolved(id: ElementId) -> String {
+    format!(
+        "{id}: no mirrored shape (created before the collaborator attached, or the internal session rejected the edit); skipped"
+    )
+}
+
+/// The cursor anchor for a shape: the center of its bounding box.
+fn shape_anchor(shape: &DrawShape) -> Point {
+    rect_center(shape.bounding_box())
+}
+
+/// Transforms a shape's geometry by `transform` (orient, magnify, translate),
+/// mirroring `reticle-agent-api`'s single-shape placement transform so a mirrored move
+/// matches what the session applied.
+fn transform_shape(transform: &Transform, shape: &DrawShape) -> DrawShape {
+    let kind = match &shape.kind {
+        ShapeKind::Rect(rect) => {
+            let corners = [
+                rect.min,
+                Point::new(rect.max.x, rect.min.y),
+                rect.max,
+                Point::new(rect.min.x, rect.max.y),
+            ];
+            let mapped = corners.into_iter().map(|c| transform.apply(c));
+            ShapeKind::Rect(Rect::from_points(mapped).unwrap_or_default())
+        }
+        ShapeKind::Polygon(poly) => ShapeKind::Polygon(Polygon::new(
+            poly.vertices()
+                .iter()
+                .map(|p| transform.apply(*p))
+                .collect(),
+        )),
+        ShapeKind::Path(path) => ShapeKind::Path(Path::new(
+            path.points().iter().map(|p| transform.apply(*p)).collect(),
+            transform.magnification.scale(path.width()),
+            path.endcap(),
+        )),
+    };
+    DrawShape::new(shape.layer, kind)
 }
 
 // ----- geometry conversions (mirroring reticle-agent-api's apply module) --------

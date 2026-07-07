@@ -453,6 +453,29 @@ pub(crate) fn insert_shape(
     shapes.insert(txn, id, encode_shape(cell, shape));
 }
 
+/// Overwrites the shape record stored under `id` (owned by `cell`) with `shape`,
+/// in place, without allocating a new id or touching the cell existence set.
+///
+/// Where [`insert_shape`] adds a fresh record under a freshly-minted id, this
+/// re-encodes the value at an id that already addresses a shape. It is how a
+/// mirrored *in-place transform* moves a shape the agent created earlier: the CRDT
+/// record keeps its id, so a converged peer sees the same element move rather than
+/// a delete-and-recreate. Because the id is a unique `actor:counter` string only
+/// this peer ever writes, overwriting it is a single-writer update that converges
+/// with any concurrent edit on a different id.
+pub(crate) fn overwrite_shape(txn: &mut TransactionMut, cell: &str, id: &str, shape: &DrawShape) {
+    let shapes = txn.get_or_insert_map(SHAPES);
+    shapes.insert(txn, id, encode_shape(cell, shape));
+}
+
+/// Removes the shape record stored under `id`, if present. Mirrors a delete of a
+/// single shape the agent created earlier (by its CRDT element id), leaving every
+/// other record, including a concurrent peer's, untouched.
+pub(crate) fn remove_shape_by_id(txn: &mut TransactionMut, id: &str) {
+    let shapes = txn.get_or_insert_map(SHAPES);
+    shapes.remove(txn, id);
+}
+
 /// Inserts a single instance record into a cell under `id`.
 pub(crate) fn insert_instance(
     txn: &mut TransactionMut,

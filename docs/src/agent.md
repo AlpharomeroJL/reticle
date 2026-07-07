@@ -126,6 +126,49 @@ room never sees a half-drawn step and can edit alongside the agent (ADR 0022). T
 same transcript the harness writes is what the in-app replay theater plays back
 through a live session.
 
+### Id-addressed edits: transform and delete (ADR 0066)
+
+The geometry-*creating* commands change what a human sees, so those are mirrored. So are
+the two edits that address *existing* elements, `TransformShapes` and `DeleteShapes`: the
+gap ADR 0022 documented and ADR 0066 closes. They name the command surface's stable
+`ElementId`s, which are not the CRDT's `actor:counter` element ids, so the collaborator
+drives an authoritative internal session in lockstep with the mirror: applying each
+command there validates it and hands back the `ElementId` it assigned, and the bridge
+records `ElementId -> CRDT id` for every shape it creates. A later transform resolves each
+addressed id and moves that record's geometry *in place* (the shape keeps its identity); a
+delete removes it. An id the bridge never learned (a shape created before it attached) is
+skipped and reported in `StepReport.skipped`, never applied incorrectly or dropped
+silently. Convergence tests exchange these edits with a concurrent human peer in both
+orders and confirm the transform actually moved the shape and the delete removed it.
+
+### Joining a real room (`reticle-agent::live`)
+
+`reticle_agent::live::run_in_room` connects an `AgentCollaborator` to a real
+`reticle-server` relay room over a native WebSocket (`ws://host/ws/{room}`). For each
+step it ships that step's CRDT delta as one binary frame in the same `SyncMessage` framing
+the browser transport uses (ADR 0058): one step is one frame, so a watcher never sees a
+half-step. It publishes the agent's presence (cursor at the last placement, an amber color,
+a display name), and applies inbound peer frames back into its own document. The agent is
+then indistinguishable from any other participant: its edits reach browser humans, and
+their concurrent edits reach it. An in-process integration test proves both directions over
+a real socket.
+
+The `agent_live_room` example is the small CLI entry: `--relay <ws-url> --room <name>` joins
+a room and runs the demo; `--emit <path>` regenerates the committed transcript.
+
+### The DRC-fix demo transcript
+
+`examples/collab/agent_drc_fix.transcript.jsonl` is a committed, replayable transcript of
+the agent fixing a seeded design-rule violation in a live room: it seeds two met1
+rectangles closer than the SKY130-subset `m1.2` spacing (140 DBU), runs DRC (flagged),
+`TransformShapes` the second rectangle to a legal gap, and runs DRC again (clean). It
+replays to a pinned document hash, checked by a test.
+
+This is a **deterministic scripted run, not a live model**: the commands are the fixed
+script in `reticle_agent::live::scripted_drc_fix_steps`, driven by the harness with no LLM,
+no API key, and no network beyond the relay socket. The transcript trailer says so, and so
+does this paragraph: the label is honest everywhere.
+
 ## Scoped sessions and context packs (`reticle-agent::context_pack`)
 
 A session can be opened on a *region* of the document rather than the whole thing. This
