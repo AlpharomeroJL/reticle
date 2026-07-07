@@ -3,7 +3,7 @@
 //! A page opened with `?archive=<url>` (parsed by [`crate::share::archive_url_from_query`])
 //! streams the served archive at `<url>` over the HTTP-range
 //! [`TileSource`](reticle_index::TileSource) (lane 2B) into a read-only
-//! [`DocHost::Streamed`](crate::dochost::DocHost::Streamed) scene (lane 2C) and browses it
+//! [`DocHost::Streamed`] scene (lane 2C) and browses it
 //! with progressive residency: as the camera moves, the tiles covering the viewport are
 //! fetched, and the coarsest resident level keeps painting until the fine tiles land
 //! (ADR 0062). This module owns the *app-side* state for that browse mode.
@@ -17,15 +17,15 @@
 //!   size, working-set estimate, fetched fraction, byte formatting), the target-level
 //!   choice for a viewport ([`target_level_for_viewport`]), and the not-yet-resident,
 //!   not-yet-in-flight fetch list, coarse level first ([`wanted_tiles`]).
-//! * **Glue (`#[cfg(target_arch = "wasm32")]`):** opening an [`HttpRangeTileSource`]
+//! * **Glue (`#[cfg(target_arch = "wasm32")]`):** opening an `HttpRangeTileSource`
 //!   (`reticle_index::tile_source`), probing the archive's total size with one ranged
 //!   GET, and handing each missing tile to
-//!   [`spawn_fetch`](crate::streamed::spawn_fetch). These need a browser and are proven
+//!   `spawn_fetch`. These need a browser and are proven
 //!   by the served-archive Playwright spec, not a headless unit test.
 //!
 //! # Read-only by construction
 //!
-//! [`ArchiveBrowse`] holds a [`DocHost`](crate::dochost::DocHost) that is *always* the
+//! [`ArchiveBrowse`] holds a [`DocHost`] that is *always* the
 //! [`Streamed`](crate::dochost::DocHost::Streamed) arm, which exposes no `&mut History`
 //! and no mutation API, so an edit to the streamed die is a compile error rather than a
 //! runtime check (ADR 0062/0071). The browse mode reuses the editor camera for pan/zoom,
@@ -43,7 +43,7 @@ use crate::streamed::{StreamedScene, TileInbox};
 /// the knob trading tile count (and so fetch traffic) for on-screen detail.
 const TILES_ACROSS: i64 = 4;
 
-/// The in-memory tile-cache byte budget an [`HttpRangeTileSource`] keeps in front of the
+/// The in-memory tile-cache byte budget an `HttpRangeTileSource` keeps in front of the
 /// network, so panning back to a recent tile does not re-fetch it. 16 MiB is generous for
 /// the handful of tiles a viewport covers while staying well within a browser tab.
 #[cfg(target_arch = "wasm32")]
@@ -64,7 +64,7 @@ const MAX_FETCH_PER_PASS: usize = 32;
 /// tiles are resident, and the derived working-set and mean-tile estimates.
 ///
 /// `bytes_fetched` and `tiles_fetched` are cumulative over the session (a re-fetch after
-/// an eviction counts again — honest *network traffic*, not a snapshot of resident
+/// an eviction counts again, honest *network traffic* rather than a snapshot of resident
 /// bytes), read straight off the metered [`TileInbox`]. `file_size` comes from a one-shot
 /// ranged probe of the archive's `Content-Range` total (`0` when the server did not
 /// report one). `working_set_bytes` is an *estimate*: the resident tile count times the
@@ -158,7 +158,7 @@ pub fn fmt_bytes(n: u64) -> String {
 }
 
 /// The finest level appropriate for `viewport` against `scene`, aiming for roughly
-/// [`TILES_ACROSS`] tiles spanning the larger viewport dimension.
+/// `TILES_ACROSS` tiles spanning the larger viewport dimension.
 ///
 /// A zoomed-in (small) viewport yields a small target tile size and so a finer level; a
 /// zoomed-out one a coarser level. This is the level [`wanted_tiles`] fetches toward and
@@ -201,7 +201,7 @@ pub fn wanted_tiles<S: std::hash::BuildHasher>(
 ///
 /// The [`DocHost`] is always the [`Streamed`](DocHost::Streamed) arm; see the
 /// [module docs](self) for the read-only-by-construction guarantee. On wasm it also owns
-/// the shared [`HttpRangeTileSource`] every in-flight fetch reads from.
+/// the shared `HttpRangeTileSource` every in-flight fetch reads from.
 #[derive(Debug)]
 pub struct ArchiveBrowse {
     /// The document host, always [`DocHost::Streamed`].
@@ -288,7 +288,7 @@ impl ArchiveBrowse {
         let adopted = self.inbox.drain_into(scene);
         // A tile that became resident is no longer in flight. (A fetch that errored never
         // becomes resident; such a coordinate stays in flight, which for a well-formed
-        // archive does not happen — every covering tile exists.)
+        // archive does not happen; every covering tile exists.)
         // Borrow the scene through the `host` field directly (not the `scene()` method,
         // which borrows all of `self`) so `in_flight` stays independently mutable.
         let scene = self.host.scene().expect("archive host is always Streamed");
@@ -399,7 +399,7 @@ pub fn start_archive_open(url: String, inbox: ArchiveOpenInbox, repaint: eframe:
 /// write short-circuit before reaching the worker-only
 /// `FileSystemFileHandle.createSyncAccessHandle()` (which throws a synchronous
 /// `TypeError` the source's async guards cannot catch). Losing the persistent cross-reload
-/// cache is expected here — it genuinely needs a worker, which lane 2D-alpha owns; the
+/// cache is expected here: it genuinely needs a worker, which lane 2D-alpha owns; the
 /// in-memory LRU still spares a re-fetch while panning. The override is CSP-safe (no
 /// `eval`/`new Function`) and idempotent: re-running it just reinstalls the rejecter.
 #[cfg(target_arch = "wasm32")]

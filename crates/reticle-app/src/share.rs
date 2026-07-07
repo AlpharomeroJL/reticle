@@ -520,7 +520,7 @@ pub const ARCHIVE_KEY: &str = "archive";
 ///
 /// `query` is the raw `window.location.search` (for example
 /// `"?archive=https://host/chip.rtla&view=editor"`), with or without the leading `?`.
-/// The value is percent-decoded (the full [`decode_permalink_value`] decoding, so an
+/// The value is percent-decoded (the full `decode_permalink_value` decoding, so an
 /// encoded URL round-trips), trimmed, and rejected if empty so a bare `?archive=` does
 /// not kick off a fetch of the empty string. Permissive about the URL itself: any
 /// non-empty value is returned, and whether it resolves (and whether CORS and `Range`
@@ -554,7 +554,7 @@ pub fn archive_url_from_query(query: &str) -> Option<String> {
 ///
 /// The inverse of [`archive_url_from_query`]: the `?archive=` query it writes parses
 /// back to the same URL. The archive URL is fully percent-encoded with
-/// [`encode_permalink_value`] so a URL carrying `/`, `?`, `&`, or `#` stays parseable.
+/// `encode_permalink_value` so a URL carrying `/`, `?`, `&`, or `#` stays parseable.
 /// An empty `base_page` yields a relative `?archive=...` query (resolving against the
 /// loaded bundle), mirroring [`emit_permalink`]; a non-empty one is joined as
 /// `base/?archive=...`. This is what a gallery entry (a real-chip deep link) serializes.
