@@ -111,6 +111,39 @@ The deterministic `MockModel` (no key, no network) solves only the three sample 
 end to end; `just bench-agent` runs it and reports 3/75, a machinery baseline that shows
 all 75 tasks and their checkers execute, not a model score.
 
+(The two local rows above are the 75-task v0.4.0 suite. The generator wave added 8 tasks
+to v0.5.0, so the suite is now 83 tasks; re-running the local models on v0.5.0 is a
+follow-up, and the extra 8 are pass/fail-gated the same way.)
+
+## An agent-system row is not a bare-model row
+
+The two local rows are **bare models**: Reticle's own harness owns the
+propose-verify-correct loop and asks the model for commands one iteration at a time, so
+the row measures the model against a fixed reasoning scaffold. **Claude Code is an agent
+system**: it brings its own loop, planning, and tool-calling scaffold. Reticle drives it
+through a separate `claude-code` backend that, per task, launches `claude -p` against a
+generated MCP config pointing at `reticle-mcp` (with the server-side transcript capture
+of ADR 0051 on), lets Claude Code drive the tools itself, then replays the captured
+transcript and runs the same two-way-tested checker. Because the loop and scaffold are
+the agent system's own, a Claude Code row is labeled **"Claude Code (`<model>`)"** and is
+**not** comparable head to head with a bare-model row: it measures a different thing (a
+whole agent system, not a model against our loop). That distinction is the point of the
+row, not a caveat to hide.
+
+Honesty of the backend: a run that completes but fails the checker is a real
+`success = false` record, exactly like the local rows; a run that cannot happen at all
+(the `claude` CLI missing, or the session not authenticated, or out of quota) is a
+distinct `NotRunRecord` artifact that can never be counted as a pass or a fail.
+
+Status in this environment: **not run.** The `claude` CLI is present (v2.1.197) but has
+no authenticated session here, so every task honestly records a not-run
+(`please run /login`), and no Claude Code row is published. To produce the row, on this
+host: authenticate the CLI once (`claude` interactive `/login`), then run
+`just bench-agent-claude-code` (on Windows also set `RETICLE_CLAUDE_BIN` to the resolved
+`claude.ps1` or `claude.cmd`, since the npm shim is not a directly spawnable executable).
+That consumes the operator's Claude subscription quota, 83 agentic sessions, one per
+task; it is deliberately left as an operator step rather than run automatically.
+
 ## Growing the suite
 
 Failure mining (`reticle-bench`'s `mining` module) turns real run failures into
