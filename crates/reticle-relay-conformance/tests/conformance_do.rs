@@ -16,7 +16,18 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use reticle_relay_conformance::vectors::broken_expects_view_frame_forwarded;
-use reticle_relay_conformance::{Target, run_vector, vectors};
+use reticle_relay_conformance::{Target, Vector, run_vector, vectors};
+
+/// Runs every vector against `target`, collecting each failure's message.
+async fn run_all(target: &Target, vecs: &[Vector]) -> Vec<String> {
+    let mut failures = Vec::new();
+    for vector in vecs {
+        if let Err(failure) = run_vector(target, vector).await {
+            failures.push(failure.to_string());
+        }
+    }
+    failures
+}
 
 /// The `worker/` directory, resolved from this crate's manifest dir.
 fn worker_dir() -> PathBuf {
@@ -100,6 +111,37 @@ async fn wait_ready(base: &str) -> bool {
 /// vector fails against it: the two relays return identical verdicts.
 #[tokio::test]
 async fn every_vector_passes_against_the_durable_object() {
+    // Deploy smoke: when a URL is provided, run the deterministic core-semantic
+    // vectors against an already-deployed relay (wss://...workers.dev) with no
+    // local spawn. The timing-dependent presence-coalescing vector is proven
+    // under the hermetic local run, not over the WAN.
+    if let Ok(url) = std::env::var("RETICLE_CONFORMANCE_DO_URL") {
+        let target = Target::external(&url, true);
+        let deterministic = [
+            "late_join_log_replay",
+            "view_mode_frame_dropped",
+            "echo_suppression",
+            "two_room_isolation",
+            "binary_frames_only",
+        ];
+        let subset: Vec<Vector> = vectors()
+            .into_iter()
+            .filter(|v| deterministic.contains(&v.name))
+            .collect();
+        let failures = run_all(&target, &subset).await;
+        let negative = run_vector(&target, &broken_expects_view_frame_forwarded()).await;
+        assert!(
+            failures.is_empty(),
+            "deployed relay smoke failures against {url}:\n{}",
+            failures.join("\n")
+        );
+        assert!(
+            negative.is_err(),
+            "negative vector must fail against the deployed relay"
+        );
+        return;
+    }
+
     if std::env::var("RETICLE_CONFORMANCE_DO").ok().as_deref() != Some("1") {
         eprintln!(
             "skipping Durable Object conformance: set RETICLE_CONFORMANCE_DO=1 \
@@ -118,12 +160,7 @@ async fn every_vector_passes_against_the_durable_object() {
     }
 
     let target = Target::external(&base, true);
-    let mut failures = Vec::new();
-    for vector in vectors() {
-        if let Err(failure) = run_vector(&target, &vector).await {
-            failures.push(failure.to_string());
-        }
-    }
+    let failures = run_all(&target, &vectors()).await;
     let negative = run_vector(&target, &broken_expects_view_frame_forwarded()).await;
 
     dev.kill();

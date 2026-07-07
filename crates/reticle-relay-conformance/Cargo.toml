@@ -20,4 +20,6 @@ reticle-geometry = { workspace = true }
 reticle-server = { workspace = true }
 futures-util = "0.3.32"
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "net", "time", "process"] }
-tokio-tungstenite = "0.29.0"
+# native-tls (SChannel on Windows) so the deployed-relay smoke can reach
+# wss://...workers.dev without a rustls CryptoProvider; local ws:// does not use it.
+tokio-tungstenite = { version = "0.29.0", features = ["native-tls"] }
