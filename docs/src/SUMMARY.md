@@ -23,6 +23,7 @@
 - [SKY130 grounding](sky130.md)
 - [Routing](routing.md)
 - [Connectivity extraction](extraction.md)
+- [Metrology](metrology.md)
 - [Collaboration](collaboration.md)
   - [The relay: two implementations, one protocol](relay.md)
 - [Scripting](scripting.md)

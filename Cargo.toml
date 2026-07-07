@@ -21,6 +21,7 @@ members = [
     "crates/reticle-drc",
     "crates/reticle-route",
     "crates/reticle-extract",
+    "crates/reticle-metrology",
     "crates/reticle-gen",
     "crates/reticle-sync",
     "crates/reticle-server",
