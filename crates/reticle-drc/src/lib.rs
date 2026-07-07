@@ -58,8 +58,10 @@
 #![forbid(unsafe_code)]
 
 mod geom;
+pub mod lydrc;
 mod sky130;
 
+pub use lydrc::{LydrcError, parse_lydrc};
 pub use sky130::sky130_drc_rules;
 
 use geom::{contains_rect, enclosure_margin, overlaps, rect_gap};
