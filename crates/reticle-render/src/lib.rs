@@ -27,6 +27,7 @@
 mod context;
 mod cull;
 mod geometry;
+mod gpu_hierarchy;
 mod indirect;
 mod pages;
 mod palette;
@@ -40,6 +41,7 @@ mod view;
 pub use context::WgpuContext;
 pub use cull::{CellCompactor, CellCuller, CompactionOutput, CullAabb, QUAD_INDEX_COUNT};
 pub use geometry::{MeshVertex, RectInstance, SceneGeometry};
+pub use gpu_hierarchy::{ArrayPlacement, GpuHierarchy, cpu_expand_ops};
 pub use indirect::{IndirectRects, MultiDraw, upload_instances};
 pub use pages::{Allocation, BufferPages, DEFAULT_PAGE_SIZE, PageAllocator};
 pub use palette::{Palette, Rgba};
