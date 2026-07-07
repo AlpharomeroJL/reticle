@@ -294,6 +294,25 @@ impl SyncDocument {
             .encode_state_as_update_v1(&StateVector::default())
     }
 
+    /// Encodes a **full-state snapshot**: every change this peer has, as one `yrs`
+    /// v1 update against the empty state vector.
+    ///
+    /// This is the resynchronization frame a reconnecting sharer publishes first,
+    /// before resuming incremental updates (the live share transport, ADR 0063).
+    /// Because it carries the *whole* document rather than a diff since some
+    /// remembered point, it is self-contained: a receiver that missed arbitrary
+    /// updates while the socket was down (or that never saw any) converges to this
+    /// peer's exact document by applying it, and applying it again is a no-op (yrs
+    /// updates are idempotent). It is deliberately equivalent to
+    /// [`encode_state_update`](Self::encode_state_update); the distinct name marks
+    /// the reconnect-resync contract at the call site (snapshot-on-reconnect, not a
+    /// state-vector diff, since a reconnecting peer cannot trust any remembered
+    /// remote state vector).
+    #[must_use]
+    pub fn encode_full_state(&self) -> Vec<u8> {
+        self.encode_state_update()
+    }
+
     /// This peer's [`StateVector`], encoded as `yrs` v1 bytes.
     ///
     /// Send this to a peer so it can compute (via [`SyncDocument::encode_update`])
