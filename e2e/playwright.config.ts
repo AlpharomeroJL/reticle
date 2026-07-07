@@ -73,12 +73,12 @@ export default defineConfig({
     {
       name: "webgl2",
       // The subpath and share-live specs run in their own projects.
-      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts/,
+      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts/,
       use: { launchOptions: { args: WEBGL2_ARGS } },
     },
     {
       name: "webgpu",
-      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts/,
+      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts/,
       use: { launchOptions: { args: WEBGPU_ARGS } },
     },
     {
@@ -105,6 +105,16 @@ export default defineConfig({
       // WebGPU adapter here.
       name: "served-archive",
       testMatch: /served-archive\.spec\.ts/,
+      use: { launchOptions: { args: WEBGL2_ARGS } },
+    },
+    {
+      // The PWA install + offline e2e (lane v8-4d-pwa). Served at root by
+      // serve-dist.mjs (8080); asserts a valid linked manifest and a service
+      // worker that registers, controls the page, and (best-effort) serves the
+      // app shell offline from its cache. WebGL2 fallback, since headless
+      // Chromium here has no WebGPU adapter (the shell checks do not need it).
+      name: "pwa",
+      testMatch: /pwa\.spec\.ts/,
       use: { launchOptions: { args: WEBGL2_ARGS } },
     },
   ],

@@ -51,4 +51,5 @@
 - [Layer and technology editing](layer-tech-editing.md)
 - [Deployment](deployment.md)
   - [Archive hosting](archive-hosting.md)
+  - [Install and offline (PWA)](pwa.md)
 - [Contributing](contributing.md)

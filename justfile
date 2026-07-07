@@ -242,6 +242,18 @@ e2e-archive:
     cd e2e; npx playwright install chromium
     cd e2e; npx playwright test --project=served-archive
 
+# PWA install + offline gate (lane v8-4d-pwa). Builds the Trunk bundle (which now
+# emits manifest.json, sw.js, and the icons into dist) and runs the `pwa`
+# Playwright project against the root-served dist. It asserts a linked, valid
+# manifest and a service worker that registers and controls the page; offline
+# reload of the app shell is a best-effort check reported as an annotation (see
+# the `offline-reload` annotation in the run output). See e2e/pwa.spec.ts.
+e2e-pwa:
+    cd crates/web; trunk build index.html
+    npm --prefix e2e install
+    cd e2e; npx playwright install chromium
+    cd e2e; npx playwright test --project=pwa
+
 book:
     mdbook build docs
 
