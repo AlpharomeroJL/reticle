@@ -1,8 +1,27 @@
 # v8.0.0 run state (single writer: orchestrator)
 
-updated: 2026-07-07T15:40:00-05:00
-phase: wave1/dispatch
-head: (Wave 0 closed; main pushed) e18cc43 + wave0-close commit
+## >>> OVERNIGHT AUTONOMY AUTHORIZATION (operator, 2026-07-07 night) <<<
+Run the packet to completion, fully autonomous, no human input until morning. Gates are checkpoints to run+pass, not stops. Only a red gate I cannot fix-forward, or total quota exhaustion, halts progress (protocols below). Standing authorization: dispatch/gate/merge/redeploy Waves 2-9 in wave order, pipelined disjoint next-wave lanes when slots free. All prior amendments/rules/conventions in force.
+PERMANENT CONVENTIONS: (a) lane done = RESULT.md or PARKED.md; exit-0-without-artifact gets ONE resume-to-finalize, then verify at gate against the brief's explicit SUCCESS BAR (not just tests-green), log outcome where RESULT.md would go (applies now to 7A, 5E, 2D-alpha). (b) placeholder ADR ids in briefs; orchestrator numbers them at merge in merge order. (c) Windows npm-shim CLIs -> .cmd when spawned from Rust. (d) app-touching lane gates include the web bin. (e) bench claims cite FULL-gate test counts, never scoped lane counts.
+ADVERSARIAL REVIEW at EXACTLY two points: Wave 3 gate (GPU-vs-CPU oracle correctness, chunked compaction boundaries) + Wave 4 gate (V1-fixture migration correctness, selective-undo convergence, view-mode permission). Confirmed HIGH fix before that wave's redeploy; else tracked entries. No other reviews (quota to lanes).
+RESILIENCE: rate limit -> backoff + auto resume, never thrash. Red gate -> fix forward if diagnosable+contained (Wave 1 precedent); else revert offending merge, park lane honest, continue with the rest. Near context limit -> write full resume block here FIRST then continue compacted. Every wave boundary commits RUN_STATE + pushes.
+WAVE-SPECIFIC: W2 gate verify 2A peak-RSS vs bar + differential test covers committed crash fixtures before merge; dispatch converter-CLI right after 2A merges; served-archive Playwright spec runs vs LOCAL ranged server regardless of hosting. W3 GPU exclusivity ABSOLUTE (3B/3C/3D/captures/soak one at a time; 3A may pair with one GPU lane). W4B commit V1 golden fixture with pre-V2 build BEFORE any V2 schema change (non-negotiable order). W5 5B only after 5A LefDefDesign frozen at merge; container oracles use pinned E: images. W6B vision model never with GPU lanes; honest not-run if VRAM-bound. W7 leaderboard format freezes at 7A merge; 7B consumes banked bench (PARTIAL if incomplete); 7C only after bench workers fully STOPPED (edits task TOMLs). W8 captures GPU-serialized; bundle-size ledger; soak vs deployed relay if live else local+labeled.
+W9 IN FULL: gauntlet; skeptical STATUS audit (every not-run/parked/PARTIAL); version bump; CHANGELOG; branch pre-v8-audit at pre-tag commit (rollback anchor); tag v8.0.0; redeploy; verify URL + README media; GitHub release w/ binaries. Claims = ONLY evidence-backed (measured, passed smokes, deployed+verified); unverified listed as such.
+MORNING REPORT goes at the very top here: waves completed, shipped-live (bundle, relay version, archives), headline measured numbers, full not-run/parked ledger w/ operator commands, bench final row, review findings+dispositions, top-3 for operator.
+IMMEDIATE (in order): trim bench to 3 (kill 4 leftovers) + dedupe dup task records (earliest honest per task); when 1E exits/contention clear -> redeploy relay (just conformance; wrangler deploy; record version); run deferred e2e/e2e-share/conformance no later than the Wave 2 gate.
+
+## RESUME BLOCK (if this session dies, start here)
+Position (2026-07-07 night): mid Wave 2 gate. main HEAD d56c094 (2A merged). Wave 2 lanes green: 2A(merged), 2B, 2C, 2D-alpha (all in D:\dev\reticle-lanes\). Remaining Wave 2 merges (order): 2b, 2d-alpha, 2c (app last). ADR collisions to renumber at merge: 2A already added 0063-rtla-onwire-framing (renumber - 0063 taken by reconnect; assign next free), 2C+2D-alpha both authored "ADR 0068" (assign in merge order). Then: dispatch converter-CLI lane; Wave 2 gate (ci + served-archive local spec + e2e + conformance + redeploy + smoke); relay wrangler deploy. Then Waves 3-9 per plan. Lane UUIDs + briefs under scratch/lanes/<id>/. Dispatch: scratch/dispatch-lane.ps1 -Id <id> -SessionId <uuid>; resume: scratch/resume-lane.ps1. Bench: scratch/bench-extension.ps1 -WorkerIndex i -WorkerCount 3 -SkipBuild. Deploy: just deploy-pages then publish scratch/pages to gh-pages worktree then just smoke-pages.
+
+updated: 2026-07-07 night (overnight autonomous)
+phase: wave2/gate (2A merged, merging 2B/2C/2D-alpha)
+head: d56c094 (2A merged)
+
+## SHIPPED LIVE (running tally):
+- Site bundle: web-e6f6b8398ffb8c08 (Wave 1 live-collab + review reconnect fix), gh-pages 763660a, smoke PASS. URL https://alpharomerojl.github.io/reticle/
+- DO relay: reticle-relay.josefdean.workers.dev, version 33fe97b0-8b2f-4bc0-8591-e3724b365ae9 (hardened: presence-replay, frame/log caps, FIFO flush, per-room conn cap). Conformance GREEN both relays (native + DO).
+- Bench claude-code row: 72/83 committed (PARTIAL), 3 stride workers finishing the last 11.
+- Immediate actions DONE: bench trimmed to 3 (killed leftover dup workers; 0 duplicate result records - one file per task), relay redeployed. PENDING: deferred e2e/e2e-share browser validation at Wave 2 gate.
 
 ## AMENDMENT (operator, 2026-07-07): pipelined dispatch authorized
 When concurrency slots are free AND the next wave has lanes whose file surfaces are provably disjoint from every in-flight lane, run that wave's contract step and dispatch those lanes early. They STILL merge only at their own wave gate, in declared order. Wave 1 lanes merge first at the Wave 1 gate; early-dispatched lanes park green and merge at their own gates.

@@ -31,6 +31,29 @@ on. The disk/mmap paging layer and its renderer integration are **not yet wired 
 today (the API is exercised over in-memory buffers); the out-of-core streaming ADR and
 `STATUS.md` record this precisely.
 
+## Streaming a `.rtla` archive over a `TileSource`
+
+The `.rtla` container (ADR 0062) turns a layout into a network transport for renderable
+silicon: a header with the world box and per-level grid dimensions, a tile directory of
+byte ranges, then byte-contiguous tiles, each an independently-validated `rkyv`
+`TilePayload`. A `TileSource` is the read seam over one such archive: fetch the header,
+fetch one tile's bytes by address. Three sources implement it. `MmapTileSource` maps a
+local file and serves a tile by slicing the mapped range, reusing the zero-copy archive
+discipline above (the one documented `unsafe`, every block validated). `HttpRangeTileSource`
+runs in the browser: it fetches the header with two ranged GETs, then a tile per `fetch`
+with a `Range: bytes=offset-end` header, in front of a byte-budgeted in-memory LRU and an
+OPFS persistent cache so revisiting an archive is instant (ADR 0063). `MemTileSource` is an
+in-memory double for tests.
+
+A small query layer resolves a viewport against the archive's finest level (coarser levels
+are paint-only), fetches the overlapping tiles, and returns the records that intersect the
+view. That streamed result is proven equal to the in-RAM R-tree's answer over 600
+randomized layouts. Every count read from a header or directory is untrusted: tile counts
+are summed with checked arithmetic, a header inconsistent with its directory is rejected,
+and the header fetch is capped, so a directory claiming billions of tiles errors rather
+than exhausting memory. The physical byte framing and the OPFS/LRU cache policy are fixed
+in ADR 0063.
+
 ## Targets
 
 The bulk index build of one million shapes should complete in well under a second,
