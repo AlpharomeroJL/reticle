@@ -97,16 +97,25 @@ async fn live_wiring_streams_the_drawn_geometry_to_a_watcher() {
     );
 
     // Drain the frames the watcher received and apply them to a fresh CRDT peer,
-    // exactly as a browser reticle-sync client does.
+    // exactly as a browser reticle-sync client does: each binary frame is a
+    // `SyncMessage` envelope (ADR 0058), decoded with `reticle_sync::frame` and routed
+    // on its variant. A demo stream carries CRDT update frames.
     let mut peer = SyncDocument::new("watcher");
     let mut frames = 0usize;
     while let Ok(Some(Ok(msg))) =
         tokio::time::timeout(Duration::from_millis(750), watcher.next()).await
     {
         if let Message::Binary(bytes) = msg {
-            peer.apply_update(&bytes)
-                .expect("frame is a valid yrs update");
-            frames += 1;
+            match reticle_sync::decode_frame(&bytes).expect("frame is a valid SyncMessage") {
+                reticle_sync::Frame::Update(raw) => {
+                    peer.apply_update(&raw)
+                        .expect("frame is a valid yrs update");
+                    frames += 1;
+                }
+                // A demo stream ships CRDT frames; presence/comments are not expected
+                // here, but decoding them cleanly (not panicking) is the contract.
+                reticle_sync::Frame::Presence(_) | reticle_sync::Frame::Comment(_) => {}
+            }
         }
     }
     assert!(frames > 0, "the watcher received at least one CRDT frame");

@@ -82,4 +82,18 @@ web-sys = { version = "0.3", features = [
     "IdbTransactionMode",
     "IdbObjectStore",
     "IdbRequest",
+    # The live share transport (`crate::livesync`, wasm only) dials the relay socket
+    # so a shared read-only link streams live sync and presence in the browser
+    # (ADR 0058). These are the WebSocket interfaces its onopen/onmessage/onclose/
+    # onerror handlers need; already in the lockfile via eframe, so no new dependency.
+    "WebSocket",
+    "MessageEvent",
+    "BinaryType",
+    "CloseEvent",
+    "ErrorEvent",
+    "Blob",
 ] }
+
+# `reticle-sync`'s live-session wire codec (`reticle_sync::frame`) frames and decodes
+# the `SyncMessage` envelope the share transport sends and receives; it is already a
+# native dependency above, but the share transport also calls it on wasm.

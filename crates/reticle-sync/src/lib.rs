@@ -43,11 +43,15 @@
 
 mod comment;
 mod error;
+mod frame;
 mod mapping;
 mod presence;
 
 pub use comment::{Comment, CommentThread};
 pub use error::{Result, SyncError};
+pub use frame::{
+    Frame, decode_frame, encode_presence_frame, encode_update_frame, encode_update_frame_for,
+};
 pub use presence::{Awareness, Presence};
 
 // `StepEdit` is defined further down in this module and re-exported here so the one
