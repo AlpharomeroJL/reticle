@@ -1248,7 +1248,7 @@ impl App {
     /// This is the viewer's bridge between the socket's event world and the synchronous
     /// editor loop, mirroring [`drive_web_open`](Self::drive_web_open). The transport
     /// posts [`LiveEvent`](crate::livesync::LiveEvent)s; here, on the main thread, a
-    /// CRDT frame is applied into the [`ViewerSession`] and its mirrored document is
+    /// CRDT frame is applied into the [`ViewerSession`](crate::viewer::ViewerSession) and its mirrored document is
     /// installed for rendering, a presence updates the sharer's cursor and follow
     /// viewport, and a status change updates the status line. On native the inbox is
     /// always empty and no socket is opened, so this is a cheap no-op.
@@ -1294,7 +1294,7 @@ impl App {
     /// returning `true` if the mirrored document's geometry changed (so the caller
     /// rebuilds the render scene).
     ///
-    /// A CRDT frame is merged into the [`ViewerSession`]; a presence updates the
+    /// A CRDT frame is merged into the [`ViewerSession`](crate::viewer::ViewerSession); a presence updates the
     /// sharer's cursor and the viewport follow-mode rides on, and is also mirrored into
     /// the App's awareness map so the existing [`draw_presence`](Self::draw_presence)
     /// draws the sharer's cursor; a status change updates the status line.
@@ -1337,7 +1337,7 @@ impl App {
     }
 
     /// Installs the viewer's mirrored document into the render pipeline, rebuilding the
-    /// spatial index, retained GPU scene, and outline from the [`ViewerSession`]'s
+    /// spatial index, retained GPU scene, and outline from the [`ViewerSession`](crate::viewer::ViewerSession)'s
     /// current document.
     ///
     /// Called when a CRDT frame changed the mirror. It reframes the camera only on the
@@ -1382,7 +1382,7 @@ impl App {
     /// The document is re-encoded and sent only when it actually changed since the last
     /// publish (tracked by the history revision), because [`self.document`](Self::document)
     /// (the collaboration mirror) is not kept in step with edits, so the sharer builds a
-    /// fresh [`SyncDocument`](reticle_sync::SyncDocument) from the editable
+    /// fresh [`SyncDocument`] from the editable
     /// [`history`](Self::history) document to produce the update bytes. Presence (cursor,
     /// selection, viewport) is sent every frame the socket is open so a viewer's cursor
     /// and follow-viewport stay live; presence frames are tiny.
