@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-f14f2250.js";
+            window.path_to_searchindex_js = "searchindex-20d64bab.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-702c5735.js"></script>
+        <script src="toc-38e0bbb5.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -198,10 +198,33 @@ straight to them.</p>
 the rules touching the affected region are re-run, using the index to bound the
 work. The target is under a hundred milliseconds for a local edit, so the violation
 overlay stays live as you draw.</p>
+<h2 id="drc-as-you-type"><a class="header" href="#drc-as-you-type">DRC as you type</a></h2>
+<p>The editor wires that incremental re-check to live editing, so a violation is
+underlined the moment its geometry is drawn, the way a text editor squiggles a
+misspelling as you type. The DRC panel’s “Check as you type” toggle turns it on.</p>
+<p>Two costs run on two cadences. The cheap step re-checks only the region an edit
+dirtied (<code>check_region</code> over the edit’s neighbourhood, measured at microsecond scale
+even on a million-shape cell) and runs synchronously on every edit. The expensive step
+rebuilds the whole prepared index and runs on a throttle, off the per-edit hot path,
+because a <code>PreparedDrc</code> is an immutable snapshot: an edit is reflected only once the
+index is rebuilt. Between rebuilds the underlines show the last snapshot, so a
+just-drawn shape enters the checks after a brief, bounded lag, like a spell-checker
+catching up after a burst of typing.</p>
+<p>The dirty region comes from the edit pipeline: a shape add or remove dirties its
+bounding box, while a structural change or an undo dirties the whole cell (its region
+is not cheaply bounded). The live underlines are a spell-checker squiggle drawn beneath
+each violation at constant on-screen size, deliberately distinct from the boxed markers
+of a full DRC-panel run.</p>
+<p>The measured per-edit <code>check_region</code> latency at a million shapes, and the methodology,
+are recorded in <code>PERF.md</code>.</p>
 <h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
 <p>The engine is checked against a naive reference implementation that tests every
 rule the slow, obvious way over randomized inputs, so the fast path cannot silently
 disagree with the specification.</p>
+<p>The live wiring is covered at the app level by
+<code>crates/reticle-app/tests/drc_live.rs</code>: drawing two rects too close underlines a
+spacing violation, and moving one apart clears it, driving the real edit pipeline
+headlessly with no GPU.</p>
 
                     </main>
 

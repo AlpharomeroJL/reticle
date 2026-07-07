@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-f14f2250.js";
+            window.path_to_searchindex_js = "searchindex-20d64bab.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-702c5735.js"></script>
+        <script src="toc-38e0bbb5.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -188,6 +188,36 @@ draw list (compacting the survivors into an indirect draw is a follow-up). The w
 proportional to the number of cells considered, not the flattened shape count. The
 interactive egui canvas currently culls on the CPU with the same R-tree, and the GPU
 compute cull is validated against that CPU result in a golden test.</p>
+<h2 id="gpu-resident-hierarchy"><a class="header" href="#gpu-resident-hierarchy">GPU-resident hierarchy</a></h2>
+<p>The cull stage above flags visible cells; <code>GpuHierarchy</code> closes the loop by keeping the
+whole arrayed hierarchy resident on the GPU and never touching a per-element draw list on
+the CPU. A compact table of <em>array placements</em> (one record per array reference, not per
+element) plus a table of leaf cells is uploaded once. Every frame a single compute pass
+(<code>expand_cull_compact.wgsl</code>) does three things at once: it <strong>expands</strong> each array
+element-by-element (one thread per element, binary-searching the placement table by a
+precomputed cumulative element offset), <strong>culls</strong> each element’s transformed bounding box
+against the viewport with the same half-open rule as the CPU, and <strong>compacts</strong> the
+survivors into ready-to-draw <code>RectInstanceT</code> buffers with a per-workgroup prefix scan and
+a single atomic range reservation, filling an indirect instance count. One
+<code>draw_indirect</code> per chunk then draws exactly the survivors; the GPU, not the CPU, decides
+how many.</p>
+<p>A single compute dispatch is bounded two ways: at most <code>max_compute_workgroups_per_dimension</code>
+(65,535) workgroups of 256 threads, and a storage binding no larger than
+<code>max_storage_buffer_binding_size</code> (128 MiB, so about 2.79M 48-byte survivors on a
+default-limits device). <code>GpuHierarchy</code> escapes both by splitting the global element space
+into fixed-size <strong>chunks</strong> and issuing one dispatch and one draw per chunk; the cap is
+beaten by chunk <em>count</em>, never by a bigger dispatch, so the design scales to arbitrarily
+many elements at a fixed per-chunk cost. A 100M-element array (a via, fill, or bit-cell
+field, routine in real layout) spans 36 chunks; a 30M array spans 11.</p>
+<p>Because the per-frame path iterates only the chunk list (a handful of entries) and the
+scene tables are uploaded once, the CPU does no per-element work per frame; the
+<code>cpu_expand_ops</code> counter, bumped only by the CPU reference expansion, stays flat across
+frames, which a test asserts. Measured throughput and the honest 100M shortfall are in
+the <a href="performance.html">performance chapter</a> and <code>docs/PERF.md</code>: expansion and culling run
+at 3.4-3.7 billion elements per second, a 100M design pans interactively at 111 fps when
+culling keeps the on-screen subset, and drawing all 100M sub-pixel quads at once stays
+fill-bound at 10 fps (an LOD follow-up, for which this GPU-resident expansion is the
+prerequisite).</p>
 <h2 id="instanced-draws-and-tessellation"><a class="header" href="#instanced-draws-and-tessellation">Instanced draws and tessellation</a></h2>
 <p>Axis-aligned rectangles are drawn as instanced quads; polygons and paths are
 tessellated once into vertex and index buffers (<code>lyon</code>) and drawn with per-layer style.
@@ -214,7 +244,7 @@ of leaf shapes at 60 fps through cell culling and LOD. Measured numbers are in t
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="streaming.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="gpu-drc-heatmap.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -228,7 +258,7 @@ of leaf shapes at 60 fps through cell culling and LOD. Measured numbers are in t
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="streaming.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="gpu-drc-heatmap.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

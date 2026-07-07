@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-f14f2250.js";
+            window.path_to_searchindex_js = "searchindex-20d64bab.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-702c5735.js"></script>
+        <script src="toc-38e0bbb5.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -784,6 +784,36 @@ draw list (compacting the survivors into an indirect draw is a follow-up). The w
 proportional to the number of cells considered, not the flattened shape count. The
 interactive egui canvas currently culls on the CPU with the same R-tree, and the GPU
 compute cull is validated against that CPU result in a golden test.</p>
+<h2 id="gpu-resident-hierarchy"><a class="header" href="#gpu-resident-hierarchy">GPU-resident hierarchy</a></h2>
+<p>The cull stage above flags visible cells; <code>GpuHierarchy</code> closes the loop by keeping the
+whole arrayed hierarchy resident on the GPU and never touching a per-element draw list on
+the CPU. A compact table of <em>array placements</em> (one record per array reference, not per
+element) plus a table of leaf cells is uploaded once. Every frame a single compute pass
+(<code>expand_cull_compact.wgsl</code>) does three things at once: it <strong>expands</strong> each array
+element-by-element (one thread per element, binary-searching the placement table by a
+precomputed cumulative element offset), <strong>culls</strong> each element’s transformed bounding box
+against the viewport with the same half-open rule as the CPU, and <strong>compacts</strong> the
+survivors into ready-to-draw <code>RectInstanceT</code> buffers with a per-workgroup prefix scan and
+a single atomic range reservation, filling an indirect instance count. One
+<code>draw_indirect</code> per chunk then draws exactly the survivors; the GPU, not the CPU, decides
+how many.</p>
+<p>A single compute dispatch is bounded two ways: at most <code>max_compute_workgroups_per_dimension</code>
+(65,535) workgroups of 256 threads, and a storage binding no larger than
+<code>max_storage_buffer_binding_size</code> (128 MiB, so about 2.79M 48-byte survivors on a
+default-limits device). <code>GpuHierarchy</code> escapes both by splitting the global element space
+into fixed-size <strong>chunks</strong> and issuing one dispatch and one draw per chunk; the cap is
+beaten by chunk <em>count</em>, never by a bigger dispatch, so the design scales to arbitrarily
+many elements at a fixed per-chunk cost. A 100M-element array (a via, fill, or bit-cell
+field, routine in real layout) spans 36 chunks; a 30M array spans 11.</p>
+<p>Because the per-frame path iterates only the chunk list (a handful of entries) and the
+scene tables are uploaded once, the CPU does no per-element work per frame; the
+<code>cpu_expand_ops</code> counter, bumped only by the CPU reference expansion, stays flat across
+frames, which a test asserts. Measured throughput and the honest 100M shortfall are in
+the <a href="#performance-methodology">performance chapter</a> and <code>docs/PERF.md</code>: expansion and culling run
+at 3.4-3.7 billion elements per second, a 100M design pans interactively at 111 fps when
+culling keeps the on-screen subset, and drawing all 100M sub-pixel quads at once stays
+fill-bound at 10 fps (an LOD follow-up, for which this GPU-resident expansion is the
+prerequisite).</p>
 <h2 id="instanced-draws-and-tessellation"><a class="header" href="#instanced-draws-and-tessellation">Instanced draws and tessellation</a></h2>
 <p>Axis-aligned rectangles are drawn as instanced quads; polygons and paths are
 tessellated once into vertex and index buffers (<code>lyon</code>) and drawn with per-layer style.
@@ -801,6 +831,62 @@ highlighted nets, and a 3D layer-stack cross-section), are tracked follow-ups no
 interactive at 30 fps or better, and hierarchical designs with effectively billions
 of leaf shapes at 60 fps through cell culling and LOD. Measured numbers are in the
 <a href="#performance-methodology">performance chapter</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="gpu-drc-heatmap"><a class="header" href="#gpu-drc-heatmap">GPU DRC heatmap</a></h1>
+<p>The GPU DRC heatmap is a compute-shader design-rule overlay: it evaluates two rules,
+minimum feature width and minimum edge-to-edge spacing, over the <em>visible</em> rectangle
+instances entirely on the GPU, and paints the result as a coarse violation heatmap on top
+of the rendered layout, with a live rule-value slider. It is the interactive, at-a-glance
+companion to the exact CPU <a href="#design-rule-checking"><code>DrcEngine</code></a>: the CPU engine is the source of truth
+for a full sign-off pass; the heatmap is the cheap, per-frame “where are the hot spots”
+view of what the eye is currently looking at.</p>
+<p>Like the GPU-driven cull stage, it is WebGPU-only (ADR 0009 / ADR 0027); the WebGL2
+fallback keeps the CPU DRC path.</p>
+<h2 id="two-passes-reusing-the-cull-scan"><a class="header" href="#two-passes-reusing-the-cull-scan">Two passes, reusing the cull scan</a></h2>
+<p>The heatmap runs as two compute stages over the same instance buffer.</p>
+<p><strong>Binning</strong> sorts the visible instances into a uniform grid with a counting sort. A first
+pass computes each instance’s grid cell from the minimum corner of its world bounding box
+and does an <code>atomicAdd</code> into a per-bin counter. A single 256-thread workgroup then runs an
+exclusive prefix scan over those counts, the <em>same</em> Hillis-Steele scan the stream
+compactor uses for the draw list, to turn per-bin counts into per-bin start offsets. A
+final scatter pass reserves a slot per instance with one more <code>atomicAdd</code> and writes the
+instance index into its bin’s dense slice. The grid is capped at 256 bins so the whole
+scan fits one workgroup.</p>
+<p><strong>Checking</strong> runs one thread per instance. It flags a min-width violation when the smaller
+side of the instance’s world box is below the width rule, and a min-spacing violation when
+any instance in its 3x3 bin neighbourhood sits at a strictly positive edge gap below the
+spacing rule. Each flagged instance is recorded in a per-instance flag buffer and adds one
+to its bin’s entry in a coarse heatmap buffer, so the heatmap holds the count of violating
+instances per bin, the field the overlay draws.</p>
+<h3 id="why-3x3-is-enough"><a class="header" href="#why-3x3-is-enough">Why 3x3 is enough</a></h3>
+<p>The neighbourhood search is only correct if no violating partner can hide outside the 3x3
+window. The binning grid guarantees that: the bin size on each axis is chosen (on the CPU)
+to be at least <code>max_instance_extent + min_spacing</code>, so any two instances whose edge gap is
+below the spacing rule must land in bins at most one apart on each axis. The 3x3 search is
+therefore exhaustive, the GPU never misses a violation the CPU engine would find. Capping
+the grid at 256 bins only makes bins <em>larger</em>, never smaller, so it preserves the
+invariant.</p>
+<h2 id="agreement-with-the-cpu-oracle"><a class="header" href="#agreement-with-the-cpu-oracle">Agreement with the CPU oracle</a></h2>
+<p>The compute path works in <code>f32</code>, but its geometry mirrors <code>reticle-drc</code>’s exact integer
+helpers, the same signed interval gap, the same floor-integer-square-root for the diagonal
+corner distance, so it agrees with the CPU engine bit-for-bit as long as every coordinate,
+width, and height is an integer strictly below <code>2^24</code> (the range over which <code>f32</code>
+represents consecutive integers exactly). Inside that range, a property test generates
+randomized layouts, runs the CPU <code>DrcEngine</code> restricted to width and spacing as the
+oracle, reads back the GPU flags, and asserts the GPU-flagged instance set equals the CPU
+violating-instance set. It skips honestly when no GPU adapter is present, mirroring the
+other compute gates.</p>
+<p>The <code>2^24</code> bound is not a limitation in practice: database-unit coordinates for a cell
+under interactive DRC sit far below it, and the CPU engine remains available for the exact
+full-database pass.</p>
+<h2 id="the-overlay-and-the-slider"><a class="header" href="#the-overlay-and-the-slider">The overlay and the slider</a></h2>
+<p>The per-bin heatmap stays GPU-resident. A small render pipeline draws one alpha-blended
+quad per grid bin, coloured by a heat ramp scaled by the bin’s violation count; empty bins
+are discarded so the layout shows through. Because the heatmap never leaves the GPU,
+dragging the rule-value slider is cheap: it re-runs the two compute passes with the new
+rule value and redraws, with no CPU readback in the loop. Measured recompute times are in
+the <a href="#performance-methodology">performance chapter</a>; on the visible working set a recompute stays
+well under a frame.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="streamed-documents"><a class="header" href="#streamed-documents">Streamed documents</a></h1>
 <p>A layout that fits in RAM is opened, edited, and undone through the in-memory document
@@ -1160,10 +1246,33 @@ straight to them.</p>
 the rules touching the affected region are re-run, using the index to bound the
 work. The target is under a hundred milliseconds for a local edit, so the violation
 overlay stays live as you draw.</p>
+<h2 id="drc-as-you-type"><a class="header" href="#drc-as-you-type">DRC as you type</a></h2>
+<p>The editor wires that incremental re-check to live editing, so a violation is
+underlined the moment its geometry is drawn, the way a text editor squiggles a
+misspelling as you type. The DRC panel’s “Check as you type” toggle turns it on.</p>
+<p>Two costs run on two cadences. The cheap step re-checks only the region an edit
+dirtied (<code>check_region</code> over the edit’s neighbourhood, measured at microsecond scale
+even on a million-shape cell) and runs synchronously on every edit. The expensive step
+rebuilds the whole prepared index and runs on a throttle, off the per-edit hot path,
+because a <code>PreparedDrc</code> is an immutable snapshot: an edit is reflected only once the
+index is rebuilt. Between rebuilds the underlines show the last snapshot, so a
+just-drawn shape enters the checks after a brief, bounded lag, like a spell-checker
+catching up after a burst of typing.</p>
+<p>The dirty region comes from the edit pipeline: a shape add or remove dirties its
+bounding box, while a structural change or an undo dirties the whole cell (its region
+is not cheaply bounded). The live underlines are a spell-checker squiggle drawn beneath
+each violation at constant on-screen size, deliberately distinct from the boxed markers
+of a full DRC-panel run.</p>
+<p>The measured per-edit <code>check_region</code> latency at a million shapes, and the methodology,
+are recorded in <code>PERF.md</code>.</p>
 <h2 id="testing-2"><a class="header" href="#testing-2">Testing</a></h2>
 <p>The engine is checked against a naive reference implementation that tests every
 rule the slow, obvious way over randomized inputs, so the fast path cannot silently
 disagree with the specification.</p>
+<p>The live wiring is covered at the app level by
+<code>crates/reticle-app/tests/drc_live.rs</code>: drawing two rects too close underlines a
+spacing violation, and moving one apart clears it, driving the real edit pipeline
+headlessly with no GPU.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sky130-rule-coverage"><a class="header" href="#sky130-rule-coverage">SKY130 rule coverage</a></h1>
 <p>This deck is a SUBSET of the SKY130 design rules: passing it is NOT tape-out
@@ -1425,6 +1534,52 @@ check.</p>
 <p>Extraction is validated against an independent union-find oracle over randomized
 geometry, so the optimized traversal cannot disagree with the definition of
 connectivity.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="metrology"><a class="header" href="#metrology">Metrology</a></h1>
+<p><code>reticle-metrology</code> turns a laid-out <a href="#document-model"><code>Document</code></a> into a small set of
+quantitative reports. Every measurement runs on the CPU with exact integer
+geometry (no GPU, no sampling), over the flattened top cell, and never mutates the
+document. It reads only the public APIs of <code>reticle-model</code>, <code>reticle-geometry</code>,
+and <code>reticle-extract</code>.</p>
+<h2 id="reports"><a class="header" href="#reports">Reports</a></h2>
+<p><strong>Area and perimeter per layer.</strong> For each layer that carries geometry,
+<code>area::report</code> unions that layer’s flattened shapes on the exact <code>i_overlay</code>
+integer engine (through <code>reticle_geometry::polygon_boolean</code>) and returns a
+<code>LayerMetrics { layer, area, perimeter, shape_count }</code>. Area is the covered area
+in DBU squared with overlaps counted once; perimeter is the total union boundary
+length in DBU, including the boundaries of holes. Both are exact for integer
+(manhattan) geometry. A property test cross-checks area and perimeter against an
+independent coordinate-compression oracle over 200 random rectangle layouts.</p>
+<p><strong>Connectivity statistics.</strong> <code>connectivity::stats</code> extracts nets with
+<code>reticle-extract</code> using the SKY130 via/contact stack, so conductors on different
+layers joined by a via count as one net. It reports <code>net_count</code>, <code>net_sizes</code>
+(shapes per net, largest first), <code>total_shapes</code>, and <code>max_fanout</code> (the largest
+net’s shape count).</p>
+<p><strong>Antenna ratio.</strong> <code>antenna::check</code> is a deliberately small screen of the antenna
+effect: for each net it computes <code>connected_metal_area / gate_area</code> over a SKY130
+layer subset and flags nets above a threshold. The semantics and their limits are
+stated in full in the module documentation and repeated here so no one mistakes
+the screen for sign-off:</p>
+<ul>
+<li><code>gate_area</code> is the union area of polysilicon (<code>poly</code>, 66/20) on the net,
+approximated as all poly, not poly intersected with diffusion.</li>
+<li><code>connected_metal_area</code> is the union area of <code>li1</code> (67/20) and <code>met1</code>..<code>met4</code>
+(68/20, 69/20, 70/20, 71/20) on the net. Contacts and vias join nets but are
+not counted as metal.</li>
+<li>A net with no poly has no gate and is never flagged.</li>
+</ul>
+<p>This reduces the whole net to a single total-metal-to-gate ratio. It does not
+model per-metal-layer cumulative ratios across fabrication steps, sidewall or
+perimeter terms, diffusion-diode protection, or partial-route (as-built) area.
+Treat a flag as “worth a closer look”, not as a rule violation.</p>
+<h2 id="export"><a class="header" href="#export">Export</a></h2>
+<p><code>MetrologyReport::generate</code> bundles all three reports; <code>to_csv</code> and <code>to_markdown</code>
+render the bundle deterministically (newline-only line endings, fixed number
+formatting), so the output is byte-stable and safe to diff. Golden tests pin both
+renderings.</p>
+<h2 id="scope"><a class="header" href="#scope">Scope</a></h2>
+<p>This is the CPU half of the metrology work. A GPU density overlay was scoped and
+explicitly deferred (see the metrology decision record); it is not built here.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="collaboration"><a class="header" href="#collaboration">Collaboration</a></h1>
 <p><code>reticle-sync</code> and <code>reticle-server</code> make a document editable by several people at
