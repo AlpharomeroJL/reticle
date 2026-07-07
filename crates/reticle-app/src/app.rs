@@ -1188,6 +1188,7 @@ impl App {
 
     /// On wasm there is no capture mode, so nothing is ever suppressed.
     #[cfg(target_arch = "wasm32")]
+    #[allow(clippy::unused_self)] // signature must match the native version, which uses `self`.
     fn in_demo_capture(&self) -> bool {
         false
     }
@@ -4089,6 +4090,9 @@ impl App {
     /// Web stub: report the generated size rather than writing to a filesystem.
     #[cfg(target_arch = "wasm32")]
     #[allow(clippy::unused_self)]
+    // Always `Ok` on wasm, but the native version genuinely returns `Result`, so the
+    // signature must match across cfg.
+    #[allow(clippy::unnecessary_wraps)]
     fn write_export_text(&self, _name: &str, text: &str) -> std::io::Result<String> {
         Ok(format!("Generated {} bytes of SVG", text.len()))
     }
