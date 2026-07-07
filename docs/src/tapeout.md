@@ -24,11 +24,16 @@ truth over this page.
   `ua[0]`..`ua[5]` analog pins on met4, and the VDPWR/VGND/VAPWR power straps, all at
   coordinates transcribed from TinyTapeout's own analog DEF template and init script
   (see below).
-- **Planned, not yet built** (the rest of this wave): a wrapper that runs
-  TinyTapeout's own precheck as an external oracle, `just tt-precheck <gds>` (Lane 4B);
-  and the worked in-repo example, an agent-generated test-structure tile in the TT
-  template that passes `just tt-precheck` clean, committed with its transcript (the
-  packet's proof artifact). Those are the remaining work.
+- **Built in this wave** (Lane 4B): a wrapper that runs TinyTapeout's own precheck as an
+  external oracle, `just tt-precheck <gds>`, with a structured-failure parser and the
+  agent-loop seam (see below). The live Docker run is the operator's step, not run to a
+  verdict here.
+- **Built in this wave** (Lane 4C): the worked in-repo example, a **generator-built**
+  test-structure tile in the TT template, DRC-clean against the SKY130 subset and
+  committed with its replayable transcript under `examples/tapeout/` (the packet's proof
+  artifact). It is DRC-subset-clean but **not** yet verified through the real precheck;
+  see "The worked example tile (Lane 4C)" below. It is generator-built, not
+  agent-authored: the Claude Code agent path is unauthenticated in this environment.
 
 No shuttle purchase is in scope for this project. A paid submission is the operator's
 own decision, which the tooling above is meant to make straightforward at any time.
@@ -178,6 +183,56 @@ running it to a verdict is an operator step, not a fabricated pass. **No tile is
 to have passed the precheck.** When a real run is captured, its `results.md` and
 `magic_drc.txt` drop in beside (or over) the synthesized fixtures and the same parser and
 test cover the real output unchanged.
+
+## The worked example tile (Lane 4C)
+
+The packet's proof artifact is a real, committed tile: a complete `tt_um_reticle_tile`
+made by Reticle's own generators, framed by the Lane 4A template, and DRC-clean against
+the SKY130 subset. It is committed under `examples/tapeout/`:
+
+- `tt_um_reticle_tile.gds`, the finished tile exported to GDSII.
+- `tt_um_reticle_tile.transcript.jsonl`, the replayable transcript of the build (one
+  command per line, then a `{"final_hash": ...}` trailer, the format the replay theater
+  loads).
+
+**How it is built.** Starting from the Lane 4A frame (`tile_document()`: the 1x2 die
+outline, the six `ua[0]`..`ua[5]` met4 pins, and the VDPWR/VGND/VAPWR met4 power straps,
+met5 clear), the build places a probe-able **serpentine** from the `reticle_gen`
+`test_structure` generator into the interior, on `met2`, at width 1.0 um, bar length
+140 um, 40 bars. That is a continuous boustrophedon trace (a ~140 um by ~45.5 um band)
+whose end-to-end resistance a probe station reads. It is translated to `(12000, 88000)`
+DBU, which puts it 4 um to the right of the rightmost power strap and far above the
+analog-pin strip, wholly inside the die, on a layer that is neither the frame's met4 nor
+the forbidden met5.
+
+**It is built through the command path, so there is a transcript.** The build runs as
+three frozen `AgentCommand`s against a `Session` (see `reticle_app::tinytapeout_example`):
+`ImportGds` of the frame, then `RunGenerator` `test_structure`, then `TransformShapes` to
+place it. The transcript replays to the same `document_hash` the tile exports, which the
+committed test `worked_tile_is_drc_subset_clean` (and its siblings, including
+`transcript_replays_to_its_hash`) checks; `xtask tapeout-example` regenerates both
+artifacts and refuses to write unless the tile is DRC-subset-clean and the transcript
+replays. The frame is seeded by GDS import because the frozen command set has no
+pin-or-label create command; a consequence is that the committed GDS carries the frame as
+drawing metal and labels, not as Reticle `Pin` objects, because **GDSII has no pin
+element** (see ADR 0055).
+
+**This is a generator-built tile, not an agent-authored one.** The Claude Code agent path
+is a not-run in this environment (the CLI is unauthenticated), so nothing in this tile was
+written by a model; the geometry is emitted by Reticle's `test_structure` generator and
+placed by two ordinary commands. The build is deterministic (two runs produce
+byte-identical GDS).
+
+**DRC-subset-clean, precheck-deferred.** The tile passes Reticle's SKY130 DRC **subset**,
+which is necessary but not sufficient. It is **not** verified through the real TinyTapeout
+precheck; that authoritative check is the operator's live step (Lane 4B), which needs a
+multi-GB Docker image and the SKY130 PDK. To get the real verdict, an operator runs:
+
+```text
+just tt-precheck examples/tapeout/tt_um_reticle_tile.gds
+```
+
+No tile in this repo is claimed to have passed the precheck.
 
 ## Honest limits
 
