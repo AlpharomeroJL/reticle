@@ -11,7 +11,7 @@ than papered over. See `docs/src/performance.md` for the methodology and
 - OS: Windows 11
 - Toolchain: Rust 1.94.1 (stable), release/bench profile (`opt-level = 3`, thin LTO)
 - Inputs: the deterministic layout generator (`xtask gen-layout`), so runs reproduce.
-- Date of this record: 2026-07-01 (retained render path, WASM cold load, and collaboration echo measured 2026-07-02)
+- Date of this record: 2026-07-01 (retained render path, WASM cold load, and collaboration echo measured 2026-07-02; v7.0.0 interaction latency and soak measured 2026-07-06)
 
 ## Measured
 
@@ -171,6 +171,120 @@ using 594 MB, on this machine. The DRC and extract rows are whole-pipeline wall 
 that include emitting a per-item text report for millions of items (the CLI is
 verbose by design); the core algorithm costs are isolated in the criterion sections
 above (index build 227 ms per 1M shapes, DRC full pass 643 ms per 1M shapes).
+
+## v7.0.0 interaction latency on real designs (measured 2026-07-06 on this machine)
+
+Wave 5B profiled the *product interaction path* (open a design, see the first frame,
+pan and redraw under load) on the committed real designs and a large generated one,
+because product use exposes latency the synthetic `fps_bench` (flat documents at
+steady state) does not. All numbers are wall clock on this host (RTX 4060 Ti, Vulkan,
+release build), offscreen render plus CPU readback, so they are headless and
+reproduce. The live-window wasm pan path is browser only and is labeled not measured
+here below.
+
+Method: `cargo run -p reticle-render --example interaction_latency --release --
+[--iters N] FILE ...`. For each design it parses the GDS into a `Document`, then times
+four phases separately: **open (CPU)** = parse + framing bbox + `Document::flatten`;
+**first frame** = the CLI one-shot `WgpuRenderer::render_document_offscreen`
+(rebuilds pipelines, target, palette, and the whole `SceneGeometry`, then reads the
+frame back); **scene build + upload** = build the `RetainedScene`, expand, and upload
+to the GPU once; **pan/redraw** = with geometry resident, shift the camera and redraw
+(a camera-uniform write plus draw plus readback). Designs: the two committed real
+tiles (`examples/tapeout/tt_um_reticle_tile.gds`, 89 leaves;
+`corpus/tinytapeout/real_tinytapeout_min.gds`, 139 leaves) and a large generated
+design (`xtask gen-layout --shapes 2000000 --layers 8 --depth 3`, 4,194,304 flattened
+leaves). Figures are the typical of three runs at 1920x1080, 200 pan iterations.
+
+| Design (leaves) | open (CPU) | first frame (one-shot) | scene build + upload | pan/redraw |
+|---|---:|---:|---:|---:|
+| tt_um_reticle_tile (89) | 0.15 ms | 3.7 ms | 0.85 ms | 2.7 ms/frame |
+| real_tinytapeout_min (139) | 0.14 ms | 3.7 ms | 0.85 ms | 2.8 ms/frame |
+| generated (4,194,304) | 31 ms | 192 ms | 125 ms | 5.3 ms/frame |
+
+The real tiles are tiny, so opening and interacting is dominated by fixed GPU costs:
+the first frame is about 3.7 ms (one-shot pipeline build plus draw plus readback) and
+a steady pan is about 2.7 ms/frame, which is the offscreen draw-plus-CPU-readback
+floor a live surface skips. There is no CPU offender on real tiles. The generated
+design is where the open path costs real time, and the profile pointed at one clear
+offender.
+
+### Offender fixed: the array-flattening inner loop
+
+Profiling the generated design showed **`Document::flatten` was the dominant open
+cost: about 230 ms of a 230 ms open**, and the one-shot first frame paid it again
+(the one-shot path flattens internally). `flatten_local`'s array expansion called
+`transform_shape(&array.transform, shape)` inside the innermost `(col, row)` loop,
+recomputing the same orientation/magnification transform `columns * rows` times per
+child shape, and grew the output `Vec` from empty (tens of reallocation-and-copy
+passes for millions of shapes). The fix (`crates/reticle-model/src/document.rs`)
+factors the placement transform out of the per-cell loop (transform each child shape
+once, then only translate per copy, which is exactly equivalent because the per-copy
+step is a pure translation) and reserves the whole array's capacity up front. No
+hot-path behavior changed; a new equivalence test
+(`flatten_rotated_array_places_every_copy_correctly` in
+`crates/reticle-model/tests/editing.rs`) pins the exact placed geometry of a rotated
+array so the factoring is proven correct for non-identity orientations, and all 25
+`reticle-model` tests pass.
+
+Measured before and after with a new criterion bench
+(`crates/reticle-model/benches/flatten.rs`, `cargo bench -p reticle-model --bench
+flatten`, a 2-level 16x16 nested array = 1,048,576 leaves, same host):
+
+| flatten bench (1,048,576 leaves) | Before | After | Change |
+|---|---:|---:|---:|
+| nested array, identity placement | 33.77 ms | 10.99 ms | -68% (about 3.1x) |
+| nested array, rotated placement | 32.54 ms | 12.14 ms | -63% (about 2.7x) |
+
+End to end on the 4.19M-leaf generated design (interaction_latency harness, same
+host): **open (CPU) dropped from about 230 ms to about 31 ms** (the flatten part from
+about 230 ms to about 31 ms), and the **one-shot first frame from about 330 ms to
+about 192 ms** (it inherits the flatten win). `scene build + upload` and `pan/redraw`
+are unchanged by this fix: `RetainedScene` expansion does not go through `flatten`,
+and the pan cost is the GPU readback floor.
+
+### Soak / stability check
+
+`cargo run -p reticle-render --example interaction_soak --release -- [--iters N]
+[--frame-ceiling-ms MS] [--drift-tolerance F] FILE` opens a design, uploads the
+retained scene once, then pans and zooms and redraws it for N iterations and asserts
+the run is stable. It checks, every frame, that the retained renderer's rect-instance
+count, page-chunk count (draw calls), and mesh-index count never change (a pan or zoom
+must not re-upload or rebuild geometry; a per-frame leak or rebuild would trip this),
+and that no frame exceeds the ceiling and the last-decile mean frame time does not
+exceed the first-decile mean by more than the drift tolerance (default 50%). It exits
+non-zero with a printed reason on any violation, so it can gate in a script. The
+heap is bounded by the retained buffer inventory (the zero-growth proxy) plus the
+peak process working set when run under `scripts/measure-run.ps1`; there is no
+in-process allocator hook, so true heap bytes per frame are not sampled here.
+
+Runs on this host (each passed: no buffer growth, no frame over the ceiling, no
+upward drift):
+
+| Design | iterations | frame p50 | frame p99 | frame max | first/last decile mean | peak working set |
+|---|---:|---:|---:|---:|---|---:|
+| tt_um_reticle_tile (89 instances) | 5,000 | 2.79 ms | 3.08 ms | 4.59 ms | 2.77 / 2.74 ms | 160 MB |
+| generated (4.19M instances) | 2,000 | 5.14 ms | 5.55 ms | 6.06 ms | 5.17 / 5.17 ms | about 305 MB |
+
+The retained buffer inventory was constant across every frame in both runs (for the
+generated design: 4,194,304 rect instances across 4 page chunks, unchanged over all
+2,000 frames), and the last-decile mean equaled the first-decile mean, so there is no
+per-frame growth or frame-time creep over the run. This is a bounded soak run here
+(seconds, not the full 30 minutes); the harness is parameterized by `--iters` so an
+operator can run it for a longer duration. A true multi-minute soak of the *live wasm
+pan path in a browser* is a separate e2e/operator step and is not measured here.
+
+Note (honest caveat, and a bug found in passing): the generated GDS parses its AREF
+array column/row counts as 8x8 when `reticle`/the harness is run directly (giving the
+correct 4,194,304 leaves), but as 7x7 (1,882,384 leaves) when the process is launched
+with `UseShellExecute=false` and stdout redirected to a pipe, which is how
+`scripts/measure-run.ps1` launches it. This is a reproducible, launch-context
+dependent misparse in the GDS import path (an off-by-one in the AREF COLROW decode,
+consistent with an uninitialized read), not a Lane 5B regression and not affected by
+the flatten fix (both counts are internally consistent). It is filed as a separate
+bug. It means the peak-working-set figures gathered under `measure-run.ps1` (and the
+v5.0.0 "4,194,304 flattened leaf shapes" scale-proof above, measured the same way)
+reflect the 7x7 (1.88M) parse; the interaction-latency and direct soak numbers here
+are the correct 8x8 (4.19M) parse.
 
 ## Targets (Section 10)
 

@@ -323,13 +323,28 @@ impl Document {
             }
             for array in &cell.arrays {
                 let child = self.flatten_local(&array.cell, visiting);
+                // The array places `columns * rows` copies of the child. The
+                // orientation/magnification part of the placement transform is the
+                // same for every copy, so apply it to each child shape ONCE, then only
+                // translate per (col, row). This is exactly equivalent to the old
+                // `translate_shape(transform_shape(shape), dx, dy)` per copy, because
+                // the per-copy step is a pure translation, but it moves the
+                // corner-transform work out of the innermost loop (a `columns * rows`x
+                // reduction in `transform_shape` calls). Reserve the whole array's
+                // worth of shapes up front so the millions of pushes below never
+                // trigger a reallocation-and-copy of a growing Vec.
+                let placed_child: Vec<DrawShape> = child
+                    .iter()
+                    .map(|shape| transform_shape(&array.transform, shape))
+                    .collect();
+                let copies = (array.columns as usize).saturating_mul(array.rows as usize);
+                out.reserve(copies.saturating_mul(placed_child.len()));
                 for col in 0..array.columns {
+                    let dx = array.column_pitch.saturating_mul(span_from(col));
                     for row in 0..array.rows {
-                        let dx = array.column_pitch.saturating_mul(span_from(col));
                         let dy = array.row_pitch.saturating_mul(span_from(row));
-                        for shape in &child {
-                            let placed = transform_shape(&array.transform, shape);
-                            out.push(translate_shape(&placed, dx, dy));
+                        for shape in &placed_child {
+                            out.push(translate_shape(shape, dx, dy));
                         }
                     }
                 }

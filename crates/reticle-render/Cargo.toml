@@ -35,3 +35,9 @@ reticle-io = { workspace = true }
 
 [[example]]
 name = "fps_bench"
+
+[[example]]
+name = "interaction_latency"
+
+[[example]]
+name = "interaction_soak"

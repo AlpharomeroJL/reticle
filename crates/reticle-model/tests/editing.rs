@@ -155,6 +155,69 @@ fn flatten_expands_array() {
     assert_eq!(doc.flatten("top").len(), 6);
 }
 
+/// The array flattening factors the placement transform out of the per-cell loop
+/// (transform each child shape once, then only translate per copy). That is only
+/// correct when `translate ∘ transform == place-per-cell` for a non-identity
+/// orientation, so pin the exact placed geometry of a rotated array against a hand
+/// computed expectation. A `child` rect at `(1,0)-(3,2)` under an R90 orientation
+/// maps its corners `(x,y) -> (-y,x)`, giving the box `(-2,1)-(0,3)`; each array
+/// copy then shifts that by `(col*px, row*py)`.
+#[test]
+fn flatten_rotated_array_places_every_copy_correctly() {
+    use reticle_geometry::{Magnification, Orientation};
+    use std::collections::BTreeSet;
+
+    let mut doc = Document::new();
+    let mut child = Cell::new("child");
+    child.shapes.push(rect_shape(2, 1, 0, 3, 2));
+    doc.insert_cell(child);
+
+    let rot90 = Transform {
+        translation: Point::ORIGIN,
+        orientation: Orientation::R90,
+        magnification: Magnification::UNITY,
+    };
+    let (columns, rows) = (3u32, 2u32);
+    let (col_pitch, row_pitch) = (100i32, 50i32);
+    let mut top = Cell::new("top");
+    top.arrays.push(ArrayInstance {
+        cell: "child".to_owned(),
+        transform: rot90,
+        columns,
+        rows,
+        column_pitch: col_pitch,
+        row_pitch,
+    });
+    doc.insert_cell(top);
+
+    // The rotated base box, then one translated copy per (col, row).
+    let base = Rect::new(Point::new(-2, 1), Point::new(0, 3));
+    let mut expected: BTreeSet<(i32, i32, i32, i32)> = BTreeSet::new();
+    for col in 0..columns as i32 {
+        for row in 0..rows as i32 {
+            let dx = col * col_pitch;
+            let dy = row * row_pitch;
+            expected.insert((
+                base.min.x + dx,
+                base.min.y + dy,
+                base.max.x + dx,
+                base.max.y + dy,
+            ));
+        }
+    }
+
+    let flat = doc.flatten("top");
+    assert_eq!(flat.len(), (columns * rows) as usize);
+    let got: BTreeSet<(i32, i32, i32, i32)> = flat
+        .iter()
+        .map(|s| match &s.kind {
+            ShapeKind::Rect(r) => (r.min.x, r.min.y, r.max.x, r.max.y),
+            other => panic!("expected a rect, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(got, expected, "every rotated array copy must land exactly");
+}
+
 /// Builds a two-level hierarchy: a `unit` leaf, a `block` that instances and
 /// arrays `unit`, and a `top` that owns a shape plus an instance of `block`.
 fn hierarchical_doc() -> Document {
