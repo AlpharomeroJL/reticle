@@ -400,11 +400,17 @@ fn pacing(step_delay: Duration) -> Pacing {
     }
 }
 
-/// Encodes the collaborator's whole document as a `yrs` update and ships it as one
-/// binary frame to the room. A no-op when there is no publisher.
+/// Encodes the collaborator's whole document as a `yrs` update, wraps it in the
+/// `SyncMessage` envelope every peer agrees on (ADR 0058), and ships it as one binary
+/// frame to the room. A no-op when there is no publisher.
+///
+/// The envelope is what a browser viewer decodes with `reticle_sync::frame`, so a demo
+/// room streams to a viewer identically to a human-shared room. The raw `yrs` bytes are
+/// unchanged; they are only nested in the `CrdtUpdate` variant so a receiver can tell a
+/// document delta from a presence update on the single binary channel.
 fn stream_frame(collab: &AgentCollaborator, publisher: Option<&RoomPublisher>) {
     if let Some(p) = publisher {
-        let frame = collab.sync().encode_state_update();
+        let frame = reticle_sync::encode_update_frame(&collab.sync().encode_state_update());
         p.publish(frame);
     }
 }

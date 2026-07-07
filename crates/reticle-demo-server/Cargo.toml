@@ -48,11 +48,14 @@ tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "
 # The same version reticle-server already resolves, so no new copy is pulled.
 tokio-tungstenite = "0.29.0"
 futures-util = "0.3.32"
+# The shared live-session wire codec (`reticle_sync::frame`): the harness frames every
+# CRDT update in the `SyncMessage` envelope so a browser viewer decodes a demo room the
+# same way it decodes a human-shared room (ADR 0058). Already in the graph via
+# reticle-agent's CRDT bridge, so no new copy is pulled; the live-wiring test decodes
+# the same frames a watcher receives and materializes the drawn geometry.
+reticle-sync = { workspace = true }
 
 [dev-dependencies]
 # Drive the demo router in-process with oneshot requests, as tests/abuse.rs does.
 tower = { version = "0.5.3", features = ["util"] }
 http-body-util = "0.1.3"
-# The live-wiring test decodes the CRDT frames a watcher receives from the room,
-# exactly as a browser reticle-sync peer would, and materializes the drawn geometry.
-reticle-sync = { workspace = true }
