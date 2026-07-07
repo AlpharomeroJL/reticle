@@ -310,3 +310,16 @@ miri:
 # ---------------------------------------------------------------------------
 coverage:
     cargo llvm-cov --workspace --lcov --output-path lcov.info
+
+# ---------------------------------------------------------------------------
+# Relay conformance (ADR 0062): one vector table, both relays.
+# ---------------------------------------------------------------------------
+# Wave-gate recipe (NOT part of `just ci`, which stays Node-free). The native
+# half always runs in-process; the Durable Object half spawns `wrangler dev
+# --local` (miniflare, no Cloudflare auth) and runs the identical vectors when
+# worker/node_modules exists, which it bootstraps here with `npm ci`. The DO
+# test self-skips when RETICLE_CONFORMANCE_DO is unset, so a plain
+# `cargo nextest run -p reticle-relay-conformance` stays Node-free.
+conformance:
+    if (-not (Test-Path worker/node_modules)) { npm --prefix worker ci }
+    $env:RETICLE_CONFORMANCE_DO = "1"; cargo nextest run -p reticle-relay-conformance --no-tests=pass; exit $LASTEXITCODE
