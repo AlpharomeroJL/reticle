@@ -280,6 +280,19 @@ pub struct App {
 
     /// The DRC panel state: the last run's violations and the highlighted one.
     drc: DrcResults,
+    /// DRC-as-you-type: the incremental checker re-run on every edit so violations are
+    /// underlined the moment geometry is drawn (see [`crate::live_drc`]).
+    live_drc: crate::live_drc::LiveDrc,
+    /// Whether live DRC is on. Off by default so a big load does not pay the first
+    /// index build until the user opts in from the DRC panel.
+    live_drc_on: bool,
+    /// The region dirtied since the live index was last rebuilt. Merged every frame
+    /// and re-checked when the throttle rebuilds the index, so an edit made against a
+    /// stale snapshot is still underlined once the fresh index lands.
+    live_pending: crate::history::Dirty,
+    /// Seconds since the live index was last rebuilt, throttling the expensive
+    /// re-prepare off the per-edit hot path (see [`poll_live_drc`](Self::poll_live_drc)).
+    live_reprepare_accum: f32,
     /// Whether the camera should frame the selected violation on the next frame
     /// (deferred so the real canvas size is known, like [`fit_requested`](Self::fit_requested)).
     zoom_to_selected_violation: bool,
@@ -723,6 +736,10 @@ impl App {
             store: Box::new(crate::store::default_store()),
             agent_history: crate::agent_history::HistoryBrowser::new(),
             drc: DrcResults::new(),
+            live_drc: crate::live_drc::LiveDrc::new(),
+            live_drc_on: false,
+            live_pending: crate::history::Dirty::None,
+            live_reprepare_accum: 0.0,
             zoom_to_selected_violation: false,
             netlight: Netlight::new(),
             view3d: crate::view3d::View3d::new(),
@@ -859,6 +876,11 @@ impl App {
         self.selection.clear();
         self.netlight.clear();
         self.drc.clear();
+        // Drop the live index and its underlines; the new document builds a fresh one
+        // on the next edit (and the pending dirt from `History::new` is drained then).
+        self.live_drc.clear();
+        self.live_pending = crate::history::Dirty::None;
+        self.live_reprepare_accum = 0.0;
         self.fit_requested = true;
     }
 
@@ -3762,6 +3784,49 @@ impl App {
         }
     }
 
+    /// Advances DRC-as-you-type by one frame: feed this frame's edits to the live
+    /// checker so a fresh violation is underlined the moment its geometry is drawn.
+    ///
+    /// The prepared index is an immutable snapshot, so an edit is reflected only once
+    /// the index is rebuilt. This drains the region every edit dirtied (see
+    /// [`History::take_dirty`]), accumulates it, and on a throttle rebuilds the index
+    /// and re-checks the accumulated region: the cheap per-edit `check_region` runs at
+    /// microsecond scale, the expensive re-prepare at most a few times a second. The
+    /// dirt is drained every frame regardless so it cannot pile up while the feature is
+    /// off or while a read-only archive is being browsed.
+    fn poll_live_drc(&mut self, dt: f32) {
+        // How long a stale index may persist before the throttle rebuilds it. A quarter
+        // second reads as live while bounding the expensive re-prepare during a drag.
+        const REPREPARE_INTERVAL_SECS: f32 = 0.25;
+
+        let dirty = self.history.take_dirty();
+        if !self.live_drc_on || self.archive.is_some() {
+            self.live_pending = crate::history::Dirty::None;
+            self.live_reprepare_accum = 0.0;
+            return;
+        }
+        self.live_pending = self.live_pending.merge(dirty);
+
+        self.live_reprepare_accum += dt;
+        let revision = self.history.revision();
+        let due =
+            !self.live_drc.has_index() || self.live_reprepare_accum >= REPREPARE_INTERVAL_SECS;
+        if self.live_drc.is_stale(revision) && due {
+            self.live_reprepare_accum = 0.0;
+            let pending = std::mem::take(&mut self.live_pending);
+            let n = self.live_drc.apply_dirty(
+                pending,
+                self.history.document(),
+                &self.top_cell,
+                revision,
+                true,
+            );
+            if n > 0 {
+                self.status.set(format!("Live DRC: {n} near the edit"));
+            }
+        }
+    }
+
     /// Draws the DRC panel section: run/clear actions and the violation list.
     ///
     /// Clicking a violation records it as selected and zooms the camera to its
@@ -3777,6 +3842,17 @@ impl App {
                 self.status.set("DRC cleared");
             }
         });
+        // DRC-as-you-type: underline violations live as geometry is drawn. Turning it
+        // off drops the live index and its underlines.
+        if ui
+            .checkbox(&mut self.live_drc_on, "Check as you type")
+            .changed()
+            && !self.live_drc_on
+        {
+            self.live_drc.clear();
+            self.live_pending = crate::history::Dirty::None;
+            self.live_reprepare_accum = 0.0;
+        }
         if self.drc.has_run() {
             ui.label(format!("{} violation(s)", self.drc.len()));
         } else {
@@ -5205,6 +5281,7 @@ impl App {
             self.draw_array_preview(&painter, &screen, viewport);
             self.draw_generate_preview(&painter, &screen, viewport);
             self.draw_drc_markers(&painter, &screen);
+            self.draw_live_drc_underlines(&painter, &screen);
         }
 
         // User guides under the ruler bars, then the rulers cover their ends.
@@ -6232,6 +6309,36 @@ impl App {
         }
     }
 
+    /// Paints DRC-as-you-type underlines: a spell-checker squiggle beneath each live
+    /// violation caught while drawing.
+    ///
+    /// Deliberately distinct from [`draw_drc_markers`](Self::draw_drc_markers) (which
+    /// boxes the violations of a full DRC run): the squiggle is a live "misspelling"
+    /// hint at the edited geometry, sized in constant screen pixels so it reads the
+    /// same at any zoom, exactly like a text editor's underline.
+    fn draw_live_drc_underlines(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        // Constant on-screen squiggle geometry (pixels), independent of zoom.
+        const AMPLITUDE: f32 = 3.0;
+        const WAVELENGTH: f32 = 8.0;
+        if self.live_drc.is_empty() {
+            return;
+        }
+        let stroke = Stroke::new(1.5, Color32::from_rgb(255, 120, 90));
+        for v in self.live_drc.violations() {
+            let e = self.world_rect_to_screen(screen, v.location);
+            // Ride just beneath the offending region's bottom edge.
+            let baseline = e.bottom() + AMPLITUDE + 1.0;
+            let pts: Vec<Pos2> =
+                drc_panel::squiggle_points(e.left(), e.right(), baseline, AMPLITUDE, WAVELENGTH)
+                    .into_iter()
+                    .map(|(x, y)| Pos2::new(x, y))
+                    .collect();
+            if pts.len() >= 2 {
+                painter.add(Shape::line(pts, stroke));
+            }
+        }
+    }
+
     /// Draws just the outline (and a faint fill) of a shape, for overlay emphasis.
     ///
     /// Unlike [`draw_one_shape`](Self::draw_one_shape) this never uses the shape's
@@ -6849,6 +6956,10 @@ impl eframe::App for App {
         if let Some(update) = self.replay.tick(dt) {
             self.apply_agent_drc_update(update);
         }
+
+        // Feed the previous frame's edits to DRC-as-you-type before drawing, so the
+        // live underlines the canvas paints below reflect this frame's re-check.
+        self.poll_live_drc(dt);
 
         // The surface color format when eframe is on its wgpu backend; drives the
         // retained GPU canvas. `None` (e.g. a glow build) falls back to egui painting.
