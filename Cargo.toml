@@ -24,6 +24,7 @@ members = [
     "crates/reticle-gen",
     "crates/reticle-sync",
     "crates/reticle-server",
+    "crates/reticle-relay-conformance",
     "crates/reticle-script",
     "crates/reticle-app",
     "crates/reticle-cli",
