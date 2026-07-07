@@ -165,14 +165,19 @@ carry them. The fixtures under `crates/reticle-cli/tests/fixtures/tt-precheck/` 
 `magic_drc.tcl`, and `pin_check.py`, fetched 2026-07-06) and are labeled as synthesized
 in their `NOTICE.md`; they are not captured from a live run.
 
-**Live-run status, stated plainly:** the live Docker precheck was **attempted but not
-completed in this lane**. Docker Desktop's daemon was not running and the host had about
-39.5 GB free against the multi-GB image plus PDK, so a reliable pull-and-run was out of
-scope. The pinned image tag and digest, the exact `docker run` invocation, and the WSL
-fallback are recorded so that running it is an operator step, not a fabricated pass. **No
-tile is claimed to have passed the precheck.** When a real run is captured, its
-`results.md` and `magic_drc.txt` drop in beside (or over) the synthesized fixtures and
-the same parser and test cover the real output unchanged.
+**Live-run status, stated plainly:** the live Docker precheck was **attempted but
+deliberately not run to completion in this lane**. The wrapper ran end to end through the
+real path (it validated the GDS, cloned `tt-support-tools`, staged the minimal project,
+assembled the exact `docker run`, and started the pull, with real image layers observed
+downloading from the `desktop-linux` context), so the daemon is reachable and the
+invocation is correct. The pull was stopped because the 3.94 GB compressed image expands
+to well over 10 GB uncompressed (plus the PDK) against about 39.5 GB free disk, and the
+pull-plus-precheck is slow, so completing it here was out of scope. The pinned image tag
+and digest, the exact `docker run` invocation, and the WSL fallback are recorded so that
+running it to a verdict is an operator step, not a fabricated pass. **No tile is claimed
+to have passed the precheck.** When a real run is captured, its `results.md` and
+`magic_drc.txt` drop in beside (or over) the synthesized fixtures and the same parser and
+test cover the real output unchanged.
 
 ## Honest limits
 

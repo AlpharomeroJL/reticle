@@ -57,11 +57,16 @@ with its message) plus the feedback lines that carry them. Those fixtures are **
 from the precheck's real output format** (transcribed from `precheck.py`, `magic_drc.tcl`,
 and `pin_check.py`, fetched 2026-07-06) and are labeled as synthesized in their
 `NOTICE.md`; they are not captured from a live run. The **live Docker precheck was
-attempted but not completed in this lane**: Docker Desktop's daemon was not running and the
-host had 39.5 GB free against a 3.94 GB compressed (larger uncompressed, plus PDK) image,
-so a reliable pull-and-run was out of scope. The image tag and digest, the exact `docker
-run` invocation, and the WSL fallback are recorded here and in the wrapper so a live run is
-an operator step, not a fabricated pass: no tile is claimed to have passed the precheck.
+attempted but deliberately not run to completion in this lane**: the wrapper ran end to end
+through the real path (it validated the GDS, cloned `tt-support-tools`, staged the minimal
+project, assembled the exact `docker run`, and started the pull, with real image layers
+observed downloading from the `desktop-linux` context), so the daemon is reachable and the
+invocation is correct; the pull was stopped because the 3.94 GB compressed image expands to
+well over 10 GB uncompressed (plus the PDK) against 39.5 GB free disk, and the
+pull-plus-precheck is slow, so completing it here was out of scope. The image tag and
+digest, the exact `docker run` invocation, and the WSL fallback are recorded here and in
+the wrapper so a live run is an operator step, not a fabricated pass: no tile is claimed to
+have passed the precheck.
 When a real run is captured, its `results.md` and `magic_drc.txt` drop in beside (or over)
 the synthesized fixtures and the same parser and test cover the real output unchanged, and
 the e2e test can then be wired to the live run with its measured tag and timing.

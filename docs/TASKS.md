@@ -559,10 +559,13 @@ exact per-pin DEF coordinates still need pulling from the shuttle's template rep
   passes clean, seeded violation fails with a parsed actionable report (Magic rectangle
   located in DBU + boundary failure). Fixtures under
   `crates/reticle-cli/tests/fixtures/tt-precheck/` are SYNTHESIZED from the real precheck
-  output format (labeled in NOTICE.md), not captured. LIVE Docker run ATTEMPTED, NOT
-  completed (Docker Desktop daemon not running; ~39.5 GB free vs the multi-GB image+PDK);
-  documented as the operator's step with the exact command, NOT a fabricated pass. No
-  tile is claimed to have passed the precheck. ADR 0054. NOT pushed/merged.
+  output format (labeled in NOTICE.md), not captured. LIVE Docker run ATTEMPTED, run end
+  to end through the real path (GDS validated, tt-support-tools cloned, project staged,
+  exact docker run assembled, pull started with real layers downloading from the
+  desktop-linux context; daemon reachable, invocation correct) but DELIBERATELY not run to
+  completion: the 3.94 GB compressed image expands to >10 GB (plus PDK) against ~39.5 GB
+  free disk and the pull is slow, so a verdict is the operator's step, NOT a fabricated
+  pass. No tile is claimed to have passed the precheck. ADR 0054. NOT pushed/merged.
 - [~] Lane 4C: `docs/src/tapeout.md`. The HONEST PLAN half is DONE (commit 7692f0b,
   orchestrator direct, no quota; wired into SUMMARY under a Tape-out section; book +
   check-style + typos green): what GDS-mode submission is versus the digital HDL flow,
