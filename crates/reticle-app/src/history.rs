@@ -7,7 +7,39 @@
 //! [`reticle_model::DocumentStore`] trait supplies `apply`/`undo`/`redo`, so those
 //! are imported here.
 
+use reticle_geometry::{Rect, Shape};
 use reticle_model::{Document, DocumentStore, Edit, EditableDocument, Result};
+
+/// The region the most recent edits dirtied, for incremental live DRC re-checks.
+///
+/// A local shape add or remove dirties a known rectangle; a structural change
+/// (instance, array, cell) or an undo/redo dirties an unknown region and asks the
+/// live checker to fall back to the whole cell. Accumulated across every apply since
+/// the app last drained it with [`History::take_dirty`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Dirty {
+    /// No geometry changed since the last drain.
+    #[default]
+    None,
+    /// Geometry changed within this rectangle (a local shape add or remove).
+    Region(Rect),
+    /// A structural or unknown-region change: the whole current cell should be
+    /// re-checked (instance/array/cell edits, undo, redo).
+    Full,
+}
+
+impl Dirty {
+    /// Combines two dirty regions: `Full` dominates, `None` is the identity, and two
+    /// regions union into the rectangle that contains both.
+    #[must_use]
+    pub fn merge(self, other: Dirty) -> Dirty {
+        match (self, other) {
+            (Dirty::Full, _) | (_, Dirty::Full) => Dirty::Full,
+            (Dirty::None, x) | (x, Dirty::None) => x,
+            (Dirty::Region(a), Dirty::Region(b)) => Dirty::Region(a.union(&b)),
+        }
+    }
+}
 
 /// The editable document plus its undo/redo history.
 ///
@@ -32,6 +64,10 @@ pub struct History {
     undo_groups: Vec<usize>,
     /// The mirror of [`History::undo_groups`] for the redo stack.
     redo_groups: Vec<usize>,
+    /// The region dirtied by edits since the app last drained it (see
+    /// [`take_dirty`](History::take_dirty)), so the live DRC checker re-checks only
+    /// the edited neighbourhood rather than the whole cell.
+    pending_dirty: Dirty,
 }
 
 impl Default for History {
@@ -48,7 +84,37 @@ impl History {
             doc: EditableDocument::new(document),
             undo_groups: Vec::new(),
             redo_groups: Vec::new(),
+            pending_dirty: Dirty::None,
         }
+    }
+
+    /// The dirty region of a single edit, before it is applied.
+    ///
+    /// A shape add dirties the shape's own bounding box; a shape remove dirties the
+    /// bounding box of the shape still at that index in the current document (so it
+    /// must be read *before* the remove lands). Structural edits (cells, instances,
+    /// arrays) have no cheap bounding box and dirty [`Dirty::Full`]; labels are not
+    /// DRC geometry and dirty nothing.
+    fn dirty_of(&self, edit: &Edit) -> Dirty {
+        match edit {
+            Edit::AddShape { shape, .. } => Dirty::Region(shape.bounding_box()),
+            Edit::RemoveShape { cell, index } => self
+                .doc
+                .document()
+                .cell(cell)
+                .and_then(|c| c.shapes.get(*index))
+                .map_or(Dirty::None, |s| Dirty::Region(s.bounding_box())),
+            Edit::AddLabel { .. } | Edit::RemoveLabel { .. } => Dirty::None,
+            // Cells, instances, arrays, and any future edit kind: a region we cannot
+            // cheaply bound, so re-check the whole cell on the next throttle tick.
+            _ => Dirty::Full,
+        }
+    }
+
+    /// Drains and returns the region dirtied since the last drain, resetting it to
+    /// [`Dirty::None`]. The app calls this each frame to feed the live DRC checker.
+    pub fn take_dirty(&mut self) -> Dirty {
+        std::mem::take(&mut self.pending_dirty)
     }
 
     /// Borrows the current document snapshot for reading (culling, drawing, export).
@@ -86,7 +152,11 @@ impl History {
     /// Propagates any [`reticle_model::ModelError`] from the underlying store (for
     /// example an edit that references a missing cell).
     pub fn apply(&mut self, edit: Edit) -> Result<()> {
+        // Bound the dirty region before the edit lands (a remove needs the shape that
+        // is still present), then accumulate it only once the edit actually applies.
+        let dirty = self.dirty_of(&edit);
         self.doc.apply(edit)?;
+        self.pending_dirty = self.pending_dirty.merge(dirty);
         self.undo_groups.push(1);
         self.redo_groups.clear();
         Ok(())
@@ -113,8 +183,12 @@ impl History {
         }
         let mut applied = 0usize;
         for edit in edits {
+            let dirty = self.dirty_of(&edit);
             match self.doc.apply(edit) {
-                Ok(()) => applied += 1,
+                Ok(()) => {
+                    applied += 1;
+                    self.pending_dirty = self.pending_dirty.merge(dirty);
+                }
                 Err(e) => {
                     // Demote the partial batch to individual steps and surface the
                     // error; the document reflects exactly the edits that landed.
@@ -140,6 +214,9 @@ impl History {
         for _ in 0..steps {
             self.doc.undo();
         }
+        // An undo can move geometry anywhere; its region is not cheaply known, so ask
+        // the live checker to re-check the whole cell on the next throttle tick.
+        self.pending_dirty = Dirty::Full;
         self.redo_groups.push(steps);
         true
     }
@@ -153,6 +230,7 @@ impl History {
         for _ in 0..steps {
             self.doc.redo();
         }
+        self.pending_dirty = Dirty::Full;
         self.undo_groups.push(steps);
         true
     }
@@ -305,6 +383,110 @@ mod tests {
         h.apply_group(Vec::new()).unwrap();
         assert_eq!(h.undo_depth(), 0);
         assert!(!h.can_undo());
+    }
+
+    #[test]
+    fn add_shape_dirties_its_bounding_box_then_drains() {
+        let mut h = History::new(Document::new());
+        h.apply(Edit::AddCell {
+            cell: Cell::new("A"),
+        })
+        .unwrap();
+        h.take_dirty(); // drop the structural dirty from the cell add
+        h.apply(Edit::AddShape {
+            cell: "A".to_owned(),
+            shape: DrawShape::new(
+                LayerId::new(4, 0),
+                ShapeKind::Rect(Rect::new(Point::new(10, 20), Point::new(40, 60))),
+            ),
+        })
+        .unwrap();
+        assert_eq!(
+            h.take_dirty(),
+            Dirty::Region(Rect::new(Point::new(10, 20), Point::new(40, 60)))
+        );
+        // Draining resets to None.
+        assert_eq!(h.take_dirty(), Dirty::None);
+    }
+
+    #[test]
+    fn remove_shape_dirties_the_removed_bounding_box() {
+        let mut h = History::new(Document::new());
+        h.apply(Edit::AddCell {
+            cell: Cell::new("A"),
+        })
+        .unwrap();
+        let bbox = Rect::new(Point::new(0, 0), Point::new(30, 30));
+        h.apply(Edit::AddShape {
+            cell: "A".to_owned(),
+            shape: DrawShape::new(LayerId::new(4, 0), ShapeKind::Rect(bbox)),
+        })
+        .unwrap();
+        h.take_dirty();
+        h.apply(Edit::RemoveShape {
+            cell: "A".to_owned(),
+            index: 0,
+        })
+        .unwrap();
+        assert_eq!(h.take_dirty(), Dirty::Region(bbox));
+    }
+
+    #[test]
+    fn apply_group_unions_the_dirty_regions() {
+        let mut h = History::new(Document::new());
+        h.apply(Edit::AddCell {
+            cell: Cell::new("A"),
+        })
+        .unwrap();
+        h.take_dirty();
+        let a = Rect::new(Point::new(0, 0), Point::new(10, 10));
+        let b = Rect::new(Point::new(100, 100), Point::new(120, 120));
+        h.apply_group(vec![
+            Edit::AddShape {
+                cell: "A".to_owned(),
+                shape: DrawShape::new(LayerId::new(4, 0), ShapeKind::Rect(a)),
+            },
+            Edit::AddShape {
+                cell: "A".to_owned(),
+                shape: DrawShape::new(LayerId::new(4, 0), ShapeKind::Rect(b)),
+            },
+        ])
+        .unwrap();
+        assert_eq!(h.take_dirty(), Dirty::Region(a.union(&b)));
+    }
+
+    #[test]
+    fn structural_and_undo_edits_dirty_full() {
+        let mut h = History::new(Document::new());
+        // A cell add has no cheap bounding box: full.
+        h.apply(Edit::AddCell {
+            cell: Cell::new("A"),
+        })
+        .unwrap();
+        assert_eq!(h.take_dirty(), Dirty::Full);
+        // Undo dirties the whole cell too.
+        h.apply(Edit::AddShape {
+            cell: "A".to_owned(),
+            shape: shape(),
+        })
+        .unwrap();
+        h.take_dirty();
+        assert!(h.undo());
+        assert_eq!(h.take_dirty(), Dirty::Full);
+    }
+
+    #[test]
+    fn dirty_merge_rules() {
+        let r = Rect::new(Point::new(0, 0), Point::new(1, 1));
+        assert_eq!(Dirty::None.merge(Dirty::Region(r)), Dirty::Region(r));
+        assert_eq!(Dirty::Region(r).merge(Dirty::None), Dirty::Region(r));
+        assert_eq!(Dirty::Full.merge(Dirty::Region(r)), Dirty::Full);
+        assert_eq!(Dirty::Region(r).merge(Dirty::Full), Dirty::Full);
+        let s = Rect::new(Point::new(5, 5), Point::new(6, 6));
+        assert_eq!(
+            Dirty::Region(r).merge(Dirty::Region(s)),
+            Dirty::Region(r.union(&s))
+        );
     }
 
     #[test]
