@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_intent_met2_wire",
+    "model": "claude-sonnet-5",
+    "suite_version": "adhoc",
+    "success": true,
+    "iterations": 6,
+    "first_proposal_violations": 1,
+    "final_violations": 1,
+    "wall_ms": 34381,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]

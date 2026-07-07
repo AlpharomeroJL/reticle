@@ -73,3 +73,5 @@ superseded decision is marked and linked to its replacement.
 | [0065](0065-relay-conformance-vector-format.md) | The relay conformance vector format: one table, two targets, presence coalescing the only target-aware branch |
 | [0066](0066-agent-live-room-and-id-addressed-mirroring.md) | The agent in a real relay room: id-addressed (transform/delete) mirroring and a native live client |
 | [0067](0067-permalink-view-param-disambiguation.md) | Permalinks reuse `?view=`, disambiguated by shape (three floats is a camera, else the start-view selector) |
+| [0068](0068-rtla-onwire-framing-and-external-build.md) | .rtla on-disk framing and the external two-pass builder |
+| [0069](0069-rtla-physical-framing-and-tile-caches.md) | .rtla physical byte framing, the untrusted-count rule, and the wasm tile-source LRU and OPFS cache policy |

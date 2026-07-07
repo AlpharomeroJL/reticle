@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 648cfb88373e74ba79b3c5f754514e648569c1fab18569c0af23ac8c1b484de5 # shrinks to records = [TileRecord { layer: 0, datatype: 0, rect: ArchivableRect { min_x: 959, min_y: 343, max_x: 1039, max_y: 431 } }], (cols, rows) = (1, 1), viewport = Rect { min: Point { x: 1000, y: 343 }, max: Point { x: 1001, y: 344 } }

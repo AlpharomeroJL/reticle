@@ -20,7 +20,7 @@
 //!    entries carrying its index; assemble them into a [`TilePayload`], serialize it,
 //!    and append it. Peak memory is one tile's records plus the `k` merge heads.
 //!
-//! # On-disk framing (ADR 0063)
+//! # On-disk framing (ADR 0068)
 //!
 //! [`crate::archive`] freezes the rkyv record *types* and says tiles are
 //! byte-contiguous with `(offset, len)` from the start of the file, but does not say
@@ -29,7 +29,7 @@
 //! (`header_off`, `header_len`, `dir_off`, `dir_len`) ahead of the rkyv
 //! [`RtlaHeader`] block and the rkyv `Vec<TileDirEntry>` directory block, then the
 //! tiles. Every block starts on a `BLOCK_ALIGN`-byte boundary so a reader can
-//! `rkyv::access` it in place from a memory map. ADR 0063 documents this so lane 2B's
+//! `rkyv::access` it in place from a memory map. ADR 0068 documents this so lane 2B's
 //! reader is written to the same layout.
 //!
 //! # Coarse-level decimation
