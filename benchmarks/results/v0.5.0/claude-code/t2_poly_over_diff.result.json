@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t2_poly_over_diff",
+    "model": "claude-sonnet-5",
+    "suite_version": "adhoc",
+    "success": false,
+    "iterations": 5,
+    "first_proposal_violations": 1,
+    "final_violations": 1,
+    "wall_ms": 44145,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]
