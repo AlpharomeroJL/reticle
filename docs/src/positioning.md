@@ -51,12 +51,18 @@ distinct emphasis is threefold:
 2. **Objective checkers as a first-class engine.** The design-rule checker, router,
    and connectivity extractor are each pinned to an independent reference oracle by
    property tests, so their correctness is demonstrated rather than asserted. They are
-   built to be driven programmatically, not only from a GUI.
+   built to be driven programmatically, not only from a GUI. The same discipline covers
+   the six parameterized generators (guard ring, via farm, pad ring, seal ring, density
+   fill, test structure): a property test runs each over 400 random valid parameter sets
+   and asserts zero DRC violations, so the structures they emit are clean by construction.
 3. **An agent surface graded by those checkers.** Reticle exposes its whole editing
    engine as a serializable command API and drives a model through a
    propose-verify-correct loop whose success is decided by the DRC subset and the
    connectivity checker, not by the model's own claim. A benchmark suite scores that
-   loop; an MCP server offers the surface to any model host. This agent-plus-objective-
+   loop; an MCP server offers the surface (including one tool per generator) to any model
+   host. When the surface is driven by a bare local model, Reticle supplies the loop and
+   grades the result; an agent system such as Claude Code brings its own loop, so its
+   result is not head-to-head comparable with a bare model. This agent-plus-objective-
    checker angle is where Reticle does something the established tools do not package.
 
 So the honest one-line placement: Reticle is a fast, browser-native layout viewer and
