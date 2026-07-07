@@ -13,6 +13,7 @@
 - [Boolean and transform operations](boolean-transform.md)
 - [File formats](io.md)
 - [Rendering and scale](rendering.md)
+  - [GPU DRC heatmap](gpu-drc-heatmap.md)
 - [Streamed documents](streaming.md)
 - [View and export](view-export.md)
 - [Snapping and guides](snapping.md)

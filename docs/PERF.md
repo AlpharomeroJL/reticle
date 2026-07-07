@@ -337,6 +337,40 @@ same seam a user's HUD shows. The at-scale residency behaviour (coarse level pai
 fine tiles stream, LRU eviction bounding RAM) is proven headlessly by the `residency`
 integration test with an injected per-tile fetch latency.
 
+## v8.0.0 GPU DRC heatmap (measured 2026-07-07 on this machine)
+
+The compute-shader DRC heatmap (lane v8-3b) bins the visible rect instances into a
+uniform grid on the GPU (reusing the cull crate's prefix scan), then checks each
+instance's min-width and its 3x3 bin neighbourhood for min-spacing, writing a
+per-instance violation flag buffer and a coarse per-bin heatmap. A property test pins the
+GPU flag set to the `reticle-drc` CPU oracle; these numbers are its throughput.
+
+**Methodology.** A manual timing harness, the `#[ignore]`d `bench_drc_heatmap` in
+`crates/reticle-render/tests/drc_heatmap_gpu.rs`, run with
+`cargo test -p reticle-render --test drc_heatmap_gpu -- --ignored --nocapture` on the RTX
+4060 Ti (Vulkan). Each iteration is one full heatmap recompute (bin count/scan/scatter +
+check) plus the flag readback that drives the GPU to completion; the figure is the median
+over 30 iterations after 3 warmups and so *includes* a blocking CPU readback a live
+overlay redraw (which keeps the heatmap GPU-resident) would skip. The input is a
+deterministic jittered grid so runs reproduce. This is a manual measurement, not a
+Criterion bench, so it is recorded here but not in the `xtask perf-check` baseline.
+
+| Benchmark | Median | Notes |
+|---|---:|---|
+| GPU DRC heatmap, 10,000 visible instances | 0.66 ms/recompute | ~4,700 flagged; incl. flag readback |
+| GPU DRC heatmap, 50,000 visible instances | 3.57 ms/recompute | ~23,000 flagged; incl. flag readback |
+
+Counts are *post-cull visible* instances, not whole-design shape counts: the grid is
+capped at 256 bins (a single-workgroup scan), so per-instance cost is the fixed 3x3
+neighbour scan of about `n / 256` instances per bin. That is the regime this heatmap
+targets, the visible working set of an interactive view, where recompute stays well under
+a frame and the rule-value slider redraws live. A whole 1M-shape pass is the CPU
+`DrcEngine`'s job (32.8 ms full pass, above), not this overlay's.
+
+**Browser note.** Measured native (Vulkan). Like the compute-cull gates (ADR 0027), the
+heatmap is WebGPU-only; the WebGL2 path keeps the CPU DRC engine. The browser (WebGPU)
+figure is not yet instrumented and is a follow-up rather than an assumed equal to native.
+
 ## Targets (Section 10)
 
 Honest status of each spec target. Two are measured with a hard number; the rest are
