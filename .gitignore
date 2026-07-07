@@ -59,3 +59,6 @@ Thumbs.db
 /reticle-autonomous-build-plan.md
 /reticle-v6-extended-packet.md
 /scratch/
+
+# Lane RESULT.md files belong under scratch/lanes/<id>/, never the repo root.
+/RESULT.md

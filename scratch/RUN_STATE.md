@@ -11,17 +11,22 @@ MORNING REPORT goes at the very top here: waves completed, shipped-live (bundle,
 IMMEDIATE (in order): trim bench to 3 (kill 4 leftovers) + dedupe dup task records (earliest honest per task); when 1E exits/contention clear -> redeploy relay (just conformance; wrangler deploy; record version); run deferred e2e/e2e-share/conformance no later than the Wave 2 gate.
 
 ## RESUME BLOCK (if this session dies, start here)
-Position (2026-07-07 night): mid Wave 2 gate. main HEAD d56c094 (2A merged). Wave 2 lanes green: 2A(merged), 2B, 2C, 2D-alpha (all in D:\dev\reticle-lanes\). Remaining Wave 2 merges (order): 2b, 2d-alpha, 2c (app last). ADR collisions to renumber at merge: 2A already added 0063-rtla-onwire-framing (renumber - 0063 taken by reconnect; assign next free), 2C+2D-alpha both authored "ADR 0068" (assign in merge order). Then: dispatch converter-CLI lane; Wave 2 gate (ci + served-archive local spec + e2e + conformance + redeploy + smoke); relay wrangler deploy. Then Waves 3-9 per plan. Lane UUIDs + briefs under scratch/lanes/<id>/. Dispatch: scratch/dispatch-lane.ps1 -Id <id> -SessionId <uuid>; resume: scratch/resume-lane.ps1. Bench: scratch/bench-extension.ps1 -WorkerIndex i -WorkerCount 3 -SkipBuild. Deploy: just deploy-pages then publish scratch/pages to gh-pages worktree then just smoke-pages.
+Position (2026-07-07 night): WAVE 2 SHIPPED. main HEAD 28ed2ae-ish (2A-2D-alpha merged + framing fix ce04438 + doc/typo fix). Wave 2 CI GREEN, e2e+e2e-subpath+e2e-share+conformance GREEN, site live web-2b5eb620c993eb64 (gh-pages 88193ef, smoke PASS), relay redeployed version 33fe97b0.
+IN FLIGHT (dispatched, running): v8-2f-converter (reticle-cli convert gds->rtla; UUID da15b7db-9a8a-4401-bbb1-e27871e106e7), v8-2e-hud-stream (browser ?archive streaming + HUD + served-archive e2e; GPU lane; UUID 1ef4444f-d84a-4a56-a11a-080daffcecb3). Also done-and-parked awaiting their gates: 5D (Wave 5, done), 5E (Wave 5), 7A (Wave 7), 1E (Wave 1 tail). Bench: 3 workers finished, row near-complete (verify count).
+NEXT: (1) when 2E+2F green -> merge at Wave 2 completion sub-gate (served-archive spec lands with 2E), redeploy. (2) Wave 3 dispatch: GPU EXCLUSIVITY ABSOLUTE - 3A(CPU drc/app) may pair with ONE GPU lane; 3B/3C/3D one at a time. 3A + 2E both touch reticle-app -> serialize. Adversarial review at Wave 3 gate (GPU-vs-CPU oracle, chunked compaction) + Wave 4 gate. (3) Waves 4-9 per the AUTHORIZATION block above.
+CONVENTIONS: lane RESULT.md is at scratch/lanes/<id>/RESULT.md in the lane WORKTREE (D:\dev\reticle-lanes\<id>\...) - some lanes wrongly wrote /RESULT.md at root (now gitignored + git-rm'd at merge). Verify exit-0-no-artifact lanes at their gate vs the brief success bar. ADR ids in briefs are PLACEHOLDERS; assign at merge in merge order (Wave 2 used 0068 2a-onwire, 0069 2b-framing, 0070 2d-alpha-worker, 0071 2c-dochost; next free 0072). Tooling: dispatch-lane.ps1/resume-lane.ps1/bench-extension.ps1 under scratch/. Deploy: just deploy-pages -> gh-pages worktree publish -> just smoke-pages. Relay: cd worker; npx wrangler deploy.
+KNOWN GAP: served-archive Playwright spec + browser ?archive wiring was 2E scope (not in 2A-2D); lane 2E now building it. Streaming proven natively (rtla_writer_reader_agree cross-test, 2B streamed==in-RAM proptest, 2C residency test, 2A builder 126.9 MiB @30M).
 
 updated: 2026-07-07 night (overnight autonomous)
-phase: wave2/gate (2A merged, merging 2B/2C/2D-alpha)
-head: d56c094 (2A merged)
+phase: wave2/shipped -> wave2-completion(2e,2f) + wave3/dispatch-next
+head: Wave 2 merged + shipped live
 
 ## SHIPPED LIVE (running tally):
-- Site bundle: web-e6f6b8398ffb8c08 (Wave 1 live-collab + review reconnect fix), gh-pages 763660a, smoke PASS. URL https://alpharomerojl.github.io/reticle/
-- DO relay: reticle-relay.josefdean.workers.dev, version 33fe97b0-8b2f-4bc0-8591-e3724b365ae9 (hardened: presence-replay, frame/log caps, FIFO flush, per-room conn cap). Conformance GREEN both relays (native + DO).
-- Bench claude-code row: 72/83 committed (PARTIAL), 3 stride workers finishing the last 11.
-- Immediate actions DONE: bench trimmed to 3 (killed leftover dup workers; 0 duplicate result records - one file per task), relay redeployed. PENDING: deferred e2e/e2e-share browser validation at Wave 2 gate.
+- Site bundle: web-2b5eb620c993eb64 (Wave 2 streaming: gds_stream reader, external .rtla builder, TileSource mmap/http-range/mem, DocHost edit/stream split + residency, archive-serving worker, license xtask), gh-pages 88193ef, smoke PASS. URL https://alpharomerojl.github.io/reticle/. (Wave 1 bundle web-e6f6b8398ffb8c08 superseded.)
+- DO relay: reticle-relay.josefdean.workers.dev, version 33fe97b0-8b2f-4bc0-8591-e3724b365ae9 (hardened). Conformance GREEN both relays.
+- Bench claude-code row: ~72-83/83 committed (verify), PARTIAL; 3 workers done this batch.
+- Wave 2 HEADLINE NUMBERS (measured): external builder 30M-entry .rtla at 126.9 MiB peak RSS (budget ~2 GiB); 120M records -> 2.42 GB archive in 45.2 s; builder/reader framing agreement fixed (ce04438) + cross-test guards it; streamed query == in-RAM R-tree query (2B proptest).
+- Immediate overnight actions DONE: bench trimmed to 3 (0 dup records), relay redeployed, deferred e2e/e2e-share/conformance ran GREEN.
 
 ## AMENDMENT (operator, 2026-07-07): pipelined dispatch authorized
 When concurrency slots are free AND the next wave has lanes whose file surfaces are provably disjoint from every in-flight lane, run that wave's contract step and dispatch those lanes early. They STILL merge only at their own wave gate, in declared order. Wave 1 lanes merge first at the Wave 1 gate; early-dispatched lanes park green and merge at their own gates.
