@@ -113,6 +113,7 @@ pub mod startscreen;
 pub mod store;
 pub mod tech_editor;
 pub mod tinytapeout;
+pub mod tinytapeout_example;
 pub mod tool;
 pub mod tour;
 pub mod usecases;

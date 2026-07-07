@@ -6317,6 +6317,7 @@ name = "xtask"
 version = "6.0.1"
 dependencies = [
  "image",
+ "reticle-agent-api",
  "reticle-app",
  "reticle-drc",
  "reticle-geometry",

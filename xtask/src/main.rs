@@ -6,11 +6,14 @@
 //! - `capture-media`, regenerate the hero image, demo GIFs, and feature stills;
 //!   an optional trailing asset name limits the run to that one asset.
 //! - `perf-check`, compare benchmarks against the committed history (Wave 5).
+//! - `tapeout-example`, write the worked in-repo Tiny Tapeout tile and its replayable
+//!   transcript into `examples/tapeout/` (Lane 4C).
 
 mod generator;
 mod media;
 mod overlay;
 mod perf;
+mod tapeout;
 mod ui_capture;
 
 use reticle_io::Gds;
@@ -25,9 +28,10 @@ fn main() -> ExitCode {
         "capture-media" => cmd_capture_media(args.get(1).map(String::as_str)),
         "capture-ui" => ui_capture::cmd_capture_ui(args.get(1).map(String::as_str)),
         "perf-check" => perf::perf_check(),
+        "tapeout-example" => tapeout::cmd_tapeout_example(args.get(1).map(String::as_str)),
         "" => {
             eprintln!(
-                "usage: xtask <gen-layout|capture-media [asset]|capture-ui [name]|perf-check> [options]"
+                "usage: xtask <gen-layout|capture-media [asset]|capture-ui [name]|perf-check|tapeout-example [out-dir]> [options]"
             );
             ExitCode::FAILURE
         }
