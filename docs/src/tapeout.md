@@ -122,6 +122,58 @@ authoring, but it is **not** the precheck: the precheck is the authoritative ext
 oracle, and only a clean precheck run means a tile is submission-ready. Keeping the two
 distinct, our subset for speed and their precheck for truth, is the honest arrangement.
 
+## The precheck oracle (Lane 4B)
+
+The precheck wrapper and its structured-failure parser are built and committed (ADR
+0054). Three pieces:
+
+- **`just tt-precheck <gds>`** runs Tiny Tapeout's own precheck over a GDS inside a
+  **pinned** Docker container. The image is `hpretl/iic-osic-tools:2025.01` (amd64
+  digest `sha256:a51257b7d85fc75d5a690317539f9787a401d6dd28583d73dceab174ccc9e78f`,
+  measured at 3.94 GB compressed on 2026-07-06), which bundles Magic, KLayout, gdstk,
+  and the SKY130 PDK (`PDK_ROOT=/foss/pdks`). The recipe calls
+  `scripts/tt-precheck.ps1`, which stages a minimal Tiny Tapeout project (an
+  `info.yaml` whose `top_module` equals the GDS filename stem, which the precheck
+  requires and asserts), mounts that project and a pinned `tt-support-tools` checkout,
+  runs `python precheck/precheck.py --gds <gds> --tech sky130A` in the container, and
+  copies the reports (`results.md`, `results.xml`, `magic_drc.txt`, `drc_*.xml`) to an
+  out directory. The container exit code is the precheck's own (`0` = passed). WSL is a
+  documented fallback (the same precheck command against a distro that has the tools and
+  PDK installed). The recipe is additive and **not** part of `just ci`, like the
+  nightly-only `fuzz`/`miri` recipes, because it needs Docker and a multi-GB image.
+- **A structured-failure parser** in `reticle_cli::tt_precheck` (standard-library-only,
+  no new dependency) turns the reports into
+  `PrecheckReport { passed, failures: Vec<PrecheckFailure> }`, where a
+  `PrecheckFailure { rule, layer, location, message }` is modeled on a
+  `reticle_model::Violation`. `parse_results_md` records each failed Markdown row as a
+  structural failure carrying the precheck's own message; `parse_magic_drc` turns each
+  Magic DRC rectangle (four micron floats) into a located failure at its bounding box in
+  database units. `passed` is the precheck's own verdict, not "no failures parsed", and a
+  missing `results.md` is an error, not a silent pass.
+- **The agent-loop seam.** `PrecheckReport::feedback_lines()` returns exactly the
+  `Vec<String>` the propose-verify-correct loop folds into its model context (the same
+  `Context::feedback` channel the DRC verifier uses), so a precheck failure reaches the
+  model on the next proposal the way a DRC violation does. A tile can therefore be
+  generated, prechecked, and corrected in one loop.
+
+The oracle is proven **both ways** by `tests/tt_precheck_oracle.rs`: a known-good report
+parses as `passed = true` with no failures, and a seeded-violation report parses as a
+failing report with a Magic DRC rectangle located in database units and a boundary
+failure (`Shapes outside project area`) with its message, plus the feedback lines that
+carry them. The fixtures under `crates/reticle-cli/tests/fixtures/tt-precheck/` are
+**synthesized from the precheck's real output format** (transcribed from `precheck.py`,
+`magic_drc.tcl`, and `pin_check.py`, fetched 2026-07-06) and are labeled as synthesized
+in their `NOTICE.md`; they are not captured from a live run.
+
+**Live-run status, stated plainly:** the live Docker precheck was **attempted but not
+completed in this lane**. Docker Desktop's daemon was not running and the host had about
+39.5 GB free against the multi-GB image plus PDK, so a reliable pull-and-run was out of
+scope. The pinned image tag and digest, the exact `docker run` invocation, and the WSL
+fallback are recorded so that running it is an operator step, not a fabricated pass. **No
+tile is claimed to have passed the precheck.** When a real run is captured, its
+`results.md` and `magic_drc.txt` drop in beside (or over) the synthesized fixtures and
+the same parser and test cover the real output unchanged.
+
 ## Honest limits
 
 - The tooling makes a submission possible and repeatable; it does not make one. No tile
