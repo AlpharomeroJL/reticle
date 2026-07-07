@@ -9,6 +9,15 @@
       content="Browser-native, GPU-accelerated editor for very large hierarchical 2D IC-layout scenes."
     />
     <!--
+      PWA install metadata. All paths are RELATIVE so they resolve both at the
+      dev root and under the gh-pages subpath (https://.../reticle/). The
+      manifest declares start_url/scope "." (relative), and the icons/theme mirror
+      the app shell background (#0b0e14).
+    -->
+    <link rel="manifest" href="manifest.json" />
+    <meta name="theme-color" content="#0b0e14" />
+    <link rel="icon" type="image/png" href="icon-192.png" />
+    <!--
       Failure surface. Trunk injects its own `<script type="module">` in place of
       the `data-trunk rel="rust"` link below; that module does a top-level
       `await init(...)` to fetch and instantiate the wasm. If the fetch 404s (for
@@ -96,6 +105,14 @@
       })();
     </script>
     <link data-trunk rel="rust" data-bin="web" data-wasm-opt="z" />
+    <!--
+      Emit the PWA shell assets into dist. Trunk copies these verbatim into the
+      dist root, so the wholesale `dist/*` copy in scripts/deploy-pages.ps1
+      carries manifest.json, sw.js, and the icons to gh-pages under /reticle/.
+    -->
+    <link data-trunk rel="copy-file" href="manifest.json" />
+    <link data-trunk rel="copy-file" href="icon-192.png" />
+    <link data-trunk rel="copy-file" href="icon-512.png" />
     <style>
       :root {
         color-scheme: dark;
