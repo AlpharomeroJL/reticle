@@ -32,6 +32,9 @@ bytemuck = { version = "1.25.0", features = ["derive"] }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 proptest = "1.11.0"
 reticle-io = { workspace = true }
+# `reticle-drc` is the CPU oracle the GPU DRC-heatmap proptest checks against: the
+# same width+spacing rules, evaluated on the CPU, must agree with the compute path.
+reticle-drc = { workspace = true }
 
 [[example]]
 name = "fps_bench"
