@@ -78,3 +78,26 @@ diffusion rectangle would be **one** net under connectivity extraction (source
 shorted to drain), because a plain wire and a transistor look identical to a
 same-layer union-find. Splitting the diffusion by its gate is what recovers the
 distinct source and drain nets asserted in the tests.
+
+## Oracle agreement (Magic)
+
+`inverter_magic.spice` in this directory is Magic's own device extraction of the
+**real** production cell `sky130_fd_sc_hd__inv_1.gds`, produced by
+`scripts/device-oracle.ps1` inside the pinned `hpretl/iic-osic-tools:2025.01`
+container (Magic 8.3.513, sky130A PDK). Provenance flows from the source GDS,
+whose Apache-2.0 attribution is in `crates/reticle-app/assets/NOTICE.md`.
+
+Magic's netlist is:
+
+```
+X0 Y A VGND VNB sky130_fd_pr__nfet_01v8      w=0.65 l=0.15
+X1 Y A VPWR VPB sky130_fd_pr__pfet_01v8_hvt  w=1    l=0.15
+```
+
+That is **1 NMOS + 1 PMOS**, gate = `A`, drains = `Y`, sources on `VGND` / `VPWR`,
+bodies on `VNB` / `VPB` (the substrate/well ties). This is the same device count,
+the same kinds, and the same terminal connectivity our extractor recovers from the
+synthetic fixture above, an independent-tool agreement at the device level. Magic's
+device order (drain, gate, source, body) and its W/L in microns are the SPICE
+convention; our L = 0.15 um = 150 nm matches, and our synthetic W is not intended
+to reproduce the production cell's.
