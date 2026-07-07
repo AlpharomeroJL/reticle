@@ -60,3 +60,4 @@ superseded decision is marked and linked to its replacement.
 | [0052](0052-claude-code-agent-backend.md) | Claude Code as an agent-system backend, driven non-interactively with honest not-run marking |
 | [0053](0053-tinytapeout-tile-template-bundle.md) | TinyTapeout tile template: a technology plus a built document, validated against the published frame |
 | [0054](0054-tinytapeout-precheck-oracle.md) | TinyTapeout's precheck as an external oracle: a pinned Docker container, a structured-failure parser, and the agent-loop seam |
+| [0055](0055-worked-tapeout-tile-generator-built-command-seeded.md) | The worked TinyTapeout tile: generator-built, command-seeded through GDS import, DRC-subset-clean and precheck-deferred |

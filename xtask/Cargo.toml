@@ -6,7 +6,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Reticle build automation: the deterministic layout generator, media capture, and perf-check."
+description = "Reticle build automation: the deterministic layout generator, media capture, perf-check, and the worked TinyTapeout tile."
 publish = false
 
 [lints]
@@ -22,6 +22,10 @@ reticle-app = { workspace = true }
 reticle-drc = { workspace = true }
 reticle-route = { workspace = true }
 reticle-sync = { workspace = true }
+# The `tapeout-example` subcommand (Lane 4C) drives the worked-tile build (which runs
+# through the frozen agent command surface) and re-verifies transcript replay before
+# writing the committed artifacts.
+reticle-agent-api = { workspace = true }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 # Media capture renders offscreen with reticle-render, writes PNGs with `image`,
 # and assembles GIFs with the installed `gifski` CLI.
