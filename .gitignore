@@ -41,6 +41,12 @@ Thumbs.db
 /.wrangler/
 **/.wrangler/
 
+# Benchmark per-task byproducts: only the .result.json record is committed (it is
+# the API), matching the v0.5.0 pattern. The per-run MCP config and captured
+# transcript are local artifacts.
+/benchmarks/results/**/*.mcp.json
+/benchmarks/results/**/*.transcript.jsonl
+
 # Local tooling/config and the internal build specification (not shipped).
 /.claude/
 /.mcp.json
