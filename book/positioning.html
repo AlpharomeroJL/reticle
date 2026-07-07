@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fd65c002.js";
+            window.path_to_searchindex_js = "searchindex-dd61d1be.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-16d5da84.js"></script>
+        <script src="toc-8ee98abe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -226,12 +226,18 @@ problem Reticle pushes hardest on.</li>
 <li><strong>Objective checkers as a first-class engine.</strong> The design-rule checker, router,
 and connectivity extractor are each pinned to an independent reference oracle by
 property tests, so their correctness is demonstrated rather than asserted. They are
-built to be driven programmatically, not only from a GUI.</li>
+built to be driven programmatically, not only from a GUI. The same discipline covers
+the six parameterized generators (guard ring, via farm, pad ring, seal ring, density
+fill, test structure): a property test runs each over 400 random valid parameter sets
+and asserts zero DRC violations, so the structures they emit are clean by construction.</li>
 <li><strong>An agent surface graded by those checkers.</strong> Reticle exposes its whole editing
 engine as a serializable command API and drives a model through a
 propose-verify-correct loop whose success is decided by the DRC subset and the
 connectivity checker, not by the model’s own claim. A benchmark suite scores that
-loop; an MCP server offers the surface to any model host. This agent-plus-objective-
+loop; an MCP server offers the surface (including one tool per generator) to any model
+host. When the surface is driven by a bare local model, Reticle supplies the loop and
+grades the result; an agent system such as Claude Code brings its own loop, so its
+result is not head-to-head comparable with a bare model. This agent-plus-objective-
 checker angle is where Reticle does something the established tools do not package.</li>
 </ol>
 <p>So the honest one-line placement: Reticle is a fast, browser-native layout viewer and

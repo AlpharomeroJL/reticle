@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-fd65c002.js";
+            window.path_to_searchindex_js = "searchindex-dd61d1be.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-16d5da84.js"></script>
+        <script src="toc-8ee98abe.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -265,22 +265,20 @@ from a script. Each record carries the backend (<code>ollama</code>), the model 
 quantization, so two local models, or a local versus a frontier run, are always
 distinguishable.</p>
 <h2 id="current-local-model-results"><a class="header" href="#current-local-model-results">Current local-model results</a></h2>
-<p>The committed local-model result sets under <code>benchmarks/results/</code> were measured on this
-host against the local Ollama backend. They were run over the <strong>63-task</strong> set (the
-result records carry an ad hoc suite label from that run), before the 12 Wave-3 tasks
-were promoted to v0.4.0. They are the current honest data, presented here labeled as a
-75-task v0.4.0 run (manifest v0.4.0) against gpt-oss:16k (MXFP4) and qwen2.5-coder:16k
-(Q4_K_M) on this host; the table below is that run.</p>
-<p><strong>Two-model comparison, 75-task v0.4.0 suite (local Ollama, honest, labeled by model
-and quantization):</strong></p>
+<p>The committed local-model result sets under <code>benchmarks/results/v0.5.0/</code> were measured on
+this host against the local Ollama backend over the full <strong>83-task</strong> v0.5.0 suite (the 75
+v0.4.0 tasks plus the 8 generator tasks). Each record carries the backend (<code>ollama</code>), the
+model id, and the quantization, so two local models are always distinguishable.</p>
+<p><strong>Two-model comparison, 83-task v0.5.0 suite (local Ollama, honest, labeled by model and
+quantization):</strong></p>
 <div class="table-wrapper">
 <table>
 <thead>
 <tr><th>Model</th><th>Quantization</th><th style="text-align: right">Tier 1</th><th style="text-align: right">Tier 2</th><th style="text-align: right">Tier 3</th><th style="text-align: right">Tier 4</th><th style="text-align: right">Tier 5</th><th style="text-align: right">Overall</th><th style="text-align: right">Mean iterations</th></tr>
 </thead>
 <tbody>
-<tr><td><code>gpt-oss:16k</code></td><td>MXFP4</td><td style="text-align: right">9/9 (100%)</td><td style="text-align: right">10/11 (91%)</td><td style="text-align: right">19/34 (56%)</td><td style="text-align: right">4/11 (36%)</td><td style="text-align: right">8/10 (80%)</td><td style="text-align: right"><strong>50/75 (67%)</strong></td><td style="text-align: right">1.73</td></tr>
-<tr><td><code>qwen2.5-coder:16k</code></td><td>Q4_K_M</td><td style="text-align: right">6/9 (67%)</td><td style="text-align: right">10/11 (91%)</td><td style="text-align: right">6/34 (18%)</td><td style="text-align: right">2/11 (18%)</td><td style="text-align: right">1/10 (10%)</td><td style="text-align: right"><strong>25/75 (33%)</strong></td><td style="text-align: right">1.91</td></tr>
+<tr><td><code>gpt-oss:16k</code></td><td>MXFP4</td><td style="text-align: right">8/9 (89%)</td><td style="text-align: right">9/11 (82%)</td><td style="text-align: right">20/42 (48%)</td><td style="text-align: right">5/11 (45%)</td><td style="text-align: right">7/10 (70%)</td><td style="text-align: right"><strong>49/83 (59%)</strong></td><td style="text-align: right">1.58</td></tr>
+<tr><td><code>qwen2.5-coder:16k</code></td><td>Q4_K_M</td><td style="text-align: right">7/9 (78%)</td><td style="text-align: right">8/11 (73%)</td><td style="text-align: right">6/42 (14%)</td><td style="text-align: right">3/11 (27%)</td><td style="text-align: right">5/10 (50%)</td><td style="text-align: right"><strong>29/83 (35%)</strong></td><td style="text-align: right">2.06</td></tr>
 </tbody>
 </table>
 </div>
@@ -339,7 +337,7 @@ rather than the whole document, which is a different lever on the same constrain
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="performance.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="tapeout.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -353,7 +351,7 @@ rather than the whole document, which is a different lever on the same constrain
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="performance.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="tapeout.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
