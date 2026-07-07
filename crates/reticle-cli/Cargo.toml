@@ -21,9 +21,14 @@ path = "src/main.rs"
 reticle-geometry = { workspace = true }
 reticle-model = { workspace = true }
 reticle-io = { workspace = true }
+reticle-index = { workspace = true }
 reticle-drc = { workspace = true }
 reticle-route = { workspace = true }
 reticle-extract = { workspace = true }
 reticle-render = { workspace = true }
 clap = { version = "4.6.1", features = ["derive"] }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+
+[dev-dependencies]
+pollster = "0.4.0"
+rkyv = "0.8.16"
