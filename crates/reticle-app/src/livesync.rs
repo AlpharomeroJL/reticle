@@ -44,6 +44,13 @@
 
 use reticle_sync::{Frame, Presence, decode_frame};
 
+/// The actor id the sharer's persistent [`SyncDocument`](reticle_sync::SyncDocument)
+/// publishes under. Stable and distinct from [`VIEWER_ACTOR`](crate::viewer::VIEWER_ACTOR)
+/// so the sharer's element ids never collide with a viewer's (viewers never publish).
+/// The sharer keeps ONE document under this id for a whole session so `yrs` clocks
+/// advance monotonically across publishes (ADR 0063, [`SyncDocument::reconcile_to`]).
+pub const SHARER_ACTOR: &str = "sharer";
+
 /// The connection status of a live transport, for the status line and repaint logic.
 ///
 /// A small state machine the socket's lifecycle callbacks advance: a transport starts

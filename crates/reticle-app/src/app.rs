@@ -404,6 +404,18 @@ pub struct App {
     /// send happen only when the editor's document actually changed (not every frame).
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     published_revision: u64,
+    /// The sharer's long-lived CRDT document (ADR 0063). Kept for a whole live session
+    /// and reconciled to the editable document on each publish, so `yrs` clocks advance
+    /// monotonically and viewers integrate every delta. Rebuilding a fresh document per
+    /// publish (the old behavior) reset the clocks, so viewers dropped every publish
+    /// after the first as duplicate struct ids.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    sharer_doc: Option<reticle_sync::SyncDocument>,
+    /// Set when the next publish must carry the full document state (on go-live and on
+    /// every socket (re)open) rather than an incremental delta, so a reconnecting viewer
+    /// or a late joiner receives a complete snapshot.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    publish_full_next: bool,
     /// Whether to open the sharer transport automatically on the first wasm frame,
     /// publishing this session for viewers without a manual "Go live" click. Set from a
     /// `?share=1` page flag (see [`App::with_share_on_boot`]); the browser share-live
@@ -701,6 +713,8 @@ impl App {
             live_status: crate::livesync::LiveStatus::default(),
             live_started: false,
             published_revision: 0,
+            sharer_doc: None,
+            publish_full_next: false,
             share_on_boot: false,
             e2e_edit: false,
             cursor_world: None,
@@ -1497,6 +1511,9 @@ impl App {
                 // is live (the CRDT is idempotent, so a repeat is harmless).
                 if status.is_open() && self.sharer_transport.is_some() {
                     self.published_revision = self.history.revision().wrapping_sub(1);
+                    // A (re)connected socket must resend the FULL state so a reconnecting
+                    // viewer or a late joiner gets a complete snapshot, not just a delta.
+                    self.publish_full_next = true;
                 }
                 self.status.set(status.label());
                 self.live_status = status;
@@ -1561,23 +1578,39 @@ impl App {
     fn drive_sharer_publish(&mut self) {
         #[cfg(target_arch = "wasm32")]
         {
-            let Some(transport) = self.sharer_transport.as_ref() else {
+            if self.sharer_transport.is_none() {
                 return;
-            };
+            }
             // Re-encode and publish the document only on a real change.
             let revision = self.history.revision();
             if revision != self.published_revision {
-                let sync = reticle_sync::SyncDocument::from_document(
-                    crate::viewer::VIEWER_ACTOR, // any stable non-viewer actor; the sharer
-                    self.history.document(),     // publishes, viewers never do.
-                );
-                transport.publish_update(&sync.encode_state_update());
+                // Reconcile the sharer's LONG-LIVED document to the current editable
+                // document (ADR 0063). Mutating one persistent doc advances the yrs
+                // clocks monotonically, so a viewer integrates each delta rather than
+                // dropping later publishes as already-seen struct ids (which rebuilding
+                // a fresh document per publish caused). A (re)connect sends full state.
+                let doc = self.sharer_doc.get_or_insert_with(|| {
+                    reticle_sync::SyncDocument::new(crate::livesync::SHARER_ACTOR)
+                });
+                let state_before = doc.state_vector();
+                doc.reconcile_to(self.history.document());
+                let update = if self.publish_full_next {
+                    self.publish_full_next = false;
+                    doc.encode_state_update()
+                } else {
+                    doc.encode_update(&state_before)
+                        .unwrap_or_else(|_| doc.encode_state_update())
+                };
+                if let Some(transport) = self.sharer_transport.as_ref() {
+                    transport.publish_update(&update);
+                }
                 self.published_revision = revision;
             }
             // Publish presence every open frame; the frame is small and keeps the
             // sharer's cursor and follow-viewport live for viewers.
             if self.live_status.is_open()
                 && let Some(presence) = self.local_presence()
+                && let Some(transport) = self.sharer_transport.as_ref()
             {
                 transport.publish_presence(&presence);
             }
@@ -1617,6 +1650,8 @@ impl App {
     /// presence. On native this records intent but dials no socket.
     fn go_live(&mut self, ctx: &egui::Context) {
         self.published_revision = self.history.revision().wrapping_sub(1); // force a first publish
+        self.sharer_doc = None; // a fresh session rebuilds the persistent sharer doc
+        self.publish_full_next = true; // the first publish carries full state
         self.live_status = crate::livesync::LiveStatus::Connecting;
         self.sharer_transport = Some(crate::livesync::SharerTransport::connect(
             &self.share_server,

@@ -226,6 +226,54 @@ impl SyncDocument {
         self.edit(|txn, next_id| mapping::set_top_cell(txn, name, is_top, next_id));
     }
 
+    /// Reconciles this document to match `target` in one atomic transaction: cells
+    /// `target` no longer has are removed, new cells are added, changed cells are
+    /// replaced, and top-cell flags are updated.
+    ///
+    /// This is the sharer-side publish primitive (ADR 0063). The sharer keeps ONE
+    /// long-lived `SyncDocument` and reconciles it to the editable document on every
+    /// change, rather than rebuilding a fresh document per publish. That distinction
+    /// is load-bearing: a fresh document resets the underlying `yrs` client clock to
+    /// zero, so a viewer that already integrated an earlier snapshot would drop every
+    /// later one as a duplicate of already-seen struct ids and never see edits made
+    /// after the first publish. Mutating this persistent document instead advances
+    /// the clocks monotonically, so the delta from [`encode_update`](Self::encode_update)
+    /// (or a full [`encode_state_update`](Self::encode_state_update) on reconnect)
+    /// integrates correctly on every peer.
+    pub fn reconcile_to(&mut self, target: &Document) {
+        let current = self.to_document();
+        let target_tops: Vec<&str> = target.top_cells().iter().map(String::as_str).collect();
+        self.edit(|txn, next_id| {
+            // Remove cells the target no longer has.
+            for cell in current.cells() {
+                if target.cell(&cell.name).is_none() {
+                    mapping::remove_cell(txn, &cell.name);
+                }
+            }
+            // Add new cells; replace changed ones (remove then rewrite so a shrunk
+            // cell does not keep stale shapes).
+            for cell in target.cells() {
+                match current.cell(&cell.name) {
+                    Some(existing) if existing == cell => {}
+                    Some(_) => {
+                        mapping::remove_cell(txn, &cell.name);
+                        mapping::write_cell(txn, cell, next_id);
+                    }
+                    None => mapping::write_cell(txn, cell, next_id),
+                }
+            }
+            // Reconcile top-cell flags in both directions.
+            for name in current.top_cells() {
+                if !target_tops.contains(&name.as_str()) {
+                    mapping::set_top_cell(txn, name, false, next_id);
+                }
+            }
+            for name in &target_tops {
+                mapping::set_top_cell(txn, name, true, next_id);
+            }
+        });
+    }
+
     /// Runs `f` as a single grouped, atomic CRDT transaction.
     ///
     /// The closure receives a [`StepEdit`] handle whose methods mirror the
