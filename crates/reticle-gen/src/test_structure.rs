@@ -59,8 +59,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::GenError;
 use crate::generator::{GenOutput, GenParams, Generator};
+use crate::gentech::{Conductor, GenTech};
 use crate::schema::{FieldSchema, ParamSchema};
-use crate::sky130::{self, Conductor};
 
 /// The conductor layer the single-layer structures (cross, comb, serpentine) are
 /// drawn on.
@@ -84,13 +84,15 @@ pub enum StructureLayer {
 }
 
 impl StructureLayer {
-    /// The SKY130 subset data (layer, width, spacing, area) for this choice.
-    fn conductor(self) -> Conductor {
+    /// The conductor data (layer, width, spacing, area) for this choice in the given
+    /// technology. The variants name interconnect *levels* (0 = base): `li1..met3` on
+    /// SKY130, `Metal1..Metal4` on SG13G2.
+    fn conductor(self, gt: &GenTech) -> Conductor {
         match self {
-            Self::Li1 => sky130::LI1,
-            Self::Met1 => sky130::MET1,
-            Self::Met2 => sky130::MET2,
-            Self::Met3 => sky130::MET3,
+            Self::Li1 => gt.conductor(0),
+            Self::Met1 => gt.conductor(1),
+            Self::Met2 => gt.conductor(2),
+            Self::Met3 => gt.conductor(3),
         }
     }
 
@@ -261,11 +263,13 @@ impl GenParams for TestStructureParams {
     }
 
     fn validate(&self) -> Result<(), GenError> {
-        // The contact chain is fixed to li1/met1; single-layer structures use `layer`.
-        // Validate against the layer whose floors actually apply.
+        // Validation bounds are the reference (SKY130) technology; `generate` uses the
+        // active technology's own floors. The contact chain is fixed to the base and
+        // next interconnect (conductor 0/1); single-layer structures use `layer`.
+        let gt = GenTech::sky130();
         let cond = match self.kind {
-            StructureKind::ContactChain => sky130::MET1,
-            _ => self.layer.conductor(),
+            StructureKind::ContactChain => gt.conductor(1),
+            _ => self.layer.conductor(&gt),
         };
 
         check_range(
@@ -323,15 +327,16 @@ impl Generator for TestStructure {
     fn generate(
         &self,
         params: &Self::Params,
-        _tech: &Technology,
+        tech: &Technology,
         cell: &mut Cell,
     ) -> Result<GenOutput, GenError> {
         let start = cell.shapes.len();
+        let gt = GenTech::for_technology(tech);
         match params.kind {
-            StructureKind::VanDerPauw => emit_van_der_pauw(params, cell),
-            StructureKind::ContactChain => emit_contact_chain(params, cell),
-            StructureKind::Comb => emit_comb(params, cell),
-            StructureKind::Serpentine => emit_serpentine(params, cell),
+            StructureKind::VanDerPauw => emit_van_der_pauw(params, cell, &gt),
+            StructureKind::ContactChain => emit_contact_chain(params, cell, &gt),
+            StructureKind::Comb => emit_comb(params, cell, &gt),
+            StructureKind::Serpentine => emit_serpentine(params, cell, &gt),
         }
         let added = cell.shapes.len() - start;
         let bbox = cell
@@ -361,8 +366,8 @@ fn push_rect(cell: &mut Cell, layer: reticle_geometry::LayerId, r: Rect) {
 /// `feature_width`, each `feature_length` long, overlapping in the centre. The two
 /// bars share the centre square (overlap, not a spacing violation) and each clears the
 /// layer width and area rules on its own bounding box.
-fn emit_van_der_pauw(params: &TestStructureParams, cell: &mut Cell) {
-    let layer = params.layer.conductor().layer;
+fn emit_van_der_pauw(params: &TestStructureParams, cell: &mut Cell, gt: &GenTech) {
+    let layer = params.layer.conductor(gt).layer;
     let w = params.feature_width;
     let span = params.feature_length.max(w); // the cross fits in a span x span box
     let off = (span - w) / 2; // centre each bar across the span
@@ -377,17 +382,23 @@ fn emit_van_der_pauw(params: &TestStructureParams, cell: &mut Cell) {
 /// `li1` bridges so current threads metal-contact-metal along the chain. Each contact
 /// is enclosed by a `met1` feature (a bridge, or an end pad for the last contact when
 /// the last bridge is `li1`) by at least the `m1.4` margin.
-fn emit_contact_chain(params: &TestStructureParams, cell: &mut Cell) {
-    let cut = sky130::MCON;
+fn emit_contact_chain(params: &TestStructureParams, cell: &mut Cell, gt: &GenTech) {
+    // The chain threads the base cut between the base and next interconnect levels
+    // (mcon between li1/met1 on SKY130; Via1 between Metal1/Metal2 on SG13G2).
+    let cut = gt.cut(0);
+    let base = gt.conductor(0);
+    let next = gt.conductor(1);
     let s = cut.size;
     let enc = TestStructureParams::CHAIN_ENC;
     let n = params.count;
 
     // Pitch: contact size, an enclosure on each side, and a gap comfortably above the
     // largest same-layer min spacing so consecutive same-layer bridges clear each
-    // other. (The subset carries no cut-to-cut spacing rule; this pitch is a
-    // conservative choice.)
-    let max_spacing = sky130::LI1.min_spacing.max(sky130::MET1.min_spacing);
+    // other, and above any cut-to-cut spacing the deck carries.
+    let max_spacing = base
+        .min_spacing
+        .max(next.min_spacing)
+        .max(gt.safe_cut_margin());
     let pitch = s + 2 * enc + 2 * max_spacing;
 
     // Vertical band: contacts centred in a band tall enough to enclose them by `enc`
@@ -413,11 +424,7 @@ fn emit_contact_chain(params: &TestStructureParams, cell: &mut Cell) {
     // rectangle from the left contact's left edge minus `enc` to the right contact's
     // right edge plus `enc`, over the full band.
     for j in 0..n.saturating_sub(1) {
-        let layer = if j % 2 == 0 {
-            sky130::MET1.layer
-        } else {
-            sky130::LI1.layer
-        };
+        let layer = if j % 2 == 0 { next.layer } else { base.layer };
         let xl = contact_x(j) - enc;
         let xr = contact_x(j + 1) + s + enc;
         let bridge = Rect::new(Point::new(xl, band_y0), Point::new(xr, band_y0 + band_h));
@@ -429,25 +436,25 @@ fn emit_contact_chain(params: &TestStructureParams, cell: &mut Cell) {
     // bridge n-2; if that bridge is li1 (n even), add a met1 end pad enclosing it, big
     // enough for the met1 minimum area.
     let last = n - 1;
-    let last_bridge_is_met1 = n < 2 || (n - 2).is_multiple_of(2);
-    if !last_bridge_is_met1 {
-        let side = met1_square_side(); // >= s + 2*enc and >= sqrt(met1 area)
+    let last_bridge_is_next = n < 2 || (n - 2).is_multiple_of(2);
+    if !last_bridge_is_next {
+        let side = met1_square_side(gt); // >= s + 2*enc and >= sqrt(next-level area)
         let cx = contact_x(last) + s / 2;
         let cy = band_y0 + enc + s / 2;
         let pad = Rect::new(
             Point::new(cx - side / 2, cy - side / 2),
             Point::new(cx - side / 2 + side, cy - side / 2 + side),
         );
-        push_rect(cell, sky130::MET1.layer, pad);
+        push_rect(cell, next.layer, pad);
     }
 }
 
 /// The side of a square `met1` pad that both encloses an `mcon` (by at least the
 /// `m1.4` margin) and clears the `met1` minimum area: the larger of the enclosure-
 /// derived side and the area-derived side.
-fn met1_square_side() -> i32 {
-    let enclosure_side = sky130::MCON.size + 2 * TestStructureParams::CHAIN_ENC;
-    let area_side = sky130::MET1.min_area.map_or(0, isqrt_ceil_i32);
+fn met1_square_side(gt: &GenTech) -> i32 {
+    let enclosure_side = gt.cut(0).size + 2 * TestStructureParams::CHAIN_ENC;
+    let area_side = gt.conductor(1).min_area.map_or(0, isqrt_ceil_i32);
     enclosure_side.max(area_side)
 }
 
@@ -455,8 +462,8 @@ fn met1_square_side() -> i32 {
 /// comb B (spine at the top, fingers down), with A's and B's fingers interleaved at
 /// exactly the layer minimum spacing. A finger connects to its own spine (touch) and
 /// stays a min-spacing gap from the other comb's fingers and spine.
-fn emit_comb(params: &TestStructureParams, cell: &mut Cell) {
-    let cond = params.layer.conductor();
+fn emit_comb(params: &TestStructureParams, cell: &mut Cell, gt: &GenTech) {
+    let cond = params.layer.conductor(gt);
     let layer = cond.layer;
     let w = params.feature_width;
     let finger_len = params.feature_length.max(w);
@@ -523,8 +530,8 @@ fn emit_comb(params: &TestStructureParams, cell: &mut Cell) {
 /// end to end by alternating vertical links so the whole thing is one connected trace.
 /// Adjacent bars are a min-spacing gap apart where they are not joined; a bar and its
 /// link touch.
-fn emit_serpentine(params: &TestStructureParams, cell: &mut Cell) {
-    let cond = params.layer.conductor();
+fn emit_serpentine(params: &TestStructureParams, cell: &mut Cell, gt: &GenTech) {
+    let cond = params.layer.conductor(gt);
     let layer = cond.layer;
     let w = params.feature_width;
     let length = params.feature_length.max(w);
@@ -611,6 +618,7 @@ fn check_range(field: &'static str, value: i64, min: i64, max: i64) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sky130;
 
     fn build(params: &TestStructureParams) -> Cell {
         let mut cell = Cell::new("top");
