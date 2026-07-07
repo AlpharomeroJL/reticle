@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t5_route_min_pitch_pair",
+    "model": "claude-sonnet-5",
+    "suite_version": "adhoc",
+    "success": true,
+    "iterations": 7,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 85514,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]

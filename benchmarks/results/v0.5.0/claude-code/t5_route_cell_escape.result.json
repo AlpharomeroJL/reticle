@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t5_route_cell_escape",
+    "model": "claude-sonnet-5",
+    "suite_version": "adhoc",
+    "success": true,
+    "iterations": 11,
+    "first_proposal_violations": 1,
+    "final_violations": 1,
+    "wall_ms": 212973,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]
