@@ -80,8 +80,8 @@ pub struct Cut {
 /// cuts bridging them, the substrate-tap cut, and a conservative cut pitch margin.
 ///
 /// Construct one of the built-ins with [`GenTech::sky130`] or [`GenTech::sg13g2`], or
-/// pick from a [`Technology`] by name with [`GenTech::for_technology`]. See the
-/// [module docs](self) for the role model.
+/// pick from a [`Technology`] by name with [`GenTech::for_technology`]. See the crate's
+/// `gentech` module documentation for the role model.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct GenTech {
     /// The process name (`"sky130"`, `"sg13g2"`).
