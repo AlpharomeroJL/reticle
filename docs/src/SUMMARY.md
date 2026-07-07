@@ -22,6 +22,7 @@
 - [Routing](routing.md)
 - [Connectivity extraction](extraction.md)
 - [Collaboration](collaboration.md)
+  - [The relay: two implementations, one protocol](relay.md)
 - [Scripting](scripting.md)
 
 # Automation and agents
