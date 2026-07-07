@@ -505,6 +505,70 @@ pub fn parse_e2e_edit(query: &str) -> bool {
     false
 }
 
+/// The query key that opens a served `.rtla` archive in the browser build.
+///
+/// A page URL carrying `?archive=<url>` streams the archive at `<url>` over the
+/// HTTP-range [`TileSource`](reticle_index::TileSource) into a read-only
+/// [`StreamedScene`](crate::streamed::StreamedScene) (ADR 0062), rather than importing a
+/// GDS/OASIS file into an editable document (`?gds=`, [`crate::webopen`]). The two are
+/// deliberately distinct keys: `?gds=` opens something the visitor can edit, `?archive=`
+/// opens a multi-gigabyte die they only browse.
+pub const ARCHIVE_KEY: &str = "archive";
+
+/// Extracts the `?archive=<url>` target from a page query string, or `None` when the
+/// parameter is absent or empty.
+///
+/// `query` is the raw `window.location.search` (for example
+/// `"?archive=https://host/chip.rtla&view=editor"`), with or without the leading `?`.
+/// The value is percent-decoded (the full [`decode_permalink_value`] decoding, so an
+/// encoded URL round-trips), trimmed, and rejected if empty so a bare `?archive=` does
+/// not kick off a fetch of the empty string. Permissive about the URL itself: any
+/// non-empty value is returned, and whether it resolves (and whether CORS and `Range`
+/// are permitted) is decided by the fetch, which surfaces a clear error on failure.
+///
+/// Pure string logic, so it is unit-tested without a browser; the inverse of
+/// [`emit_archive_link`].
+#[must_use]
+pub fn archive_url_from_query(query: &str) -> Option<String> {
+    let query = query.trim_start_matches('?');
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if key != ARCHIVE_KEY {
+            continue;
+        }
+        let decoded = decode_permalink_value(value);
+        let trimmed = decoded.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        return Some(trimmed.to_owned());
+    }
+    None
+}
+
+/// Composes a page URL that opens the served archive at `archive_url`, hosted at page
+/// origin `base_page`.
+///
+/// The inverse of [`archive_url_from_query`]: the `?archive=` query it writes parses
+/// back to the same URL. The archive URL is fully percent-encoded with
+/// [`encode_permalink_value`] so a URL carrying `/`, `?`, `&`, or `#` stays parseable.
+/// An empty `base_page` yields a relative `?archive=...` query (resolving against the
+/// loaded bundle), mirroring [`emit_permalink`]; a non-empty one is joined as
+/// `base/?archive=...`. This is what a gallery entry (a real-chip deep link) serializes.
+#[must_use]
+pub fn emit_archive_link(base_page: &str, archive_url: &str) -> String {
+    let query = format!("{ARCHIVE_KEY}={}", encode_permalink_value(archive_url));
+    let base = base_page.trim().trim_end_matches('/');
+    if base.is_empty() {
+        format!("?{query}")
+    } else {
+        format!("{base}/?{query}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -774,6 +838,63 @@ mod tests {
         assert!(!parse_e2e_edit(""));
         // Not a partial-key match.
         assert!(!parse_e2e_edit("e2eedit=1"));
+    }
+
+    #[test]
+    fn archive_url_from_query_reads_the_parameter() {
+        assert_eq!(
+            archive_url_from_query("?archive=https://host/chip.rtla"),
+            Some("https://host/chip.rtla".to_owned())
+        );
+        // Works without the leading '?', among other params, and in any position.
+        assert_eq!(
+            archive_url_from_query("view=editor&archive=http://h/c.rtla"),
+            Some("http://h/c.rtla".to_owned())
+        );
+        // Not a partial-key match: `archives=` is not `archive=`.
+        assert_eq!(archive_url_from_query("archives=http://h/c.rtla"), None);
+    }
+
+    #[test]
+    fn archive_url_from_query_absent_or_empty_is_none() {
+        assert_eq!(archive_url_from_query("?view=editor"), None);
+        assert_eq!(archive_url_from_query(""), None);
+        assert_eq!(archive_url_from_query("?archive="), None);
+        // A value that is only encoded whitespace trims to empty and is rejected.
+        assert_eq!(archive_url_from_query("?archive=%20%20"), None);
+    }
+
+    #[test]
+    fn archive_link_round_trips_through_the_query() {
+        // emit -> parse is the identity on the archive URL, including one carrying the
+        // reserved query characters `?`, `&`, and `#` that must be encoded to survive.
+        for url in [
+            "http://localhost:8788/fixture.rtla",
+            "https://cdn.example/dies/chip.rtla?v=2#frag",
+            "https://h/a b&c=d.rtla",
+        ] {
+            let link = emit_archive_link("https://reticle.example", url);
+            assert!(
+                link.starts_with("https://reticle.example/?archive="),
+                "base joined: {link}"
+            );
+            let query = link.split_once('?').expect("link has a query").1;
+            assert_eq!(
+                archive_url_from_query(query).as_deref(),
+                Some(url),
+                "round trip via {link}"
+            );
+        }
+    }
+
+    #[test]
+    fn archive_link_with_empty_page_is_a_relative_query() {
+        let link = emit_archive_link("", "http://localhost:8788/fixture.rtla");
+        assert!(link.starts_with("?archive="), "relative query: {link}");
+        assert_eq!(
+            archive_url_from_query(link.trim_start_matches('?')).as_deref(),
+            Some("http://localhost:8788/fixture.rtla")
+        );
     }
 
     #[test]
