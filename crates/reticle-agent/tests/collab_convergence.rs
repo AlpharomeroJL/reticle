@@ -12,10 +12,10 @@
 //!    observes a partially-applied step.
 
 use reticle_agent::{AgentCollaborator, Pacing};
-use reticle_agent_api::AgentCommand;
 use reticle_agent_api::args::{LayerArg, PointArg, RectArg, TransformArg};
+use reticle_agent_api::{AgentCommand, ElementId};
 use reticle_geometry::{LayerId, Point, Rect};
-use reticle_model::Cell;
+use reticle_model::{Cell, Document, ShapeKind};
 use reticle_sync::SyncDocument;
 
 /// A met1 rectangle command in `cell`.
@@ -39,6 +39,34 @@ fn human_rect(l: u16, x0: i32, y0: i32, x1: i32, y1: i32) -> reticle_model::Draw
         LayerId::new(l, 0),
         reticle_model::ShapeKind::Rect(Rect::new(Point::new(x0, y0), Point::new(x1, y1))),
     )
+}
+
+/// A `TransformShapes` command addressing the given stable element ids by number.
+fn transform_cmd(ids: &[u64], dx: i32, dy: i32) -> AgentCommand {
+    AgentCommand::TransformShapes {
+        ids: ids.iter().map(|&n| ElementId(n)).collect(),
+        transform: TransformArg {
+            dx,
+            dy,
+            ..TransformArg::default()
+        },
+    }
+}
+
+/// A `DeleteShapes` command addressing the given stable element ids by number.
+fn delete_cmd(ids: &[u64]) -> AgentCommand {
+    AgentCommand::DeleteShapes {
+        ids: ids.iter().map(|&n| ElementId(n)).collect(),
+    }
+}
+
+/// Whether `cell` in `doc` holds a met1 (layer 68) rectangle exactly equal to `want`.
+fn has_rect(doc: &Document, cell: &str, want: Rect) -> bool {
+    doc.cell(cell).is_some_and(|c| {
+        c.shapes.iter().any(|s| {
+            s.layer == LayerId::new(68, 20) && matches!(s.kind, ShapeKind::Rect(r) if r == want)
+        })
+    })
 }
 
 /// Exchanges the full state of two peers both ways (asymmetric: a diff one direction,
@@ -249,4 +277,195 @@ fn no_intermediate_update_between_two_steps_carries_a_half_step() {
         "step 2 brings the peer to exactly four shapes"
     );
     assert_eq!(peer.document(), agent.document());
+}
+
+// ----- id-addressed edits (ADR 0022's closed gap) ----------------------------
+//
+// These prove the new mirroring: the agent transforms and deletes shapes it created,
+// addressed by their stable ElementIds, and those edits reach the CRDT and converge
+// with a concurrent human peer's edits in either exchange order. They also prove the
+// honest failure mode: an id the collaborator never learned is skipped with a warning
+// rather than applied incorrectly or silently dropped.
+
+#[test]
+fn agent_transform_of_its_own_shape_converges_with_a_concurrent_human_edit_both_orders() {
+    // Each pair: the agent draws two rects (E1, E2) and moves E2 right by 200 DBU, while a
+    // human concurrently draws in its own cell. The two pairs exchange updates in opposite
+    // orders and must reach the same document, with E2 actually moved.
+    let build = || {
+        let mut agent = AgentCollaborator::new(Pacing::Instant);
+        agent.apply_step(&[
+            AgentCommand::CreateCell { name: "top".into() },
+            rect_cmd("top", 0, 0, 10, 10),    // E1
+            rect_cmd("top", 100, 0, 110, 10), // E2
+        ]);
+        let report = agent.apply_step(&[transform_cmd(&[2], 200, 0)]);
+        assert!(
+            report.skipped.is_empty(),
+            "the agent's own id resolves, nothing skipped"
+        );
+        let mut human = SyncDocument::new("human");
+        human.add_empty_cell("human_cell");
+        human.add_shape("human_cell", &human_rect(69, 5, 5, 20, 20));
+        (agent, human)
+    };
+
+    // Pair 1: human -> agent first, then agent -> human.
+    let (mut agent1, mut human1) = build();
+    let sv_a1 = agent1.sync().state_vector();
+    let sv_h1 = human1.state_vector();
+    let a1_to_h1 = agent1.sync().encode_update(&sv_h1).unwrap();
+    let h1_to_a1 = human1.encode_update(&sv_a1).unwrap();
+    agent1.sync_mut().apply_update(&h1_to_a1).unwrap();
+    human1.apply_update(&a1_to_h1).unwrap();
+
+    // Pair 2: agent -> human first (delivered twice for idempotence), then human -> agent.
+    let (mut agent2, mut human2) = build();
+    let sv_a2 = agent2.sync().state_vector();
+    let sv_h2 = human2.state_vector();
+    let a2_to_h2 = agent2.sync().encode_update(&sv_h2).unwrap();
+    let h2_to_a2 = human2.encode_update(&sv_a2).unwrap();
+    human2.apply_update(&a2_to_h2).unwrap();
+    human2.apply_update(&a2_to_h2).unwrap();
+    agent2.sync_mut().apply_update(&h2_to_a2).unwrap();
+
+    // Both pairs converge to a single identical document, regardless of exchange order.
+    assert_eq!(agent1.document(), &human1.to_document());
+    assert_eq!(agent2.document(), &human2.to_document());
+    assert_eq!(agent1.document(), agent2.document());
+
+    // The transform actually moved E2: it now sits at (300,0)-(310,10), not its original
+    // (100,0)-(110,10); E1 is unmoved; the human's cell arrived.
+    let doc = agent1.document();
+    assert!(
+        has_rect(
+            doc,
+            "top",
+            Rect::new(Point::new(300, 0), Point::new(310, 10))
+        ),
+        "E2 moved to the transformed location"
+    );
+    assert!(
+        !has_rect(
+            doc,
+            "top",
+            Rect::new(Point::new(100, 0), Point::new(110, 10))
+        ),
+        "E2 is no longer at its original location"
+    );
+    assert!(
+        has_rect(doc, "top", Rect::new(Point::new(0, 0), Point::new(10, 10))),
+        "E1 is unmoved"
+    );
+    assert_eq!(doc.cell("top").unwrap().shapes.len(), 2, "still two shapes");
+    assert!(
+        doc.cell("human_cell").is_some(),
+        "the human's cell converged"
+    );
+}
+
+#[test]
+fn agent_deletes_its_own_shape_and_the_delete_converges_with_a_concurrent_human_edit() {
+    let mut agent = AgentCollaborator::new(Pacing::Instant);
+    agent.apply_step(&[
+        AgentCommand::CreateCell { name: "top".into() },
+        rect_cmd("top", 0, 0, 10, 10),    // E1
+        rect_cmd("top", 100, 0, 110, 10), // E2
+    ]);
+    // The agent deletes E1 (its first rect).
+    let report = agent.apply_step(&[delete_cmd(&[1])]);
+    assert!(report.skipped.is_empty(), "the agent's own id resolves");
+
+    // Concurrently, the human adds a shape to the SAME cell (a union merge).
+    let mut human = SyncDocument::new("human");
+    human.add_empty_cell("top");
+    human.add_shape("top", &human_rect(70, 8, 8, 12, 12));
+
+    exchange_and_assert(agent.sync_mut(), &mut human);
+
+    let doc = agent.document();
+    // E1 was deleted (gone), E2 survived, the human's shape merged in: two shapes total.
+    assert!(
+        !has_rect(doc, "top", Rect::new(Point::new(0, 0), Point::new(10, 10))),
+        "the deleted shape E1 is gone on both peers"
+    );
+    assert!(
+        has_rect(
+            doc,
+            "top",
+            Rect::new(Point::new(100, 0), Point::new(110, 10))
+        ),
+        "the surviving shape E2 is present"
+    );
+    assert_eq!(
+        doc.cell("top").unwrap().shapes.len(),
+        2,
+        "E2 plus the human's shape; E1 removed"
+    );
+}
+
+#[test]
+fn a_transform_of_an_unknown_id_is_skipped_and_does_not_poison_the_step() {
+    let mut agent = AgentCollaborator::new(Pacing::Instant);
+    agent.apply_step(&[
+        AgentCommand::CreateCell { name: "top".into() },
+        rect_cmd("top", 0, 0, 10, 10), // E1
+    ]);
+    // One step transforms an id no shape has (999) AND adds a sibling rect. The unknown
+    // transform is skipped; the sibling still lands, so the step is not poisoned.
+    let report = agent.apply_step(&[
+        transform_cmd(&[999], 50, 0),
+        rect_cmd("top", 200, 0, 210, 10),
+    ]);
+    assert_eq!(
+        report.skipped.len(),
+        1,
+        "the unknown id is recorded as skipped"
+    );
+    assert!(
+        report.skipped[0].contains("e999"),
+        "the warning names the unresolved id: {}",
+        report.skipped[0]
+    );
+    assert_eq!(report.placed.len(), 1, "the sibling add still landed");
+    assert_eq!(
+        agent.document().cell("top").unwrap().shapes.len(),
+        2,
+        "E1 plus the sibling; the step committed despite the skipped transform"
+    );
+}
+
+#[test]
+fn a_transform_after_the_id_map_is_forgotten_is_skipped_not_a_silent_no_op() {
+    // Seeded-bad variant: the collaborator learned E1, then the map is deliberately
+    // cleared (as if it attached mid-session). The authoritative session still has E1, so
+    // it accepts the transform; the collaborator must record a skip, not silently move
+    // nothing, and the CRDT shape must stay put.
+    let mut agent = AgentCollaborator::new(Pacing::Instant);
+    agent.apply_step(&[
+        AgentCommand::CreateCell { name: "top".into() },
+        rect_cmd("top", 0, 0, 10, 10), // E1
+    ]);
+    assert_eq!(agent.tracked_id_count(), 1, "E1 was learned");
+
+    agent.forget_element_ids();
+    assert_eq!(agent.tracked_id_count(), 0, "the map was cleared");
+
+    let report = agent.apply_step(&[transform_cmd(&[1], 500, 0)]);
+    assert_eq!(
+        report.skipped.len(),
+        1,
+        "the forgotten id yields a skipped entry, not a silent no-op"
+    );
+    assert!(report.skipped[0].contains("e1"));
+
+    // The CRDT shape did not move (the mirror could not resolve the id).
+    assert!(
+        has_rect(
+            agent.document(),
+            "top",
+            Rect::new(Point::new(0, 0), Point::new(10, 10))
+        ),
+        "the shape stayed at its original location on the CRDT"
+    );
 }

@@ -4057,6 +4057,7 @@ name = "reticle-agent"
 version = "7.0.0"
 dependencies = [
  "clap",
+ "futures-util",
  "reticle-agent-api",
  "reticle-bench",
  "reticle-drc",
@@ -4067,6 +4068,8 @@ dependencies = [
  "reticle-sync",
  "serde",
  "serde_json",
+ "tokio",
+ "tokio-tungstenite",
  "ureq",
 ]
 
@@ -4340,6 +4343,8 @@ version = "7.0.0"
 dependencies = [
  "axum",
  "futures-util",
+ "reticle-agent",
+ "reticle-agent-api",
  "reticle-geometry",
  "reticle-model",
  "reticle-proto",
