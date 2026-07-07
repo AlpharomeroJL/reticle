@@ -192,8 +192,8 @@ pub fn mcp_config(mcp_bin: &Path, transcript_path: &Path, command_budget: u32) -
     // working directory (not the harness's), so a relative path would resolve there and the
     // harness would replay an empty or missing transcript. An absolute path (resolved
     // against the harness's CWD, where the harness also reads it) pins both ends together.
-    let transcript = std::path::absolute(transcript_path)
-        .unwrap_or_else(|_| transcript_path.to_path_buf());
+    let transcript =
+        std::path::absolute(transcript_path).unwrap_or_else(|_| transcript_path.to_path_buf());
     env.insert(
         RETICLE_MCP_TRANSCRIPT.to_owned(),
         transcript.display().to_string(),
@@ -287,7 +287,7 @@ pub fn build_invocation(
     prompt: &str,
     config_path: &Path,
 ) -> ClaudeInvocation {
-    let mut args = vec![
+    let args = vec![
         // `-p` with no positional prompt: the prompt is handed to the session over stdin
         // (see `ClaudeInvocation::stdin_prompt`), so the shell wrapper cannot mangle it.
         "-p".to_owned(),
