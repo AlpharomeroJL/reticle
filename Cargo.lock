@@ -4208,6 +4208,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reticle-relay-conformance"
+version = "7.0.0"
+dependencies = [
+ "futures-util",
+ "reticle-geometry",
+ "reticle-proto",
+ "reticle-server",
+ "reticle-sync",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "reticle-render"
 version = "7.0.0"
 dependencies = [
@@ -5069,6 +5082,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
