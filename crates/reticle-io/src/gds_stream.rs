@@ -31,7 +31,7 @@ use reticle_model::Result;
 // GDSII record framing constants (hand-rolled; no `gds21` dependency so this
 // path is wasm-clean). A record is `[len: u16 BE][rtype: u8][dtype: u8][payload]`
 // where `len` counts the 4-byte header, so the payload is `len - 4` bytes. See
-// the mirrored framing walk in [`crate::gds::guard_gds21_records`].
+// the mirrored framing walk in `crate::gds::guard_gds21_records`.
 // ---------------------------------------------------------------------------
 
 // HEADER (0x00), BGNLIB (0x01), and BGNSTR (0x05) are consumed by the catch-all skip
@@ -82,7 +82,7 @@ const RT_BOX: u8 = 0x2D;
 /// GDSII data-type code for an ASCII string payload. A string record with a
 /// zero-length payload is the panic class `gds21`'s `read_str` hits by indexing
 /// `data[len - 1]`; this reader rejects it up front, exactly as
-/// [`crate::gds::guard_gds21_records`] does, so the streaming path cannot
+/// `crate::gds::guard_gds21_records` does, so the streaming path cannot
 /// reintroduce it (commit e8752f7).
 const DT_STRING: u8 = 0x06;
 
