@@ -85,6 +85,7 @@
 pub mod agent_history;
 pub mod agent_panel;
 pub mod app;
+pub mod archive;
 pub mod camera;
 pub mod command;
 pub mod culling;
@@ -133,6 +134,7 @@ pub mod webopen;
 pub mod xsection;
 
 pub use app::{App, StartView};
+pub use archive::{ArchiveBrowse, ArchiveOpenInbox, ArchiveStats};
 pub use dochost::DocHost;
 pub use notify::{Notification, Notifications, Severity};
 pub use open::{DocFormat, OpenError, OpenOutcome, OpenWarning, open_document_bytes};

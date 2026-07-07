@@ -305,6 +305,38 @@ count is the correct flatten of whichever file was read; nothing is misparsed. P
 the design by absolute path (as done for the table above), or giving `measure-run.ps1`
 an explicit `WorkingDirectory`, removes the ambiguity.
 
+## v8.0.0 served-archive streaming HUD (measured 2026-07-07 on this machine)
+
+The browser `?archive=<url>` browse (lane v8-2e) streams a served `.rtla` over HTTP Range
+into a read-only streamed scene and paints it coarse-then-fine. The streaming HUD's
+counters are read off the live `window.__reticle_stats` seam the app publishes each frame;
+the numbers below are from the served-archive Playwright spec running against the local
+ranged static server (`e2e/serve-archive.mjs`) in headless Chromium on the WebGL2 path.
+
+**Methodology.** The committed fixture (`e2e/fixtures/fixture.rtla`) is a three-level
+power-of-two pyramid (1x1, 2x2, 4x4) over a 10000x10000 DBU world with one record centred
+in each of the sixteen finest tiles. The page opens
+`?archive=http://127.0.0.1:8082/fixture.rtla`; the bundle probes the archive's total size
+with one ranged `bytes=0-0` GET (reading the `Content-Range` total), then the residency
+pass fetches every covering tile from the coarsest level up. Counters are read from
+`window.__reticle_stats` after the scene settles.
+
+| Quantity | Value | How |
+|---|---|---|
+| Archive total size | 1132 B | `Content-Range` total from the `bytes=0-0` probe (`archive_file_size`). |
+| Bytes fetched over Range | 588 B (52% of the file) | Sum of the 21 tile-fetch payloads, metered on the inbox (`archive_bytes_fetched`). |
+| Tiles fetched / resident | 21 / 21 | Whole pyramid (1 + 4 + 16 covering tiles); all resident, none evicted (LRU bound 256). |
+| Records painted (fine level) | 16 | Finest level fully resident, one record per finest tile (`archive_records_painted`). |
+| Working-set estimate | ~588 B | Resident tiles times mean fetched tile size (~28 B/tile); an estimate, since eviction is inside the scene's LRU. |
+
+This is a *functional* proof of the streaming and HUD accounting on a deliberately tiny
+fixture (so the whole pyramid fits the working-set bound and the coarse-to-fine transition
+is observable end to end), not a scale benchmark: "bytes fetched vs file size" and the
+working-set estimate are exercised against real ranged transport and read back through the
+same seam a user's HUD shows. The at-scale residency behaviour (coarse level painting while
+fine tiles stream, LRU eviction bounding RAM) is proven headlessly by the `residency`
+integration test with an injected per-tile fetch latency.
+
 ## Targets (Section 10)
 
 Honest status of each spec target. Two are measured with a hard number; the rest are

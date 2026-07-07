@@ -366,6 +366,28 @@ pub struct App {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     web_open_started: bool,
 
+    // ---- Served-archive browse (`?archive=`, lane v8-2e) -------------------
+    /// The open archive browse, present only when the page opened a served `.rtla` via
+    /// `?archive=` (see [`crate::archive`]). `None` in a normal editing session; when
+    /// `Some`, the canvas paints the read-only streamed die with progressive residency
+    /// instead of the editable document.
+    archive: Option<crate::archive::ArchiveBrowse>,
+    /// The mailbox the async archive-open task posts the finished browse into (wasm only;
+    /// always empty on native). Uniform field type across targets, like [`web_open`](Self::web_open).
+    archive_open: crate::archive::ArchiveOpenInbox,
+    /// The `?archive=` URL to open on the first wasm frame, stashed by
+    /// [`with_archive`](Self::with_archive) until the open path is kicked off. Consumed on
+    /// wasm; dead on native (no browser fetch).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pending_archive_url: Option<String>,
+    /// Whether the one-shot archive open has been kicked off (guards it to the first wasm
+    /// frame, mirroring [`web_open_started`](Self::web_open_started)).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    archive_started: bool,
+    /// Whether the camera has framed the streamed die yet. The first archive frame fits
+    /// the camera to the archive world; after that the browse camera is the user's.
+    archive_framed: bool,
+
     // ---- Live share transport (ADR 0058) -----------------------------------
     /// The read-only viewer target (room + relay) this app booted from, when the page
     /// URL was a viewer link (`?view=viewer&...`). `Some` opens the viewer transport on
@@ -612,6 +634,28 @@ impl App {
         app
     }
 
+    /// Creates the app to **browse a served `.rtla` archive** streamed from `url`
+    /// (`?archive=<url>`, lane v8-2e).
+    ///
+    /// The web mount calls this when the page URL carries an `?archive=` link
+    /// (see [`crate::share::archive_url_from_query`]). The app boots the editor chrome
+    /// but, on its first wasm frame, opens an [`HttpRangeTileSource`](reticle_index::tile_source)
+    /// over `url`, builds a read-only [`StreamedScene`](crate::streamed::StreamedScene),
+    /// and paints it with progressive residency (ADR 0062). Editing the streamed die is a
+    /// compile error (the [`Streamed`](crate::dochost::DocHost::Streamed) arm exposes no
+    /// mutation), so browse, measure, and query work while an edit cannot be expressed.
+    ///
+    /// On native this simply stashes the URL; nothing dials a browser fetch, so the
+    /// desktop build still constructs and the archive stays unopened.
+    #[must_use]
+    pub fn with_archive(url: String) -> Self {
+        let mut app = Self::build(StartView::Editor);
+        // Browse opens straight onto the canvas, not the worked-use-case chooser.
+        app.start_screen = false;
+        app.pending_archive_url = Some(url);
+        app
+    }
+
     /// Applies the recorded [`StartView`] to the constructed app.
     ///
     /// For [`StartView::ReplayTheater`] it opens the theater window and loads the
@@ -630,6 +674,9 @@ impl App {
 
     /// Builds the app state opening into `start_view` (without applying the view;
     /// [`with_start_view`](Self::with_start_view) applies it).
+    // One flat struct literal initializing every field: the length is field count, not
+    // branching logic, so the line-count lint does not apply.
+    #[allow(clippy::too_many_lines)]
     #[must_use]
     fn build(start_view: StartView) -> Self {
         let doc = demo::demo_document();
@@ -703,6 +750,11 @@ impl App {
             load_progress: crate::webopen::LoadProgress::Idle,
             web_open: crate::webopen::WebOpenInbox::new(),
             web_open_started: false,
+            archive: None,
+            archive_open: crate::archive::ArchiveOpenInbox::new(),
+            pending_archive_url: None,
+            archive_started: false,
+            archive_framed: false,
             last_screen: None,
             viewer_target: None,
             viewer_session: None,
@@ -1412,6 +1464,44 @@ impl App {
                     merged.record(file);
                 }
                 self.recent_files = merged;
+            }
+        }
+    }
+
+    /// Drives the served-archive browse (`?archive=`, lane v8-2e): on the first wasm frame
+    /// it kicks off the async archive open, and every frame it installs the finished
+    /// browse once it arrives.
+    ///
+    /// Mirrors [`drive_web_open`](Self::drive_web_open): the open runs on
+    /// `wasm_bindgen_futures::spawn_local` (it fetches the header and probes the size) and
+    /// posts the assembled [`ArchiveBrowse`](crate::archive::ArchiveBrowse) into
+    /// [`archive_open`](Self::archive_open); here, on the main thread, a success installs
+    /// it (so the canvas paints the streamed die next frame) and a failure surfaces as a
+    /// notification. On native nothing is ever posted, so this is a cheap no-op.
+    fn drive_archive(&mut self, ctx: &egui::Context) {
+        #[cfg(target_arch = "wasm32")]
+        if !self.archive_started {
+            self.archive_started = true;
+            if let Some(url) = self.pending_archive_url.take() {
+                self.status.set("Opening archive...");
+                crate::archive::start_archive_open(url, self.archive_open.clone(), ctx.clone());
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = ctx;
+
+        if let Some(result) = self.archive_open.take() {
+            match result {
+                Ok(browse) => {
+                    self.status.set("Streaming archive");
+                    self.archive = Some(browse);
+                    // Frame the die on the first archive frame, once the canvas size is known.
+                    self.archive_framed = false;
+                }
+                Err(message) => {
+                    self.report_error("Could not open the archive", message.clone());
+                    self.status.set(message);
+                }
             }
         }
     }
@@ -5091,40 +5181,51 @@ impl App {
 
         // Draw the scene (shapes or, at low zoom, cell boxes).
         let viewport = self.camera.visible_world_rect(&screen);
-        match culling::lod_for_zoom(self.camera.pixels_per_dbu()) {
-            DetailLevel::Shapes => match gpu_format {
-                // GPU path: render the retained scene through eframe's device. The
-                // callback composites under the egui overlays queued below.
-                Some(format) => {
-                    self.draw_shapes_gpu(&painter, &screen, egui_rect_of(&screen), format);
-                }
-                // Fallback: paint the geometry with egui.
-                None => self.draw_shapes(&painter, &screen, viewport),
-            },
-            DetailLevel::CellBoxes => self.draw_cell_boxes(&painter, &screen, viewport),
-        }
+        if self.archive.is_some() {
+            // Served-archive browse: paint the read-only streamed die with progressive
+            // residency (coarse-then-fine) and its HUD, skipping the document-specific
+            // overlays below (there is no editable document in browse mode).
+            self.draw_archive(&painter, &screen);
+        } else {
+            match culling::lod_for_zoom(self.camera.pixels_per_dbu()) {
+                DetailLevel::Shapes => match gpu_format {
+                    // GPU path: render the retained scene through eframe's device. The
+                    // callback composites under the egui overlays queued below.
+                    Some(format) => {
+                        self.draw_shapes_gpu(&painter, &screen, egui_rect_of(&screen), format);
+                    }
+                    // Fallback: paint the geometry with egui.
+                    None => self.draw_shapes(&painter, &screen, viewport),
+                },
+                DetailLevel::CellBoxes => self.draw_cell_boxes(&painter, &screen, viewport),
+            }
 
-        // Engine-driven overlays on top of the geometry.
-        self.draw_net_highlight(&painter, &screen, viewport);
-        self.draw_array_preview(&painter, &screen, viewport);
-        self.draw_generate_preview(&painter, &screen, viewport);
-        self.draw_drc_markers(&painter, &screen);
+            // Engine-driven overlays on top of the geometry.
+            self.draw_net_highlight(&painter, &screen, viewport);
+            self.draw_array_preview(&painter, &screen, viewport);
+            self.draw_generate_preview(&painter, &screen, viewport);
+            self.draw_drc_markers(&painter, &screen);
+        }
 
         // User guides under the ruler bars, then the rulers cover their ends.
         self.draw_guides(&painter, &screen);
         self.draw_rulers(&painter, &screen);
         self.draw_measure(&painter, &screen);
-        self.draw_draw_overlay(&painter, &screen, &response, ui.ctx());
         // The snap indicator rides on top so it is never hidden by geometry.
         self.draw_snap_indicator(&painter, &screen);
-        if self.labels_visible {
-            self.draw_labels(&painter, &screen);
+        // Document- and collaboration-specific overlays are meaningless while browsing a
+        // read-only streamed archive, so they are drawn only in the editing session.
+        if self.archive.is_none() {
+            self.draw_draw_overlay(&painter, &screen, &response, ui.ctx());
+            if self.labels_visible {
+                self.draw_labels(&painter, &screen);
+            }
+            if self.minimap_visible {
+                self.draw_minimap(&painter, &screen);
+            }
+            self.draw_presence(&painter, &screen);
+            self.draw_agent_cursor(&painter, &screen);
         }
-        if self.minimap_visible {
-            self.draw_minimap(&painter, &screen);
-        }
-        self.draw_presence(&painter, &screen);
-        self.draw_agent_cursor(&painter, &screen);
 
         // Mark the focused pane when split (drawn unclipped so the full border
         // stroke shows).
@@ -5782,6 +5883,164 @@ impl App {
             let fill = Color32::from_rgba_unmultiplied(r, g, b, a);
             let selected = self.selection.contains(idx);
             self.draw_one_shape(painter, screen, shape, fill, selected);
+        }
+    }
+
+    /// Paints the read-only streamed archive for the current camera, driving one
+    /// residency pass and drawing the HUD (lane v8-2e).
+    ///
+    /// The steps mirror the residency contract proven in `tests/residency.rs`: adopt any
+    /// tiles fetched since last frame, pick the target level for the viewport, spawn
+    /// fetches for the covering tiles that are not yet resident (wasm), then paint the
+    /// finest resident level that still covers the viewport
+    /// ([`StreamedScene::paint_level`](crate::streamed::StreamedScene::paint_level)) so the
+    /// die refines coarse-then-fine rather than blanking while fine tiles stream. Finally
+    /// it draws the on-canvas HUD and publishes the counters to `window.__reticle_stats`
+    /// for the served-archive e2e.
+    fn draw_archive(&mut self, painter: &egui::Painter, screen: &ScreenRect) {
+        // Frame the whole die once the canvas size is known (deferred from the async
+        // open, which has no screen), then read the fitted viewport.
+        if !self.archive_framed {
+            if let Some(browse) = self.archive.as_ref() {
+                let world = browse.scene().world();
+                self.camera.zoom_to_fit(screen, world);
+            }
+            self.archive_framed = true;
+        }
+        let viewport = self.camera.visible_world_rect(screen);
+
+        // 1. Adopt fetched tiles and choose the paint level for this viewport.
+        let (target, paint) = {
+            let browse = self.archive.as_mut().expect("archive browse is active");
+            browse.drain();
+            let scene = browse.scene();
+            let target = crate::archive::target_level_for_viewport(scene, viewport);
+            let paint = scene.paint_level(viewport, target);
+            (target, paint)
+        };
+
+        // 2. Spawn fetches for the covering tiles not yet resident or in flight (wasm).
+        #[cfg(target_arch = "wasm32")]
+        if let Some(browse) = self.archive.as_mut() {
+            browse.spawn_missing(viewport, target);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = target;
+
+        // 3. Paint the resident records at the chosen (coarse-then-fine) level.
+        let records = paint
+            .map(|level| {
+                self.archive
+                    .as_ref()
+                    .expect("archive browse is active")
+                    .scene()
+                    .painted_records(viewport, level)
+            })
+            .unwrap_or_default();
+        self.draw_streamed_records(painter, screen, &records);
+        if let Some(browse) = self.archive.as_mut() {
+            browse.set_records_painted(records.len());
+        }
+
+        // 4. The on-canvas HUD, and the JS stats seam the e2e reads.
+        self.draw_archive_hud(painter, screen);
+        #[cfg(target_arch = "wasm32")]
+        self.publish_archive_stats();
+    }
+
+    /// Paints a set of streamed [`TileRecord`](reticle_index::TileRecord)s as filled,
+    /// outlined rectangles, colored and visibility-gated by the same layer table as the
+    /// editing geometry (an unknown archive layer paints in the default grey and stays
+    /// visible; see [`LayerState::is_visible`](crate::layers::LayerState::is_visible)).
+    fn draw_streamed_records(
+        &self,
+        painter: &egui::Painter,
+        screen: &ScreenRect,
+        records: &[reticle_index::TileRecord],
+    ) {
+        for record in records {
+            let layer = LayerId::new(record.layer, record.datatype);
+            if !self.layer_state.is_visible(layer) {
+                continue;
+            }
+            let (red, green, blue, alpha) = self.layer_color(layer);
+            let fill = Color32::from_rgba_unmultiplied(red, green, blue, alpha);
+            let dst = self.world_rect_to_screen(screen, record.rect.to_rect());
+            painter.rect_filled(dst, 0.0, fill);
+            painter.rect_stroke(
+                dst,
+                0.0,
+                Stroke::new(1.0, fill.gamma_multiply(1.4)),
+                StrokeKind::Middle,
+            );
+        }
+    }
+
+    /// Draws the streaming HUD in the top-left of the canvas: bytes fetched vs archive
+    /// size, tiles resident and records painted, the working-set estimate, and the frame
+    /// rate (the counter arithmetic is [`ArchiveStats`](crate::archive::ArchiveStats), unit-tested).
+    fn draw_archive_hud(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        let Some(browse) = self.archive.as_ref() else {
+            return;
+        };
+        let lines = browse.stats().hud_lines(self.frame_meter.fps());
+        let pad = 8.0;
+        let line_h = 16.0;
+        let x = screen.left + pad;
+        let top = screen.top + pad;
+        let panel = EguiRect::from_min_size(
+            Pos2::new(x - 6.0, top - 6.0),
+            egui::vec2(210.0, pad * 2.0 + line_h * lines.len() as f32),
+        );
+        painter.rect_filled(panel, 5.0, Color32::from_rgba_unmultiplied(10, 12, 16, 205));
+        let mut y = top;
+        for line in &lines {
+            painter.text(
+                Pos2::new(x, y),
+                egui::Align2::LEFT_TOP,
+                line,
+                egui::FontId::monospace(12.0),
+                Color32::from_rgb(180, 220, 255),
+            );
+            y += line_h;
+        }
+    }
+
+    /// Publishes the archive HUD counters to `window.__reticle_stats` (wasm only), the
+    /// seam the served-archive Playwright spec polls to assert tiles become resident and
+    /// the canvas paints. Extends the same stats object the share-live viewer writes to.
+    #[cfg(target_arch = "wasm32")]
+    fn publish_archive_stats(&self) {
+        use wasm_bindgen::JsValue;
+        let Some(browse) = self.archive.as_ref() else {
+            return;
+        };
+        let s = browse.stats();
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let key = JsValue::from_str("__reticle_stats");
+        let stats = match js_sys::Reflect::get(window.as_ref(), &key) {
+            Ok(v) if v.is_object() => v,
+            _ => {
+                let obj = js_sys::Object::new();
+                let _ = js_sys::Reflect::set(window.as_ref(), &key, obj.as_ref());
+                JsValue::from(obj)
+            }
+        };
+        let set = |k: &str, v: f64| {
+            let _ = js_sys::Reflect::set(&stats, &JsValue::from_str(k), &JsValue::from_f64(v));
+        };
+        #[allow(clippy::cast_precision_loss)]
+        {
+            set("archive_file_size", s.file_size as f64);
+            set("archive_bytes_fetched", s.bytes_fetched as f64);
+            set("archive_tiles_fetched", s.tiles_fetched as f64);
+            set("archive_tiles_resident", s.tiles_resident as f64);
+            set("archive_working_set_bytes", s.working_set_bytes() as f64);
+            set("archive_records_painted", s.records_painted as f64);
+            // A convenience alias the spec reads directly.
+            set("tiles_resident", s.tiles_resident as f64);
         }
     }
 
@@ -6529,6 +6788,11 @@ impl eframe::App for App {
         // recent-list load on the first wasm frame, and apply whatever those async
         // tasks have posted since last frame. A no-op on native.
         self.drive_web_open(&ctx);
+
+        // Drive the served-archive browse: kick off the `?archive=` open on the first
+        // wasm frame and install the streamed scene once it arrives. A no-op on native
+        // and in a normal editing session.
+        self.drive_archive(&ctx);
 
         // Drive the live share transport: open the read-only viewer socket on the first
         // wasm frame of a viewer session, and apply the sharer's streamed frames and
