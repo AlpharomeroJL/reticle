@@ -34,11 +34,13 @@
 //! assert_eq!(layers[0].perimeter, 40.0);
 //! ```
 
+pub mod antenna;
 pub mod area;
 pub mod connectivity;
 
 mod polyize;
 
+pub use antenna::{AntennaCheck, AntennaViolation};
 pub use area::{LayerMetrics, report as area_report};
 pub use connectivity::ConnectivityStats;
 
