@@ -4158,11 +4158,16 @@ name = "reticle-index"
 version = "7.0.0"
 dependencies = [
  "criterion",
+ "js-sys",
  "memmap2",
+ "pollster",
  "proptest",
  "reticle-geometry",
  "rkyv",
  "rstar",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
