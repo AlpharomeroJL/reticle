@@ -1,0 +1,14 @@
+# The archive-serving Worker. Separate from the relay's worker/wrangler.toml (that
+# one is a Durable Object; this one is a stateless R2 range proxy) so the two deploy
+# and version independently. A plain ES-module Worker: no build step, no wasm.
+name = "reticle-archive"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+workers_dev = true
+
+# The private archive bucket, reachable only through this Worker binding. Serving
+# through the binding (never the public r2.dev URL) is what keeps the archives off
+# the rate-limited path and behind the CORS lock in src/index.js.
+[[r2_buckets]]
+binding = "ARCHIVES"
+bucket_name = "reticle-archives"

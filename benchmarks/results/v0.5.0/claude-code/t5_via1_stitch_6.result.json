@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t5_via1_stitch_6",
+    "model": "claude-sonnet-5",
+    "suite_version": "adhoc",
+    "success": true,
+    "iterations": 11,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 52889,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]
