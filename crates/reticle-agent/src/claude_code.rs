@@ -11,11 +11,13 @@
 //!    transcript capture on (`RETICLE_MCP_TRANSCRIPT` set to a per-task JSONL path) and a
 //!    command budget (`RETICLE_MCP_BUDGET`). The serial step (ADR 0051) already made
 //!    `reticle-mcp` stream every applied command to that JSONL.
-//! 2. Launches Claude Code non-interactively (`claude -p "<prompt>" --mcp-config <config>
+//! 2. Launches Claude Code non-interactively (`claude -p --mcp-config <config>
 //!    --strict-mcp-config --model <model> --output-format stream-json --permission-mode
-//!    bypassPermissions --allowed-tools <the reticle-mcp tool names>`). One `claude`
-//!    session per task; Claude Code drives the `reticle-mcp` tools itself, the server
-//!    enforces the budget and captures the transcript.
+//!    bypassPermissions`), handing the prompt over stdin (not as an argument) so the Windows
+//!    shell wrapper cannot mangle a multi-line prompt. One `claude` session per task; Claude
+//!    Code drives the `reticle-mcp` tools itself, the server enforces the budget and captures
+//!    the transcript to an absolute path (the session's own working directory would
+//!    otherwise misplace a relative one).
 //! 3. Reconstructs the resulting document by replaying the captured transcript, runs the
 //!    task's [`Checker`], and records a [`ResultRecord`] with `backend = "claude-code"`
 //!    and `model = <the model the run reports>`.
@@ -186,9 +188,15 @@ pub struct McpServerEntry {
 #[must_use]
 pub fn mcp_config(mcp_bin: &Path, transcript_path: &Path, command_budget: u32) -> McpConfig {
     let mut env = std::collections::BTreeMap::new();
+    // Absolutize the transcript path. Claude Code launches the MCP server with its own
+    // working directory (not the harness's), so a relative path would resolve there and the
+    // harness would replay an empty or missing transcript. An absolute path (resolved
+    // against the harness's CWD, where the harness also reads it) pins both ends together.
+    let transcript = std::path::absolute(transcript_path)
+        .unwrap_or_else(|_| transcript_path.to_path_buf());
     env.insert(
         RETICLE_MCP_TRANSCRIPT.to_owned(),
-        transcript_path.display().to_string(),
+        transcript.display().to_string(),
     );
     env.insert(RETICLE_MCP_BUDGET.to_owned(), command_budget.to_string());
     let entry = McpServerEntry {
@@ -225,6 +233,12 @@ pub struct ClaudeInvocation {
     pub program: PathBuf,
     /// The full argument vector (not including the program itself).
     pub args: Vec<String>,
+    /// The prompt, written to the child's stdin rather than passed as a command-line
+    /// argument. `claude -p` with no positional prompt reads the prompt from stdin, which
+    /// avoids a large multi-line prompt (the task prompt plus an embedded technology source)
+    /// being split or truncated by the Windows shell wrapper (`cmd /c` for the npm `.cmd`
+    /// shim) that would otherwise mangle newlines in a command-line argument.
+    pub stdin_prompt: String,
 }
 
 /// Composes the full prompt handed to `claude -p`: the task prompt, plus a preamble that
@@ -260,11 +274,13 @@ pub fn compose_prompt(task_prompt: &str, technology_source: &str) -> String {
 
 /// Builds the [`ClaudeInvocation`] for a task.
 ///
-/// The flags are the verified `claude` v2.1 surface: `-p <prompt>` (non-interactive print
-/// and exit), `--mcp-config <config>` and `--strict-mcp-config` (use *only* that server),
-/// `--model <model>`, `--output-format stream-json`, `--permission-mode bypassPermissions`
-/// (non-interactive: the `reticle-mcp` server enforces the real budget, and only its tools
-/// are reachable under `--strict-mcp-config`), and `--allowed-tools <namespaced names>`.
+/// The flags are the verified `claude` v2.1 surface: `-p` (non-interactive print and exit,
+/// prompt over stdin), `--mcp-config <config>` and `--strict-mcp-config` (use *only* that
+/// server), `--model <model>`, `--output-format stream-json` with `--verbose`, and
+/// `--permission-mode bypassPermissions` (non-interactive: the `reticle-mcp` server enforces
+/// the real budget, and only its tools are reachable under `--strict-mcp-config`). There is
+/// deliberately no `--allowed-tools`: an allow-list blocks the deferred-tool path a
+/// heavily-configured session uses to reach the reticle tools.
 #[must_use]
 pub fn build_invocation(
     config: &ClaudeCodeConfig,
@@ -272,8 +288,9 @@ pub fn build_invocation(
     config_path: &Path,
 ) -> ClaudeInvocation {
     let mut args = vec![
+        // `-p` with no positional prompt: the prompt is handed to the session over stdin
+        // (see `ClaudeInvocation::stdin_prompt`), so the shell wrapper cannot mangle it.
         "-p".to_owned(),
-        prompt.to_owned(),
         "--mcp-config".to_owned(),
         config_path.display().to_string(),
         "--strict-mcp-config".to_owned(),
@@ -286,15 +303,17 @@ pub fn build_invocation(
         "--permission-mode".to_owned(),
         "bypassPermissions".to_owned(),
     ];
-    // `--allowed-tools` takes a space-separated list; clap on the CLI side accepts each
-    // tool as its own value, so push them individually after the flag.
-    args.push("--allowed-tools".to_owned());
-    for tool in allowed_tool_names() {
-        args.push(tool);
-    }
+    // No `--allowed-tools`: with a heavily configured host, a Claude Code session reaches
+    // the reticle-mcp tools through `ToolSearch` (deferred-tool loading), and pinning an
+    // allow-list (even one that includes `ToolSearch`) prevents the session from calling any
+    // reticle tool at all (measured: the session runs but applies nothing). `bypassPermissions`
+    // already runs non-interactively and `--strict-mcp-config` restricts MCP to reticle-mcp;
+    // task integrity does not depend on the allow-list because the checker reconstructs the
+    // document only from the reticle-mcp transcript, so only reticle commands ever count.
     ClaudeInvocation {
         program: config.claude_bin.clone(),
         args,
+        stdin_prompt: prompt.to_owned(),
     }
 }
 
@@ -339,19 +358,31 @@ pub struct SystemClaudeRunner;
 
 impl ClaudeRunner for SystemClaudeRunner {
     fn run(&self, invocation: &ClaudeInvocation) -> Result<RunReport, SpawnFailure> {
-        let output = system_command(invocation).output();
-        match output {
-            Ok(out) => Ok(RunReport {
-                exit_code: out.status.code(),
-                stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-                stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-            }),
-            Err(e) => Err(SpawnFailure {
-                // A `NotFound` is the CLI-absent case; any other spawn error is also an
-                // honest not-run (we could not run the session), reported with its cause.
-                detail: format!("could not launch `{}`: {e}", invocation.program.display()),
-            }),
+        use std::io::Write as _;
+        use std::process::Stdio;
+        // A `NotFound` is the CLI-absent case; any other spawn/wait error is also an honest
+        // not-run (we could not run the session), reported with its cause.
+        let launch_err = |e: std::io::Error| SpawnFailure {
+            detail: format!("could not launch `{}`: {e}", invocation.program.display()),
+        };
+        let mut command = system_command(invocation);
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().map_err(launch_err)?;
+        // Hand the prompt to `claude -p` over stdin (it reads the prompt from stdin when no
+        // positional prompt is given), then drop the handle to close stdin so the session
+        // runs to completion and exits.
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(invocation.stdin_prompt.as_bytes());
         }
+        let out = child.wait_with_output().map_err(launch_err)?;
+        Ok(RunReport {
+            exit_code: out.status.code(),
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+        })
     }
 }
 
@@ -932,9 +963,14 @@ mod tests {
             entry.args.is_empty(),
             "reticle-mcp is configured by env only"
         );
+        // The transcript path is absolutized so the MCP server (launched by Claude Code with
+        // its own working directory) writes where the harness later reads.
+        let expected = std::path::absolute(&transcript).unwrap_or_else(|_| transcript.clone());
+        assert!(expected.is_absolute(), "the transcript path is absolute");
+        let expected_str = expected.display().to_string();
         assert_eq!(
             entry.env.get("RETICLE_MCP_TRANSCRIPT").map(String::as_str),
-            Some(transcript.display().to_string().as_str())
+            Some(expected_str.as_str())
         );
         assert_eq!(
             entry.env.get("RETICLE_MCP_BUDGET").map(String::as_str),
@@ -998,6 +1034,7 @@ mod tests {
         let inv = ClaudeInvocation {
             program: PathBuf::from("C:/npm/claude.ps1"),
             args: vec!["-p".to_owned(), "hi".to_owned()],
+            stdin_prompt: String::new(),
         };
         let cmd = system_command(&inv);
         assert_eq!(cmd.get_program(), std::ffi::OsStr::new("powershell.exe"));
@@ -1021,9 +1058,11 @@ mod tests {
         let cfg = config_for(unique_dir("flags"));
         let inv = build_invocation(&cfg, "draw a rect", Path::new("/cfg/t1.mcp.json"));
         let a = &inv.args;
-        // -p <prompt> (non-interactive print-and-exit).
+        // -p with no positional prompt (non-interactive print-and-exit); the prompt is
+        // delivered over stdin so the shell wrapper cannot mangle a multi-line prompt.
         assert_eq!(a[0], "-p");
-        assert_eq!(a[1], "draw a rect");
+        assert_eq!(a[1], "--mcp-config");
+        assert_eq!(inv.stdin_prompt, "draw a rect");
         // The MCP config plus strict-mcp-config (only that server).
         let cfg_pos = a
             .iter()
@@ -1041,16 +1080,13 @@ mod tests {
             .position(|s| s == "--permission-mode")
             .expect("perm");
         assert_eq!(a[perm_pos + 1], "bypassPermissions");
-        // --allowed-tools followed by the namespaced tool names.
-        let allow_pos = a
-            .iter()
-            .position(|s| s == "--allowed-tools")
-            .expect("allowed-tools");
+        // No `--allowed-tools`: pinning an allow-list blocks the deferred-tool path the
+        // session uses to reach the reticle tools (see `build_invocation`); `bypassPermissions`
+        // plus `--strict-mcp-config` govern access, and the checker only counts reticle-mcp
+        // transcript commands.
         assert!(
-            a[allow_pos + 1..]
-                .iter()
-                .any(|s| s == "mcp__reticle__create_cell"),
-            "the allowed-tools list follows the flag"
+            !a.iter().any(|s| s == "--allowed-tools"),
+            "no allowed-tools flag: it prevents the session from calling the reticle tools"
         );
     }
 
