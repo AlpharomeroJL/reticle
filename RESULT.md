@@ -27,14 +27,14 @@ hook), so the change breaks nothing wider.
 
 ## What was built
 
-- **`crates/reticle-app/src/dochost.rs` — the edit/stream split.** `DocHost` is
+- **`crates/reticle-app/src/dochost.rs`, the edit/stream split.** `DocHost` is
   `Edited(History)` | `Streamed(StreamedScene)`. A `&mut History` is obtainable **only**
   by matching the `Edited` arm; there is no total `history_mut(&mut self) -> &mut History`,
   only a fallible `Option`-returning one, and `StreamedScene` carries no mutation API.
   Editing code that does not handle the streamed case cannot name a `History` to mutate,
   so **editing a streamed document is a compile error**, not a runtime check (ADR 0062,
   0068). Browse/measure/query/share read either arm.
-- **`crates/reticle-app/src/streamed.rs` — the residency logic.** `StreamedScene` holds
+- **`crates/reticle-app/src/streamed.rs`, the residency logic.** `StreamedScene` holds
   the `.rtla` header, resident tiles keyed by `TileCoord`, and an LRU working-set bound.
   It validates the header (magic, version, and that each level is the `2^level` square
   grid the mapper assumes) and builds a shape-free `LodPyramid` purely as a
@@ -45,7 +45,7 @@ hook), so the change breaks nothing wider.
   resident level that fully covers the viewport, which is the coarse-then-fine mechanism.
   `upload_tile_bytes` is the thin passthrough to the existing `BufferPages::upload` API
   (no render pipeline changed).
-- **`crates/reticle-app/tests/residency.rs` — the residency proof.** See below.
+- **`crates/reticle-app/tests/residency.rs`, the residency proof.** See below.
 - **Docs.** ADR 0068 (`docs/decisions/`), a new "Streamed documents" chapter
   (`docs/src/streaming.md` + `SUMMARY.md`), decisions `README.md` row.
 
