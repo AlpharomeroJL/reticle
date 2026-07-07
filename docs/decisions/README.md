@@ -77,3 +77,4 @@ superseded decision is marked and linked to its replacement.
 | [0069](0069-rtla-physical-framing-and-tile-caches.md) | .rtla physical byte framing, the untrusted-count rule, and the wasm tile-source LRU and OPFS cache policy |
 | [0070](0070-archive-serving-worker-and-license-gate.md) | The archive-serving Worker (R2 range proxy, Cache API, CORS lock, untrusted-Range 416) and the redistribution license gate |
 | [0071](0071-dochost-edited-streamed-split.md) | The DocHost edit/stream split (editing a streamed document is a compile error) and coarse-then-fine tile residency |
+| [00XX](00XX-gds-to-rtla-converter-flatten-and-leveling.md) | `reticle convert` GDS-to-`.rtla`: v1 flatten scope (drawn geometry only, no DOM) and world-span pyramid leveling |
