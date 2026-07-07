@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t2_met1_area_pin",
+    "model": "claude-sonnet-5",
+    "suite_version": "adhoc",
+    "success": true,
+    "iterations": 6,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 35389,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]

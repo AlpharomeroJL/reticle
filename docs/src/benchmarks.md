@@ -87,16 +87,16 @@ never conflated.
 
 ## Current results: two local models
 
-The runs below drove two local models through the whole 75-task suite over Ollama on
-the host, each task graded by its two-way-tested checker. The raw per-task
+The runs below drove two local models through the whole 83-task v0.5.0 suite over Ollama
+on the host, each task graded by its two-way-tested checker. The raw per-task
 `ResultRecord` files and their command transcripts are committed under
-[`benchmarks/results/`](https://github.com/AlpharomeroJL/reticle/tree/main/benchmarks/results);
+[`benchmarks/results/v0.5.0/`](https://github.com/AlpharomeroJL/reticle/tree/main/benchmarks/results/v0.5.0);
 the rows here are computed from those records.
 
 | Model | Quantization | Tier 1 | Tier 2 | Tier 3 | Tier 4 | Tier 5 | Overall |
 |---|---|---:|---:|---:|---:|---:|---:|
-| `gpt-oss:16k` (20B) | MXFP4 | 9/9 | 11/11 | 19/34 | 5/11 | 8/10 | **52/75 (69%)** |
-| `qwen2.5-coder:16k` (14B) | Q4_K_M | 6/9 | 8/11 | 6/34 | 3/11 | 6/10 | **29/75 (39%)** |
+| `gpt-oss:16k` (20B) | MXFP4 | 8/9 | 9/11 | 20/42 | 5/11 | 7/10 | **49/83 (59%)** |
+| `qwen2.5-coder:16k` (14B) | Q4_K_M | 7/9 | 8/11 | 6/42 | 3/11 | 5/10 | **29/83 (35%)** |
 
 These are small quantized local models, so the numbers are a realistic floor, not a
 ceiling. The gap has a concrete cause: `gpt-oss:16k` returns native tool calls, while
@@ -108,12 +108,8 @@ transcript-replay determinism (replaying a recorded transcript to a fixed
 
 The deterministic `MockModel` (no key, no network) solves only the three sample tasks
 (`t1_place_met1_rect`, `t1_drc_clean_met1`, `t1_intent_connect`) that prove the harness
-end to end; `just bench-agent` runs it and reports 3/75, a machinery baseline that shows
-all 75 tasks and their checkers execute, not a model score.
-
-(The two local rows above are the 75-task v0.4.0 suite. The generator wave added 8 tasks
-to v0.5.0, so the suite is now 83 tasks; re-running the local models on v0.5.0 is a
-follow-up, and the extra 8 are pass/fail-gated the same way.)
+end to end; `just bench-agent` runs it and reports 3/83, a machinery baseline that shows
+all 83 tasks and their checkers execute, not a model score.
 
 ## An agent-system row is not a bare-model row
 
@@ -135,14 +131,27 @@ Honesty of the backend: a run that completes but fails the checker is a real
 (the `claude` CLI missing, or the session not authenticated, or out of quota) is a
 distinct `NotRunRecord` artifact that can never be counted as a pass or a fail.
 
-Status in this environment: **not run.** The `claude` CLI is present (v2.1.197) but has
-no authenticated session here, so every task honestly records a not-run
-(`please run /login`), and no Claude Code row is published. To produce the row, on this
-host: authenticate the CLI once (`claude` interactive `/login`), then run
-`just bench-agent-claude-code` (on Windows also set `RETICLE_CLAUDE_BIN` to the resolved
-`claude.ps1` or `claude.cmd`, since the npm shim is not a directly spawnable executable).
-That consumes the operator's Claude subscription quota, 83 agentic sessions, one per
-task; it is deliberately left as an operator step rather than run automatically.
+Status in this environment: **a real but partial run.** The `claude` CLI (v2.1.202) is
+authenticated here, and a `claude-sonnet-5` agent-system run over this suite drove the
+`reticle-mcp` tools for real: of the 25 tasks that ran (tiers 1 through 3), **24 passed**,
+a 96% rate well above either bare local model. The run was **not** carried to all 83 tasks:
+the operator's Claude subscription rate-limited the back-to-back agentic sessions, recording
+the rest as honest not-runs (a `401`), and it was stopped before tiers 4 and 5. So the
+Claude Code row is partial, its denominator (the 25 tasks that ran) differs from the
+full-suite local rows, and it is not published as an 83-task score. The records for the 25
+tasks are committed under `benchmarks/results/v0.5.0/claude-code/`.
+
+Getting the backend to actually drive the tools took four fixes, all real: hand the prompt
+to `claude -p` over stdin (a large multi-line prompt is mangled by the Windows `cmd /c` npm
+shim when passed as an argument); drop `--allowed-tools` (an allow-list blocks the
+deferred-tool path a heavily configured session uses to reach the MCP tools, so it applied
+nothing); absolutize `RETICLE_MCP_TRANSCRIPT` (Claude Code launches the MCP server with its
+own working directory, so a relative path lands the transcript where the harness cannot
+replay it); and point `RETICLE_MCP_BIN` at a current `reticle-mcp` (the transcript capture
+is ADR 0051, newer than a stale prebuilt binary). To complete the row when the rate window
+is clear: `just bench-agent-claude-code` (on Windows set `RETICLE_CLAUDE_BIN` to the
+resolved `claude.cmd` and `RETICLE_MCP_BIN` to a current `reticle-mcp`); it consumes the
+operator's subscription quota, one agentic session per task.
 
 ## Growing the suite
 

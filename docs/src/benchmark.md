@@ -97,20 +97,18 @@ distinguishable.
 
 ## Current local-model results
 
-The committed local-model result sets under `benchmarks/results/` were measured on this
-host against the local Ollama backend. They were run over the **63-task** set (the
-result records carry an ad hoc suite label from that run), before the 12 Wave-3 tasks
-were promoted to v0.4.0. They are the current honest data, presented here labeled as a
-75-task v0.4.0 run (manifest v0.4.0) against gpt-oss:16k (MXFP4) and qwen2.5-coder:16k
-(Q4_K_M) on this host; the table below is that run.
+The committed local-model result sets under `benchmarks/results/v0.5.0/` were measured on
+this host against the local Ollama backend over the full **83-task** v0.5.0 suite (the 75
+v0.4.0 tasks plus the 8 generator tasks). Each record carries the backend (`ollama`), the
+model id, and the quantization, so two local models are always distinguishable.
 
-**Two-model comparison, 75-task v0.4.0 suite (local Ollama, honest, labeled by model
-and quantization):**
+**Two-model comparison, 83-task v0.5.0 suite (local Ollama, honest, labeled by model and
+quantization):**
 
 | Model | Quantization | Tier 1 | Tier 2 | Tier 3 | Tier 4 | Tier 5 | Overall | Mean iterations |
 | ----- | ------------ | -----: | -----: | -----: | -----: | -----: | ------: | --------------: |
-| `gpt-oss:16k` | MXFP4 | 9/9 (100%) | 10/11 (91%) | 19/34 (56%) | 4/11 (36%) | 8/10 (80%) | **50/75 (67%)** | 1.73 |
-| `qwen2.5-coder:16k` | Q4_K_M | 6/9 (67%) | 10/11 (91%) | 6/34 (18%) | 2/11 (18%) | 1/10 (10%) | **25/75 (33%)** | 1.91 |
+| `gpt-oss:16k` | MXFP4 | 8/9 (89%) | 9/11 (82%) | 20/42 (48%) | 5/11 (45%) | 7/10 (70%) | **49/83 (59%)** | 1.58 |
+| `qwen2.5-coder:16k` | Q4_K_M | 7/9 (78%) | 8/11 (73%) | 6/42 (14%) | 3/11 (27%) | 5/10 (50%) | **29/83 (35%)** | 2.06 |
 
 The gap has a concrete, non-mysterious cause: `gpt-oss:16k` returns native `tool_calls`,
 while `qwen2.5-coder:16k` ignores the forced `tool_choice` and embeds the call in the

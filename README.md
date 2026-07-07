@@ -75,24 +75,26 @@ comparable.
 
 | What it is | Detail | Result |
 |---|---|---:|
-| `gpt-oss:16k` (MXFP4) | a bare local model driven by Reticle's own loop | 52/75 (69%), v0.4.0 |
-| `qwen2.5-coder:16k` (Q4_K_M) | a bare local model driven by Reticle's own loop | 29/75 (39%), v0.4.0 |
-| Claude Code (`sonnet`) | an agent system (its own loop) | **not run in this environment** |
+| `gpt-oss:16k` (MXFP4) | a bare local model driven by Reticle's own loop | 49/83 (59%), v0.5.0 |
+| `qwen2.5-coder:16k` (Q4_K_M) | a bare local model driven by Reticle's own loop | 29/83 (35%), v0.5.0 |
+| Claude Code (`claude-sonnet-5`) | an agent system (its own loop) | 24/25 that ran passed (partial) |
 
-The two local rows are the 75-task v0.4.0 numbers; re-running the local models on the
-83-task v0.5.0 suite is a follow-up. They are small quantized local models, so the numbers
-are a floor, not an upper bound.
+The two local rows are the full 83-task v0.5.0 suite. They are small quantized local
+models, so the numbers are a floor, not an upper bound.
 
 The distinction the table makes is real. The two local models are *bare models*: Reticle
 supplies the loop, feeds the checker's violations back, and decides when a task passes.
 Claude Code is an *agent system* with its own planning-and-tool loop, so pointed at
-Reticle's MCP server it does not run the same harness the two local rows do; its row is
-not a like-for-like comparison. It is shown as **not run in this environment** because the
-`claude` CLI is present here but unauthenticated. There is no fabricated score. To run it:
-authenticate the CLI (`claude`, then `/login`), then `just bench-agent-claude-code`, which
-per task launches `reticle-mcp`, runs `claude -p` over it, replays the captured transcript,
-and runs the task's checker; a missing or unauthenticated CLI is recorded as an honest
-not-run, never a pass or fail. See
+Reticle's MCP server it does not run the same harness the two local rows do; its row is not
+a like-for-like comparison. It is a real authenticated run, not a fabricated score, but a
+**partial** one: 25 of the 83 tasks ran (tiers 1 through 3) and 24 passed before the
+subscription rate limits stopped the run, so its denominator differs from the full-suite
+local rows and the tier 4 and 5 tasks were not reached. Per task the harness launches
+`reticle-mcp`, runs `claude -p` over it, replays the captured transcript, and runs the
+task's checker; a rate-limited or unauthenticated session is recorded as an honest not-run,
+never a pass or fail. To run the full suite when the rate window is clear:
+`just bench-agent-claude-code` (on Windows set `RETICLE_CLAUDE_BIN` to the resolved
+`claude.cmd` and `RETICLE_MCP_BIN` to a current `reticle-mcp`). See
 [Benchmark methodology](docs/src/benchmark.md) for how a run is scored and replayed.
 
 ## The live demo
