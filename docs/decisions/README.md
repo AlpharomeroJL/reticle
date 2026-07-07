@@ -68,3 +68,4 @@ superseded decision is marked and linked to its replacement.
 | [0060](0060-v8-disk-and-lane-target-policy.md) | v8 run disk policy: lane target dirs move to E:, D: keeps the shared main target |
 | [0061](0061-v8-frozen-surface-amendments.md) | v8 frozen-surface amendments: what may change, at which wave boundary, always additive |
 | [0062](0062-rtla-streamed-archive-contract.md) | The .rtla streamed-archive format, the TileSource seam, and the gds_stream reader (Wave 2 contract) |
+| [0063](0063-lydrc-drc-deck-compatibility-subset.md) | KLayout .lydrc DRC deck compatibility: the supported subset, compiled down to the frozen rule vocabulary and validated against KLayout headless |
