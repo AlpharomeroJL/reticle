@@ -31,6 +31,8 @@
 //! * [`command`], the command-palette catalog and fuzzy filter.
 //! * [`keymap`], rebindable keyboard shortcuts: TOML load/save and conflicts.
 //! * [`drc_panel`], running the DRC engine and formatting its violations.
+//! * [`live_drc`], DRC-as-you-type: a prepared incremental index re-checked on every
+//!   edit so a violation is underlined the moment it is drawn.
 //! * [`agent_panel`], the agent panel's run state machine, conversation-mode
 //!   transcript, and narration feed over the `reticle-agent-api` transcript types.
 //! * [`agent_history`], the session history browser: enumerating past run
@@ -102,6 +104,7 @@ pub mod inspector;
 pub mod keymap;
 pub mod labels;
 pub mod layers;
+pub mod live_drc;
 pub mod livesync;
 pub mod measure;
 pub mod minimap;
