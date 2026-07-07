@@ -65,3 +65,5 @@ superseded decision is marked and linked to its replacement.
 | [0057](0057-aref-off-by-one-was-a-measurement-misdiagnosis.md) | The "GDS AREF-decode off-by-one" was a measurement misdiagnosis, not a parser bug |
 | [0058](0058-share-link-live-browser-transport.md) | The share-link live browser transport: one SyncMessage framing, two transports, read-only enforced twice |
 | [0059](0059-tinytapeout-precheck-live-run-and-boundary-fix.md) | The live TinyTapeout precheck run: making the wrapper work end to end, and the real prBoundary bug it caught |
+| [0060](0060-v8-disk-and-lane-target-policy.md) | v8 run disk policy: lane target dirs move to E:, D: keeps the shared main target |
+| [0061](0061-v8-frozen-surface-amendments.md) | v8 frozen-surface amendments: what may change, at which wave boundary, always additive |
