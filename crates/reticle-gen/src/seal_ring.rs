@@ -52,8 +52,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::GenError;
 use crate::generator::{GenOutput, GenParams, Generator};
+use crate::gentech::{Conductor, Cut, GenTech};
 use crate::schema::{FieldSchema, ParamSchema};
-use crate::sky130::{self, Conductor, Cut};
 
 /// How tall the seal-ring stack is: which conductor levels it walls off and which
 /// cuts stitch them.
@@ -89,46 +89,38 @@ struct StackStep {
 }
 
 impl SealStack {
-    /// The conductor levels in the stack, lowest first.
-    fn conductors(self) -> &'static [Conductor] {
+    /// The number of conductor levels this stack walls off (2, 3, or 4, base-up).
+    fn depth(self) -> usize {
         match self {
-            Self::Li1Met1 => &[sky130::LI1, sky130::MET1],
-            Self::UpToMet2 => &[sky130::LI1, sky130::MET1, sky130::MET2],
-            Self::UpToMet3 => &[sky130::LI1, sky130::MET1, sky130::MET2, sky130::MET3],
+            Self::Li1Met1 => 2,
+            Self::UpToMet2 => 3,
+            Self::UpToMet3 => 4,
         }
     }
 
-    /// The cut steps stitching adjacent conductor levels, lowest first. There is one
-    /// fewer step than there are conductors.
-    fn steps(self) -> &'static [StackStep] {
-        // mcon (li1<->met1): m1.4 asks met1 to enclose it by 30; li1 has no subset
-        // enclosure for mcon, so 30 is the binding margin, applied to both frames.
-        const MCON_STEP: StackStep = StackStep {
-            cut: sky130::MCON,
-            enclosure: 30,
-        };
-        // via (met1<->met2): m2.4 asks met2 to enclose it by 55.
-        const VIA_STEP: StackStep = StackStep {
-            cut: sky130::VIA,
-            enclosure: 55,
-        };
-        // via2 (met2<->met3): the subset carries no via2 enclosure, so a conservative
-        // positive margin keeps both frames comfortably over the cut.
-        const VIA2_STEP: StackStep = StackStep {
-            cut: sky130::VIA2,
-            enclosure: 65,
-        };
-        match self {
-            Self::Li1Met1 => &[MCON_STEP],
-            Self::UpToMet2 => &[MCON_STEP, VIA_STEP],
-            Self::UpToMet3 => &[MCON_STEP, VIA_STEP, VIA2_STEP],
-        }
+    /// The conductor levels in the stack, lowest first, resolved against `gt`.
+    fn conductors(self, gt: &GenTech) -> Vec<Conductor> {
+        (0..self.depth()).map(|l| gt.conductor(l)).collect()
+    }
+
+    /// The cut steps stitching adjacent conductor levels, lowest first, resolved
+    /// against `gt`. There is one fewer step than there are conductors. Each step's
+    /// enclosure is the margin the deck asks of that cut (grown on both frames); where
+    /// the deck gives none, [`GenTech`] carries a conservative positive margin.
+    fn steps(self, gt: &GenTech) -> Vec<StackStep> {
+        (0..self.depth() - 1)
+            .map(|l| {
+                let cut = gt.cut(l);
+                let (_, enclosure) = cut.enclosure.expect("seal cut has an enclosure margin");
+                StackStep { cut, enclosure }
+            })
+            .collect()
     }
 
     /// The widest conductor minimum width across the stack (drives the `ring_width`
     /// floor).
-    fn max_min_width(self) -> i32 {
-        self.conductors()
+    fn max_min_width(self, gt: &GenTech) -> i32 {
+        self.conductors(gt)
             .iter()
             .map(|c| c.min_width)
             .max()
@@ -137,8 +129,8 @@ impl SealStack {
 
     /// The widest conductor minimum spacing across the stack (drives the die-interior
     /// floor).
-    fn max_min_spacing(self) -> i32 {
-        self.conductors()
+    fn max_min_spacing(self, gt: &GenTech) -> i32 {
+        self.conductors(gt)
             .iter()
             .map(|c| c.min_spacing)
             .max()
@@ -147,8 +139,8 @@ impl SealStack {
 
     /// The largest enclosure any step asks of a frame (drives the `ring_width` floor
     /// when cuts are present).
-    fn max_enclosure(self) -> i32 {
-        self.steps()
+    fn max_enclosure(self, gt: &GenTech) -> i32 {
+        self.steps(gt)
             .iter()
             .map(|s| s.enclosure)
             .max()
@@ -212,14 +204,14 @@ impl SealRingParams {
 
     /// The smallest `ring_width` that keeps every cut in the stack enclosed: the
     /// largest cut size plus the largest step enclosure on both sides.
-    fn ring_floor_for_cuts(stack: SealStack) -> i32 {
+    fn ring_floor_for_cuts(stack: SealStack, gt: &GenTech) -> i32 {
         let max_cut = stack
-            .steps()
+            .steps(gt)
             .iter()
             .map(|s| s.cut.size)
             .max()
             .expect("a stack has at least one step");
-        max_cut + 2 * stack.max_enclosure()
+        max_cut + 2 * stack.max_enclosure(gt)
     }
 
     /// The smallest die side that leaves an interior of at least `min_interior` after
@@ -280,10 +272,14 @@ impl GenParams for SealRingParams {
             Self::RING_MAX,
         )?;
 
+        // Validation bounds are the reference (SKY130) technology; `generate` uses the
+        // active technology's own widths and enclosures.
+        let gt = GenTech::sky130();
+
         // `ring_width` must clear both the widest conductor width and, because the
         // stack always has cuts, room to enclose the largest cut on both sides.
-        let ring_floor = i64::from(self.stack.max_min_width())
-            .max(i64::from(Self::ring_floor_for_cuts(self.stack)));
+        let ring_floor = i64::from(self.stack.max_min_width(&gt))
+            .max(i64::from(Self::ring_floor_for_cuts(self.stack, &gt)));
         if i64::from(self.ring_width) < ring_floor {
             return Err(GenError::Invalid {
                 field: "ring_width",
@@ -295,7 +291,7 @@ impl GenParams for SealRingParams {
         // ring widths. Check the field range first, then the ring-dependent floor.
         check_range("die_width", self.die_width, Self::DIE_MIN, Self::DIE_MAX)?;
         check_range("die_height", self.die_height, Self::DIE_MIN, Self::DIE_MAX)?;
-        let interior = self.stack.max_min_spacing();
+        let interior = self.stack.max_min_spacing(&gt);
         if i64::from(self.die_width) < self.die_floor(interior) {
             return Err(GenError::Invalid {
                 field: "die_width",
@@ -340,16 +336,17 @@ impl Generator for SealRing {
     fn generate(
         &self,
         params: &Self::Params,
-        _tech: &Technology,
+        tech: &Technology,
         cell: &mut Cell,
     ) -> Result<GenOutput, GenError> {
         let start = cell.shapes.len();
+        let gt = GenTech::for_technology(tech);
         let rw = params.ring_width;
         let die_w = params.die_width;
         let die_h = params.die_height;
 
         // A closed frame on every conductor level, flush with the die outline.
-        for cond in params.stack.conductors() {
+        for cond in params.stack.conductors(&gt) {
             for strip in frame_strips(die_w, die_h, rw) {
                 cell.shapes
                     .push(DrawShape::new(cond.layer, ShapeKind::Rect(strip)));
@@ -357,8 +354,8 @@ impl Generator for SealRing {
         }
 
         // A ring of cuts for every stitch step, centered in the strips.
-        for step in params.stack.steps() {
-            emit_cut_ring(cell, step.cut, die_w, die_h, rw);
+        for step in params.stack.steps(&gt) {
+            emit_cut_ring(cell, step.cut, die_w, die_h, rw, &gt);
         }
 
         let added = cell.shapes.len() - start;
@@ -391,9 +388,9 @@ fn frame_strips(die_w: i32, die_h: i32, rw: i32) -> [Rect; 4] {
 /// margin; the corners are left cut-free so no two cuts on the layer overlap or crowd
 /// (the subset carries no cut-to-cut spacing rule, so the pitch is a conservative
 /// choice).
-fn emit_cut_ring(cell: &mut Cell, cut: Cut, die_w: i32, die_h: i32, rw: i32) {
+fn emit_cut_ring(cell: &mut Cell, cut: Cut, die_w: i32, die_h: i32, rw: i32, gt: &GenTech) {
     let size = cut.size;
-    let pitch = size + sky130::SAFE_CUT_MARGIN;
+    let pitch = size + gt.safe_cut_margin();
 
     // Cut centers stay inside the corner squares of the frame, so a horizontal run
     // spans x in [rw, die_w - rw) and a vertical run spans y in [rw, die_h - rw).
@@ -451,6 +448,7 @@ fn check_range(field: &'static str, value: i32, min: i64, max: i64) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sky130;
 
     fn build(params: &SealRingParams) -> Cell {
         let mut cell = Cell::new("top");
@@ -467,14 +465,15 @@ mod tests {
         let cell = build(&p);
         // Four conductor levels * 4 strips = 16 frame rects, plus three cut rings.
         assert!(cell.shapes.len() > 16, "frames plus cut rings");
-        for cond in p.stack.conductors() {
+        let gt = GenTech::sky130();
+        for cond in p.stack.conductors(&gt) {
             assert!(
                 cell.shapes.iter().any(|s| s.layer == cond.layer),
                 "frame present on conductor layer {:?}",
                 cond.layer
             );
         }
-        for step in p.stack.steps() {
+        for step in p.stack.steps(&gt) {
             assert!(
                 cell.shapes.iter().any(|s| s.layer == step.cut.layer),
                 "cut ring present on layer {:?}",
@@ -546,7 +545,7 @@ mod tests {
         let cell = build(&p);
         let rw = p.ring_width;
         let strips = frame_strips(p.die_width, p.die_height, rw);
-        for step in p.stack.steps() {
+        for step in p.stack.steps(&GenTech::sky130()) {
             let enc = i64::from(step.enclosure);
             for s in cell.shapes.iter().filter(|s| s.layer == step.cut.layer) {
                 let ShapeKind::Rect(cut) = s.kind else {

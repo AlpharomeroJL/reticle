@@ -49,8 +49,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::GenError;
 use crate::generator::{GenOutput, GenParams, Generator};
+use crate::gentech::{Conductor, GenTech};
 use crate::schema::{FieldSchema, ParamSchema};
-use crate::sky130;
 
 /// The most `via2` cuts a power pad's reinforcement staple uses per axis. A real
 /// supply pad is stitched to the lower bus by a compact via array, not a pad-wide
@@ -119,30 +119,27 @@ impl PadRingParams {
     /// caps it at the actual number of placed pads.
     const POWER_MAX: i64 = 4_096;
 
-    /// The conductor level pads are drawn on: `met3`, the top of the subset stack.
-    fn pad_conductor() -> sky130::Conductor {
-        sky130::MET3
+    /// The conductor level pads are drawn on: the top interconnect (`met3` on SKY130,
+    /// `Metal4` on SG13G2), the top of the generator stack.
+    fn pad_conductor(gt: &GenTech) -> Conductor {
+        gt.top()
     }
 
-    /// The backing-plate level for a power pad: `met2`, one below the pad level.
-    fn backing_conductor() -> sky130::Conductor {
-        sky130::MET2
+    /// The backing-plate level for a power pad: one below the pad level.
+    fn backing_conductor(gt: &GenTech) -> Conductor {
+        gt.conductor(2)
     }
-
-    /// The conservative enclosure a plate keeps around a power pad's `via2` cuts (the
-    /// subset carries no `via2` enclosure), matching the via-farm generator's choice.
-    const VIA2_ENCLOSURE: i32 = 65;
 
     /// How far a pad sits in from the die edge on the perpendicular axis. A small
     /// fixed inset (the pad-level spacing) keeps every pad clearly inside the outline.
-    fn edge_inset() -> i32 {
-        Self::pad_conductor().min_spacing
+    fn edge_inset(gt: &GenTech) -> i32 {
+        Self::pad_conductor(gt).min_spacing
     }
 
-    /// The pad-level minimum spacing (`met3`), the clearance every non-overlapping pad
-    /// pair must keep.
-    fn pad_spacing() -> i32 {
-        Self::pad_conductor().min_spacing
+    /// The pad-level minimum spacing, the clearance every non-overlapping pad pair must
+    /// keep.
+    fn pad_spacing(gt: &GenTech) -> i32 {
+        Self::pad_conductor(gt).min_spacing
     }
 
     /// Corner ownership. The **left and right columns run the full die height**; the
@@ -153,24 +150,24 @@ impl PadRingParams {
     ///
     /// The count along a column is how many pads fit in the height between the edge
     /// insets; along a row, how many fit in the corner-clear interior width.
-    fn column_pad_count(&self) -> u32 {
+    fn column_pad_count(&self, gt: &GenTech) -> u32 {
         // Full-height span available to a column: [inset, height - inset].
-        let span = i64::from(self.die_height) - 2 * i64::from(Self::edge_inset());
+        let span = i64::from(self.die_height) - 2 * i64::from(Self::edge_inset(gt));
         fit_count(span, self.pad_size, self.pad_pitch)
     }
 
     /// The count of pads along a bottom/top row (the corner-clear interior width).
-    fn row_pad_count(&self) -> u32 {
-        let span = self.row_interior_span();
+    fn row_pad_count(&self, gt: &GenTech) -> u32 {
+        let span = self.row_interior_span(gt);
         fit_count(span, self.pad_size, self.pad_pitch)
     }
 
     /// The interior x-span a row's pads may occupy: the die width minus, on each side,
     /// the edge inset plus a column pad plus the pad spacing.
-    fn row_interior_span(&self) -> i64 {
-        let side = i64::from(Self::edge_inset())
+    fn row_interior_span(&self, gt: &GenTech) -> i64 {
+        let side = i64::from(Self::edge_inset(gt))
             + i64::from(self.pad_size)
-            + i64::from(Self::pad_spacing());
+            + i64::from(Self::pad_spacing(gt));
         i64::from(self.die_width) - 2 * side
     }
 
@@ -178,18 +175,18 @@ impl PadRingParams {
     /// their inner faces are `die_height - 2*(inset + size)` apart, which must be at
     /// least the pad spacing (or the rows would overlap, which the die size forbids
     /// here because both rows are always placed).
-    fn rows_clear_vertically(&self) -> bool {
+    fn rows_clear_vertically(&self, gt: &GenTech) -> bool {
         let gap = i64::from(self.die_height)
-            - 2 * (i64::from(Self::edge_inset()) + i64::from(self.pad_size));
-        gap >= i64::from(Self::pad_spacing())
+            - 2 * (i64::from(Self::edge_inset(gt)) + i64::from(self.pad_size));
+        gap >= i64::from(Self::pad_spacing(gt))
     }
 
     /// The total number of pads placed around the ring: two full-height columns plus
     /// two interior-width rows.
-    fn total_pads(&self) -> u32 {
-        self.column_pad_count()
+    fn total_pads(&self, gt: &GenTech) -> u32 {
+        self.column_pad_count(gt)
             .saturating_mul(2)
-            .saturating_add(self.row_pad_count().saturating_mul(2))
+            .saturating_add(self.row_pad_count(gt).saturating_mul(2))
     }
 }
 
@@ -273,25 +270,30 @@ impl GenParams for PadRingParams {
         )?;
         check_range("power_pads", i64::from(self.power_pads), 0, Self::POWER_MAX)?;
 
+        // Validation bounds are the reference (SKY130) technology; the generate path
+        // uses the active technology's own spacing.
+        let gt = GenTech::sky130();
+
         // Pitch must keep adjacent pads spaced by at least the pad-level min spacing.
-        let pitch_floor = i64::from(self.pad_size) + i64::from(Self::pad_conductor().min_spacing);
+        let pitch_floor =
+            i64::from(self.pad_size) + i64::from(Self::pad_conductor(&gt).min_spacing);
         if i64::from(self.pad_pitch) < pitch_floor {
             return Err(GenError::Invalid {
                 field: "pad_pitch",
-                reason: "too tight to keep adjacent pads spaced by the met3 min spacing",
+                reason: "too tight to keep adjacent pads spaced by the pad-level min spacing",
             });
         }
 
         // The die must fit at least one column pad (full height) and, once the
         // corners are reserved for the columns, at least one row pad in the interior
         // width. Blame the dimension that is short.
-        if self.column_pad_count() == 0 {
+        if self.column_pad_count(&gt) == 0 {
             return Err(GenError::Invalid {
                 field: "die_height",
                 reason: "too short to fit a pad along the left/right columns",
             });
         }
-        if self.row_pad_count() == 0 {
+        if self.row_pad_count(&gt) == 0 {
             return Err(GenError::Invalid {
                 field: "die_width",
                 reason: "too narrow to fit a pad in the interior between the columns",
@@ -300,15 +302,15 @@ impl GenParams for PadRingParams {
         // The bottom and top rows are both placed, so they must clear each other
         // vertically by the pad spacing (a short die that would leave a sub-spacing
         // gap between the two rows is rejected rather than emitting a violation).
-        if !self.rows_clear_vertically() {
+        if !self.rows_clear_vertically(&gt) {
             return Err(GenError::Invalid {
                 field: "die_height",
-                reason: "too short to clear the bottom and top rows by the met3 spacing",
+                reason: "too short to clear the bottom and top rows by the pad-level spacing",
             });
         }
 
         // Power pads cannot exceed the pads actually placed.
-        if self.power_pads > self.total_pads() {
+        if self.power_pads > self.total_pads(&gt) {
             return Err(GenError::Invalid {
                 field: "power_pads",
                 reason: "more power pads requested than pads placed around the ring",
@@ -356,16 +358,17 @@ impl Generator for PadRing {
     fn generate(
         &self,
         params: &Self::Params,
-        _tech: &Technology,
+        tech: &Technology,
         cell: &mut Cell,
     ) -> Result<GenOutput, GenError> {
         let start = cell.shapes.len();
+        let gt = GenTech::for_technology(tech);
 
         // Collect every pad's lower-left corner in a stable order (bottom, top, left,
         // right), so the "first N are power pads" choice is deterministic.
         let mut pads: Vec<Point> = Vec::new();
         for edge in [Edge::Bottom, Edge::Top, Edge::Left, Edge::Right] {
-            collect_edge_pads(params, edge, &mut pads);
+            collect_edge_pads(params, edge, &mut pads, &gt);
         }
 
         // Spread the requested power pads evenly across the placed pads by striding:
@@ -383,7 +386,7 @@ impl Generator for PadRing {
             let i = i as u32;
             // A slot is a power pad if it is one of the first `power` stride steps.
             let is_power = power > 0 && i.is_multiple_of(stride) && (i / stride) < power;
-            emit_pad(cell, corner, params.pad_size, is_power);
+            emit_pad(cell, corner, params.pad_size, is_power, &gt);
         }
 
         let added = cell.shapes.len() - start;
@@ -405,14 +408,14 @@ impl Generator for PadRing {
 /// between the columns: they start a pad-plus-spacing in from the column on each side,
 /// so a row pad always clears the perpendicular column by the pad spacing. Only whole
 /// pads that fit their span are emitted.
-fn collect_edge_pads(params: &PadRingParams, edge: Edge, pads: &mut Vec<Point>) {
+fn collect_edge_pads(params: &PadRingParams, edge: Edge, pads: &mut Vec<Point>, gt: &GenTech) {
     let size = params.pad_size;
-    let inset = PadRingParams::edge_inset();
+    let inset = PadRingParams::edge_inset(gt);
 
     match edge {
         Edge::Left | Edge::Right => {
             // Full-height column: pads step along y from `inset` upward.
-            let count = params.column_pad_count();
+            let count = params.column_pad_count(gt);
             let near_x = inset;
             let far_x = params.die_width - inset - size;
             let x = if edge == Edge::Left { near_x } else { far_x };
@@ -423,8 +426,8 @@ fn collect_edge_pads(params: &PadRingParams, edge: Edge, pads: &mut Vec<Point>) 
         }
         Edge::Bottom | Edge::Top => {
             // Interior-width row: pads step along x, clearing the columns by spacing.
-            let count = params.row_pad_count();
-            let row_lo_x = inset + size + PadRingParams::pad_spacing();
+            let count = params.row_pad_count(gt);
+            let row_lo_x = inset + size + PadRingParams::pad_spacing(gt);
             let near_y = inset;
             let far_y = params.die_height - inset - size;
             let y = if edge == Edge::Bottom { near_y } else { far_y };
@@ -455,8 +458,8 @@ fn fit_count(span: i64, size: i32, pitch: i32) -> u32 {
 /// the pad interior and both the pad and the backing plate cover the cut array grown
 /// by a conservative enclosure, so every cut is enclosed on all sides and the backing
 /// plate never reaches beyond the pad it backs.
-fn emit_pad(cell: &mut Cell, corner: Point, size: i32, is_power: bool) {
-    let pad_layer = PadRingParams::pad_conductor().layer;
+fn emit_pad(cell: &mut Cell, corner: Point, size: i32, is_power: bool, gt: &GenTech) {
+    let pad_layer = PadRingParams::pad_conductor(gt).layer;
     let pad = Rect::new(corner, Point::new(corner.x + size, corner.y + size));
     cell.shapes
         .push(DrawShape::new(pad_layer, ShapeKind::Rect(pad)));
@@ -465,13 +468,14 @@ fn emit_pad(cell: &mut Cell, corner: Point, size: i32, is_power: bool) {
         return;
     }
 
-    // Reinforce: a bounded via2 cut staple inside the pad, covered by a met2 backing
-    // plate. A power pad is stapled to the lower bus by a compact via array, not a
-    // full flood of the pad, so the array is capped per axis regardless of pad size;
-    // this keeps the emitted geometry bounded and matches how real supply pads staple.
-    let cut = sky130::VIA2;
-    let enc = PadRingParams::VIA2_ENCLOSURE;
-    let pitch = cut.size + sky130::SAFE_CUT_MARGIN;
+    // Reinforce: a bounded top-cut staple inside the pad, covered by a backing plate
+    // one level down. A power pad is stapled to the lower bus by a compact via array,
+    // not a full flood of the pad, so the array is capped per axis regardless of pad
+    // size; this keeps the emitted geometry bounded and matches how real supply pads
+    // staple.
+    let cut = gt.cut(2);
+    let (_, enc) = cut.enclosure.expect("top cut has an enclosure margin");
+    let pitch = cut.size + gt.safe_cut_margin();
 
     // How many cuts fit per axis inside the pad, leaving `enc + pitch` of margin on
     // each side so both covering plates stay inside the pad, then cap at the staple
@@ -514,7 +518,7 @@ fn emit_pad(cell: &mut Cell, corner: Point, size: i32, is_power: bool) {
         // growing by `enc` keeps a positive gap to the pad edge).
         let plate = bbox.expanded(enc);
         cell.shapes.push(DrawShape::new(
-            PadRingParams::backing_conductor().layer,
+            PadRingParams::backing_conductor(gt).layer,
             ShapeKind::Rect(plate),
         ));
     }
@@ -537,6 +541,7 @@ fn check_range(field: &'static str, value: i64, min: i64, max: i64) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sky130;
 
     fn build(params: &PadRingParams) -> Cell {
         let mut cell = Cell::new("top");
@@ -569,7 +574,7 @@ mod tests {
     #[test]
     fn power_pad_count_is_honored() {
         let p = PadRingParams::default();
-        let total = p.total_pads();
+        let total = p.total_pads(&GenTech::sky130());
         assert!(total >= p.power_pads, "enough pads for the power request");
         // Count distinct met3 pad squares: one per pad.
         let cell = build(&p);
