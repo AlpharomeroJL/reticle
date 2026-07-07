@@ -491,24 +491,29 @@ flags from the installed CLI help), then decide 3B run scope with the operator.
   nothing. A test drives successes and failures and asserts the captured JSONL replays
   to the same document as direct application. Closes the mining/replay gap for a raw
   MCP client (Lane 3A) and local runs. ADR 0051.
-- [ ] Lane 3A: harness backend that drives Claude Code non-interactively; one session
-  per task; server enforces command budgets and captures the transcript (via the
-  serial step's `RETICLE_MCP_TRANSCRIPT`); detect absence of the CLI or an
-  unauthenticated session and skip with an honest not-run marker. BLOCKED on the
-  weekly quota for any real run until Jul 7 9am. VERIFIED CLI flags (claude v2.1.197,
-  captured 2026-07-06, no quota): `-p`/`--print` (non-interactive), `--mcp-config
-  <configs...>` (point at a generated config that launches `reticle-mcp` with
-  `RETICLE_MCP_TRANSCRIPT` set), `--strict-mcp-config` (only that server),
-  `--model <model>` (the row label reports what the CLI used), `--output-format
-  stream-json` (parse the result), `--allowed-tools <tools...>`, `--append-system-prompt`,
-  `--permission-mode`. Build against these, not guesses.
-- [ ] Lane 3B: honest labeling + the run. Row labeled "Claude Code (<model reported
-  by the CLI>)", never a bare-model comparison; README + benchmark chapter explain
-  the agent-system vs bare-model distinction. If the CLI is present and authenticated
-  at bench time, run the full 83-task suite and publish the row alongside the two
-  local rows (note it consumes operator subscription quota, and how to re-run). Mine
-  all transcripts incl. the new server-side local ones; promote only two-way-tested
-  candidates.
+- [x] Lane 3A: Claude Code agent-system backend. done-gate-green, merged (lane e7dfa03;
+  Windows launcher fix 9f4b351; `just ci` GREEN). reticle-agent `claude-code` backend
+  (not a `ModelClient`, since Claude Code brings its own loop): per task it writes an MCP
+  config launching `reticle-mcp` with the serial step's transcript capture + a budget,
+  runs `claude -p` with the verified flags, replays the captured transcript, runs the
+  task's checker, and records a `ResultRecord` labeled `backend=claude-code` (model from
+  the stream). A missing/unauthenticated CLI is a distinct `NotRunRecord` that can never
+  be counted as pass/fail. Testable via `RETICLE_CLAUDE_BIN` fake (no quota). Windows
+  launcher wraps the npm `.ps1`/`.cmd` shim through powershell/cmd. ADR 0052. Orchestrator
+  smoke VERIFIED the honest paths end to end with the real CLI: program-not-found and
+  unauthenticated (`please run /login`) both yield honest not-runs, never a fabricated
+  result.
+- [~] Lane 3B: honest labeling DONE; the RUN is an honest NOT-RUN in this environment.
+  The benchmark chapter (commit 0361cad) explains the agent-system versus bare-model
+  distinction (Claude Code brings its own loop, so its row is labeled "Claude Code
+  (<model>)" and is not head-to-head comparable) and states the status: the `claude` CLI
+  is present (v2.1.197) but NOT authenticated here (the plan upgrade reset the
+  orchestrator quota, but the standalone CLI has no login session), so every task records
+  a not-run and no row is published. Honest, per the packet ("skip with an honest not-run
+  marker"). RE-RUN to publish a real row: `claude` `/login` once, then
+  `just bench-agent-claude-code` (on Windows set `RETICLE_CLAUDE_BIN` to the resolved
+  `claude.ps1`/`.cmd`); it consumes 83 sessions of subscription quota, an operator step.
+  Transcript mining over the new server-side local transcripts is still outstanding.
 
 ## Wave 4: the tape-out oracle, TTSKY26c readiness (parallel, 3 lanes) [in-progress]
 
@@ -526,11 +531,17 @@ Metal 5 forbidden (TT power grid). No floating digital output pins. Top macro na
 `TinyTapeout/tt-support-tools` (its `precheck` module), confirmed present. For 4A the
 exact per-pin DEF coordinates still need pulling from the shuttle's template repo.
 
-- [ ] Lane 4A: pull the current TinyTapeout GDS-mode die template (tile dims, pin
-  locations/layers, power rails, keep-outs, cell naming); encode as a Reticle
-  technology+template bundle; "New TinyTapeout tile" in the Start screen creates a
-  correctly framed, pinned, locked document; validate against their published example
-  submissions.
+- [x] Lane 4A: TinyTapeout tile template bundle. done-gate-green, merged (lane e00f220/
+  9f657cb into merge f5b3f3e; `just ci` GREEN). `tech/tinytapeout-sky130.tech` plus
+  `reticle_app::tinytapeout::tile_document()` building cell `tt_um_reticle_tile`: the 1x2
+  die outline (0,0 to 161000,225760 DBU), the six `ua[0..5]` met4 pins at the canonical
+  DEF coordinates, and the VDPWR/VGND/VAPWR met4 power straps, all transcribed from
+  TinyTapeout's own `tt_analog_1x2.def` + `magic_init_project.tcl` (fetched 2026-07-06).
+  "New TinyTapeout tile" on the Start screen loads it. Validated zero-tolerance against
+  the canonical DEF and cross-checked against the real published `tt_um_analog_mux`
+  submission; 13 tests; wasm-safe. ADR 0053. Honest: the model has no per-shape lock, so
+  the frame is documented (not mechanically locked); met5 keep-out is documented +
+  test-enforced.
 - [ ] Lane 4B: integrate TinyTapeout's own precheck (Magic + KLayout, Linux-native,
   via a pinned Docker container with WSL as documented fallback; `just tt-precheck
   <gds>`); wire it as an agent-loop verifier whose structured failures are parsed and
