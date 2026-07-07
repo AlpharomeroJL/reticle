@@ -26,6 +26,7 @@
 
 mod context;
 mod cull;
+mod drc_heatmap;
 mod geometry;
 mod indirect;
 mod pages;
@@ -39,6 +40,7 @@ mod view;
 
 pub use context::WgpuContext;
 pub use cull::{CellCompactor, CellCuller, CompactionOutput, CullAabb, QUAD_INDEX_COUNT};
+pub use drc_heatmap::{DrcHeatmap, DrcHeatmapOverlay, DrcOutput, DrcRules};
 pub use geometry::{MeshVertex, RectInstance, SceneGeometry};
 pub use indirect::{IndirectRects, MultiDraw, upload_instances};
 pub use pages::{Allocation, BufferPages, DEFAULT_PAGE_SIZE, PageAllocator};
