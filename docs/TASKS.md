@@ -663,15 +663,29 @@ Release hold lifted; executing the remaining items in order. Progress:
   fixed. The tile now passes every one of TinyTapeout's own Magic+KLayout DRC and geometry
   checks; four submission-artifact checks (LEF, Verilog x2, wired analog pins) remain,
   recorded honestly. Report committed at `examples/tapeout/precheck-results.md`.
-- [~] Share-link live browser transport: dispatched as lane `v7-share-live` (subagent, in
-  progress) per the lane procedure. The biggest genuine gap (the wasm `web_sys::WebSocket`
-  client so a shared read-only link streams live sync + presence in the browser).
-- [~] Benchmarks v0.5.0 (83 tasks): gpt-oss:16k re-run in progress (orchestrator-direct,
-  Ollama); qwen2.5-coder:16k queued; the Claude Code flagship row queued (the `claude` CLI
-  is authenticated here, verified). All three rows land in the README + benchmark chapter.
-- [ ] Release end to end (version bump 7.0.0, git-cliff CHANGELOG, tag, GitHub release with
-  binaries, gh-pages redeploy, smoke + live verify), then the final skeptical STATUS
-  re-audit and summary.
+- [x] Share-link live browser transport DONE (lane `v7-share-live`, merged a4e6e68,
+  lane-done): a wasm `web_sys::WebSocket` viewer + sharer over a shared `SyncMessage`
+  codec, read-only enforced server-side (relay drops viewer frames) and app-side, with a
+  hard-gate two-client relay test and a two-context Playwright e2e (`just e2e-share`, 1
+  passed). ADR 0058. `just ci`, wasm clippy, and the e2e all green on main.
+- [x] Benchmarks v0.5.0 (83 tasks) DONE: gpt-oss:16k (MXFP4) 49/83 = 59%, qwen2.5-coder:16k
+  (Q4_K_M) 29/83 = 35% (both full-suite, committed under `benchmarks/results/v0.5.0/`). The
+  Claude Code flagship row is REAL but PARTIAL: 24 of 25 tasks that ran passed (96%),
+  stopped before all 83 under subscription rate limits. Getting the backend to drive the
+  tools took four real fixes (ADR is in the benchmark chapter + commit 13c8586): stdin
+  prompt, drop `--allowed-tools`, absolute transcript path, current `reticle-mcp`. All three
+  rows are in the README and both benchmark chapters, honestly labeled.
+- [x] Release v7.0.0 DONE and SHIPPED (2026-07-07): version 7.0.0, git-cliff CHANGELOG (with
+  the remapped grouping), tag `v7.0.0` pushed, GitHub release (not draft) with four host
+  binaries, gh-pages redeployed (`web-8a430603a0e038f8`), `just smoke-pages` PASS + README
+  media all 200. Live demo serves v7.0.0. Repository visibility unchanged.
+- [x] Final skeptical STATUS re-audit DONE: single author (Josef Long), no AI attribution in
+  files or commit messages, one `unsafe` (documented mmap), no `todo!`/`unimplemented!`
+  stubs, no leaked secrets over tree and full history (`check-keys -History`), ~1350 test
+  attributes. `docs/STATUS.md` v7.0.0 section updated to the shipped state with honest limits.
+
+**v7.0.0 SHIPPED.** The AREF misfiling is closed, the precheck ran to a verdict, the
+share-live transport shipped, the three benchmark rows are honest, and the release is live.
 
 ### Frozen-surface manifest (recorded at Wave 2 contract point)
 
