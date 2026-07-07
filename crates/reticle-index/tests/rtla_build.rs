@@ -97,8 +97,16 @@ impl ArchiveReader {
         #[allow(unsafe_code)]
         let mmap = unsafe { Mmap::map(&file).expect("map archive") };
         assert!(mmap.len() >= 32, "archive smaller than its preamble");
+        // Canonical .rtla preamble (ADR 0069, shared with the real reader): magic[0..8],
+        // version[8..12], flags[12..16], header_len[16..24], dir_len[24..32]. Offsets are
+        // derived (header at 32, directory at the next 16-aligned boundary), exactly as
+        // crate::tile_source::MmapTileSource derives them.
+        assert_eq!(&mmap[0..8], &RTLA_MAGIC, "bad .rtla magic");
         let rd = |at: usize| u64::from_le_bytes(mmap[at..at + 8].try_into().unwrap());
-        let (header_off, header_len, dir_off, dir_len) = (rd(0), rd(8), rd(16), rd(24));
+        let header_len = rd(16);
+        let dir_len = rd(24);
+        let header_off = 32u64;
+        let dir_off = (header_off + header_len).div_ceil(16) * 16;
         Self {
             mmap,
             header_off,
