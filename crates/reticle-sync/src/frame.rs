@@ -1,6 +1,6 @@
 //! The live-session wire codec: the single framing every peer agrees on (ADR 0058).
 //!
-//! A live collaboration socket ([`reticle_server`]'s `GET /ws/{room}`) carries
+//! A live collaboration socket (`reticle_server`'s `GET /ws/{room}`) carries
 //! **opaque binary frames**; the relay never inspects them. This module fixes what
 //! those bytes *are*: every published frame is a [`reticle_proto::v1::SyncMessage`]
 //! envelope (the frozen Wave 0 collaboration message, spec Section 6), so one binary
@@ -23,8 +23,9 @@
 //!   CRDT delta with [`encode_update_frame`] and its presence with
 //!   [`encode_presence_frame`], and sends each as one binary frame.
 //! * A receiver (the app's read-only viewer session, or a watcher building a
-//!   [`SyncDocument`]) decodes each binary frame with [`decode_frame`] and applies the
-//!   [`Frame::Update`] raw bytes with [`SyncDocument::apply_update`] and the
+//!   [`SyncDocument`](crate::SyncDocument)) decodes each binary frame with
+//!   [`decode_frame`] and applies the [`Frame::Update`] raw bytes with
+//!   [`SyncDocument::apply_update`](crate::SyncDocument::apply_update) and the
 //!   [`Frame::Presence`] into its awareness map.
 //!
 //! Everything here is pure, `cfg`-free, and builds for `wasm32`, so the browser
