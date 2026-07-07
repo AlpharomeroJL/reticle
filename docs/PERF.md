@@ -149,7 +149,7 @@ remote echo on localhost is about 0.79 ms median, roughly 100x under the 100 ms 
 This is the relay-plus-CRDT round trip on one machine; a wide-area deployment adds real
 network latency on top.
 
-## v5.0.0 headless pipeline scale proof (measured 2026-07-03 on this machine)
+## v5.0.0 headless pipeline scale proof (measured 2026-07-03, re-measured 2026-07-06 on this machine)
 
 The headless CLI (`reticle`, release build) processing a deliberately large,
 hierarchical layout end to end. The design is one `xtask gen-layout --shapes 2000000
@@ -157,17 +157,21 @@ hierarchical layout end to end. The design is one `xtask gen-layout --shapes 200
 **4,194,304 flattened leaf shapes**. Wall time and peak working set are measured per
 process by `scripts/measure-run.ps1` (peak working set polled from the OS high-water
 mark, wall time by a stopwatch around the process), release binaries, same host.
+The design file is passed to the harness by **absolute path**, so these figures are
+always this 4,194,304-leaf (8x8x8) output and never a differently-sized
+`scratch/gen.gds` left by an earlier `gen-layout` run (see the note at the end of
+this section).
 
 | Stage | Wall time | Peak memory | Note |
 |---|---:|---:|---|
-| Import (parse the hierarchical GDS) | 37 ms | 7.5 MB | Hierarchy stays small: 4.19M effective leaves, but the on-disk and in-memory forms are tiny because the design is cells and arrays, never flattened to import. |
-| Render (flatten, then offscreen to 2560x1440 PNG) | 809 ms | 594 MB | The 4.19M leaves are flattened and drawn to a 2560x1440 image (a 2.4 MB PNG). |
-| DRC (flatten, full-cell check, emit report) | 11.0 s | 1426 MB | Whole pipeline including formatting and emitting the full violation report. The synthetic design is violation-dense (about 2 million min-width violations), so most of this time and memory is the report itself, not the check. The isolated incremental-DRC cost (the interactive path) is 5 to 37 us; see the DRC section above. |
-| Extract (flatten, connectivity, emit report) | 12.2 s | 1075 MB | Finds 4,194,304 single-shape nets (the synthetic shapes are disjoint) and prints one line per net, so this figure too is dominated by emitting a multi-million-line report, not the union-find. |
+| Import (parse the hierarchical GDS) | 32 ms | 7.6 MB | Hierarchy stays small: 4.19M effective leaves, but the on-disk and in-memory forms are tiny because the design is cells and arrays, never flattened to import. |
+| Render (flatten, then offscreen to 2560x1440 PNG) | 801 ms | 595 MB | The 4.19M leaves are flattened and drawn to a 2560x1440 image (a 2.4 MB PNG). |
+| DRC (flatten, full-cell check, emit report) | 10.3 s | 1426 MB | Whole pipeline including formatting and emitting the full violation report. The synthetic design is violation-dense (4,194,304 min-width violations, one per leaf shape), so most of this time and memory is the report itself, not the check. The isolated incremental-DRC cost (the interactive path) is 5 to 37 us; see the DRC section above. |
+| Extract (flatten, connectivity, emit report) | 12.7 s | 1074 MB | Finds 4,194,304 single-shape nets (the synthetic shapes are disjoint) and prints one line per net, so this figure too is dominated by emitting a multi-million-line report, not the union-find. |
 
 The honest headline is the first two rows: a 4.19M-leaf hierarchical layout imports
-in 37 ms using 7.5 MB, and flattens and renders offscreen at 2560x1440 in 809 ms
-using 594 MB, on this machine. The DRC and extract rows are whole-pipeline wall times
+in 32 ms using 7.6 MB, and flattens and renders offscreen at 2560x1440 in 801 ms
+using 595 MB, on this machine. The DRC and extract rows are whole-pipeline wall times
 that include emitting a per-item text report for millions of items (the CLI is
 verbose by design); the core algorithm costs are isolated in the criterion sections
 above (index build 227 ms per 1M shapes, DRC full pass 643 ms per 1M shapes).
@@ -273,18 +277,33 @@ per-frame growth or frame-time creep over the run. This is a bounded soak run he
 operator can run it for a longer duration. A true multi-minute soak of the *live wasm
 pan path in a browser* is a separate e2e/operator step and is not measured here.
 
-Note (honest caveat, and a bug found in passing): the generated GDS parses its AREF
-array column/row counts as 8x8 when `reticle`/the harness is run directly (giving the
-correct 4,194,304 leaves), but as 7x7 (1,882,384 leaves) when the process is launched
-with `UseShellExecute=false` and stdout redirected to a pipe, which is how
-`scripts/measure-run.ps1` launches it. This is a reproducible, launch-context
-dependent misparse in the GDS import path (an off-by-one in the AREF COLROW decode,
-consistent with an uninitialized read), not a Lane 5B regression and not affected by
-the flatten fix (both counts are internally consistent). It is filed as a separate
-bug. It means the peak-working-set figures gathered under `measure-run.ps1` (and the
-v5.0.0 "4,194,304 flattened leaf shapes" scale-proof above, measured the same way)
-reflect the 7x7 (1.88M) parse; the interaction-latency and direct soak numbers here
-are the correct 8x8 (4.19M) parse.
+Note (correcting an earlier misdiagnosis): a previous revision of this section claimed
+the generated GDS "parses its AREF column/row counts as 8x8 when run directly but as
+7x7 (1,882,384 leaves) when launched with `UseShellExecute=false`", blamed "an
+off-by-one in the AREF COLROW decode, consistent with an uninitialized read", and
+warned that the scale-proof numbers above reflected that 7x7 misparse. That was wrong
+on every point. The GDS parse is pure, deterministic safe Rust: `gds21`, the AREF
+import in `crates/reticle-io/src/gds.rs` (which copies `aref.cols`/`aref.rows`
+verbatim), and `Document::flatten` (which loops `0..columns`) contain no `unsafe` and
+no uninitialized memory, so identical bytes yield identical counts on every launch.
+Re-measuring on the design pinned by absolute path reproduces the 4,194,304-leaf
+figures above; their DRC/extract peaks (1426 MB / 1074 MB) are about double the same
+generator run at 1,882,384 leaves (695 MB / 500 MB), which confirms the numbers above
+are the 8x8x8 design, not a 7x7 parse.
+
+The real launch-context effect is a working-directory bug in the *measurement*, not a
+parser bug. `scripts/measure-run.ps1` starts the child via .NET `ProcessStartInfo`
+without setting `WorkingDirectory`, so a **relative** path such as `scratch/gen.gds`
+resolves against `[Environment]::CurrentDirectory` (which PowerShell's `Set-Location`
+does not update), whereas a direct run or `Start-Process` resolves it against the
+shell's current location. When those two directories hold different `scratch/gen.gds`
+files, the harness silently measures a different design than intended -- and this repo
+documents two designs written to that same path: `xtask gen-layout --shapes 2000000
+--layers 8 --depth 3` (the 4,194,304-leaf design measured here) and `just gen-layout
+1000000 8 3 scratch/gen.gds` (README / user guide, a 1,882,384-leaf design). Each
+count is the correct flatten of whichever file was read; nothing is misparsed. Passing
+the design by absolute path (as done for the table above), or giving `measure-run.ps1`
+an explicit `WorkingDirectory`, removes the ambiguity.
 
 ## Targets (Section 10)
 
