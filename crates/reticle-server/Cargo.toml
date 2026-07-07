@@ -22,7 +22,14 @@ tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "
 
 [dev-dependencies]
 tokio-tungstenite = "0.29.0"
+futures-util = "0.3.32"
 # The echo-latency example drives real CRDT updates through the relay.
 reticle-sync = { workspace = true }
 reticle-model = { workspace = true }
 reticle-geometry = { workspace = true }
+# The `agent_live` integration test drives the agent's live-room client
+# (`reticle_agent::live::run_in_room`) against an in-process relay, proving the agent's
+# frames reach a peer and a peer's edits reach the agent. Dev-only: the relay crate does
+# not depend on the agent at build time.
+reticle-agent = { workspace = true }
+reticle-agent-api = { workspace = true }
