@@ -542,11 +542,27 @@ exact per-pin DEF coordinates still need pulling from the shuttle's template rep
   submission; 13 tests; wasm-safe. ADR 0053. Honest: the model has no per-shape lock, so
   the frame is documented (not mechanically locked); met5 keep-out is documented +
   test-enforced.
-- [ ] Lane 4B: integrate TinyTapeout's own precheck (Magic + KLayout, Linux-native,
-  via a pinned Docker container with WSL as documented fallback; `just tt-precheck
-  <gds>`); wire it as an agent-loop verifier whose structured failures are parsed and
-  fed back like DRC violations; an e2e-style test proves a known-good example passes
-  and a seeded violation fails with a parsed, actionable report.
+- [x] Lane 4B: integrate TinyTapeout's own precheck (Magic + KLayout, Linux-native)
+  as an external oracle. Code-gate green (lane/v7-4b; reticle-cli nextest 27 pass,
+  clippy `--all-targets -D warnings`, `cargo doc -D warnings`, `cargo build --workspace`,
+  typos, check-style, `mdbook build docs`). `just tt-precheck <gds>` +
+  `scripts/tt-precheck.ps1` run `python precheck/precheck.py --gds <gds> --tech sky130A`
+  inside the PINNED image `hpretl/iic-osic-tools:2025.01` (amd64 digest
+  `sha256:a51257b7d85fc75d5a690317539f9787a401d6dd28583d73dceab174ccc9e78f`, 3.94 GB
+  compressed, measured from the registry manifest 2026-07-06), staging a minimal
+  info.yaml (top_module = GDS stem) and a pinned tt-support-tools checkout, copying the
+  reports (results.md, magic_drc.txt, ...) out; WSL is the documented fallback. Parser
+  `reticle_cli::tt_precheck` (std-only) -> `PrecheckReport { passed, failures }` with
+  `PrecheckFailure { rule, layer, location, message }` modeled on `Violation`;
+  `feedback_lines()` is the agent-loop seam (the same `Context::feedback` channel the DRC
+  verifier uses). Two-way oracle test `tests/tt_precheck_oracle.rs` (5 tests): known-good
+  passes clean, seeded violation fails with a parsed actionable report (Magic rectangle
+  located in DBU + boundary failure). Fixtures under
+  `crates/reticle-cli/tests/fixtures/tt-precheck/` are SYNTHESIZED from the real precheck
+  output format (labeled in NOTICE.md), not captured. LIVE Docker run ATTEMPTED, NOT
+  completed (Docker Desktop daemon not running; ~39.5 GB free vs the multi-GB image+PDK);
+  documented as the operator's step with the exact command, NOT a fabricated pass. No
+  tile is claimed to have passed the precheck. ADR 0054. NOT pushed/merged.
 - [~] Lane 4C: `docs/src/tapeout.md`. The HONEST PLAN half is DONE (commit 7692f0b,
   orchestrator direct, no quota; wired into SUMMARY under a Tape-out section; book +
   check-style + typos green): what GDS-mode submission is versus the digital HDL flow,
