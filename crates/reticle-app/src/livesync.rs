@@ -48,9 +48,13 @@ use reticle_sync::{Frame, Presence, decode_frame};
 ///
 /// A small state machine the socket's lifecycle callbacks advance: a transport starts
 /// [`Connecting`](LiveStatus::Connecting), moves to [`Open`](LiveStatus::Open) on the
-/// socket's `open` event, and ends [`Closed`](LiveStatus::Closed) (clean close) or
-/// [`Failed`](LiveStatus::Failed) (an error before or after open). Pure and `cfg`-free
-/// so the transitions are unit-tested without a browser.
+/// socket's `open` event. If a live socket drops the transport does not give up: it
+/// enters [`Reconnecting`](LiveStatus::Reconnecting) and redials with capped exponential
+/// backoff (see [`next_backoff`]), so a transient network blip resynchronizes rather than
+/// stranding the session. It ends [`Closed`](LiveStatus::Closed) only on a user cancel
+/// (the transport dropped) or [`Failed`](LiveStatus::Failed) (a fatal, non-retryable
+/// error such as a malformed relay URL). Pure and `cfg`-free so the transitions and the
+/// backoff schedule are unit-tested without a browser.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub enum LiveStatus {
     /// The socket is opening; no frames have flowed yet.
@@ -58,6 +62,12 @@ pub enum LiveStatus {
     Connecting,
     /// The socket is open and delivering (or accepting) frames.
     Open,
+    /// The socket dropped and a redial is scheduled; `attempt` is the 1-based count of
+    /// reconnect tries so far (the status line shows it so a person sees progress).
+    Reconnecting {
+        /// The 1-based reconnect attempt this backoff wait belongs to.
+        attempt: u32,
+    },
     /// The socket closed cleanly (the room ended, or the tab navigated away).
     Closed,
     /// The socket failed with a human-readable reason (a dead relay, a network error).
@@ -75,10 +85,17 @@ impl LiveStatus {
     }
 
     /// Whether this is a terminal status (closed or failed): the transport will carry no
-    /// more frames without a reconnect.
+    /// more frames. [`Reconnecting`](LiveStatus::Reconnecting) is *not* terminal: a redial
+    /// is scheduled, so frames may resume without any caller action.
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         matches!(self, LiveStatus::Closed | LiveStatus::Failed { .. })
+    }
+
+    /// Whether the transport is between sockets, waiting on a backoff timer to redial.
+    #[must_use]
+    pub fn is_reconnecting(&self) -> bool {
+        matches!(self, LiveStatus::Reconnecting { .. })
     }
 
     /// The failure reason, if this status is [`Failed`](LiveStatus::Failed).
@@ -96,10 +113,75 @@ impl LiveStatus {
         match self {
             LiveStatus::Connecting => "connecting to the shared session...".to_owned(),
             LiveStatus::Open => "connected to the shared session".to_owned(),
+            LiveStatus::Reconnecting { attempt } => {
+                format!("reconnecting to the shared session (attempt {attempt})...")
+            }
             LiveStatus::Closed => "the shared session ended".to_owned(),
             LiveStatus::Failed { reason } => format!("could not join the shared session: {reason}"),
         }
     }
+}
+
+/// The ceiling a reconnect backoff wait is clamped to.
+///
+/// A dropped live socket never waits longer than this between redials, so a session that
+/// recovers after a long outage reconnects within half a minute rather than stalling on
+/// an ever-growing exponential delay.
+pub const RECONNECT_BACKOFF_CAP: core::time::Duration = core::time::Duration::from_millis(CAP_MS);
+
+/// The base wait for the first reconnect attempt, doubled each attempt up to
+/// [`RECONNECT_BACKOFF_CAP`].
+pub const RECONNECT_BACKOFF_BASE: core::time::Duration = core::time::Duration::from_millis(BASE_MS);
+
+/// Base reconnect delay in milliseconds (attempt 1's ceiling before jitter).
+const BASE_MS: u64 = 500;
+/// Backoff ceiling in milliseconds.
+const CAP_MS: u64 = 30_000;
+
+/// The backoff wait before reconnect `attempt`, using the default (zero) jitter seed.
+///
+/// Delegates to [`next_backoff_seeded`]; a browser transport instead seeds the jitter
+/// from a per-session random value so many tabs reconnecting to the same relay after a
+/// blip do not redial in lockstep. See that function for the exact schedule.
+#[must_use]
+pub fn next_backoff(attempt: u32) -> core::time::Duration {
+    next_backoff_seeded(attempt, 0)
+}
+
+/// The backoff wait before reconnect `attempt` (1-based), with deterministic jitter.
+///
+/// The wait is capped exponential backoff with *equal jitter*: the un-jittered ceiling is
+/// `BASE * 2^(attempt-1)` clamped to [`RECONNECT_BACKOFF_CAP`], and the returned wait is
+/// half that ceiling plus a deterministic amount in `[0, ceiling/2]` derived from
+/// `(attempt, seed)`. So the wait always lands in `[ceiling/2, ceiling]`: never zero (a
+/// floor keeps a redial storm from hammering the relay), never above the cap, and exactly
+/// reproducible for a given `(attempt, seed)` so the schedule is unit-testable without a
+/// clock. `attempt` values of `0` and `1` share the base ceiling; the exponent saturates
+/// so a very large `attempt` cannot overflow.
+#[must_use]
+pub fn next_backoff_seeded(attempt: u32, seed: u64) -> core::time::Duration {
+    // 2^(attempt-1), saturating. Clamp the shift well below the cap so the shift itself
+    // cannot overflow and the multiply cannot wrap before the cap clamps it.
+    let shift = attempt.saturating_sub(1).min(20);
+    let ceiling_ms = BASE_MS.saturating_mul(1u64 << shift).min(CAP_MS);
+    let half = ceiling_ms / 2;
+    let jitter = if half == 0 {
+        0
+    } else {
+        jitter_amount(attempt, seed) % (half + 1)
+    };
+    core::time::Duration::from_millis(half + jitter)
+}
+
+/// A deterministic pseudo-random value from `(attempt, seed)` for backoff jitter.
+///
+/// A splitmix64-style mix: pure, fast, and stable across runs and targets, so the jitter
+/// is reproducible in tests yet well-spread across attempts and seeds.
+fn jitter_amount(attempt: u32, seed: u64) -> u64 {
+    let mut x = seed.wrapping_add(u64::from(attempt).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^ (x >> 31)
 }
 
 /// One event a live transport posts into the [`LiveInbox`] for the egui loop to apply.
@@ -512,7 +594,10 @@ mod wasm {
 
 #[cfg(test)]
 mod tests {
-    use super::{LiveEvent, LiveStatus, route_frame};
+    use super::{
+        LiveEvent, LiveStatus, RECONNECT_BACKOFF_BASE, RECONNECT_BACKOFF_CAP, next_backoff,
+        next_backoff_seeded, route_frame,
+    };
     use reticle_geometry::{LayerId, Point, Rect};
     use reticle_model::{Cell, DrawShape, ShapeKind};
     use reticle_sync::{Presence, SyncDocument, encode_presence_frame, encode_update_frame};
@@ -576,16 +661,92 @@ mod tests {
         assert!(open.is_open());
         assert!(!open.is_terminal());
 
+        let reconnecting = LiveStatus::Reconnecting { attempt: 3 };
+        assert!(!reconnecting.is_open());
+        assert!(
+            !reconnecting.is_terminal(),
+            "a redial is scheduled, not given up"
+        );
+        assert!(reconnecting.is_reconnecting());
+        assert!(
+            reconnecting.label().contains('3'),
+            "the status line surfaces the attempt count: {}",
+            reconnecting.label()
+        );
+        assert_eq!(reconnecting.failure_reason(), None);
+
         let closed = LiveStatus::Closed;
         assert!(closed.is_terminal());
         assert!(!closed.is_open());
+        assert!(!closed.is_reconnecting());
 
         let failed = LiveStatus::Failed {
             reason: "dead relay".to_owned(),
         };
         assert!(failed.is_terminal());
+        assert!(!failed.is_reconnecting());
         assert_eq!(failed.failure_reason(), Some("dead relay"));
         assert!(failed.label().contains("dead relay"));
+    }
+
+    #[test]
+    fn backoff_grows_exponentially_until_the_cap() {
+        // Each attempt's ceiling (before jitter) doubles the previous one, and the wait
+        // always lands in [ceiling/2, ceiling]. Exercise every seed-independent bound.
+        let base = RECONNECT_BACKOFF_BASE.as_millis() as u64;
+        let cap = RECONNECT_BACKOFF_CAP.as_millis() as u64;
+        for attempt in 1..=6u32 {
+            let ceiling = (base << (attempt - 1)).min(cap);
+            let got = next_backoff(attempt).as_millis() as u64;
+            assert!(
+                got >= ceiling / 2 && got <= ceiling,
+                "attempt {attempt}: {got}ms not within [{}, {ceiling}]ms",
+                ceiling / 2
+            );
+        }
+        // Attempt 1 and the degenerate attempt 0 share the base ceiling.
+        for attempt in [0u32, 1] {
+            let got = next_backoff(attempt).as_millis() as u64;
+            assert!(got >= base / 2 && got <= base);
+        }
+    }
+
+    #[test]
+    fn backoff_is_clamped_to_the_cap_and_never_overflows() {
+        let cap = RECONNECT_BACKOFF_CAP.as_millis() as u64;
+        // Well past the point the ceiling reaches the cap (base 500ms doubles to >30s by
+        // attempt 7), and at an absurd attempt that would overflow a naive shift.
+        for attempt in [7u32, 20, 1_000, u32::MAX] {
+            let got = next_backoff_seeded(attempt, 0xDEAD_BEEF).as_millis() as u64;
+            assert!(
+                got >= cap / 2 && got <= cap,
+                "attempt {attempt}: {got}ms not within [{}, {cap}]ms",
+                cap / 2
+            );
+        }
+    }
+
+    #[test]
+    fn backoff_jitter_is_deterministic_and_seed_dependent() {
+        // Same (attempt, seed) always yields the same wait (a clock-free, reproducible
+        // schedule), while different seeds spread the jitter so clients de-correlate.
+        for attempt in 1..=8u32 {
+            assert_eq!(
+                next_backoff_seeded(attempt, 42),
+                next_backoff_seeded(attempt, 42),
+                "attempt {attempt} must be reproducible for a fixed seed"
+            );
+        }
+        // At an attempt with real jitter room (attempt 3: ceiling 2000ms, half 1000ms),
+        // at least one seed pair must differ, proving the seed actually perturbs jitter.
+        let differs =
+            (0..64u64).any(|seed| next_backoff_seeded(3, seed) != next_backoff_seeded(3, 0));
+        assert!(differs, "the seed must move the jittered wait");
+
+        // next_backoff delegates to the zero seed.
+        for attempt in 0..=8u32 {
+            assert_eq!(next_backoff(attempt), next_backoff_seeded(attempt, 0));
+        }
     }
 
     /// A compile-and-behavior guarantee that the viewer transport exposes no publish
