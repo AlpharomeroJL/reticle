@@ -4266,6 +4266,7 @@ name = "reticle-sync"
 version = "6.0.1"
 dependencies = [
  "proptest",
+ "prost",
  "reticle-geometry",
  "reticle-model",
  "reticle-proto",

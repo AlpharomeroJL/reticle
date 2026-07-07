@@ -17,6 +17,11 @@ workspace = true
 reticle-geometry = { workspace = true }
 reticle-model = { workspace = true }
 reticle-proto = { workspace = true }
+# The live-session wire codec (`crate::frame`) encodes and decodes the frozen
+# `reticle_proto::v1::SyncMessage` envelope with prost. The same version
+# `reticle-proto` already resolves, so no new copy is pulled into the lockfile;
+# it builds for wasm32 too, so the browser transport shares the codec.
+prost = "0.14.4"
 yrs = "0.23"
 
 [dev-dependencies]
