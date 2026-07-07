@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-dd61d1be.js";
+            window.path_to_searchindex_js = "searchindex-59f53b74.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-8ee98abe.js"></script>
+        <script src="toc-924db6f9.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -286,6 +286,41 @@ distinct actor id, as one atomic transaction per step, so a human peer watching 
 room never sees a half-drawn step and can edit alongside the agent (ADR 0022). The
 same transcript the harness writes is what the in-app replay theater plays back
 through a live session.</p>
+<h3 id="id-addressed-edits-transform-and-delete-adr-0066"><a class="header" href="#id-addressed-edits-transform-and-delete-adr-0066">Id-addressed edits: transform and delete (ADR 0066)</a></h3>
+<p>The geometry-<em>creating</em> commands change what a human sees, so those are mirrored. So are
+the two edits that address <em>existing</em> elements, <code>TransformShapes</code> and <code>DeleteShapes</code>: the
+gap ADR 0022 documented and ADR 0066 closes. They name the command surface’s stable
+<code>ElementId</code>s, which are not the CRDT’s <code>actor:counter</code> element ids, so the collaborator
+drives an authoritative internal session in lockstep with the mirror: applying each
+command there validates it and hands back the <code>ElementId</code> it assigned, and the bridge
+records <code>ElementId -&gt; CRDT id</code> for every shape it creates. A later transform resolves each
+addressed id and moves that record’s geometry <em>in place</em> (the shape keeps its identity); a
+delete removes it. An id the bridge never learned (a shape created before it attached) is
+skipped and reported in <code>StepReport.skipped</code>, never applied incorrectly or dropped
+silently. Convergence tests exchange these edits with a concurrent human peer in both
+orders and confirm the transform actually moved the shape and the delete removed it.</p>
+<h3 id="joining-a-real-room-reticle-agentlive"><a class="header" href="#joining-a-real-room-reticle-agentlive">Joining a real room (<code>reticle-agent::live</code>)</a></h3>
+<p><code>reticle_agent::live::run_in_room</code> connects an <code>AgentCollaborator</code> to a real
+<code>reticle-server</code> relay room over a native WebSocket (<code>ws://host/ws/{room}</code>). For each
+step it ships that step’s CRDT delta as one binary frame in the same <code>SyncMessage</code> framing
+the browser transport uses (ADR 0058): one step is one frame, so a watcher never sees a
+half-step. It publishes the agent’s presence (cursor at the last placement, an amber color,
+a display name), and applies inbound peer frames back into its own document. The agent is
+then indistinguishable from any other participant: its edits reach browser humans, and
+their concurrent edits reach it. An in-process integration test proves both directions over
+a real socket.</p>
+<p>The <code>agent_live_room</code> example is the small CLI entry: <code>--relay &lt;ws-url&gt; --room &lt;name&gt;</code> joins
+a room and runs the demo; <code>--emit &lt;path&gt;</code> regenerates the committed transcript.</p>
+<h3 id="the-drc-fix-demo-transcript"><a class="header" href="#the-drc-fix-demo-transcript">The DRC-fix demo transcript</a></h3>
+<p><code>examples/collab/agent_drc_fix.transcript.jsonl</code> is a committed, replayable transcript of
+the agent fixing a seeded design-rule violation in a live room: it seeds two met1
+rectangles closer than the SKY130-subset <code>m1.2</code> spacing (140 DBU), runs DRC (flagged),
+<code>TransformShapes</code> the second rectangle to a legal gap, and runs DRC again (clean). It
+replays to a pinned document hash, checked by a test.</p>
+<p>This is a <strong>deterministic scripted run, not a live model</strong>: the commands are the fixed
+script in <code>reticle_agent::live::scripted_drc_fix_steps</code>, driven by the harness with no LLM,
+no API key, and no network beyond the relay socket. The transcript trailer says so, and so
+does this paragraph: the label is honest everywhere.</p>
 <h2 id="scoped-sessions-and-context-packs-reticle-agentcontext_pack"><a class="header" href="#scoped-sessions-and-context-packs-reticle-agentcontext_pack">Scoped sessions and context packs (<code>reticle-agent::context_pack</code>)</a></h2>
 <p>A session can be opened on a <em>region</em> of the document rather than the whole thing. This
 is what the DRC error browser’s “ask the agent to fix this” button does: it hands the

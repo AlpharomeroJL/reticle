@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-dd61d1be.js";
+            window.path_to_searchindex_js = "searchindex-59f53b74.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-8ee98abe.js"></script>
+        <script src="toc-924db6f9.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -197,9 +197,69 @@ broadcasts updates and awareness to the other peers, sends a new peer the curren
 state, and offers a persistence hook. It contains no editing logic of its own, so
 the same convergence guarantees hold whether peers are connected through it or
 exchange updates by any other means.</p>
+<h2 id="reconnect-and-resync"><a class="header" href="#reconnect-and-resync">Reconnect and resync</a></h2>
+<p>A shared live session runs over a browser WebSocket, and browser sockets drop: a
+laptop sleeps, Wi-Fi hiccups, a phone changes networks. The live transport
+(<code>reticle_app::livesync</code>) treats a drop as recoverable rather than terminal (ADR
+0063). When a socket closes or errors while the session is still wanted, the
+transport redials with <strong>capped exponential backoff</strong>: the wait doubles each attempt
+from a 500 ms base up to a 30 s ceiling, with deterministic jitter (each wait lands
+in <code>[ceiling/2, ceiling]</code>) so a fleet of tabs recovering from the same outage does
+not stampede the relay in lockstep. Attempts are unbounded (only closing the session
+stops them) because an outage of any length should heal on its own.</p>
+<p>While waiting between tries the status line reads <em>“reconnecting to the shared session
+(attempt N)…”</em>, counting the tries so a person can see progress; it returns to
+<em>“connected”</em> the moment a redial succeeds.</p>
+<p>Two things resync on reconnect, from the two ends:</p>
+<ul>
+<li><strong>The sharer</strong> republishes its <strong>whole document as one full-state snapshot</strong> the
+instant its socket reopens, before resuming incremental updates. So any edit made
+while the socket was down still reaches viewers, carried by that snapshot, not lost
+with the dropped socket. Because <code>yrs</code> updates are idempotent, a viewer that already
+saw part of the document applies the snapshot without duplicating anything.</li>
+<li><strong>A viewer</strong> needs no resend logic at all: on rejoining a room the relay replays the
+room’s full update log before live traffic, so a reconnecting (or freshly arriving)
+viewer catches up on everything published so far, again idempotently.</li>
+</ul>
+<p>The reconnect <em>schedule</em> is pure, <code>cfg</code>-free logic, unit-tested without a browser
+(attempt growth, the cap, and the jitter bounds), and the resync <em>contract</em> is proven
+headlessly by a relay integration test that kills a sharer’s socket, edits offline,
+reconnects on a fresh connection, and asserts the viewer materializes the combined
+edits exactly once.</p>
+<h2 id="sharing-a-session"><a class="header" href="#sharing-a-session">Sharing a session</a></h2>
+<p>The Share panel turns the current session into something a collaborator can open. The
+one-click <strong>Share this session</strong> button does the whole dance at once: it mints a fresh
+room (the design name plus a short random suffix), goes live so viewers stream this
+session, and copies the read-only viewer link to the clipboard. The advanced fields
+(relay host, room name, viewer-page origin) stay below for when you want to name the
+room yourself or point at a specific relay. A viewer opens the copied link in a browser
+and joins read-only: they see your live edits, pan and zoom independently, and can
+follow your view, but never publish (the relay enforces read-only on its side too).</p>
+<h2 id="permalinks"><a class="header" href="#permalinks">Permalinks</a></h2>
+<p>A <strong>permalink</strong> deep-links a particular view of an opened document, layered on top of
+the <code>?gds=&lt;url&gt;</code> open link. Beyond the file, it can carry three independent, optional
+pieces of view state:</p>
+<ul>
+<li><code>?cell=&lt;name&gt;</code> - the cell to focus (URL-encoded, so spaces and non-ASCII names work).</li>
+<li><code>?view=&lt;x&gt;,&lt;y&gt;,&lt;zoom&gt;</code> - the camera: the world point at the canvas center and the
+zoom in pixels per DBU.</li>
+<li><code>?layers=&lt;csv&gt;</code> - the visible layers as <code>layer/datatype</code> specs
+(for example <code>68/20,69/20</code>); every other layer is hidden. An empty value hides all.</li>
+</ul>
+<p><code>?view=</code> is shared with the start-view selector (<code>?view=viewer|editor|replay</code>); the two
+are told apart by shape, so a value of exactly three numbers is a camera and anything
+else is the start view (see ADR 0067). <strong>Copy permalink to this view</strong> in the Share
+panel serializes the current cell, camera, and visible layers into such a link; opening
+it re-applies them once the document has loaded. Malformed values (a bad number, an
+unknown layer) are ignored rather than failing the open, so a hand-edited link still
+works as far as it can.</p>
 <h2 id="testing"><a class="header" href="#testing">Testing</a></h2>
 <p>Convergence is tested directly: concurrent operation sets are applied in different
 orders across simulated peers, and the final documents must be identical.</p>
+<p>The permalink parser and emitter are pure and round-trip tested (<code>emit</code> then <code>parse</code> is
+the identity), including the encoding edge cases (spaces, unicode cell names, an empty
+layer list), and an app-level test proves an emitted permalink restores the same cell,
+camera, and layers on a freshly opened document.</p>
 
                     </main>
 
@@ -209,7 +269,7 @@ orders across simulated peers, and the final documents must be identical.</p>
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="scripting.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="relay.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -223,7 +283,7 @@ orders across simulated peers, and the final documents must be identical.</p>
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="scripting.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="relay.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

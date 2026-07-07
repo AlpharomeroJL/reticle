@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-dd61d1be.js";
+            window.path_to_searchindex_js = "searchindex-59f53b74.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-8ee98abe.js"></script>
+        <script src="toc-924db6f9.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -1293,9 +1293,165 @@ broadcasts updates and awareness to the other peers, sends a new peer the curren
 state, and offers a persistence hook. It contains no editing logic of its own, so
 the same convergence guarantees hold whether peers are connected through it or
 exchange updates by any other means.</p>
+<h2 id="reconnect-and-resync"><a class="header" href="#reconnect-and-resync">Reconnect and resync</a></h2>
+<p>A shared live session runs over a browser WebSocket, and browser sockets drop: a
+laptop sleeps, Wi-Fi hiccups, a phone changes networks. The live transport
+(<code>reticle_app::livesync</code>) treats a drop as recoverable rather than terminal (ADR
+0063). When a socket closes or errors while the session is still wanted, the
+transport redials with <strong>capped exponential backoff</strong>: the wait doubles each attempt
+from a 500 ms base up to a 30 s ceiling, with deterministic jitter (each wait lands
+in <code>[ceiling/2, ceiling]</code>) so a fleet of tabs recovering from the same outage does
+not stampede the relay in lockstep. Attempts are unbounded (only closing the session
+stops them) because an outage of any length should heal on its own.</p>
+<p>While waiting between tries the status line reads <em>“reconnecting to the shared session
+(attempt N)…”</em>, counting the tries so a person can see progress; it returns to
+<em>“connected”</em> the moment a redial succeeds.</p>
+<p>Two things resync on reconnect, from the two ends:</p>
+<ul>
+<li><strong>The sharer</strong> republishes its <strong>whole document as one full-state snapshot</strong> the
+instant its socket reopens, before resuming incremental updates. So any edit made
+while the socket was down still reaches viewers, carried by that snapshot, not lost
+with the dropped socket. Because <code>yrs</code> updates are idempotent, a viewer that already
+saw part of the document applies the snapshot without duplicating anything.</li>
+<li><strong>A viewer</strong> needs no resend logic at all: on rejoining a room the relay replays the
+room’s full update log before live traffic, so a reconnecting (or freshly arriving)
+viewer catches up on everything published so far, again idempotently.</li>
+</ul>
+<p>The reconnect <em>schedule</em> is pure, <code>cfg</code>-free logic, unit-tested without a browser
+(attempt growth, the cap, and the jitter bounds), and the resync <em>contract</em> is proven
+headlessly by a relay integration test that kills a sharer’s socket, edits offline,
+reconnects on a fresh connection, and asserts the viewer materializes the combined
+edits exactly once.</p>
+<h2 id="sharing-a-session"><a class="header" href="#sharing-a-session">Sharing a session</a></h2>
+<p>The Share panel turns the current session into something a collaborator can open. The
+one-click <strong>Share this session</strong> button does the whole dance at once: it mints a fresh
+room (the design name plus a short random suffix), goes live so viewers stream this
+session, and copies the read-only viewer link to the clipboard. The advanced fields
+(relay host, room name, viewer-page origin) stay below for when you want to name the
+room yourself or point at a specific relay. A viewer opens the copied link in a browser
+and joins read-only: they see your live edits, pan and zoom independently, and can
+follow your view, but never publish (the relay enforces read-only on its side too).</p>
+<h2 id="permalinks"><a class="header" href="#permalinks">Permalinks</a></h2>
+<p>A <strong>permalink</strong> deep-links a particular view of an opened document, layered on top of
+the <code>?gds=&lt;url&gt;</code> open link. Beyond the file, it can carry three independent, optional
+pieces of view state:</p>
+<ul>
+<li><code>?cell=&lt;name&gt;</code> - the cell to focus (URL-encoded, so spaces and non-ASCII names work).</li>
+<li><code>?view=&lt;x&gt;,&lt;y&gt;,&lt;zoom&gt;</code> - the camera: the world point at the canvas center and the
+zoom in pixels per DBU.</li>
+<li><code>?layers=&lt;csv&gt;</code> - the visible layers as <code>layer/datatype</code> specs
+(for example <code>68/20,69/20</code>); every other layer is hidden. An empty value hides all.</li>
+</ul>
+<p><code>?view=</code> is shared with the start-view selector (<code>?view=viewer|editor|replay</code>); the two
+are told apart by shape, so a value of exactly three numbers is a camera and anything
+else is the start view (see ADR 0067). <strong>Copy permalink to this view</strong> in the Share
+panel serializes the current cell, camera, and visible layers into such a link; opening
+it re-applies them once the document has loaded. Malformed values (a bad number, an
+unknown layer) are ignored rather than failing the open, so a hand-edited link still
+works as far as it can.</p>
 <h2 id="testing-4"><a class="header" href="#testing-4">Testing</a></h2>
 <p>Convergence is tested directly: concurrent operation sets are applied in different
 orders across simulated peers, and the final documents must be identical.</p>
+<p>The permalink parser and emitter are pure and round-trip tested (<code>emit</code> then <code>parse</code> is
+the identity), including the encoding edge cases (spaces, unicode cell names, an empty
+layer list), and an app-level test proves an emitted permalink restores the same cell,
+camera, and layers on a freshly opened document.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="the-relay-two-implementations-one-protocol"><a class="header" href="#the-relay-two-implementations-one-protocol">The relay: two implementations, one protocol</a></h1>
+<p>Reticle ships two collaboration relays, and treats the protocol between them as
+the asset rather than either relay. The first is a native binary
+(<code>crates/reticle-server</code>): axum and tokio, one broadcast channel and an in-memory
+log per room, the relay you run yourself. The second is a Cloudflare <strong>Durable
+Object</strong> (<code>worker/</code>): a Worker routes <code>GET /ws/{room}</code> to a per-room object that
+holds the WebSockets, hosted on the free plan with no server to operate. A single
+conformance suite proves the two are observably interchangeable.</p>
+<h2 id="the-wire-invariant-the-relay-keys-off"><a class="header" href="#the-wire-invariant-the-relay-keys-off">The wire invariant the relay keys off</a></h2>
+<p>Every frame on a live session is a <code>reticle_proto::v1::SyncMessage</code>, a protobuf
+<code>oneof</code> of three payloads. Because a <code>oneof</code> field is encoded length-delimited,
+the <strong>first byte</strong> of every frame is the field tag of the active variant:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th style="text-align: right">First byte</th><th>Variant</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td style="text-align: right"><code>0x0A</code></td><td><code>update</code></td><td>a CRDT document delta</td></tr>
+<tr><td style="text-align: right"><code>0x12</code></td><td><code>presence</code></td><td>cursor, selection, viewport</td></tr>
+<tr><td style="text-align: right"><code>0x1A</code></td><td><code>comment</code></td><td>a threaded comment</td></tr>
+</tbody>
+</table>
+</div>
+<p>This is frozen by a unit test in <code>reticle-proto</code> and a doc comment on
+<code>SyncMessage</code>. It lets a relay classify a frame with no protobuf decoder at all:
+the Durable Object reads one byte to tell a presence update (which it coalesces)
+from a document update (which it never drops). Neither relay ever inspects the
+rest of the payload; both treat it as opaque bytes to fan out.</p>
+<h2 id="the-semantics-both-relays-honor"><a class="header" href="#the-semantics-both-relays-honor">The semantics both relays honor</a></h2>
+<p>The native relay defines the contract; the Durable Object mirrors it exactly:</p>
+<ul>
+<li><strong>Join and replay.</strong> <code>GET /ws/{room}</code> upgrades to a WebSocket;
+<code>?mode=view|viewer|readonly|ro</code> (case-insensitive) joins read-only. On join the
+room’s full accepted-frame log replays to the joiner, in order, before any live
+traffic, so a late joiner catches up.</li>
+<li><strong>Read-only is enforced server-side.</strong> A frame from a view-mode connection is
+dropped: never logged, never broadcast. A viewer cannot mutate the document
+even if it sends a well-formed edit frame.</li>
+<li><strong>No self-echo.</strong> A sender never receives the echo of its own frame.</li>
+<li><strong>Binary only.</strong> Only binary frames are payloads; text, ping, and pong are not.</li>
+</ul>
+<h2 id="free-tier-limits-engineering"><a class="header" href="#free-tier-limits-engineering">Free-tier limits engineering</a></h2>
+<p>The free plan rewards doing less work, so the Durable Object adds three things the
+native relay does not need, each preserving the observable semantics.</p>
+<p><strong>Presence coalescing.</strong> A live cursor can move at screen refresh rates, but a
+follower only needs the <em>latest</em> position. The DO keeps only the newest presence
+per client within a short window (about 10 Hz) and delivers that, driven by the
+object’s <strong>alarm</strong> rather than a <code>setTimeout</code> (a timer callback would keep the
+isolate awake and defeat hibernation). Update frames are never coalesced: a
+dropped CRDT delta would corrupt the document, while a dropped intermediate cursor
+is invisible. The newest presence always converges, so read-only follow-mode still
+lands on the sharer’s current viewport. This is the one place the two relays are
+not byte-identical: for a burst the DO delivers strictly fewer presence frames than
+the native relay, by design.</p>
+<p><strong>Log chunking.</strong> The room log is persisted in Durable Object storage in fixed
+chunks and replayed to late joiners in order, so a room survives the object being
+evicted between events. A production host would compact old chunks into snapshots;
+the raw chunked log keeps the relay free of any payload-format knowledge.</p>
+<p><strong>Caps and expiry.</strong> The native relay’s per-room broadcast channel is bounded
+(<code>ROOM_CHANNEL_CAPACITY</code> = 1024); a lagging peer skips dropped messages rather than
+stalling the room. The DO bounds its own work the same way and reclaims an idle
+room from the same alarm it uses for coalescing: when the alarm fires with no open
+sockets, the room’s storage is deleted. Hibernation-critical state (each
+connection’s mode and id) rides the socket’s <em>attachment</em>, which survives eviction,
+so a room can hibernate and wake without losing the read-only guarantee or
+self-echo suppression.</p>
+<p>A fourth optimization, <strong>client-side packing</strong> (batching several pending CRDT
+updates into one frame per flush in the sharer’s publish path), belongs to the app
+transport rather than the relay and is tracked as a follow-up.</p>
+<h2 id="proving-the-two-equivalent-the-conformance-suite"><a class="header" href="#proving-the-two-equivalent-the-conformance-suite">Proving the two equivalent: the conformance suite</a></h2>
+<p><code>crates/reticle-relay-conformance</code> expresses the whole contract once, as a table of
+scripted vectors, and runs the identical table against either relay through one
+<code>tokio-tungstenite</code> driver:</p>
+<ul>
+<li><code>Target::native</code> spawns the axum relay in-process on an ephemeral port.</li>
+<li><code>Target::external</code> addresses any relay by URL: the Durable Object under
+<code>wrangler dev --local</code> (miniflare, no Cloudflare auth), or a deployed
+<code>wss://...workers.dev</code>.</li>
+</ul>
+<p>Each vector covers one clause: late-join log replay in order, view-mode frame drop,
+echo suppression, presence coalescing, uncoalesced updates, full-log replay, two-
+room isolation, and the binary-only rule. Byte-for-byte delivery is <em>not</em> the
+invariant, because the DO coalesces presence; the shared invariant is
+<strong>convergence</strong>. A presence burst asserts on both relays that the observer receives
+a strictly increasing run whose newest value arrives last; the coalescing target
+additionally asserts it received strictly fewer than were sent, and the native
+target that it received all of them. One vector, both relays PASS, the verdicts
+identical.</p>
+<p>A deliberately-broken vector (one that expects a dropped view-mode frame to be
+forwarded) must <strong>fail</strong> against either real relay: that is how the suite proves it
+would catch a relay that broke the contract, rather than vacuously passing. Run the
+whole suite with <code>just conformance</code>, which runs the native half in-process always
+and the Durable Object half against <code>wrangler dev</code> when <code>worker/node_modules</code>
+exists. <code>just ci</code> stays Node-free.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="scripting"><a class="header" href="#scripting">Scripting</a></h1>
 <p><code>reticle-script</code> embeds a scripting language so a layout can be built, queried, and
@@ -1420,6 +1576,41 @@ distinct actor id, as one atomic transaction per step, so a human peer watching 
 room never sees a half-drawn step and can edit alongside the agent (ADR 0022). The
 same transcript the harness writes is what the in-app replay theater plays back
 through a live session.</p>
+<h3 id="id-addressed-edits-transform-and-delete-adr-0066"><a class="header" href="#id-addressed-edits-transform-and-delete-adr-0066">Id-addressed edits: transform and delete (ADR 0066)</a></h3>
+<p>The geometry-<em>creating</em> commands change what a human sees, so those are mirrored. So are
+the two edits that address <em>existing</em> elements, <code>TransformShapes</code> and <code>DeleteShapes</code>: the
+gap ADR 0022 documented and ADR 0066 closes. They name the command surface’s stable
+<code>ElementId</code>s, which are not the CRDT’s <code>actor:counter</code> element ids, so the collaborator
+drives an authoritative internal session in lockstep with the mirror: applying each
+command there validates it and hands back the <code>ElementId</code> it assigned, and the bridge
+records <code>ElementId -&gt; CRDT id</code> for every shape it creates. A later transform resolves each
+addressed id and moves that record’s geometry <em>in place</em> (the shape keeps its identity); a
+delete removes it. An id the bridge never learned (a shape created before it attached) is
+skipped and reported in <code>StepReport.skipped</code>, never applied incorrectly or dropped
+silently. Convergence tests exchange these edits with a concurrent human peer in both
+orders and confirm the transform actually moved the shape and the delete removed it.</p>
+<h3 id="joining-a-real-room-reticle-agentlive"><a class="header" href="#joining-a-real-room-reticle-agentlive">Joining a real room (<code>reticle-agent::live</code>)</a></h3>
+<p><code>reticle_agent::live::run_in_room</code> connects an <code>AgentCollaborator</code> to a real
+<code>reticle-server</code> relay room over a native WebSocket (<code>ws://host/ws/{room}</code>). For each
+step it ships that step’s CRDT delta as one binary frame in the same <code>SyncMessage</code> framing
+the browser transport uses (ADR 0058): one step is one frame, so a watcher never sees a
+half-step. It publishes the agent’s presence (cursor at the last placement, an amber color,
+a display name), and applies inbound peer frames back into its own document. The agent is
+then indistinguishable from any other participant: its edits reach browser humans, and
+their concurrent edits reach it. An in-process integration test proves both directions over
+a real socket.</p>
+<p>The <code>agent_live_room</code> example is the small CLI entry: <code>--relay &lt;ws-url&gt; --room &lt;name&gt;</code> joins
+a room and runs the demo; <code>--emit &lt;path&gt;</code> regenerates the committed transcript.</p>
+<h3 id="the-drc-fix-demo-transcript"><a class="header" href="#the-drc-fix-demo-transcript">The DRC-fix demo transcript</a></h3>
+<p><code>examples/collab/agent_drc_fix.transcript.jsonl</code> is a committed, replayable transcript of
+the agent fixing a seeded design-rule violation in a live room: it seeds two met1
+rectangles closer than the SKY130-subset <code>m1.2</code> spacing (140 DBU), runs DRC (flagged),
+<code>TransformShapes</code> the second rectangle to a legal gap, and runs DRC again (clean). It
+replays to a pinned document hash, checked by a test.</p>
+<p>This is a <strong>deterministic scripted run, not a live model</strong>: the commands are the fixed
+script in <code>reticle_agent::live::scripted_drc_fix_steps</code>, driven by the harness with no LLM,
+no API key, and no network beyond the relay socket. The transcript trailer says so, and so
+does this paragraph: the label is honest everywhere.</p>
 <h2 id="scoped-sessions-and-context-packs-reticle-agentcontext_pack"><a class="header" href="#scoped-sessions-and-context-packs-reticle-agentcontext_pack">Scoped sessions and context packs (<code>reticle-agent::context_pack</code>)</a></h2>
 <p>A session can be opened on a <em>region</em> of the document rather than the whole thing. This
 is what the DRC error browser’s “ask the agent to fix this” button does: it hands the
@@ -2327,6 +2518,12 @@ at once.</p>
 <p>Sessions are saved and restored, autosave and crash recovery protect in-progress
 work, and an undo-history panel lets you step through and jump within the edit
 history.</p>
+<p>On a touch device (a phone that opened a shared link, or a tablet), the canvas
+navigates by touch: a two-finger pinch zooms, anchored at the point between your
+fingers so what you are pinching stays put, and a two-finger drag pans. A single-finger
+drag pans when the Pan tool is active. The gesture math is a pure camera helper with the
+zoom-anchoring invariant unit-tested, so the world point under the pinch centroid stays
+fixed as the zoom changes.</p>
 <h2 id="checking-and-routing"><a class="header" href="#checking-and-routing">Checking and routing</a></h2>
 <p>Run the design-rule checker to populate the violation overlay, and use the error
 browser to zoom to each violation in turn. Route selected nets, and inspect the
