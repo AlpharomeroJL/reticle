@@ -8,6 +8,8 @@
 //! - `perf-check`, compare benchmarks against the committed history (Wave 5).
 //! - `tapeout-example`, write the worked in-repo Tiny Tapeout tile and its replayable
 //!   transcript into `examples/tapeout/` (Lane 4C).
+//! - `verify-licenses <dir>`, verify a redistribution license for every `.rtla`
+//!   archive in a staged content directory and exclude any it cannot verify.
 
 mod generator;
 mod media;
@@ -15,6 +17,7 @@ mod overlay;
 mod perf;
 mod tapeout;
 mod ui_capture;
+mod verify_licenses;
 
 use reticle_io::Gds;
 use reticle_model::Exporter;
@@ -29,9 +32,10 @@ fn main() -> ExitCode {
         "capture-ui" => ui_capture::cmd_capture_ui(args.get(1).map(String::as_str)),
         "perf-check" => perf::perf_check(),
         "tapeout-example" => tapeout::cmd_tapeout_example(args.get(1).map(String::as_str)),
+        "verify-licenses" => verify_licenses::cmd_verify_licenses(args.get(1).map(String::as_str)),
         "" => {
             eprintln!(
-                "usage: xtask <gen-layout|capture-media [asset]|capture-ui [name]|perf-check|tapeout-example [out-dir]> [options]"
+                "usage: xtask <gen-layout|capture-media [asset]|capture-ui [name]|perf-check|tapeout-example [out-dir]|verify-licenses <dir>> [options]"
             );
             ExitCode::FAILURE
         }
