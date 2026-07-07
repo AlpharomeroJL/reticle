@@ -298,7 +298,7 @@ fn offline_edit_rect() -> DrawShape {
 /// and publishes one full-state snapshot. A viewer that stayed connected materializes A+B
 /// **exactly once** (two shapes, not three: the snapshot re-carries A's content but `yrs`
 /// updates are idempotent), and a viewer joining fresh afterward sees the same A+B via the
-/// relay's log replay — no client-side reconnect code, just the snapshot frame plus replay.
+/// relay's log replay (no client-side reconnect code, just the snapshot frame plus replay).
 #[tokio::test]
 async fn sharer_reconnect_full_state_resyncs_the_viewer_exactly_once() {
     let addr = spawn_relay().await;
@@ -342,7 +342,7 @@ async fn sharer_reconnect_full_state_resyncs_the_viewer_exactly_once() {
     let full_state = reticle_sync::encode_update_frame(&sharer.encode_full_state());
     send_binary(&mut reconnected, full_state).await;
 
-    // The still-connected viewer applies the snapshot and now has A+B — exactly once: two
+    // The still-connected viewer applies the snapshot and now has A+B, exactly once: two
     // shapes, not three, because re-carrying A's content is an idempotent no-op.
     let snapshot = recv_binary(&mut viewer, RECV_TIMEOUT)
         .await

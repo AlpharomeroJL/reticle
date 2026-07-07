@@ -21,35 +21,35 @@ old socket (and any incremental deltas queued on it) is gone?
 **1. Redial with capped exponential backoff and deterministic jitter, unbounded except
 by user cancel.** On a `close`/`error` while the session is still wanted, the transport
 schedules a redial through `window.setTimeout`. The wait is `next_backoff(attempt)`:
-`500 ms * 2^(attempt-1)` clamped to a **30 s ceiling**, then *equal jitter* — half the
+`500 ms * 2^(attempt-1)` clamped to a **30 s ceiling**, then *equal jitter*: half the
 ceiling as a floor plus a seed-derived amount in `[0, ceiling/2]`, so every wait lands
 in `[ceiling/2, ceiling]`. The floor keeps a redial storm off the relay; the jitter
 (seeded per session from `Math.random`) de-correlates many tabs recovering from one
 outage. Attempts are **capped only by the user closing the session** (dropping the
 transport): an outage of any length should heal unattended. The schedule is pure,
 `cfg`-free logic (`next_backoff_seeded(attempt, seed)`), exhaustively unit-tested for
-growth, the cap, overflow safety, and jitter bounds — no browser, no clock. Each wait
+growth, the cap, overflow safety, and jitter bounds, with no browser and no clock. Each wait
 posts `LiveStatus::Reconnecting { attempt }`, which the existing status line renders as
 "reconnecting… (attempt N)"; `Reconnecting` is explicitly **not** terminal.
 
 **2. Resync by publishing a full-state snapshot on reopen, not a state-vector diff.**
 The considered alternative was a state-vector diff: on reconnect, learn the receiver's
 `StateVector` and send only what it lacks. We rejected it. A reconnecting sharer cannot
-trust any *remembered* remote state vector — the room may have gained or lost peers, the
-relay may have restarted, the previous viewer may be gone and a new one present — and
+trust any *remembered* remote state vector (the room may have gained or lost peers, the
+relay may have restarted, the previous viewer may be gone and a new one present), and
 negotiating a fresh state vector adds a round trip and a new wire exchange over a
 channel that carries opaque frames. A **full-state snapshot** (`SyncDocument::
 encode_full_state`, i.e. `yrs` `encode_state_as_update` against the empty state vector)
 sidesteps all of it: it is self-contained, correct for *every* receiver regardless of
-what they have seen, and idempotent — a viewer that already has part of the document
+what they have seen, and idempotent: a viewer that already has part of the document
 applies it without duplicating a single shape. The cost (re-sending the whole document
 on each reconnect) is bounded by document size and paid only at the reconnect edge, not
 per update; for the session sizes this transport targets that is the right trade.
 
 Mechanically the sharer needs no new reconnect code: when its socket reopens it posts
 `LiveStatus::Open`, and the app already re-arms a full-document publish on `Open` (ADR
-0058, to cover the first connecting-socket publish). So the offline edit — which bumped
-the editor's history revision — is republished as one full-state frame ahead of
+0058, to cover the first connecting-socket publish). So the offline edit, which bumped
+the editor's history revision, is republished as one full-state frame ahead of
 resumed incremental updates. **Viewers** need no client code either: the relay already
 replays a room's full update log to any (re)joiner before live traffic (ADR 0007/0038),
 so a reconnecting or freshly arriving viewer catches up idempotently by that replay.
@@ -62,7 +62,7 @@ and re-consumes; it can no more publish after reconnect than before.
 ## Consequences
 
 * A dropped live session recovers on its own, within 30 s of the network returning,
-  and the sharer's offline edits materialize on viewers exactly once — proven by a
+  and the sharer's offline edits materialize on viewers exactly once, proven by a
   headless relay test that kills the sharer's socket, edits offline, reconnects on a
   fresh connection, and asserts the viewer's shape count (A+B, not A+A+B), plus a
   negative control that omits the snapshot and shows the viewer left missing the edit.
