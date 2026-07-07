@@ -57,5 +57,5 @@ uses. `DocHost` is the routing type; making the live `App` hold one in place of 
 `History` field is a mechanical follow-up left for the wave that adds the streamed-open
 UI, so this lane stays additive and does not churn the frozen `App` surface. This reader
 accepts only power-of-two square pyramids; an archive with arbitrary per-level grids is
-refused with a clear error rather than mis-mapped, a documented limitation additive to
+refused with a clear error rather than mapped incorrectly, a documented limitation additive to
 v1.

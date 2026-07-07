@@ -49,7 +49,7 @@ use reticle_index::{
 /// Every field of a fetched header is untrusted until checked (the contract's standing
 /// hardening lesson), so construction validates the magic, the version, and that the
 /// per-level grid is the power-of-two square pyramid the coordinate mapper assumes,
-/// refusing with a clear error rather than mis-mapping a viewport.
+/// refusing with a clear error rather than incorrect mapping a viewport.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SceneError {
     /// The header magic did not match [`reticle_index::RTLA_MAGIC`].
@@ -480,7 +480,7 @@ mod tests {
             SceneError::UnsupportedVersion(999)
         );
 
-        // A level whose grid is not 2^level square is refused rather than mis-mapped.
+        // A level whose grid is not 2^level square is refused rather than mapped incorrectly.
         let mut h = header(world(), 3);
         h.levels[2] = LevelDims { cols: 3, rows: 4 };
         assert_eq!(
