@@ -178,7 +178,7 @@ fn boot_from_url() -> Boot {
             .unwrap_or_else(|| reticle_app::share::DEFAULT_SERVER.to_owned());
         let room = params.get("room").unwrap_or_default();
         let room = reticle_app::share::room_id(&room);
-        let e2e_edit = reticle_app::share::parse_e2e_edit(search);
+        let e2e_edit = reticle_app::share::parse_e2e_edit(&search);
         web_sys::console::log_1(
             &format!("reticle: auto-share editor for room '{room}' on relay '{relay}'").into(),
         );
