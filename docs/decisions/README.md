@@ -79,4 +79,5 @@ superseded decision is marked and linked to its replacement.
 | [0071](0071-dochost-edited-streamed-split.md) | The DocHost edit/stream split (editing a streamed document is a compile error) and coarse-then-fine tile residency |
 | [0072](0072-gds-to-rtla-converter-flatten-and-leveling.md) | `reticle convert` GDS-to-`.rtla`: v1 flatten scope (drawn geometry only, no DOM) and world-span pyramid leveling |
 | [0073](0073-archive-url-browse-and-streaming-hud.md) | The `?archive=` browse entry point, the streaming HUD, main-thread OPFS fallback, and the served-archive e2e |
-| [0075](0075-gpu-drc-heatmap-compute-overlay.md) | GPU DRC heatmap: a bin-and-check compute overlay whose flags are pinned to the CPU oracle (placeholder number, renumber at the Wave 3 gate) |
+| [0075](0075-gpu-drc-heatmap-compute-overlay.md) | GPU DRC heatmap: a bin-and-check compute overlay whose flags are pinned to the CPU oracle |
+| [0076](0076-gpu-resident-hierarchy-chunked-expansion.md) | Fully GPU-resident hierarchy: chunked expand + cull + compact past the single-dispatch cap |
