@@ -3979,7 +3979,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "reticle-agent"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "clap",
  "reticle-agent-api",
@@ -3997,7 +3997,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-agent-api"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "image",
  "proptest",
@@ -4015,7 +4015,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-app"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "eframe",
  "egui-wgpu",
@@ -4039,7 +4039,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-bench"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "clap",
  "reticle-agent-api",
@@ -4055,11 +4055,11 @@ dependencies = [
 
 [[package]]
 name = "reticle-benches"
-version = "6.0.1"
+version = "7.0.0"
 
 [[package]]
 name = "reticle-cli"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "clap",
  "image",
@@ -4074,7 +4074,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-demo"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "axum",
  "http-body-util",
@@ -4086,7 +4086,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-demo-server"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "axum",
  "futures-util",
@@ -4109,7 +4109,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-drc"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "criterion",
  "proptest",
@@ -4122,7 +4122,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-extract"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "proptest",
  "reticle-geometry",
@@ -4133,7 +4133,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-gen"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "proptest",
  "reticle-drc",
@@ -4145,7 +4145,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-geometry"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "criterion",
  "i_overlay",
@@ -4155,7 +4155,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-index"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "criterion",
  "memmap2",
@@ -4167,7 +4167,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-io"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "chrono",
  "gds21",
@@ -4179,7 +4179,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-mcp"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "reticle-agent-api",
  "reticle-gen",
@@ -4191,7 +4191,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-model"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "criterion",
  "proptest",
@@ -4200,7 +4200,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-proto"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "prost",
  "prost-build",
@@ -4209,7 +4209,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-render"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "bytemuck",
  "glam",
@@ -4226,7 +4226,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-route"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "pathfinding",
  "proptest",
@@ -4237,7 +4237,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-script"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "reticle-drc",
  "reticle-geometry",
@@ -4248,7 +4248,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-server"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "axum",
  "futures-util",
@@ -4263,7 +4263,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-sync"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "proptest",
  "prost",
@@ -5634,7 +5634,7 @@ dependencies = [
 
 [[package]]
 name = "web"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "console_error_panic_hook",
  "eframe",
@@ -6316,7 +6316,7 @@ checksum = "3ae8337f8a065cfc972643663ea4279e04e7256de865aa66fe25cec5fb912d3f"
 
 [[package]]
 name = "xtask"
-version = "6.0.1"
+version = "7.0.0"
 dependencies = [
  "image",
  "reticle-agent-api",
