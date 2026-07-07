@@ -376,6 +376,11 @@ impl ArchiveOpenInbox {
 /// human-readable failure) into `inbox` for the egui loop to install (wasm only).
 #[cfg(target_arch = "wasm32")]
 pub fn start_archive_open(url: String, inbox: ArchiveOpenInbox, repaint: eframe::egui::Context) {
+    // The frozen HttpRangeTileSource caches tiles in OPFS, and OPFS's synchronous
+    // FileSystemSyncAccessHandle exists ONLY in a dedicated Web Worker. We browse on the
+    // main thread (ADR 0062 wires the source into the main-thread DocHost), so that
+    // caching path must be disabled before the first fetch or it aborts every tile.
+    disable_main_thread_opfs();
     wasm_bindgen_futures::spawn_local(async move {
         // The total size is best-effort: an archive still streams without it (the HUD
         // just shows bytes fetched with no denominator).
@@ -384,6 +389,47 @@ pub fn start_archive_open(url: String, inbox: ArchiveOpenInbox, repaint: eframe:
         inbox.post(result);
         repaint.request_repaint();
     });
+}
+
+/// Makes OPFS report unavailable on the main thread, so the frozen `HttpRangeTileSource`'s
+/// cache path falls back cleanly to the network plus its in-memory LRU (wasm only).
+///
+/// The source's `opfs_dir()` starts with `navigator.storage.getDirectory()`; overriding
+/// that to return a *rejected* promise makes it return `None`, so both the OPFS read and
+/// write short-circuit before reaching the worker-only
+/// `FileSystemFileHandle.createSyncAccessHandle()` (which throws a synchronous
+/// `TypeError` the source's async guards cannot catch). Losing the persistent cross-reload
+/// cache is expected here — it genuinely needs a worker, which lane 2D-alpha owns; the
+/// in-memory LRU still spares a re-fetch while panning. The override is CSP-safe (no
+/// `eval`/`new Function`) and idempotent: re-running it just reinstalls the rejecter.
+#[cfg(target_arch = "wasm32")]
+fn disable_main_thread_opfs() {
+    use wasm_bindgen::JsValue;
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Ok(navigator) = js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("navigator"))
+    else {
+        return;
+    };
+    let Ok(storage) = js_sys::Reflect::get(&navigator, &JsValue::from_str("storage")) else {
+        return;
+    };
+    if storage.is_undefined() || storage.is_null() {
+        return;
+    }
+    let reject = wasm_bindgen::closure::Closure::<dyn FnMut() -> js_sys::Promise>::new(|| {
+        js_sys::Promise::reject(&JsValue::from_str(
+            "OPFS is unavailable on the main thread (needs a Web Worker)",
+        ))
+    });
+    let _ = js_sys::Reflect::set(
+        &storage,
+        &JsValue::from_str("getDirectory"),
+        reject.as_ref(),
+    );
+    // The rejecter must outlive this call (it is invoked on every later tile fetch).
+    reject.forget();
 }
 
 /// Opens the source at `url`, reads its header, and builds the streamed scene, returning
