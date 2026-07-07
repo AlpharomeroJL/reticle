@@ -324,15 +324,23 @@ limitations above and grounds the README in re-measured numbers.
 The remaining v6.0.0 limitations (the local-model floor, the UI-plus-seam "fix violation"
 affordance, and fuzzing not linking on Windows/MSVC) are unchanged.
 
-## v7.0.0 progress (The Product Packet, audited 2026-07-06)
+## v7.0.0 (The Product Packet, SHIPPED 2026-07-07)
+
+**v7.0.0 is released.** Version bumped 6.0.1 to 7.0.0, `CHANGELOG.md` regenerated with
+git-cliff (dated 2026-07-07, not backdated), tag `v7.0.0` pushed, GitHub release created
+(not draft) with four host binaries (`reticle-app`, `reticle` CLI, `reticle-server`,
+`reticle-demo-server`), gh-pages redeployed with the v7 wasm bundle (`web-8a430603a0e038f8`)
+and book. `just smoke-pages` PASS against the live site and all README media return 200.
+Live demo: https://alpharomerojl.github.io/reticle/ . Repository visibility unchanged.
 
 v7.0.0 adds the viewer wedge (open, inspect, share, generate IC layout in a browser
-with no install), a parameterized generator layer, a Claude Code agent-system benchmark
-backend, and a TinyTapeout tape-out oracle. Audited with the same skepticism. Same host
-(RTX 4060 Ti, Windows 11). Gate green: `just ci` (check-style, fmt, clippy `-D warnings`,
-nextest, doctests, doc build `-D warnings`, wasm build, `cargo-deny`, typos), plus
-`just e2e` (3 passed, 1 skipped honestly headless), `just e2e-subpath` (1 passed), and
-`just smoke-pages` (live). Test functions: **1333** (up from 1098 at v6). Standard greps:
+with no install, including a live WebSocket share transport), a parameterized generator
+layer, a Claude Code agent-system benchmark backend, and a TinyTapeout tape-out oracle run
+to a real verdict. Audited with the same skepticism. Same host (RTX 4060 Ti, Windows 11).
+Gate green: `just ci` (check-style, fmt, clippy `-D warnings`, nextest, doctests, doc build
+`-D warnings`, wasm build, `cargo-deny`, typos), plus `just e2e`, `just e2e-subpath`, and
+`just e2e-share` (the two-context live-share browser proof, 1 passed). Test attributes:
+**~1350** (up from 1333 mid-v7 and 1098 at v6). Standard greps:
 zero `todo!`/`unimplemented!` in shipped code; one `unsafe` (the documented mmap in
 `reticle-index/streaming.rs`, unchanged since v4); three legitimate `#[ignore]`
 (corpus-regeneration and a fetched-cell-gated test); a single author across all history;
@@ -415,13 +423,19 @@ New subsystems, itemized with their honest limits:
   `scripts/measure-run.ps1`. Retracted and closed at the v7 finish, the decode pinned correct
   by a round-trip leaf-count test. See ADR 0057 and `docs/PERF.md`.)
 
-Honest limitations (v7), consolidated: (1) the Claude Code benchmark row is a **not-run**
-(CLI unauthenticated in this environment); (2) the TinyTapeout **precheck** live run and
-the **share-live** browser transport are operator/follow-up steps, not shipped here;
-(3) the local benchmark rows are the 75-task v0.4.0 numbers, not the 83-task v0.5.0
-suite; (4) the generators and DRC are the SKY130 subset, not the full deck; (5) fuzzing
-still does not link on this Windows/MSVC host (unchanged from v4). None of these is
-hidden behind a passing test; each is documented in its ADR, the book, and above.
+Honest limitations (v7.0.0, shipped 2026-07-07), consolidated: (1) the Claude Code
+benchmark row is a **real but partial** run: 24 of 25 tasks that ran passed (96%, well
+above either local model), but subscription rate limits stopped it before all 83, so its
+denominator differs from the full-suite local rows (ADR 0058 covers the four backend fixes
+that made it drive the tools at all); (2) the TinyTapeout **precheck was run to a verdict**
+(ADR 0059): the worked tile passes every Magic and KLayout DRC and geometry check against
+their own decks, and the remaining failures (a LEF pin abstract, a Verilog view, wired
+analog pins) are submission artifacts a geometry generator does not produce; (3) the
+**share-live browser transport shipped** (ADR 0058: a wasm WebSocket viewer + sharer,
+read-only enforced server- and app-side, with a hard-gate relay test and a two-context
+Playwright e2e); (4) the generators and DRC are the SKY130 subset, not the full deck;
+(5) fuzzing still does not link on this Windows/MSVC host (unchanged from v4). None of
+these is hidden behind a passing test; each is documented in its ADR, the book, and above.
 
 ## Section 16 (definition of done), item by item
 
