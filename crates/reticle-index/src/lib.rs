@@ -16,12 +16,23 @@
 //! - [`LodPyramid`], tile/level-of-detail pyramid for out-of-core browsing.
 //! - [`streaming`], `rkyv` zero-copy (de)serialization of an index payload for
 //!   memory-mapped, out-of-core layouts.
+//! - [`archive`], the `.rtla` streamed-archive format and the [`TileSource`]
+//!   transport seam (Wave 2 contract, ADR 0062); built by [`archive_build`] and read
+//!   through [`tile_source`] over mmap (native) or HTTP Range (wasm).
 
+pub mod archive;
+pub mod archive_build;
 mod grid;
 mod lod;
 mod rtree;
 pub mod streaming;
+pub mod tile_source;
 
+pub use archive::{
+    LevelDims, RTLA_MAGIC, RTLA_VERSION, RtlaHeader, TileCoord, TileDirEntry, TilePayload,
+    TileRecord, TileSource, TileSourceError,
+};
+pub use archive_build::{BuildError, build_rtla};
 pub use grid::UniformGrid;
 pub use lod::{LodPyramid, TileId};
 pub use rtree::{Entry, RTreeIndex};
