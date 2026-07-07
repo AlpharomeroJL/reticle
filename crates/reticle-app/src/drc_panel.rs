@@ -207,6 +207,48 @@ pub fn format_violation(v: &Violation) -> String {
     )
 }
 
+/// Builds a spell-checker squiggle: a zig-zag polyline in screen pixels drawn along
+/// the underline of a live DRC violation.
+///
+/// The line runs from `x0` to `x1` along `baseline`, stepping every half
+/// `wavelength` and lifting the odd points by `amplitude` so it reads as a wavy
+/// underline rather than a straight rule. Coordinates are screen pixels (mapped from
+/// the violation's location by the caller) so the squiggle keeps a constant on-screen
+/// size at any zoom, exactly like an editor's misspelling underline.
+///
+/// Always returns at least two points, so a degenerate (zero-width) violation still
+/// paints a short tick instead of nothing.
+#[must_use]
+pub fn squiggle_points(
+    x0: f32,
+    x1: f32,
+    baseline: f32,
+    amplitude: f32,
+    wavelength: f32,
+) -> Vec<(f32, f32)> {
+    let step = (wavelength * 0.5).max(f32::MIN_POSITIVE);
+    let span = (x1 - x0).max(0.0);
+    // Half-wave segments spanning the edge; at least one so the result has >= 2 points.
+    let segments = (span / step).round().max(1.0) as usize;
+    (0..=segments)
+        .map(|i| {
+            // Place points evenly and pin the last exactly on x1 so the squiggle
+            // covers the whole edge regardless of rounding.
+            let x = if i == segments {
+                x1.max(x0)
+            } else {
+                x0 + step * i as f32
+            };
+            let y = if i % 2 == 0 {
+                baseline
+            } else {
+                baseline - amplitude
+            };
+            (x, y)
+        })
+        .collect()
+}
+
 /// The stable keyword for a [`RuleKind`], matching the wire form the agent API
 /// emits and parses.
 #[must_use]
@@ -434,6 +476,31 @@ mod tests {
         assert_eq!(rule_kind_tag(RuleKind::Enclosure), "enclosure");
         assert_eq!(rule_kind_tag(RuleKind::Area), "area");
         assert_eq!(rule_kind_tag(RuleKind::Angle), "angle");
+    }
+
+    #[test]
+    fn squiggle_spans_the_edge_and_zigzags() {
+        // A 12-wide edge with a 6-unit wavelength (3-unit half step) yields points
+        // at x = 0, 3, 6, 9, 12: five points spanning the whole edge.
+        let pts = squiggle_points(0.0, 12.0, 100.0, 3.0, 6.0);
+        assert_eq!(pts.len(), 5);
+        assert_eq!(pts.first().copied(), Some((0.0, 100.0)));
+        assert_eq!(pts.last().map(|p| p.0), Some(12.0));
+        // The odd points are lifted by the amplitude so the line reads as a squiggle.
+        assert!((pts[1].1 - 97.0).abs() < f32::EPSILON, "odd point lifted");
+        assert!(
+            (pts[2].1 - 100.0).abs() < f32::EPSILON,
+            "even point on baseline"
+        );
+    }
+
+    #[test]
+    fn squiggle_stays_a_line_for_a_zero_width_location() {
+        // A degenerate (zero-width) violation still yields at least a two-point tick
+        // so the overlay draws something rather than nothing.
+        let pts = squiggle_points(5.0, 5.0, 10.0, 2.0, 4.0);
+        assert!(pts.len() >= 2, "a tick is still drawable");
+        assert!(pts.iter().all(|p| (p.0 - 5.0).abs() < f32::EPSILON));
     }
 
     #[test]
