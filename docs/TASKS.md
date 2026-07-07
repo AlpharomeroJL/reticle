@@ -615,18 +615,28 @@ precheck are both operator steps here (CLI auth, multi-GB image); nothing is fak
 the honest three-row table, and a measured 60%-plus flatten win (before/after in
 PERF.md) with a zero-growth soak. All merged, `just ci` GREEN.**
 
-## Wave 6: gauntlet, audit, release (serial) [not-started]
+## Wave 6: gauntlet, audit, release (serial) [gauntlet + audit DONE; release HELD]
 
-- [ ] Full gauntlet: `just ci`; `just e2e` (both GPU modes, subpath, plus the new
-  drop-and-share and generator tests); `just smoke-pages` live; corpus regression;
-  replay determinism incl. server-side transcripts; abuse tests incl. share-room
-  limits; fresh-clone smoke; key/attribution greps.
-- [ ] Skeptical STATUS re-audit, every new subsystem itemized with evidence; the
-  benchmark chapter reconciled with all three rows honestly labeled; interview-defense
-  notes updated (generators, the agent-system distinction, the precheck oracle).
-- [ ] Tag and release `v7.0.0`; redeploy; verify the deployed URL and all README
-  media serve; final terse summary: demo URL, the three-row table, precheck status of
-  the example tile, what remains stubbed.
+- [x] Full gauntlet, all GREEN (audited 2026-07-06): `just ci` (1333 test functions);
+  `just e2e` 3 passed 1 skipped (webgpu backend skips honestly headless) + `just
+  e2e-subpath` 1 passed; `just smoke-pages` PASS against the live site (still v6.0.1,
+  the v7 redeploy is a release step); corpus regression + replay determinism + abuse
+  tests all in `just ci`; a fresh clone of HEAD cold-built the whole workspace in
+  2m43s; single author, no AI-attribution in files or messages, no leaked secret in the
+  tree or full history (`check-keys -History`). Honest note: the packet's "new
+  drop-and-share and generator e2e tests" were not added as browser e2e; the drop path
+  is proven by an app-level integration test and the generators by their proptests, and
+  the share-live browser flow needs the unbuilt live transport (Wave 1 gap).
+- [x] Skeptical STATUS re-audit DONE (commit d465ee2): `docs/STATUS.md` v7.0.0 section
+  itemizes every wave with evidence and the honest limits; the benchmark chapter carries
+  the three rows honestly labeled (two bare local models, the Claude Code agent-system
+  row marked not-run). Interview-defense material lives in the ADRs (0034-0055) and the
+  book chapters (generators, the agent-system distinction, the precheck oracle).
+- [~] Release v7.0.0: HELD by operator decision (2026-07-06). Version stays at 6.0.1;
+  all v7 work is merged and gate-green on main and fully documented (tracker, STATUS,
+  55 ADRs). The release (version bump to 7.0.0, git-cliff CHANGELOG, tag, gh-pages
+  redeploy, GitHub release with binaries, live verify) is a later operator step. Nothing
+  is outward-facing yet: the live demo URL still serves v6.0.1.
 
 ### Frozen-surface manifest (recorded at Wave 2 contract point)
 
