@@ -24,6 +24,7 @@
 - [Routing](routing.md)
 - [Connectivity extraction](extraction.md)
 - [Metrology](metrology.md)
+- [Layout diff](layout-diff.md)
 - [Collaboration](collaboration.md)
   - [The relay: two implementations, one protocol](relay.md)
 - [Scripting](scripting.md)
