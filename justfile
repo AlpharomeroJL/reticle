@@ -217,6 +217,22 @@ e2e-subpath:
     cd e2e; npx playwright install chromium
     cd e2e; npx playwright test --project=ghpages-subpath
 
+# Share-link LIVE transport e2e (ADR 0058). Builds the Trunk bundle AND the
+# reticle-server relay binary, then runs the two-context `share-live` Playwright
+# project: context A boots the editor and goes live (publishing into a relay room),
+# context B opens the read-only viewer link and its browser transport streams A's
+# live frames. `SHARE_LIVE=1` adds the relay webServer (serve-relay.mjs launches the
+# prebuilt relay on 127.0.0.1:3030). The headless run proves the viewer bundle boots,
+# the `?mode=view` socket opens, and real SyncMessage frames arrive and decode; the
+# authoritative proof of the transport + read-only contract is the Rust relay test
+# crates/reticle-server/tests/share_live.rs. See e2e/README.md.
+e2e-share:
+    cd crates/web; trunk build index.html
+    cargo build -p reticle-server
+    npm --prefix e2e install
+    cd e2e; npx playwright install chromium
+    cd e2e; $env:SHARE_LIVE='1'; npx playwright test --project=share-live
+
 book:
     mdbook build docs
 
