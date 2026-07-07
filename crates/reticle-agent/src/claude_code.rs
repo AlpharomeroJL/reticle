@@ -339,10 +339,7 @@ pub struct SystemClaudeRunner;
 
 impl ClaudeRunner for SystemClaudeRunner {
     fn run(&self, invocation: &ClaudeInvocation) -> Result<RunReport, SpawnFailure> {
-        use std::process::Command;
-        let output = Command::new(&invocation.program)
-            .args(&invocation.args)
-            .output();
+        let output = system_command(invocation).output();
         match output {
             Ok(out) => Ok(RunReport {
                 exit_code: out.status.code(),
@@ -356,6 +353,47 @@ impl ClaudeRunner for SystemClaudeRunner {
             }),
         }
     }
+}
+
+/// Builds the process command for `invocation`, wrapping the npm shim on Windows.
+///
+/// On Windows the `claude` CLI is usually an npm shim (`claude.cmd` or `claude.ps1`),
+/// which `CreateProcess` (and so Rust's `Command`) cannot execute directly, it runs
+/// only real PE executables. A `.ps1` is run through `powershell -File` and a `.cmd`
+/// or `.bat` through `cmd /c`, forwarding the same argument vector; a real executable,
+/// and every non-Windows target, is spawned directly. The bare default `claude` (no
+/// extension) still cannot be spawned by `CreateProcess` on Windows, so there point
+/// `RETICLE_CLAUDE_BIN` at the resolved `claude.cmd` or `claude.ps1`.
+fn system_command(invocation: &ClaudeInvocation) -> std::process::Command {
+    use std::process::Command;
+    #[cfg(windows)]
+    {
+        let ext = invocation
+            .program
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase);
+        match ext.as_deref() {
+            Some("ps1") => {
+                let mut cmd = Command::new("powershell.exe");
+                cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]);
+                cmd.arg(&invocation.program);
+                cmd.args(&invocation.args);
+                return cmd;
+            }
+            Some("cmd" | "bat") => {
+                let mut cmd = Command::new("cmd.exe");
+                cmd.arg("/c");
+                cmd.arg(&invocation.program);
+                cmd.args(&invocation.args);
+                return cmd;
+            }
+            _ => {}
+        }
+    }
+    let mut cmd = Command::new(&invocation.program);
+    cmd.args(&invocation.args);
+    cmd
 }
 
 /// The classification of a completed [`RunReport`]: did the session run for real, or did
@@ -807,6 +845,7 @@ mod tests {
         BACKEND_LABEL, ClaudeCodeConfig, ClaudeInvocation, ClaudeRunner, ClaudeTaskOutcome,
         MCP_SERVER_NAME, McpConfig, ReportClass, RunReport, SpawnFailure, allowed_tool_names,
         build_invocation, classify_report, compose_prompt, mcp_config, run_claude_code_task,
+        system_command,
     };
     use reticle_bench::{BenchTask, CheckerRegistry, Tier};
     use std::io::{BufRead, BufReader, Write};
@@ -948,6 +987,33 @@ mod tests {
             "no tech step when none is given"
         );
         assert!(no_tech.contains("Draw a met1 rect."));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_ps1_shim_launches_via_powershell() {
+        // On Windows a `claude.ps1` npm shim must run through `powershell -File`, not be
+        // spawned directly (CreateProcess runs only real executables). Verified so a
+        // future refactor cannot regress the operator's re-run path on Windows.
+        let inv = ClaudeInvocation {
+            program: PathBuf::from("C:/npm/claude.ps1"),
+            args: vec!["-p".to_owned(), "hi".to_owned()],
+        };
+        let cmd = system_command(&inv);
+        assert_eq!(cmd.get_program(), std::ffi::OsStr::new("powershell.exe"));
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            args.iter().any(|a| a == "-File"),
+            "runs the script via -File"
+        );
+        assert!(
+            args.iter().any(|a| a.ends_with("claude.ps1")),
+            "forwards the shim path"
+        );
+        assert!(args.iter().any(|a| a == "-p") && args.iter().any(|a| a == "hi"));
     }
 
     #[test]
