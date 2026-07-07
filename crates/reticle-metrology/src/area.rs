@@ -69,6 +69,15 @@ pub fn report(doc: &Document) -> Vec<LayerMetrics> {
         .collect()
 }
 
+/// Exact union area of a set of (possibly overlapping) polygons, in DBU squared.
+///
+/// Overlaps are counted once. Shared with the antenna check so per-net area sums
+/// use the same exact boolean path as the per-layer report.
+pub(crate) fn union_area_of(polys: &[Polygon]) -> f64 {
+    let union = polygon_boolean(BooleanOp::Union, polys, &[]).unwrap_or_default();
+    union_area(&union)
+}
+
 /// Exact area of a set of union contours (CCW outers positive, CW holes
 /// negative), in DBU squared.
 fn union_area(contours: &[Polygon]) -> f64 {
