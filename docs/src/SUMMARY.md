@@ -13,6 +13,7 @@
 - [Boolean and transform operations](boolean-transform.md)
 - [File formats](io.md)
 - [Rendering and scale](rendering.md)
+- [Streamed documents](streaming.md)
 - [View and export](view-export.md)
 - [Snapping and guides](snapping.md)
 - [Search and selection depth](search-selection.md)
