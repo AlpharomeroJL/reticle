@@ -104,3 +104,35 @@ fn full_state_resync_after_offline_is_idempotent() {
     assert_eq!(alice.document(), bob.document());
     assert_eq!(alice.document().cell_count(), 2);
 }
+
+#[test]
+fn encode_full_state_reproduces_the_document_on_a_fresh_peer() {
+    // The reconnect-resync contract (ADR 0062): a sharer's full-state snapshot brings
+    // an empty peer to the sharer's exact document, and applying it a second time is a
+    // no-op (idempotent), so a viewer that already saw part of the stream never
+    // double-counts geometry.
+    let mut sharer = SyncDocument::new("sharer");
+    sharer.add_cell(&Cell::new("top"));
+    sharer.add_shape("top", &rect_shape(1, 0, 0, 100, 100));
+    sharer.add_shape("top", &rect_shape(2, 10, 10, 20, 20));
+    sharer.add_cell(&Cell::new("sub"));
+
+    let snapshot = sharer.encode_full_state();
+    // It is the whole-document snapshot, byte-for-byte the initial-exchange encoding.
+    assert_eq!(snapshot, sharer.encode_state_update());
+
+    // A fresh peer converges to the sharer's exact document from the snapshot alone.
+    let mut fresh = SyncDocument::new("viewer");
+    fresh.apply_update(&snapshot).unwrap();
+    assert_eq!(
+        fresh.document(),
+        sharer.document(),
+        "the snapshot reproduces the sharer's document on a fresh peer"
+    );
+
+    // Re-applying the same snapshot changes nothing: no duplicated shapes or cells.
+    fresh.apply_update(&snapshot).unwrap();
+    assert_eq!(fresh.document(), sharer.document());
+    assert_eq!(fresh.document().cell("top").unwrap().shapes.len(), 2);
+    assert_eq!(fresh.document().cell_count(), 2);
+}
