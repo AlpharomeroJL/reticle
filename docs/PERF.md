@@ -370,6 +370,47 @@ a frame and the rule-value slider redraws live. A whole 1M-shape pass is the CPU
 **Browser note.** Measured native (Vulkan). Like the compute-cull gates (ADR 0027), the
 heatmap is WebGPU-only; the WebGL2 path keeps the CPU DRC engine. The browser (WebGPU)
 figure is not yet instrumented and is a follow-up rather than an assumed equal to native.
+### GPU-resident hierarchy: chunked expansion past the single-dispatch cap (v8, measured 2026-07-07)
+
+`GpuHierarchy` (`reticle-render`) keeps an arrayed design fully GPU-resident. A compact
+table of array placements plus leaf cells is uploaded once (a few dozen bytes for the
+scenes below), and every frame one compute pass (`expand_cull_compact.wgsl`) expands the
+arrays element by element, culls each against the viewport, and stream-compacts the
+survivors into ready-to-draw buffers, filling an indirect instance count. One
+`draw_indirect` per chunk then draws the survivors. The single-dispatch cap (65,535
+workgroups, and the 128 MiB / ~2.79M-survivor storage-binding limit on this device) is
+escaped by chunk *count*: 30M spans 11 chunks, 100M spans 36. The CPU touches only the
+chunk list (a handful of entries), never a per-element draw list, asserted by the
+`frame_path_does_no_cpu_per_element_work` test (the `cpu_expand_ops` counter is flat
+across frames).
+
+Measured with `cargo run -p reticle-render --example gpu_hierarchy_bench --release` on
+the host below (RTX 4060 Ti, Vulkan), 1920x1080, one leaf rect arrayed to the target
+count. "expand+cull only" forces the compute pass to GPU completion with no draw or
+readback; the full-frame numbers include a blocking CPU readback a surface loop skips.
+
+| N (flat-equiv) | Chunks | expand+cull only | zoomed-in (cull to window, draw few) | zoomed-out (draw all + readback) |
+|---|---:|---:|---:|---:|
+| 30,003,006 | 11 | 8.75 ms, 114 fps (3.43 G elem/s) | 4.87 ms, 206 fps (10,100 drawn) | 32.4 ms, 30.9 fps (all 30M drawn) |
+| 100,000,000 | 36 | 26.8 ms, 37 fps (3.73 G elem/s) | 9.01 ms, 111 fps (10,201 drawn) | 100.1 ms, 10.0 fps (all 100M drawn) |
+
+Honest reading:
+
+- **Expansion + culling is fully GPU-resident and fast:** ~3.4-3.7 billion elements per
+  second, so all 30M or 100M elements are re-expanded and re-culled from scratch every
+  frame with zero CPU per-element work.
+- **Interactive pan/zoom over a 100M-element design is met:** 111 fps zoomed in, where
+  culling keeps the on-screen subset (10k of 100M). This is the realistic interactive
+  case; 100M distinct shapes never usefully fit 2M pixels.
+- **30M is interactive in every regime,** including drawing all 30M at once (30.9 fps,
+  just meeting the 30 fps target).
+- **Drawing all 100M at once is NOT interactive: 10.0 fps. This is the honest
+  shortfall.** It is bounded by rasterizing 100M sub-pixel quads (400M vertices/frame)
+  plus the 8 MiB readback, not by the expansion pass (expand-only is 37 fps at 100M). A
+  surface-presenting loop skips the readback but still draws 100M primitives, so the
+  zoomed-out-all-visible case stays fill/vertex-bound. The fix is LOD (a coarser
+  representation when the whole design is in view), a tracked follow-up, not more
+  chunking; the GPU-resident expansion this lane delivers is the prerequisite for it.
 
 ## Targets (Section 10)
 

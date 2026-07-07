@@ -13,6 +13,40 @@ proportional to the number of cells considered, not the flattened shape count. T
 interactive egui canvas currently culls on the CPU with the same R-tree, and the GPU
 compute cull is validated against that CPU result in a golden test.
 
+## GPU-resident hierarchy
+
+The cull stage above flags visible cells; `GpuHierarchy` closes the loop by keeping the
+whole arrayed hierarchy resident on the GPU and never touching a per-element draw list on
+the CPU. A compact table of *array placements* (one record per array reference, not per
+element) plus a table of leaf cells is uploaded once. Every frame a single compute pass
+(`expand_cull_compact.wgsl`) does three things at once: it **expands** each array
+element-by-element (one thread per element, binary-searching the placement table by a
+precomputed cumulative element offset), **culls** each element's transformed bounding box
+against the viewport with the same half-open rule as the CPU, and **compacts** the
+survivors into ready-to-draw `RectInstanceT` buffers with a per-workgroup prefix scan and
+a single atomic range reservation, filling an indirect instance count. One
+`draw_indirect` per chunk then draws exactly the survivors; the GPU, not the CPU, decides
+how many.
+
+A single compute dispatch is bounded two ways: at most `max_compute_workgroups_per_dimension`
+(65,535) workgroups of 256 threads, and a storage binding no larger than
+`max_storage_buffer_binding_size` (128 MiB, so about 2.79M 48-byte survivors on a
+default-limits device). `GpuHierarchy` escapes both by splitting the global element space
+into fixed-size **chunks** and issuing one dispatch and one draw per chunk; the cap is
+beaten by chunk *count*, never by a bigger dispatch, so the design scales to arbitrarily
+many elements at a fixed per-chunk cost. A 100M-element array (a via, fill, or bit-cell
+field, routine in real layout) spans 36 chunks; a 30M array spans 11.
+
+Because the per-frame path iterates only the chunk list (a handful of entries) and the
+scene tables are uploaded once, the CPU does no per-element work per frame; the
+`cpu_expand_ops` counter, bumped only by the CPU reference expansion, stays flat across
+frames, which a test asserts. Measured throughput and the honest 100M shortfall are in
+the [performance chapter](performance.md) and `docs/PERF.md`: expansion and culling run
+at 3.4-3.7 billion elements per second, a 100M design pans interactively at 111 fps when
+culling keeps the on-screen subset, and drawing all 100M sub-pixel quads at once stays
+fill-bound at 10 fps (an LOD follow-up, for which this GPU-resident expansion is the
+prerequisite).
+
 ## Instanced draws and tessellation
 
 Axis-aligned rectangles are drawn as instanced quads; polygons and paths are
