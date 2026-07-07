@@ -1,0 +1,27 @@
+# tour-generate: the Generate panel turning a few numbers into verified structure.
+# Open the build starter (SKY130 metal layers), pick the guard-ring generator, grow
+# its region so the ring is prominent, and place it as one undoable step. Then switch
+# to the via-farm generator and place a 5x5 farm. Every placed structure is DRC-clean
+# by construction against the SKY130 subset; the panel scrolls into view as it drives.
+viewport 1600x1000
+use-case build
+wait 20
+generator guard_ring
+wait 6
+capture 30 20
+gen-param region_width 6000
+gen-param region_height 4000
+gen-param ring_width 500
+wait 6
+capture 40 20
+gen-place
+wait 8
+capture 45 20
+generator via_farm
+gen-param rows 5
+gen-param cols 5
+wait 6
+capture 40 20
+gen-place
+wait 8
+capture 45 20

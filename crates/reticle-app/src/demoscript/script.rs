@@ -82,6 +82,19 @@ pub enum Step {
         /// Pitch between copies in DBU.
         pitch: i64,
     },
+    /// Select the Generate-panel generator with this id (for example `guard_ring`), so
+    /// following steps drive its form. Scrolls the Generate panel into view.
+    Generator(String),
+    /// Set integer parameter `name` of the selected generator to `value`.
+    GenParam {
+        /// The schema field name.
+        name: String,
+        /// The integer value to set.
+        value: i64,
+    },
+    /// Place the selected generator's geometry into the top cell as one undo step (the
+    /// real `RunGenerator` path the Generate button uses).
+    GenPlace,
 }
 
 impl Script {
@@ -161,6 +174,14 @@ impl Script {
                 }
                 "union" => steps.push(Step::Union),
                 "array" => steps.push(parse_array(rest).map_err(|e| format!("{}: {e}", at()))?),
+                "generator" => steps.push(Step::Generator(
+                    non_empty(rest, "generator needs an id")
+                        .map_err(|e| format!("{}: {e}", at()))?,
+                )),
+                "gen-param" => {
+                    steps.push(parse_gen_param(rest).map_err(|e| format!("{}: {e}", at()))?);
+                }
+                "gen-place" => steps.push(Step::GenPlace),
                 other => return Err(format!("{}: unknown directive `{other}`", at())),
             }
         }
@@ -271,6 +292,16 @@ fn parse_array(s: &str) -> Result<Step, String> {
     let rows = parse_u32(it.next().unwrap_or(""))?;
     let pitch = parse_i64(it.next().unwrap_or(""))?;
     Ok(Step::Array { cols, rows, pitch })
+}
+
+fn parse_gen_param(s: &str) -> Result<Step, String> {
+    let (name, value) = s
+        .split_once(char::is_whitespace)
+        .ok_or_else(|| "gen-param needs a name and a value".to_owned())?;
+    Ok(Step::GenParam {
+        name: name.trim().to_owned(),
+        value: parse_i64(value.trim())?,
+    })
 }
 
 fn parse_two_f32(s: &str) -> Result<(f32, f32), String> {
@@ -394,6 +425,40 @@ orbit 0.3 0.1
                 Step::Orbit(0.3, 0.1),
             ]
         );
+    }
+
+    #[test]
+    fn parses_generator_directives() {
+        let src = "\
+use-case build
+generator via_farm
+gen-param rows 4
+gen-param cols 4
+gen-place
+";
+        let script = Script::parse(src).expect("parse");
+        assert_eq!(
+            script.steps,
+            vec![
+                Step::UseCase(UseCase::BuildWithTools),
+                Step::Generator("via_farm".to_owned()),
+                Step::GenParam {
+                    name: "rows".to_owned(),
+                    value: 4
+                },
+                Step::GenParam {
+                    name: "cols".to_owned(),
+                    value: 4
+                },
+                Step::GenPlace,
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_gen_param() {
+        assert!(Script::parse("gen-param rows").is_err());
+        assert!(Script::parse("generator").is_err());
     }
 
     #[test]
