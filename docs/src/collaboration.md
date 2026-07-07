@@ -26,7 +26,43 @@ state, and offers a persistence hook. It contains no editing logic of its own, s
 the same convergence guarantees hold whether peers are connected through it or
 exchange updates by any other means.
 
+## Sharing a session
+
+The Share panel turns the current session into something a collaborator can open. The
+one-click **Share this session** button does the whole dance at once: it mints a fresh
+room (the design name plus a short random suffix), goes live so viewers stream this
+session, and copies the read-only viewer link to the clipboard. The advanced fields
+(relay host, room name, viewer-page origin) stay below for when you want to name the
+room yourself or point at a specific relay. A viewer opens the copied link in a browser
+and joins read-only: they see your live edits, pan and zoom independently, and can
+follow your view, but never publish (the relay enforces read-only on its side too).
+
+## Permalinks
+
+A **permalink** deep-links a particular view of an opened document, layered on top of
+the `?gds=<url>` open link. Beyond the file, it can carry three independent, optional
+pieces of view state:
+
+- `?cell=<name>` - the cell to focus (URL-encoded, so spaces and non-ASCII names work).
+- `?view=<x>,<y>,<zoom>` - the camera: the world point at the canvas center and the
+  zoom in pixels per DBU.
+- `?layers=<csv>` - the visible layers as `layer/datatype` specs
+  (for example `68/20,69/20`); every other layer is hidden. An empty value hides all.
+
+`?view=` is shared with the start-view selector (`?view=viewer|editor|replay`); the two
+are told apart by shape, so a value of exactly three numbers is a camera and anything
+else is the start view (see ADR 0062). **Copy permalink to this view** in the Share
+panel serializes the current cell, camera, and visible layers into such a link; opening
+it re-applies them once the document has loaded. Malformed values (a bad number, an
+unknown layer) are ignored rather than failing the open, so a hand-edited link still
+works as far as it can.
+
 ## Testing
 
 Convergence is tested directly: concurrent operation sets are applied in different
 orders across simulated peers, and the final documents must be identical.
+
+The permalink parser and emitter are pure and round-trip tested (`emit` then `parse` is
+the identity), including the encoding edge cases (spaces, unicode cell names, an empty
+layer list), and an app-level test proves an emitted permalink restores the same cell,
+camera, and layers on a freshly opened document.

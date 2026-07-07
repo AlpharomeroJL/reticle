@@ -25,7 +25,10 @@ it works, what it does not do, and the license.
 Import a GDSII or OASIS layout and browse it at interactive speed, with nothing installed.
 Open a local file, drop one onto the window, or pass `?gds=<url>` to load a stream from a
 link. A session can be made read-only and shared, so a reviewer opens the exact view you
-are looking at and pans it themselves without being able to change it.
+are looking at and pans it themselves without being able to change it. One click mints a
+room, goes live, and copies the viewer link; a permalink (`?cell=`, `?view=x,y,z`,
+`?layers=`) deep-links a specific cell, camera, and layer set on top of the file; and a
+phone that opens a shared link navigates by touch (pinch to zoom, two fingers to pan).
 
 The clip below is the query tour: a filter selects shapes by layer and size, and the
 outline tree locates a cell on the canvas. This is the browse-and-inspect surface a shared
