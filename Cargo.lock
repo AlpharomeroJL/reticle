@@ -4100,6 +4100,7 @@ dependencies = [
  "image",
  "js-sys",
  "reticle-agent-api",
+ "reticle-diff",
  "reticle-drc",
  "reticle-extract",
  "reticle-gen",

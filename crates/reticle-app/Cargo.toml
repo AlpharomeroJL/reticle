@@ -38,6 +38,7 @@ reticle-sync = { workspace = true }
 rkyv = "0.8.16"
 reticle-drc = { workspace = true }
 reticle-extract = { workspace = true }
+reticle-diff = { workspace = true }
 
 # The Generate panel (`crate::generate_panel`) drives the parameterized layout
 # generators: it lists them from the registry, builds a typed form from each

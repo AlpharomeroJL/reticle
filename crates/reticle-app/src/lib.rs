@@ -93,6 +93,7 @@ pub mod command;
 pub mod culling;
 pub mod demo;
 pub mod demoscript;
+pub mod diff_overlay;
 pub mod dochost;
 pub mod draw;
 pub mod drc_panel;
