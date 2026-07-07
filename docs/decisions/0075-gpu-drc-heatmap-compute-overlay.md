@@ -1,4 +1,4 @@
-# 00XX, GPU DRC heatmap: a bin-and-check compute overlay whose flags are pinned to the CPU oracle
+# 0075, GPU DRC heatmap: a bin-and-check compute overlay whose flags are pinned to the CPU oracle
 
 > Placeholder number. This ADR was written on lane `v8-3b-gpu-heatmap`; renumber it to
 > the next free record at the Wave 3 merge gate (0073 was the last committed record).
