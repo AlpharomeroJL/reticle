@@ -1,4 +1,4 @@
-# 00XX, the `reticle convert` GDS-to-`.rtla` flatten scope and pyramid leveling
+# 0072, the `reticle convert` GDS-to-`.rtla` flatten scope and pyramid leveling
 
 ## Context
 

@@ -21,7 +21,7 @@
 //! defined anywhere in the file -- that is a whole-file DOM, the very thing the streaming
 //! reader exists to avoid. A referenced cell's own shapes are still captured where they
 //! are drawn, in that cell's local frame. So a hierarchical GDS converts to the union of
-//! every cell's drawn shapes in their own coordinates. See ADR 00XX; true hierarchical
+//! every cell's drawn shapes in their own coordinates. See ADR 0072; true hierarchical
 //! flattening is a documented follow-up.
 //!
 //! # Determinism
@@ -273,7 +273,7 @@ fn finalize_world(world: Option<Rect>) -> Rect {
 /// across, clamped to `[1, MAX_LEVELS]` levels. Each level `i` is a square
 /// `2^i x 2^i` grid over the world box, so the finest level is `2^(count-1)` tiles per
 /// axis. A square grid over a very non-square world gives non-square tiles, which the
-/// builder's tile math handles; a v1 simplification (ADR 00XX).
+/// builder's tile math handles; a v1 simplification (ADR 0072).
 fn plan_levels(world: Rect) -> Vec<LevelDims> {
     let width = i64::from(world.max.x) - i64::from(world.min.x);
     let height = i64::from(world.max.y) - i64::from(world.min.y);

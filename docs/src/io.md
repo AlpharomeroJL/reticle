@@ -80,7 +80,7 @@ avoids. A referenced cell's own shapes are still captured where they are drawn, 
 cell's own frame, so a flat or already-flattened GDS (what the tile generator and the
 export path emit) converts faithfully, while a deeply hierarchical one does not yet
 reproduce its placements. True hierarchical flattening is a documented follow-up. See
-ADR 00XX for the flatten and leveling choices.
+ADR 0072 for the flatten and leveling choices.
 
 ## Robustness
 

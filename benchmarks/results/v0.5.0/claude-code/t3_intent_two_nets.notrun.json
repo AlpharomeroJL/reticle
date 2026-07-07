@@ -1,7 +1,0 @@
-{
-  "task_id": "t3_intent_two_nets",
-  "backend": "claude-code",
-  "model": "sonnet",
-  "suite_version": "adhoc",
-  "reason": "claude session did not authenticate or was out of quota (401)"
-}

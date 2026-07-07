@@ -24,7 +24,7 @@ head: Wave 2 merged + shipped live
 ## SHIPPED LIVE (running tally):
 - Site bundle: web-2b5eb620c993eb64 (Wave 2 streaming: gds_stream reader, external .rtla builder, TileSource mmap/http-range/mem, DocHost edit/stream split + residency, archive-serving worker, license xtask), gh-pages 88193ef, smoke PASS. URL https://alpharomerojl.github.io/reticle/. (Wave 1 bundle web-e6f6b8398ffb8c08 superseded.)
 - DO relay: reticle-relay.josefdean.workers.dev, version 33fe97b0-8b2f-4bc0-8591-e3724b365ae9 (hardened). Conformance GREEN both relays.
-- Bench claude-code row: ~72-83/83 committed (verify), PARTIAL; 3 workers done this batch.
+- Bench claude-code row FINAL: 81/83 committed, 72 passed (89% of run tasks); PARTIAL (2 tier-5 tasks produced no record - persistent auth/quota on those). All bench workers STOPPED (unblocks 7C at the Wave 7 gate). vs v7's 25/83. Row stays labeled PARTIAL; 7B consumes this banked set.
 - Wave 2 HEADLINE NUMBERS (measured): external builder 30M-entry .rtla at 126.9 MiB peak RSS (budget ~2 GiB); 120M records -> 2.42 GB archive in 45.2 s; builder/reader framing agreement fixed (ce04438) + cross-test guards it; streamed query == in-RAM R-tree query (2B proptest).
 - Immediate overnight actions DONE: bench trimmed to 3 (0 dup records), relay redeployed, deferred e2e/e2e-share/conformance ran GREEN.
 
