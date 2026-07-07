@@ -284,3 +284,150 @@ async fn a_viewer_frame_never_enters_the_room_log() {
         "the viewer's dropped frame must never appear in the replayed log"
     );
 }
+
+/// A second met1 rectangle, the "offline edit B" a sharer makes while its socket is down.
+fn offline_edit_rect() -> DrawShape {
+    DrawShape::new(
+        met1(),
+        ShapeKind::Rect(Rect::new(Point::new(500, 0), Point::new(900, 200))),
+    )
+}
+
+/// Kill-and-reconnect resync (ADR 0062): a sharer publishes edit A; its socket drops; it
+/// makes edit B offline in its own [`SyncDocument`]; it reconnects with a *new* connection
+/// and publishes one full-state snapshot. A viewer that stayed connected materializes A+B
+/// **exactly once** (two shapes, not three: the snapshot re-carries A's content but `yrs`
+/// updates are idempotent), and a viewer joining fresh afterward sees the same A+B via the
+/// relay's log replay — no client-side reconnect code, just the snapshot frame plus replay.
+#[tokio::test]
+async fn sharer_reconnect_full_state_resyncs_the_viewer_exactly_once() {
+    let addr = spawn_relay().await;
+    let room = "share-live-reconnect";
+
+    // The viewer joins first so every live frame reaches it (no replay-timing dependence).
+    let mut viewer = connect_viewer(addr, room).await;
+    let mut publisher = connect_editor(addr, room).await;
+    tokio::time::sleep(SUBSCRIBE_GRACE).await;
+
+    // Edit A: the sharer's cell `top` with one met1 rectangle, framed as the transport does.
+    let mut sharer = sharer_document();
+    let frame_a = reticle_sync::encode_update_frame(&sharer.encode_full_state());
+    send_binary(&mut publisher, frame_a).await;
+
+    // The viewer materializes A: one shape.
+    let mut mirror = SyncDocument::new("viewer");
+    let a = recv_binary(&mut viewer, RECV_TIMEOUT)
+        .await
+        .expect("the viewer receives edit A");
+    let Frame::Update(raw_a) = decode_frame(&a).expect("A is a SyncMessage") else {
+        panic!("expected an update frame for A");
+    };
+    mirror.apply_update(&raw_a).expect("A applies");
+    assert_eq!(
+        mirror.document().cell("top").expect("top").shapes.len(),
+        1,
+        "the viewer has edit A before the drop"
+    );
+
+    // The socket drops: the sharer's client goes away, but the room and its log persist.
+    drop(publisher);
+    tokio::time::sleep(SUBSCRIBE_GRACE).await;
+
+    // Offline edit B: a second rectangle into the sharer's own SyncDocument, no socket.
+    sharer.add_shape("top", &offline_edit_rect());
+
+    // The sharer reconnects with a NEW connection and publishes one full-state snapshot.
+    let mut reconnected = connect_editor(addr, room).await;
+    tokio::time::sleep(SUBSCRIBE_GRACE).await;
+    let full_state = reticle_sync::encode_update_frame(&sharer.encode_full_state());
+    send_binary(&mut reconnected, full_state).await;
+
+    // The still-connected viewer applies the snapshot and now has A+B — exactly once: two
+    // shapes, not three, because re-carrying A's content is an idempotent no-op.
+    let snapshot = recv_binary(&mut viewer, RECV_TIMEOUT)
+        .await
+        .expect("the viewer receives the full-state snapshot");
+    let Frame::Update(raw_full) = decode_frame(&snapshot).expect("snapshot is a SyncMessage")
+    else {
+        panic!("expected an update frame for the snapshot");
+    };
+    mirror.apply_update(&raw_full).expect("snapshot applies");
+    assert_eq!(
+        mirror.document().cell("top").expect("top").shapes.len(),
+        2,
+        "the viewer materializes A+B exactly once (no duplication)"
+    );
+
+    // A viewer joining fresh replays the room log (frame A + the snapshot) and reconstructs
+    // the same A+B, proving late joiners resync via replay without any reconnect client code.
+    let mut latecomer = connect_viewer(addr, room).await;
+    let mut replayed = SyncDocument::new("latecomer");
+    while let Some(bytes) = recv_binary(&mut latecomer, NEGATIVE_TIMEOUT).await {
+        if let Ok(Frame::Update(raw)) = decode_frame(&bytes) {
+            replayed.apply_update(&raw).expect("logged frame applies");
+        }
+    }
+    assert_eq!(
+        replayed.document().cell("top").expect("top").shapes.len(),
+        2,
+        "a fresh viewer sees A+B via the relay's log replay"
+    );
+}
+
+/// Negative control for the resync (ADR 0062): if the reconnecting sharer *skips* the
+/// full-state snapshot (the pre-hardening behavior, where a dropped socket silently lost
+/// the offline edit), the viewer is left missing edit B. This is what makes the snapshot
+/// frame load-bearing: remove it and the reconnect test above would fail.
+#[tokio::test]
+async fn without_the_full_state_frame_the_viewer_misses_the_offline_edit() {
+    let addr = spawn_relay().await;
+    let room = "share-live-no-resync";
+
+    let mut viewer = connect_viewer(addr, room).await;
+    let mut publisher = connect_editor(addr, room).await;
+    tokio::time::sleep(SUBSCRIBE_GRACE).await;
+
+    // Edit A reaches the viewer, as before.
+    let mut sharer = sharer_document();
+    let frame_a = reticle_sync::encode_update_frame(&sharer.encode_full_state());
+    send_binary(&mut publisher, frame_a).await;
+
+    let mut mirror = SyncDocument::new("viewer");
+    let a = recv_binary(&mut viewer, RECV_TIMEOUT)
+        .await
+        .expect("the viewer receives edit A");
+    if let Ok(Frame::Update(raw)) = decode_frame(&a) {
+        mirror.apply_update(&raw).expect("A applies");
+    }
+    assert_eq!(mirror.document().cell("top").expect("top").shapes.len(), 1);
+
+    // The socket drops; edit B is made offline but the reconnected sharer publishes only
+    // presence (the buggy path that skips the snapshot), never the document.
+    drop(publisher);
+    tokio::time::sleep(SUBSCRIBE_GRACE).await;
+    sharer.add_shape("top", &offline_edit_rect());
+
+    let mut reconnected = connect_editor(addr, room).await;
+    tokio::time::sleep(SUBSCRIBE_GRACE).await;
+    let mut presence = Presence::new("sharer");
+    presence.cursor = Point::new(1, 2);
+    send_binary(&mut reconnected, encode_presence_frame(&presence)).await;
+
+    // No CRDT frame arrives after reconnect, so the viewer never learns about B.
+    let mut got_update_after_reconnect = false;
+    while let Some(bytes) = recv_binary(&mut viewer, NEGATIVE_TIMEOUT).await {
+        if let Ok(Frame::Update(raw)) = decode_frame(&bytes) {
+            mirror.apply_update(&raw).expect("applies");
+            got_update_after_reconnect = true;
+        }
+    }
+    assert!(
+        !got_update_after_reconnect,
+        "skipping the snapshot means no geometry resync frame is sent"
+    );
+    assert_eq!(
+        mirror.document().cell("top").expect("top").shapes.len(),
+        1,
+        "without the full-state frame the viewer is left missing offline edit B"
+    );
+}
