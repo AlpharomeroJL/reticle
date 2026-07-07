@@ -359,8 +359,59 @@ pub struct App {
     /// wasm (native never spawns the path), so it is dead there by design.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     web_open_started: bool,
+
+    // ---- Live share transport (ADR 0058) -----------------------------------
+    /// The read-only viewer target (room + relay) this app booted from, when the page
+    /// URL was a viewer link (`?view=viewer&...`). `Some` opens the viewer transport on
+    /// the first wasm frame and mirrors the sharer's session read-only; `None` is the
+    /// normal editor/theater boot. Threaded in by [`App::with_viewer`].
+    viewer_target: Option<crate::share::ViewerTarget>,
+    /// The read-only viewer state machine (ADR 0038), present only in a viewer session.
+    /// The viewer transport pumps the sharer's frames into it; the App renders its
+    /// mirrored document and the sharer's presence read-only.
+    viewer_session: Option<crate::viewer::ViewerSession>,
+    /// Whether the viewer has framed the sharer's design yet. The first mirrored frame
+    /// fits the camera to the sharer's layout (so the viewer does not have to pan to
+    /// find it); after that the viewer's camera is left alone for independent pan/zoom.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    viewer_framed: bool,
+    /// The live viewer transport, holding the `web_sys::WebSocket` and its decode
+    /// closures on wasm (inert on native). Kept alive for the session; dropping it
+    /// closes the socket. It exposes no publish path (the app-side read-only guarantee).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    viewer_transport: Option<crate::livesync::ViewerTransport>,
+    /// The live sharer transport, opened from the Share section's "Go live" action. It
+    /// publishes the editor's document and the sharer's presence so viewers stream them.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    sharer_transport: Option<crate::livesync::SharerTransport>,
+    /// The mailbox the socket callbacks post decoded [`LiveEvent`](crate::livesync::LiveEvent)s
+    /// into and the egui loop drains each frame (mirrors [`web_open`](Self::web_open)).
+    live_inbox: crate::livesync::LiveInbox,
+    /// The current connection status of whichever live transport is open, for the
+    /// status line. `Connecting` until the socket opens.
+    live_status: crate::livesync::LiveStatus,
+    /// Whether the one-shot viewer transport has been opened (guards it to the first
+    /// wasm frame of a viewer session, mirroring [`web_open_started`](Self::web_open_started)).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    live_started: bool,
+    /// The document revision last published to the sharer transport, so a re-encode and
+    /// send happen only when the editor's document actually changed (not every frame).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    published_revision: u64,
+    /// Whether to open the sharer transport automatically on the first wasm frame,
+    /// publishing this session for viewers without a manual "Go live" click. Set from a
+    /// `?share=1` page flag (see [`App::with_share_on_boot`]); the browser share-live
+    /// e2e uses it so a headless context can act as the publisher (the "Go live" button
+    /// is egui-canvas-painted and not DOM-clickable). `false` in normal use.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    share_on_boot: bool,
     /// The last world position under the cursor, for the status readout.
     cursor_world: Option<Point>,
+    /// The canvas screen rectangle from the last frame, cached so the live-share sharer
+    /// can compute the viewport it publishes (the region a following viewer frames)
+    /// without threading the screen through the publish path. `None` until the canvas
+    /// has been laid out once (see [`App::local_presence`]).
+    last_screen: Option<ScreenRect>,
     /// Rolling frame-time meter behind the status-bar fps readout.
     frame_meter: FrameMeter,
     /// Which view the app opened into (editor or the replay theater). The web mount
@@ -487,6 +538,56 @@ impl App {
         app
     }
 
+    /// Creates the app as a **read-only viewer** of the shared session named by
+    /// `target` (a room on a relay, ADR 0038/0058).
+    ///
+    /// The web mount calls this when the page URL is a viewer link
+    /// (`?view=viewer&room=..&relay=..`). The app boots into the editor chrome but, on
+    /// its first wasm frame, opens the read-only [viewer transport](crate::livesync)
+    /// to the relay room (`?mode=view`) and mirrors the sharer's live document and
+    /// presence into the canvas, read-only. The viewer transport has no publish path,
+    /// so the viewer can never mutate the shared session (the relay's `?mode=view` drop
+    /// is the independent server-side backstop).
+    ///
+    /// On native this simply records the target; nothing dials a browser socket, so the
+    /// desktop build still constructs and the field stays inert until a wasm frame runs.
+    #[must_use]
+    pub fn with_viewer(target: crate::share::ViewerTarget) -> Self {
+        // A viewer opens the editor chrome (not the Start chooser), then the transport
+        // takes over the canvas with the mirrored document. Seed the Share fields with
+        // the target so the panel reflects the joined room.
+        let mut app = Self::build(StartView::Editor);
+        app.start_screen = false;
+        app.share_server.clone_from(&target.relay);
+        app.share_room.clone_from(&target.room);
+        app.viewer_session = Some(crate::viewer::ViewerSession::new());
+        app.viewer_target = Some(target);
+        app
+    }
+
+    /// Whether this app booted as a read-only viewer of a shared session.
+    #[must_use]
+    pub fn is_viewer(&self) -> bool {
+        self.viewer_target.is_some()
+    }
+
+    /// Creates the app opening into `start_view` and, on wasm, going live automatically
+    /// on the first frame for `room` on `relay` so viewers can stream it immediately.
+    ///
+    /// This is the publisher side of the browser share-live end-to-end (ADR 0058): the
+    /// deployed "Go live" is a manual button, but the button is painted on the egui
+    /// canvas and so is not reachable by a headless DOM click, so the e2e boots a
+    /// publisher context with `?share=1` and this constructor opens the sharer transport
+    /// without a click. It is an ordinary editor session in every other respect.
+    #[must_use]
+    pub fn with_share_on_boot(start_view: StartView, relay: String, room: String) -> Self {
+        let mut app = Self::with_start_view(start_view);
+        app.share_server = relay;
+        app.share_room = room;
+        app.share_on_boot = true;
+        app
+    }
+
     /// Applies the recorded [`StartView`] to the constructed app.
     ///
     /// For [`StartView::ReplayTheater`] it opens the theater window and loads the
@@ -577,6 +678,17 @@ impl App {
             load_progress: crate::webopen::LoadProgress::Idle,
             web_open: crate::webopen::WebOpenInbox::new(),
             web_open_started: false,
+            last_screen: None,
+            viewer_target: None,
+            viewer_session: None,
+            viewer_framed: false,
+            viewer_transport: None,
+            sharer_transport: None,
+            live_inbox: crate::livesync::LiveInbox::new(),
+            live_status: crate::livesync::LiveStatus::default(),
+            live_started: false,
+            published_revision: 0,
+            share_on_boot: false,
             cursor_world: None,
             frame_meter: FrameMeter::default(),
             start_view,
@@ -1127,6 +1239,224 @@ impl App {
                 self.recent_files = merged;
             }
         }
+    }
+
+    /// Drives the live share transport (ADR 0058): on the first wasm frame of a viewer
+    /// session it opens the read-only viewer socket, and every frame it applies whatever
+    /// the socket callbacks have posted to the [`live_inbox`](Self::live_inbox).
+    ///
+    /// This is the viewer's bridge between the socket's event world and the synchronous
+    /// editor loop, mirroring [`drive_web_open`](Self::drive_web_open). The transport
+    /// posts [`LiveEvent`](crate::livesync::LiveEvent)s; here, on the main thread, a
+    /// CRDT frame is applied into the [`ViewerSession`] and its mirrored document is
+    /// installed for rendering, a presence updates the sharer's cursor and follow
+    /// viewport, and a status change updates the status line. On native the inbox is
+    /// always empty and no socket is opened, so this is a cheap no-op.
+    fn drive_live(&mut self, ctx: &egui::Context) {
+        #[cfg(target_arch = "wasm32")]
+        if !self.live_started {
+            if self.viewer_target.is_some() {
+                self.live_started = true;
+                if let Some(target) = self.viewer_target.clone() {
+                    self.viewer_transport = Some(crate::livesync::ViewerTransport::connect(
+                        &target.relay,
+                        &target.room,
+                        &self.live_inbox,
+                        ctx,
+                    ));
+                    self.status.set("Joining the shared session...");
+                }
+            } else if self.share_on_boot {
+                // Publisher side of the browser share-live e2e: go live without a click.
+                self.live_started = true;
+                self.go_live(ctx);
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = ctx;
+
+        let events = self.live_inbox.drain();
+        if events.is_empty() {
+            return;
+        }
+        let mut geometry_changed = false;
+        for event in events {
+            geometry_changed |= self.apply_live_event(event);
+        }
+        // Reflect the sharer's updated geometry into the render pipeline, and, when
+        // following, snap the local camera to the sharer's viewport.
+        if geometry_changed {
+            self.install_viewer_mirror();
+        }
+    }
+
+    /// Applies one [`LiveEvent`](crate::livesync::LiveEvent) from the viewer transport,
+    /// returning `true` if the mirrored document's geometry changed (so the caller
+    /// rebuilds the render scene).
+    ///
+    /// A CRDT frame is merged into the [`ViewerSession`]; a presence updates the
+    /// sharer's cursor and the viewport follow-mode rides on, and is also mirrored into
+    /// the App's awareness map so the existing [`draw_presence`](Self::draw_presence)
+    /// draws the sharer's cursor; a status change updates the status line.
+    fn apply_live_event(&mut self, event: crate::livesync::LiveEvent) -> bool {
+        use crate::livesync::LiveEvent;
+        match event {
+            LiveEvent::Update(bytes) => {
+                if let Some(session) = self.viewer_session.as_mut() {
+                    match session.apply_frame(&bytes) {
+                        Ok(()) => return true,
+                        Err(e) => self.status.set(format!("dropped a bad frame: {e}")),
+                    }
+                }
+                false
+            }
+            LiveEvent::Presence(presence) => {
+                if let Some(session) = self.viewer_session.as_mut() {
+                    session.apply_presence(presence.clone());
+                }
+                // Mirror the sharer's presence into the App's awareness map so the
+                // canvas draws the sharer's cursor with the machinery that already
+                // renders remote collaborators.
+                self.document.awareness_mut().set(presence);
+                false
+            }
+            LiveEvent::Status(status) => {
+                // When a sharer socket first opens, force a full-document republish: the
+                // first publish attempt fired while the socket was still connecting and
+                // was dropped, and the revision guard would otherwise never retry. This
+                // makes the sharer's whole document reach viewers as soon as the socket
+                // is live (the CRDT is idempotent, so a repeat is harmless).
+                if status.is_open() && self.sharer_transport.is_some() {
+                    self.published_revision = self.history.revision().wrapping_sub(1);
+                }
+                self.status.set(status.label());
+                self.live_status = status;
+                false
+            }
+        }
+    }
+
+    /// Installs the viewer's mirrored document into the render pipeline, rebuilding the
+    /// spatial index, retained GPU scene, and outline from the [`ViewerSession`]'s
+    /// current document.
+    ///
+    /// Called when a CRDT frame changed the mirror. It reframes the camera only on the
+    /// *first* installed geometry (so the viewer sees the sharer's design without having
+    /// to pan to find it) and thereafter leaves the local camera alone, so the viewer
+    /// pans and zooms independently. With follow-mode on, the local camera then snaps to
+    /// the sharer's viewport instead (handled where the canvas draws).
+    fn install_viewer_mirror(&mut self) {
+        let Some(session) = self.viewer_session.as_ref() else {
+            return;
+        };
+        let document = session.document().clone();
+        let top_cell = document
+            .top_cells()
+            .first()
+            .cloned()
+            .or_else(|| document.cells().next().map(|c| c.name.clone()))
+            .unwrap_or_else(|| self.top_cell.clone());
+
+        self.layer_state = LayerState::from_technology(document.technology());
+        self.scene = SceneIndex::build(&document, &top_cell);
+        let palette = palette_from_layers(&self.layer_state);
+        self.retained = RetainedScene::new(&document, &top_cell, &palette);
+        self.expanded = Arc::new(self.retained.expand());
+        self.search.outline = OutlineTree::build(&document);
+        self.top_cell = top_cell;
+        self.history = History::new(document);
+        self.doc_generation = self.doc_generation.wrapping_add(1);
+        self.render_revision = self.render_revision.wrapping_add(1);
+        // Reframe the first time the sharer's geometry lands (the viewer boots showing
+        // the demo document until then), so the viewer sees the shared design; after
+        // that keep the viewer's own camera so independent pan/zoom is not fought.
+        if !self.viewer_framed {
+            self.viewer_framed = true;
+            self.fit_requested = true;
+        }
+    }
+
+    /// Publishes the editor's document and the sharer's presence over the sharer
+    /// transport, when one is open (the Share section's "Go live", ADR 0058).
+    ///
+    /// The document is re-encoded and sent only when it actually changed since the last
+    /// publish (tracked by the history revision), because [`self.document`](Self::document)
+    /// (the collaboration mirror) is not kept in step with edits, so the sharer builds a
+    /// fresh [`SyncDocument`](reticle_sync::SyncDocument) from the editable
+    /// [`history`](Self::history) document to produce the update bytes. Presence (cursor,
+    /// selection, viewport) is sent every frame the socket is open so a viewer's cursor
+    /// and follow-viewport stay live; presence frames are tiny.
+    ///
+    /// A no-op on native and whenever no sharer transport is open.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(clippy::unused_self))]
+    fn drive_sharer_publish(&mut self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let Some(transport) = self.sharer_transport.as_ref() else {
+                return;
+            };
+            // Re-encode and publish the document only on a real change.
+            let revision = self.history.revision();
+            if revision != self.published_revision {
+                let sync = reticle_sync::SyncDocument::from_document(
+                    crate::viewer::VIEWER_ACTOR, // any stable non-viewer actor; the sharer
+                    self.history.document(),     // publishes, viewers never do.
+                );
+                transport.publish_update(&sync.encode_state_update());
+                self.published_revision = revision;
+            }
+            // Publish presence every open frame; the frame is small and keeps the
+            // sharer's cursor and follow-viewport live for viewers.
+            if self.live_status.is_open()
+                && let Some(presence) = self.local_presence()
+            {
+                transport.publish_presence(&presence);
+            }
+        }
+    }
+
+    /// Builds the sharer's own [`Presence`](reticle_sync::Presence): the cursor under
+    /// the pointer, the current selection as element references, and the visible
+    /// viewport (in world DBU) that a following viewer frames.
+    ///
+    /// Returns `None` when the canvas size is not yet known (no viewport to publish).
+    /// The viewport rides on the frozen `Presence.viewport` field, exactly what
+    /// follow-mode reads (ADR 0038).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn local_presence(&self) -> Option<reticle_sync::Presence> {
+        let screen = self.last_screen?;
+        let mut presence = reticle_sync::Presence::new("sharer");
+        presence.display_name.push_str("Sharer");
+        presence.color_rgba = 0x2f_81_f7_ff; // a distinct sharer blue
+        if let Some(cursor) = self.cursor_world {
+            presence.cursor = cursor;
+        }
+        presence.selection = self
+            .selection
+            .iter()
+            .map(|idx| format!("{}/shape-{idx}", self.top_cell))
+            .collect();
+        presence.viewport = self.camera.visible_world_rect(&screen);
+        Some(presence)
+    }
+
+    /// Opens the sharer transport for the current relay/room so viewers stream this
+    /// session (the Share section's "Go live", ADR 0058).
+    ///
+    /// Idempotent from the UI's perspective: opening replaces any prior transport,
+    /// dialing the room in Edit mode. The next frame begins publishing the document and
+    /// presence. On native this records intent but dials no socket.
+    fn go_live(&mut self, ctx: &egui::Context) {
+        self.published_revision = self.history.revision().wrapping_sub(1); // force a first publish
+        self.live_status = crate::livesync::LiveStatus::Connecting;
+        self.sharer_transport = Some(crate::livesync::SharerTransport::connect(
+            &self.share_server,
+            &self.share_room,
+            &self.live_inbox,
+            ctx,
+        ));
+        self.status
+            .set("Going live: viewers can now join this session");
     }
 
     /// Persists the recent-files list to `IndexedDB` (wasm only; a no-op on native).
@@ -1982,6 +2312,9 @@ impl App {
         egui::CentralPanel::default().show(ui, |ui| {
             canvas_screen = Some(self.canvas(ui, gpu_format));
         });
+        // Cache the canvas rectangle so the live-share sharer can publish its viewport
+        // (see [`App::local_presence`]) without threading the screen through.
+        self.last_screen = canvas_screen;
 
         // The minimap rides in the canvas's top-right; highlight the real panel when
         // it is drawn and the scene has bounds, else fall back to the canvas.
@@ -3887,12 +4220,33 @@ impl App {
             ui.text_edit_singleline(&mut self.share_room);
         });
 
+        // A read-only viewer session mirrors a sharer's screen; its Share panel is the
+        // connection status and the follow-mode toggle, not the sharing controls.
+        if self.is_viewer() {
+            self.viewer_share_controls(ui);
+            return;
+        }
+
         // The collaborator (read-write) join link.
         let link = crate::share::room_link(&self.share_server, &self.share_room);
         ui.monospace(&link);
-        if ui.button("Copy link").clicked() {
-            ui.ctx().copy_text(link);
-            self.status.set("Share link copied");
+        ui.horizontal(|ui| {
+            if ui.button("Copy link").clicked() {
+                ui.ctx().copy_text(link);
+                self.status.set("Share link copied");
+            }
+            // Go live: open the sharer transport so viewers stream this session's
+            // geometry and the live cursor/viewport (ADR 0058). On native this records
+            // intent but dials no socket; the live streaming is the browser build.
+            let live = self.sharer_transport.is_some();
+            let go_live = ui.button(if live { "Live (restart)" } else { "Go live" });
+            if go_live.clicked() {
+                let ctx = ui.ctx().clone();
+                self.go_live(&ctx);
+            }
+        });
+        if self.sharer_transport.is_some() {
+            ui.label(self.live_status.label());
         }
 
         ui.separator();
@@ -3912,6 +4266,35 @@ impl App {
             self.status.set("Read-only viewer link copied");
         }
         ui.label("Viewers see live edits, pan and zoom independently, and can follow your view.");
+    }
+
+    /// Draws the Share section for a **read-only viewer** session: the joined room, the
+    /// live connection status, and the follow-mode toggle (ADR 0038/0058).
+    ///
+    /// A viewer cannot share or edit, so this panel shows only what a viewer controls:
+    /// whether to ride along with the sharer's viewport (follow on) or pan and zoom the
+    /// mirrored design independently (follow off).
+    fn viewer_share_controls(&mut self, ui: &mut egui::Ui) {
+        ui.label(format!(
+            "Read-only viewer of room '{}' on {}",
+            self.share_room, self.share_server
+        ));
+        ui.label(self.live_status.label());
+        if let Some(session) = self.viewer_session.as_mut() {
+            let mut follow = session.is_following();
+            if ui
+                .checkbox(&mut follow, "Follow the sharer's view")
+                .changed()
+            {
+                session.set_follow(follow);
+                self.status.set(if follow {
+                    "Following the sharer's view"
+                } else {
+                    "Panning independently"
+                });
+            }
+        }
+        ui.label("You are viewing a shared session read-only. Your edits are not sent.");
     }
 
     /// Draws the view and export section: theme toggle, camera bookmarks, and the
@@ -4412,6 +4795,17 @@ impl App {
                 self.camera.zoom_to_fit(&screen, bounds);
             }
             self.fit_requested = false;
+        }
+
+        // In a read-only viewer session with follow-mode on, snap the local camera to
+        // the sharer's viewport (ADR 0038) before drawing, so the viewer rides along.
+        // The ViewerSession owns its own camera; mirror it into the App camera the
+        // canvas draws with, so follow reuses the whole render path.
+        if let Some(session) = self.viewer_session.as_mut()
+            && session.is_following()
+            && session.sync_camera(&screen)
+        {
+            self.camera = session.camera();
         }
 
         // Deferred zoom to the violation the DRC list just selected.
@@ -5871,6 +6265,14 @@ impl eframe::App for App {
         // recent-list load on the first wasm frame, and apply whatever those async
         // tasks have posted since last frame. A no-op on native.
         self.drive_web_open(&ctx);
+
+        // Drive the live share transport: open the read-only viewer socket on the first
+        // wasm frame of a viewer session, and apply the sharer's streamed frames and
+        // presence the socket has posted since last frame. A no-op on native and in a
+        // normal (non-viewer) editor session. Also publish the sharer's document and
+        // presence when a "Go live" sharer transport is open.
+        self.drive_live(&ctx);
+        self.drive_sharer_publish();
 
         // Open a file dropped onto the page (browser) or window (native) before
         // anything else this frame, so a drop works from any view including the Start
