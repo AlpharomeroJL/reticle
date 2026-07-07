@@ -4109,6 +4109,7 @@ dependencies = [
  "reticle-model",
  "reticle-render",
  "reticle-sync",
+ "rkyv",
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
