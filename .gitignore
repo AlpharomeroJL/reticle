@@ -40,6 +40,11 @@ Thumbs.db
 # committed relay config lives under worker/; this is machine-local runtime.
 /.wrangler/
 **/.wrangler/
+# Worker build/runtime dirs: node_modules (npm ci restores them), the
+# worker-build wasm bundle, and the worker's cargo target.
+/worker/node_modules/
+/worker/build/
+/worker/target/
 
 # Local tooling/config and the internal build specification (not shipped).
 /.claude/
