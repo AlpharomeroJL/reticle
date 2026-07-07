@@ -411,6 +411,12 @@ pub struct App {
     /// a `filter`/`outline-locate` step so the query tour shows the bar it is driving.
     #[cfg(not(target_arch = "wasm32"))]
     demo_focus_search: bool,
+
+    /// Whether a demo capture wants the right column scrolled to the Generate panel,
+    /// which otherwise sits below the fold. Set by a `generator`/`gen-param`/`gen-place`
+    /// step so the generator tour shows the panel it is driving.
+    #[cfg(not(target_arch = "wasm32"))]
+    demo_focus_generate: bool,
 }
 
 /// The view the app opens into.
@@ -588,6 +594,8 @@ impl App {
             demo_show_3d: false,
             #[cfg(not(target_arch = "wasm32"))]
             demo_focus_search: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            demo_focus_generate: false,
         }
     }
 
@@ -1326,6 +1334,29 @@ impl App {
                     }
                 }
             }
+            Step::Generator(id) => {
+                self.demo_focus_generate = true;
+                match self
+                    .generate
+                    .infos()
+                    .iter()
+                    .position(|i| i.id == id.as_str())
+                {
+                    Some(index) => self.generate.select(index),
+                    None => eprintln!("demo: no generator with id `{id}`"),
+                }
+            }
+            Step::GenParam { name, value } => {
+                self.demo_focus_generate = true;
+                self.generate.selected_params_mut()[name.as_str()] =
+                    serde_json::Value::from(*value);
+            }
+            Step::GenPlace => {
+                self.demo_focus_generate = true;
+                self.generate_apply();
+                // Reframe so the placed structure is on screen.
+                self.fit_requested = true;
+            }
             // Free camera nudges are not used by any committed script yet.
             Step::Zoom(_) | Step::Pan(..) => {
                 eprintln!("demo: step {step:?} not yet implemented");
@@ -1924,6 +1955,12 @@ impl App {
                         self.ops_panel(ui);
                         self.productivity_panel(ui);
                         ui.separator();
+                        // During the generator tour, scroll the column so the Generate
+                        // panel (otherwise below the fold) is on screen.
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if self.demo_focus_generate {
+                            ui.scroll_to_cursor(Some(egui::Align::TOP));
+                        }
                         self.generate_section(ui);
                         self.snap_panel(ui);
                         ui.separator();
