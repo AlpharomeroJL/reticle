@@ -73,6 +73,11 @@ const MET4_PIN: LayerId = LayerId::new(71, 16);
 const MET4_LABEL: LayerId = LayerId::new(71, 5);
 /// The tile-boundary marker layer (SKY130 areaid.sc `81/4`).
 const TT_BOUNDARY: LayerId = LayerId::new(81, 4);
+/// The `prBoundary.boundary` layer (`235/4`) Tiny Tapeout's `KLayout` precheck requires to
+/// delimit the project area. Magic reads the areaid.sc marker above; the `KLayout` precheck
+/// reads this one and reports the project boundary missing without it, so the tile carries
+/// both. (Found by running the real precheck; see ADR 0059.)
+const PRBOUNDARY: LayerId = LayerId::new(235, 4);
 
 /// The 1x2 tile die area, in DBU (1 dbu = 1 nm): `(0,0)`..`(161000, 225760)`, i.e.
 /// 161.0 x 225.76 um. From `tt_analog_1x2.def` `DIEAREA`. DBU is `i32`, and every
@@ -188,14 +193,16 @@ fn strap_rect(center_x: i32) -> Rect {
 pub fn tile_document() -> Document {
     let mut cell = Cell::new(TT_TILE_TOP);
 
-    // The tile outline: a boundary-layer rectangle over the whole die area.
-    cell.shapes.push(DrawShape::new(
-        TT_BOUNDARY,
-        ShapeKind::Rect(Rect::new(
-            Point::new(0, 0),
-            Point::new(DIE_MAX_X, DIE_MAX_Y),
-        )),
+    // The tile outline: a boundary-layer rectangle over the whole die area, drawn on both
+    // the areaid.sc marker (Magic) and prBoundary.boundary (the KLayout precheck's project
+    // area), so TinyTapeout's own precheck finds the boundary it requires.
+    let die_outline = ShapeKind::Rect(Rect::new(
+        Point::new(0, 0),
+        Point::new(DIE_MAX_X, DIE_MAX_Y),
     ));
+    cell.shapes
+        .push(DrawShape::new(TT_BOUNDARY, die_outline.clone()));
+    cell.shapes.push(DrawShape::new(PRBOUNDARY, die_outline));
 
     // The six analog pins, in order from ua[0]. Each gets drawing metal, a pin
     // terminal on the pin purpose, and a centered label.

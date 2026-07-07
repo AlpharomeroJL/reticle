@@ -381,18 +381,26 @@ New subsystems, itemized with their honest limits:
   Windows also set `RETICLE_CLAUDE_BIN`). The two local rows shown are still the 75-task
   v0.4.0 numbers; re-running local models on v0.5.0 is a follow-up; transcript mining has
   no new server-side transcripts to mine yet.
-- **Wave 4, the tape-out oracle, DONE (with the live run deferred).** A TinyTapeout
-  technology-plus-template bundle for a GDS-mode tile, transcribed from TinyTapeout's own
-  DEF/init files and validated zero-tolerance against them and cross-checked against the
-  published `tt_um_analog_mux` submission (ADR 0053). `just tt-precheck <gds>` wraps
-  TinyTapeout's own Magic+KLayout precheck via a pinned Docker image, with a
-  structured-failure parser and an agent-loop feedback seam, two-way tested over honestly
-  labeled synthesized fixtures (ADR 0054). A committed worked tile
-  (`examples/tapeout/tt_um_reticle_tile.gds`) built through the frozen agent surface with
-  a replayable transcript, DRC-subset-clean (ADR 0055). *Honest:* the tile is
-  generator-built (NOT agent-authored, the CLI is unauthenticated) and DRC-clean against
-  the SKY130 SUBSET, NOT run through the real precheck (that needs a multi-GB image and is
-  the operator's step); no tile in the repo is claimed to pass the precheck.
+- **Wave 4, the tape-out oracle, DONE and the live precheck RUN to a verdict.** A
+  TinyTapeout technology-plus-template bundle for a GDS-mode tile, transcribed from
+  TinyTapeout's own DEF/init files and validated zero-tolerance against them and
+  cross-checked against the published `tt_um_analog_mux` submission (ADR 0053).
+  `just tt-precheck <gds>` wraps TinyTapeout's own Magic+KLayout precheck via a pinned
+  Docker image, with a structured-failure parser and an agent-loop feedback seam, two-way
+  tested over honestly labeled synthesized fixtures (ADR 0054). A committed worked tile
+  (`examples/tapeout/tt_um_reticle_tile.gds`) built through the frozen agent surface with a
+  replayable transcript (ADR 0055). **The real precheck was run to completion (ADR 0059,
+  2026-07-06):** the tile passes every one of TinyTapeout's own Magic + KLayout DRC and
+  geometry checks (Magic DRC, KLayout FEOL/BEOL/offgrid/pin-label/zero-area, prBoundary,
+  boundary, layer whitelist, cell name, urpm/nwell). The run caught a real bug the subset
+  missed, the boundary was on `areaid.sc (81/4)` but the precheck reads
+  `prBoundary.boundary (235/4)`; the tile was fixed to carry both and re-verified. The raw
+  report is committed at `examples/tapeout/precheck-results.md`. *Honest:* four checks still
+  fail, all submission artifacts a geometry generator does not produce, a LEF pin abstract,
+  a Verilog interface view, and analog pins wired to a design (the six `ua[*]` are landing
+  pads on a template plus an isolated test structure). The tile is a DRC-clean geometry
+  demonstration, not a complete submittable design; no tile in the repo is claimed to pass
+  the precheck in full.
 - **Wave 5, presentation, DONE.** The README rebuilt as a product page (voice rules and
   banned-word gate kept) with a newly captured generator GIF driving the real Generate
   panel and an honest three-row benchmark table (two bare-local-model rows plus the

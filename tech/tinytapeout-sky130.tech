@@ -28,11 +28,15 @@
 technology tinytapeout_sky130
 dbu_per_micron 1000
 
-# --- Tile boundary marker ---
+# --- Tile boundary markers ---
 # SKY130 areaid.sc (81/4), the standard "this area is a design tile" identifier,
 # used here to draw the TinyTapeout tile outline. It is a marker layer, not a
 # conductor, so it carries no width/spacing rule.
 layer 81 4 tt_boundary FFD54088
+# prBoundary.boundary (235/4): the project-area layer TinyTapeout's KLayout precheck
+# delimits the tile from (it reports the boundary missing without it). Also a marker
+# layer with no width/spacing rule. The tile carries both so Magic and KLayout agree.
+layer 235 4 prboundary FFD540CC
 
 # --- met4: the layer every TinyTapeout analog pin and power strap lives on ---
 layer 71 20 met4      C2903A90
