@@ -20,8 +20,19 @@
 //! Every stage funnels subsystem failures into a single [`CliError`], which maps
 //! IO, parsing, model, and rendering problems into one type the binary can print
 //! and turn into a process exit code.
+//!
+//! # The Tiny Tapeout precheck oracle
+//!
+//! The [`tt_precheck`] module parses Tiny Tapeout's own precheck output (its Magic DRC
+//! and `KLayout` report files) into a structured [`tt_precheck::PrecheckReport`] whose
+//! failures the agent loop consumes like DRC violations. The live precheck itself runs
+//! Linux-native in a pinned Docker container via `just tt-precheck <gds>`
+//! (`scripts/tt-precheck.ps1`); the parser here needs neither Docker nor the PDK and is
+//! unit-tested against the precheck's committed output format.
 
 #![forbid(unsafe_code)]
+
+pub mod tt_precheck;
 
 use std::fmt;
 use std::path::{Path, PathBuf};

@@ -259,6 +259,28 @@ capture-ui *args:
     cargo run -p xtask --release -- capture-ui {{args}}
 
 # ---------------------------------------------------------------------------
+# TinyTapeout precheck oracle (ADR 0054): run TinyTapeout's OWN precheck over a
+# GDS as the authoritative GDS-mode submission gate. Additive and NOT part of
+# `just ci`: it needs Docker and a multi-GB pinned image, exactly like the
+# nightly-only fuzz/miri recipes below.
+# ---------------------------------------------------------------------------
+# Runs TinyTapeout's precheck (Magic DRC + KLayout + pin/boundary/layer/naming
+# checks) over <gds> inside the PINNED `hpretl/iic-osic-tools` container (Magic +
+# KLayout + gdstk + the SKY130 PDK baked in). The wrapper stages a minimal
+# TinyTapeout project (info.yaml with top_module = the GDS stem, which the
+# precheck requires), checks out `TinyTapeout/tt-support-tools`, runs
+# `python precheck/precheck.py --gds <gds> --tech sky130A` in the container, and
+# copies the reports (results.md, results.xml, magic_drc.txt, drc_*.xml) to the
+# out dir. The exit code is the precheck's own (0 = passed). The Rust parser
+# `reticle_cli::tt_precheck::parse_reports_dir` turns that out dir into a
+# structured PrecheckReport the agent loop consumes like DRC violations. WSL is a
+# documented fallback (see scripts/tt-precheck.ps1 and ADR 0054).
+#   just tt-precheck scratch/tile.gds
+#   just tt-precheck scratch/tile.gds scratch/precheck-reports
+tt-precheck gds out="scratch/precheck-reports":
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tt-precheck.ps1 -Gds {{gds}} -OutDir {{out}}
+
+# ---------------------------------------------------------------------------
 # Nightly-only: fuzzing and miri
 # ---------------------------------------------------------------------------
 fuzz target time="60":
