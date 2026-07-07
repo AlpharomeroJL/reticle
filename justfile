@@ -312,7 +312,7 @@ coverage:
     cargo llvm-cov --workspace --lcov --output-path lcov.info
 
 # ---------------------------------------------------------------------------
-# Relay conformance (ADR 0062): one vector table, both relays.
+# Relay conformance (ADR 0063): one vector table, both relays.
 # ---------------------------------------------------------------------------
 # Wave-gate recipe (NOT part of `just ci`, which stays Node-free). The native
 # half always runs in-process; the Durable Object half spawns `wrangler dev
