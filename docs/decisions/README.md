@@ -69,3 +69,5 @@ superseded decision is marked and linked to its replacement.
 | [0061](0061-v8-frozen-surface-amendments.md) | v8 frozen-surface amendments: what may change, at which wave boundary, always additive |
 | [0062](0062-rtla-streamed-archive-contract.md) | The .rtla streamed-archive format, the TileSource seam, and the gds_stream reader (Wave 2 contract) |
 | [0063](0063-share-transport-reconnect-and-resync.md) | Live share reconnect: capped-backoff redial and a full-state snapshot on reopen |
+| [0064](0064-durable-object-relay-workers-rs.md) | The Durable Object relay: workers-rs over a TypeScript fallback, hibernation-safe by attachments and alarms |
+| [0065](0065-relay-conformance-vector-format.md) | The relay conformance vector format: one table, two targets, presence coalescing the only target-aware branch |

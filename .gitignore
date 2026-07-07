@@ -40,6 +40,11 @@ Thumbs.db
 # committed relay config lives under worker/; this is machine-local runtime.
 /.wrangler/
 **/.wrangler/
+# Worker build/runtime dirs: node_modules (npm ci restores them), the
+# worker-build wasm bundle, and the worker's cargo target.
+/worker/node_modules/
+/worker/build/
+/worker/target/
 
 # Benchmark per-task byproducts: only the .result.json record is committed (it is
 # the API), matching the v0.5.0 pattern. The per-run MCP config and captured
