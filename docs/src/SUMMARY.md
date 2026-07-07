@@ -18,6 +18,7 @@
 - [Search and selection depth](search-selection.md)
 - [Design-rule checking](drc.md)
   - [SKY130 rule coverage](sky130-drc-coverage.md)
+  - [KLayout .lydrc compatibility](lydrc-compat.md)
 - [SKY130 grounding](sky130.md)
 - [Routing](routing.md)
 - [Connectivity extraction](extraction.md)

@@ -181,7 +181,9 @@ from 6.1 to about 113 fps on an RTX 4060 Ti (see [PERF.md](docs/PERF.md)).
 extension, notch, area, density, and angle rules against the indexed geometry. On an edit it
 re-checks only the changed neighbourhood: 5 us at 100k shapes and 37 us at 1M, against the
 100 ms interactive target. A property test pins the engine to a naive reference oracle over
-400 random layouts. A cited SKY130 rule subset grounds the periphery rules.
+400 random layouts. A cited SKY130 rule subset grounds the periphery rules. A documented
+subset of KLayout `.lydrc` DRC decks compiles down to the same engine, validated
+verdict-for-verdict against KLayout headless in the pinned container.
 
 **Generators.** Each of the six generators is a pure function from a typed `ParamSchema` to
 geometry. One schema drives all three surfaces (the Generate panel, the MCP tools, the
