@@ -433,7 +433,7 @@ impl DrcHeatmap {
     /// An empty input returns an output over a trivial `1 x 1` grid with a zero-length
     /// flag buffer, without dispatching.
     ///
-    /// The input is capped to [`device_instance_cap`] instances (what a single compute
+    /// The input is capped to `device_instance_cap` instances (what a single compute
     /// dispatch and one storage binding hold on this device); a larger slice is processed
     /// over its leading `cap` instances rather than tripping wgpu validation. The overlay
     /// targets the visible (culled) instance set, which sits far below the cap in
