@@ -218,6 +218,10 @@ layout, not a production EDA tool. It is honest about its edges, audited in
   boolean robustness are covered instead by proptests in the gate. Run the fuzzers on Linux.
 - OASIS round-trips rectangles, polygons, paths, instances, and arrays; GDSII carries the
   full hierarchy.
+- A streamed-archive path (`.rtla`) is landing as infrastructure: a forward-only GDSII
+  record reader with no `gds21` dependency (wasm-clean) and an external, bounded-memory
+  tiled-archive builder that turns a 30M-entry layout into an archive at 127 MiB peak RSS.
+  The in-browser residency and converter that consume it are separate Wave 2 lanes.
 
 For where Reticle sits among layout tools and the full list of non-goals, see
 [Positioning](docs/src/positioning.md).
