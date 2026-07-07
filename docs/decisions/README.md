@@ -62,3 +62,4 @@ superseded decision is marked and linked to its replacement.
 | [0054](0054-tinytapeout-precheck-oracle.md) | TinyTapeout's precheck as an external oracle: a pinned Docker container, a structured-failure parser, and the agent-loop seam |
 | [0055](0055-worked-tapeout-tile-generator-built-command-seeded.md) | The worked TinyTapeout tile: generator-built, command-seeded through GDS import, DRC-subset-clean and precheck-deferred |
 | [0056](0056-gds-export-byte-reproducibility.md) | GDSII export is byte-reproducible: a fixed date stamp, reconciled from an orphaned debug worktree |
+| [0057](0057-aref-off-by-one-was-a-measurement-misdiagnosis.md) | The "GDS AREF-decode off-by-one" was a measurement misdiagnosis, not a parser bug |

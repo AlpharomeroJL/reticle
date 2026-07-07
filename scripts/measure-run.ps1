@@ -7,12 +7,21 @@
 # the polled maximum is the true peak. stdout/stderr are drained asynchronously so
 # a full pipe buffer cannot deadlock the poll loop.
 #
+# A .NET child process started with UseShellExecute=false inherits its working
+# directory from [Environment]::CurrentDirectory, which PowerShell's Set-Location does
+# NOT update. So a relative path in $CliArgs (for example scratch\gen.gds) would resolve
+# against a stale directory and could read a different file than the one at the shell's
+# current location. $WorkingDirectory (default: the caller's current location) is set on
+# the child explicitly so relative arguments resolve where the caller expects. Prefer
+# passing designs by absolute path regardless; this closes the ambiguity either way.
+#
 # Usage (call directly so the array binds; do not use powershell -File):
 #   & scripts/measure-run.ps1 -Label import -Exe path\to\reticle.exe -CliArgs @("import","scratch\scale.gds")
 param(
     [Parameter(Mandatory = $true)][string]$Label,
     [Parameter(Mandatory = $true)][string]$Exe,
-    [string[]]$CliArgs = @()
+    [string[]]$CliArgs = @(),
+    [string]$WorkingDirectory = (Get-Location).Path
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +29,7 @@ $ErrorActionPreference = 'Stop'
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = $Exe
 $psi.Arguments = ($CliArgs -join ' ')
+$psi.WorkingDirectory = $WorkingDirectory
 $psi.UseShellExecute = $false
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError = $true
