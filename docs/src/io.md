@@ -57,6 +57,31 @@ archive to completion under the same bound. The on-disk framing (a 32-byte pream
 locating the rkyv header and directory blocks, then byte-contiguous tiles) is
 specified in ADR 0063 so the native and wasm tile sources read to the same layout.
 
+### Converting a GDS to a streamable archive
+
+`reticle convert <in.gds> <out.rtla>` joins those two pieces into one command: it turns
+a GDSII file into a `.rtla` archive you can browse over an HTTP range or a memory map
+without ever loading the whole die. It streams the input twice, holding no whole-file
+model. Pass one scans every record to find the world bounding box, recover the database
+scale, and count the drawn elements; pass two reopens the file as a lazy record source
+and feeds it to `build_rtla`. Peak memory is the builder's spill budget, not the file
+size, so the command scales to the same gigabyte dies the builder targets. The
+conversion is byte-deterministic: records are emitted in document order, the world box
+is an order-independent union, the pyramid depth is a pure function of the world span,
+and the builder writes no timestamps, so the same input always produces identical
+bytes.
+
+Its v1 flatten scope is deliberately narrow: only *directly drawn* geometry becomes a
+record. Each boundary and path bounding box is one tile record, in database units as
+authored (a path is inflated by half its width). Instance and array references are
+**not** composed into world space, because expanding a placement needs random access to
+the referenced cell's geometry (a whole-file model), the very thing the streaming path
+avoids. A referenced cell's own shapes are still captured where they are drawn, in that
+cell's own frame, so a flat or already-flattened GDS (what the tile generator and the
+export path emit) converts faithfully, while a deeply hierarchical one does not yet
+reproduce its placements. True hierarchical flattening is a documented follow-up. See
+ADR 00XX for the flatten and leveling choices.
+
 ## Robustness
 
 The parsers are fuzzed. A parser must never panic or hang on malformed input; it
