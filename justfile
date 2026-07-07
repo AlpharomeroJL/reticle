@@ -233,6 +233,15 @@ e2e-share:
     cd e2e; npx playwright install chromium
     cd e2e; $env:SHARE_LIVE='1'; npx playwright test --project=share-live
 
+# `e2e-archive` proves browser streaming: the built bundle opens `?archive=<url>`,
+# fetches a committed `.rtla` fixture over HTTP Range from a local ranged server, and
+# paints resident tiles. Runs against the local server regardless of cloud hosting.
+e2e-archive:
+    cd crates/web; trunk build index.html
+    npm --prefix e2e install
+    cd e2e; npx playwright install chromium
+    cd e2e; npx playwright test --project=served-archive
+
 book:
     mdbook build docs
 
