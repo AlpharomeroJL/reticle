@@ -20,13 +20,14 @@ const MAX_GIF_BYTES: u64 = 6 * 1024 * 1024;
 
 /// The committed captures, by base name. Each has a `<name>.demo` script and produces
 /// `assets/<name>.png` (a snap) or `assets/<name>.gif` (a tour), per its manifest.
-const CAPTURES: [&str; 6] = [
+const CAPTURES: [&str; 7] = [
     "hero",
     "tour-drc",
     "tour-edit",
     "tour-agent",
     "tour-query",
     "tour-3d",
+    "tour-generate",
 ];
 
 /// GIF output widths to try, largest first, when fitting under the size budget.
