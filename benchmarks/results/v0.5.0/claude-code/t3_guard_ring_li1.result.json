@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_guard_ring_li1",
+    "model": "claude-sonnet-5",
+    "suite_version": "adhoc",
+    "success": true,
+    "iterations": 7,
+    "first_proposal_violations": 10,
+    "final_violations": 10,
+    "wall_ms": 56387,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]

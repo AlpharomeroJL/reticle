@@ -21,6 +21,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "gds_stream"
+path = "fuzz_targets/gds_stream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "oasis_import"
 path = "fuzz_targets/oasis_import.rs"
 test = false

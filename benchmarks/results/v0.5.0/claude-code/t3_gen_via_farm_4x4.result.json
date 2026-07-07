@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_gen_via_farm_4x4",
+    "model": "claude-sonnet-5",
+    "suite_version": "adhoc",
+    "success": false,
+    "iterations": 0,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 117479,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]

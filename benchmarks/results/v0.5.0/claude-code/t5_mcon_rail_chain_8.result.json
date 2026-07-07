@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t5_mcon_rail_chain_8",
+    "model": "claude-sonnet-5",
+    "suite_version": "adhoc",
+    "success": true,
+    "iterations": 16,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 102543,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]

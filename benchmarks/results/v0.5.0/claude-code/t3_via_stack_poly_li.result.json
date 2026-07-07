@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_via_stack_poly_li",
+    "model": "claude-sonnet-5",
+    "suite_version": "adhoc",
+    "success": true,
+    "iterations": 4,
+    "first_proposal_violations": 1,
+    "final_violations": 1,
+    "wall_ms": 66702,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]
