@@ -83,3 +83,4 @@ superseded decision is marked and linked to its replacement.
 | [0075](0075-gpu-drc-heatmap-compute-overlay.md) | GPU DRC heatmap: a bin-and-check compute overlay whose flags are pinned to the CPU oracle |
 | [0076](0076-gpu-resident-hierarchy-chunked-expansion.md) | Fully GPU-resident hierarchy: chunked expand + cull + compact past the single-dispatch cap |
 | [0077](0077-cpu-metrology-reports.md) | CPU metrology reports (exact per-layer area/perimeter, connectivity stats, a simplified antenna screen, byte-stable export); GPU density overlay deferred |
+| [0078](0078-installable-pwa-app-shell-offline.md) | Installable PWA: a relative manifest, a scope-derived service worker, and an offline app shell, subpath-correct under /reticle/ |

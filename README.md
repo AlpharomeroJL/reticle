@@ -193,6 +193,14 @@ per-net antenna ratio over a SKY130 layer subset, exported to byte-stable CSV an
 property test pins area and perimeter to a coordinate-compression oracle. The GPU density
 overlay is deferred; see [ADR 0074](docs/decisions/0074-cpu-metrology-reports.md).
 
+**Installable PWA.** _(placeholder row, pending the Wave 4 merge.)_ The browser bundle is an
+installable Progressive Web App whose app shell loads offline: a relative web manifest, a
+service worker that caches the shell and the hashed wasm bundle (network-first navigation,
+cache-first assets, cache scope derived from `self.registration.scope`), and registration
+wired into `index.html`. Every path is relative, so it is correct at the dev root and under
+the gh-pages `/reticle/` subpath; a Playwright e2e proves the manifest, the registration, and
+an offline shell reload. See [ADR 0078](docs/decisions/0078-installable-pwa-app-shell-offline.md).
+
 **Generators.** Each of the six generators is a pure function from a typed `ParamSchema` to
 geometry. One schema drives all three surfaces (the Generate panel, the MCP tools, the
 benchmark checker), and a property test runs every generator over 400 random valid parameter
