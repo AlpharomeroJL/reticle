@@ -29,6 +29,13 @@ reticle-model = { workspace = true }
 reticle-index = { workspace = true }
 reticle-render = { workspace = true }
 reticle-sync = { workspace = true }
+
+# The streamed-document residency path (`crate::streamed`) decodes each fetched
+# `.rtla` tile with the same validated `rkyv` access the mmap streaming index uses, so
+# a truncated or corrupt tile errors rather than risking undefined behaviour (ADR 0062).
+# Pinned to the same 0.8 already in the lockfile via `reticle-index`, so no new version
+# is added; it builds for wasm32 too, keeping the browser residency path green.
+rkyv = "0.8.16"
 reticle-drc = { workspace = true }
 reticle-extract = { workspace = true }
 
@@ -97,3 +104,9 @@ web-sys = { version = "0.3", features = [
 # `reticle-sync`'s live-session wire codec (`reticle_sync::frame`) frames and decodes
 # the `SyncMessage` envelope the share transport sends and receives; it is already a
 # native dependency above, but the share transport also calls it on wasm.
+
+# The residency proof (`tests/residency.rs`) builds a `MemSource` test double that
+# archives `TilePayload` tiles to bytes with `rkyv` so the streamed-fetch path decodes
+# real archived bytes, exactly what a native/wasm source would serve. Same 0.8 as above.
+[dev-dependencies]
+rkyv = "0.8.16"

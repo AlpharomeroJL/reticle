@@ -23,6 +23,11 @@
 //! * [`labels`], layout and formatting for the canvas text overlay (cell names,
 //!   selection captions, live dimensions).
 //! * [`history`], the [`reticle_model::EditableDocument`] undo/redo wrapper.
+//! * [`dochost`], the document host enum ([`DocHost`]): an edited in-RAM document or a
+//!   read-only [`streamed`] scene, the type where the read-mostly scope line is drawn so
+//!   editing a streamed document is a compile error (ADR 0062, ADR 0071).
+//! * [`streamed`], async tile residency over a `.rtla` [`TileSource`](reticle_index::TileSource):
+//!   coarse-then-fine progressive refinement as the camera moves, with an LRU working set.
 //! * [`command`], the command-palette catalog and fuzzy filter.
 //! * [`keymap`], rebindable keyboard shortcuts: TOML load/save and conflicts.
 //! * [`drc_panel`], running the DRC engine and formatting its violations.
@@ -85,6 +90,7 @@ pub mod command;
 pub mod culling;
 pub mod demo;
 pub mod demoscript;
+pub mod dochost;
 pub mod draw;
 pub mod drc_panel;
 pub mod fps;
@@ -112,6 +118,7 @@ pub mod share;
 pub mod snap;
 pub mod startscreen;
 pub mod store;
+pub mod streamed;
 pub mod tech_editor;
 pub mod tinytapeout;
 pub mod tinytapeout_example;
@@ -126,9 +133,11 @@ pub mod webopen;
 pub mod xsection;
 
 pub use app::{App, StartView};
+pub use dochost::DocHost;
 pub use notify::{Notification, Notifications, Severity};
 pub use open::{DocFormat, OpenError, OpenOutcome, OpenWarning, open_document_bytes};
 pub use startscreen::ExampleChip;
+pub use streamed::{SceneError, StreamedScene, TileInbox, fetch_tile};
 pub use webopen::{
     LoadPlan, LoadProgress, RecentFile, RecentFiles, WASM_OPEN_CEILING_BYTES,
     WASM_STREAMING_THRESHOLD_BYTES, WebOpenEvent, WebOpenInbox, classify_drop, gds_url_from_query,
