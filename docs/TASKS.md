@@ -642,6 +642,37 @@ PERF.md) with a zero-growth soak. All merged, `just ci` GREEN.**
   redeploy, GitHub release with binaries, live verify) is a later operator step. Nothing
   is outward-facing yet: the live demo URL still serves v6.0.1.
 
+## Wave 7: the finish (operator resumed, 2026-07-06)
+
+Release hold lifted; executing the remaining items in order. Progress:
+
+- [x] Orphaned worktrees reconciled. The two spawned-session debug worktrees
+  (`claude/amazing-payne-7080ae`, `claude/festive-sammet-785693`) were committed as wip,
+  their non-duplicated content brought to main, and the worktrees removed. amazing-payne =
+  GDS export timestamp determinism (fixed date stamp; `just ci` GREEN; ADR 0056, commit
+  370a5f6). festive-sammet = the AREF-misdiagnosis PERF.md correction (commit 1d081ff).
+  Both branches deleted; the leftover directories are a locked-handle harness artifact.
+- [x] The filed "GDS AREF-decode off-by-one" was CLOSED as a misdiagnosis (ADR 0057,
+  commits 22fe4cc/5368fd7/1d081ff): the AREF import copies COLROW verbatim and flatten
+  loops `0..columns`, so the parse is launch-independent. The real bug was a
+  working-directory issue in `scripts/measure-run.ps1` (fixed). Retracted in PERF/STATUS/
+  TASKS; the decode is pinned by an exact round-trip leaf-count regression test.
+- [x] The real TinyTapeout precheck was RUN to a verdict (ADR 0059, commit 759aad8).
+  Getting `just tt-precheck` to actually invoke needed five permanent wrapper fixes; the
+  run then caught a real boundary-layer bug (`81/4` where `235/4` was required), which was
+  fixed. The tile now passes every one of TinyTapeout's own Magic+KLayout DRC and geometry
+  checks; four submission-artifact checks (LEF, Verilog x2, wired analog pins) remain,
+  recorded honestly. Report committed at `examples/tapeout/precheck-results.md`.
+- [~] Share-link live browser transport: dispatched as lane `v7-share-live` (subagent, in
+  progress) per the lane procedure. The biggest genuine gap (the wasm `web_sys::WebSocket`
+  client so a shared read-only link streams live sync + presence in the browser).
+- [~] Benchmarks v0.5.0 (83 tasks): gpt-oss:16k re-run in progress (orchestrator-direct,
+  Ollama); qwen2.5-coder:16k queued; the Claude Code flagship row queued (the `claude` CLI
+  is authenticated here, verified). All three rows land in the README + benchmark chapter.
+- [ ] Release end to end (version bump 7.0.0, git-cliff CHANGELOG, tag, GitHub release with
+  binaries, gh-pages redeploy, smoke + live verify), then the final skeptical STATUS
+  re-audit and summary.
+
 ### Frozen-surface manifest (recorded at Wave 2 contract point)
 
 Not yet frozen. `reticle-gen` `Generator` trait + param schemas freeze at the Wave 2
