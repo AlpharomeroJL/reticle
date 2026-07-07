@@ -33,7 +33,13 @@
 //! - [`collab`]: the [`AgentCollaborator`] bridge that mirrors the agent's edits onto
 //!   the `reticle-sync` CRDT under [`AGENT_ACTOR`](reticle_agent_api::AGENT_ACTOR) as
 //!   atomic per-step transactions, and publishes cursor/selection presence plus an
-//!   [`AgentStatus`](reticle_agent_api::AgentStatus) over the awareness layer.
+//!   [`AgentStatus`](reticle_agent_api::AgentStatus) over the awareness layer. Its
+//!   id-addressed edits (`TransformShapes`, `DeleteShapes`) are mirrored by learning the
+//!   `ElementId -> CRDT id` association at create time (ADR 0022's closed gap).
+//! - [`live`] (native only): drives an [`AgentCollaborator`] over a real WebSocket into a
+//!   `reticle-server` relay room, so the agent edits beside browser humans; publishes
+//!   each step's CRDT delta and presence as binary frames and applies inbound peer
+//!   frames back into its document.
 //!
 //! # Reuse of `reticle-bench`
 //!
@@ -49,6 +55,11 @@
 pub mod claude_code;
 pub mod collab;
 pub mod context_pack;
+// The live-room run mode drives the collaborator over a native WebSocket to a real relay
+// room. Its async transport (`tokio` / `tokio-tungstenite`) does not build for wasm, so
+// the module (and its deps) are native-only.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod live;
 pub mod model;
 pub mod ollama;
 pub mod redact;
@@ -60,6 +71,8 @@ pub use claude_code::{
 };
 pub use collab::{AgentCollaborator, Pacing, StepReport};
 pub use context_pack::{ContextPack, DEFAULT_SHAPE_CAP, token_estimate, whole_document_context};
+#[cfg(not(target_arch = "wasm32"))]
+pub use live::{LiveConfig, LiveError, run_in_room};
 pub use model::{AnthropicModel, BuildError, DEFAULT_BASE_URL, DEFAULT_MODEL, HttpTransport};
 pub use ollama::{
     BuildError as OllamaBuildError, DEFAULT_OLLAMA_BASE_URL, DEFAULT_SUMMARIZE_THRESHOLD_TOKENS,
