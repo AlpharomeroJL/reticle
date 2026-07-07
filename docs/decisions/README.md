@@ -67,3 +67,4 @@ superseded decision is marked and linked to its replacement.
 | [0059](0059-tinytapeout-precheck-live-run-and-boundary-fix.md) | The live TinyTapeout precheck run: making the wrapper work end to end, and the real prBoundary bug it caught |
 | [0060](0060-v8-disk-and-lane-target-policy.md) | v8 run disk policy: lane target dirs move to E:, D: keeps the shared main target |
 | [0061](0061-v8-frozen-surface-amendments.md) | v8 frozen-surface amendments: what may change, at which wave boundary, always additive |
+| [0062](0062-permalink-view-param-disambiguation.md) | Permalinks reuse `?view=`, disambiguated by shape (three floats is a camera, else the start-view selector) |

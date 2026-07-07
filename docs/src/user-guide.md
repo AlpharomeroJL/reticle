@@ -27,6 +27,13 @@ Sessions are saved and restored, autosave and crash recovery protect in-progress
 work, and an undo-history panel lets you step through and jump within the edit
 history.
 
+On a touch device (a phone that opened a shared link, or a tablet), the canvas
+navigates by touch: a two-finger pinch zooms, anchored at the point between your
+fingers so what you are pinching stays put, and a two-finger drag pans. A single-finger
+drag pans when the Pan tool is active. The gesture math is a pure camera helper with the
+zoom-anchoring invariant unit-tested, so the world point under the pinch centroid stays
+fixed as the zoom changes.
+
 ## Checking and routing
 
 Run the design-rule checker to populate the violation overlay, and use the error
