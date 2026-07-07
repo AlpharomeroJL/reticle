@@ -18,7 +18,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
-import { mkdirSync, rmSync, readdirSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync, readdirSync, existsSync, readFileSync } from "node:fs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..");
@@ -85,7 +85,10 @@ async function main() {
   // frames the editor and the viewer side by side with captions.
   const base = `http://127.0.0.1:${DIST_PORT}`;
   const relayParam = encodeURIComponent(RELAY);
-  const editorSrc = `${base}/?share=1&e2e-edit=1&room=${ROOM}&relay=${relayParam}`;
+  // The sharer opens a real chip via `?gds=` (fulfilled below), which dismisses its Start
+  // screen so the pane shows the editor canvas, and publishes that document to the room.
+  const gdsUrl = "/share-fixture.gds";
+  const editorSrc = `${base}/?share=1&gds=${encodeURIComponent(gdsUrl)}&room=${ROOM}&relay=${relayParam}`;
   const viewerSrc = `${base}/?view=viewer&room=${ROOM}&relay=${relayParam}`;
   const host = `<!doctype html><html><head><meta charset="utf-8"><style>
     html,body{margin:0;background:#0b0e14;font:13px/1.4 system-ui,sans-serif;color:#c8d0e0}
@@ -110,12 +113,27 @@ async function main() {
 
   const winW = PANE_W * 2 + 30;
   const winH = PANE_H + 46;
-  const browser = await chromium.launch({
-    headless: false,
-    args: ["--enable-unsafe-webgpu", "--enable-features=Vulkan,WebGPU"],
-  });
+  // No WebGPU flags: on this Windows host Chromium's Dawn D3D12 backend fails to load
+  // dxil.dll, and once wgpu has picked WebGPU it cannot fall back, so the app errors out.
+  // Deleting navigator.gpu in every frame forces the WebGL2 path the e2e already proves.
+  const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext({ viewport: { width: winW, height: winH } });
+  await context.addInitScript(() => {
+    try {
+      delete Navigator.prototype.gpu;
+    } catch {
+      /* already absent */
+    }
+  });
   const page = await context.newPage();
+
+  // Fulfill the sharer's `?gds=` fetch with a real committed chip (the Tiny Tapeout
+  // sample), so the editor pane opens onto a design rather than the Start screen. The
+  // route covers the iframe subframe too.
+  const gdsBytes = readFileSync(join(repo, "corpus", "tinytapeout", "real_tinytapeout_min.gds"));
+  await page.route(`**${gdsUrl}`, (route) =>
+    route.fulfill({ status: 200, contentType: "application/octet-stream", body: gdsBytes }),
+  );
 
   rmSync(FRAMES_DIR, { recursive: true, force: true });
   mkdirSync(FRAMES_DIR, { recursive: true });
