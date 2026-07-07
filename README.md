@@ -193,13 +193,21 @@ per-net antenna ratio over a SKY130 layer subset, exported to byte-stable CSV an
 property test pins area and perimeter to a coordinate-compression oracle. The GPU density
 overlay is deferred; see [ADR 0074](docs/decisions/0074-cpu-metrology-reports.md).
 
-**Installable PWA.** _(placeholder row, pending the Wave 4 merge.)_ The browser bundle is an
-installable Progressive Web App whose app shell loads offline: a relative web manifest, a
-service worker that caches the shell and the hashed wasm bundle (network-first navigation,
-cache-first assets, cache scope derived from `self.registration.scope`), and registration
-wired into `index.html`. Every path is relative, so it is correct at the dev root and under
-the gh-pages `/reticle/` subpath; a Playwright e2e proves the manifest, the registration, and
-an offline shell reload. See [ADR 0078](docs/decisions/0078-installable-pwa-app-shell-offline.md).
+**Installable PWA.** The browser bundle is an installable Progressive Web App whose app shell
+loads offline: a relative web manifest, a service worker that caches the shell and the hashed
+wasm bundle (network-first navigation, cache-first assets, cache scope derived from
+`self.registration.scope`), and registration wired into `index.html`. Every path is relative, so
+it is correct at the dev root and under the gh-pages `/reticle/` subpath; a Playwright e2e proves
+the manifest, the registration, and an offline shell reload. See
+[ADR 0078](docs/decisions/0078-installable-pwa-app-shell-offline.md).
+
+**Layout diff.** A pure `reticle-diff` crate answers "what changed between two versions?":
+`diff(before, after)` compares the flattened top cells as multisets keyed by exact geometry and
+reports the shapes added, removed, and (deferred in v1) changed. Property tests pin it, including a
+single-insertion oracle. The app paints the result over the canvas (added green, removed red,
+changed amber) with a show/hide toggle, fed by a snapshot/diff flow over two in-memory documents. A
+comparison-document file loader and a true `changed` classification are deferred; see
+[ADR 0079](docs/decisions/0079-layout-diff-overlay.md).
 
 **Generators.** Each of the six generators is a pure function from a typed `ParamSchema` to
 geometry. One schema drives all three surfaces (the Generate panel, the MCP tools, the
