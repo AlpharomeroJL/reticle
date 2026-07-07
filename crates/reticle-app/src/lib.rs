@@ -95,6 +95,7 @@ pub mod inspector;
 pub mod keymap;
 pub mod labels;
 pub mod layers;
+pub mod livesync;
 pub mod measure;
 pub mod minimap;
 pub mod netlight;
