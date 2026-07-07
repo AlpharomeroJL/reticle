@@ -1,4 +1,4 @@
-//! A conformant **OASIS** (SEMI P39) writer for a practical subset — the real thing
+//! A conformant **OASIS** (SEMI P39) writer for a practical subset - the real thing
 //! `KLayout` can read, distinct from the in-house [`Oasis`](crate::Oasis) container.
 //!
 //! # Scope and honesty
@@ -8,9 +8,9 @@
 //! *writer* whose output `KLayout` reads as OASIS. A reader is **out of scope** (this is a
 //! one-directional export). The subset is:
 //!
-//! * uncompressed only — no `CBLOCK` (zlib) blocks;
+//! * uncompressed only - no `CBLOCK` (zlib) blocks;
 //! * `RECTANGLE`, `POLYGON`, `PATH`, `PLACEMENT`, and `TEXT` records;
-//! * explicit modal state — every element carries its own layer, datatype, and
+//! * explicit modal state - every element carries its own layer, datatype, and
 //!   coordinates (and dimensions/point-list/extension where applicable), so the writer
 //!   never depends on an inherited modal variable, the most common OASIS-conformance
 //!   pitfall;
@@ -41,7 +41,7 @@ use reticle_model::{ArrayInstance, Cell, Document, Exporter, Label, Result, Shap
 /// The conformant-OASIS exporter (a practical writer subset; see the [module docs](self)).
 ///
 /// Implements [`Exporter`], so it plugs into the same trait the CLI and app use for
-/// every format. It never reads OASIS — export only.
+/// every format. It never reads OASIS - export only.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OasisStd;
 
@@ -157,7 +157,7 @@ fn write_cell_body(w: &mut Writer, cell: &Cell, index_of: &impl Fn(&str) -> Opti
 }
 
 /// RECTANGLE (id 20): info `SWHXYRDL`. Always emits layer, datatype, width, height,
-/// x, y — never relying on inherited modal state.
+/// x, y - never relying on inherited modal state.
 fn write_rectangle(w: &mut Writer, layer: u16, datatype: u16, r: &reticle_geometry::Rect) {
     // Info: S0 W1 H1 X1 Y1 R0 D1 L1 = 0b0111_1011.
     w.byte(REC_RECTANGLE);

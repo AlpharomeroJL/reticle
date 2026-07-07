@@ -73,3 +73,6 @@ superseded decision is marked and linked to its replacement.
 | [0065](0065-relay-conformance-vector-format.md) | The relay conformance vector format: one table, two targets, presence coalescing the only target-aware branch |
 | [0066](0066-agent-live-room-and-id-addressed-mirroring.md) | The agent in a real relay room: id-addressed (transform/delete) mirroring and a native live client |
 | [0067](0067-permalink-view-param-disambiguation.md) | Permalinks reuse `?view=`, disambiguated by shape (three floats is a camera, else the start-view selector) |
+| [0068](0068-gentech-data-driven-generator-numbers.md) | GenTech: the generator process numbers become data, threaded through the tech argument |
+| [0069](0069-second-pdk-ihp-sg13g2.md) | A second PDK (IHP SG13G2) as data, proven by the both-PDK cleanliness proptests |
+| [0070](0070-conformant-oasis-writer-scope-and-oasis-rename.md) | A conformant-OASIS writer subset (oasis_std), and renaming the in-house format honestly |

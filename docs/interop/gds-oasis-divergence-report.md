@@ -25,7 +25,7 @@ inside the pinned container and is re-runnable with `scripts/interop/run-interop
    shape is rendered to an integer-dbu polygon (so path-vs-box representation
    differences are neutralized and only real geometric divergence shows), labels are
    compared by `(layer, datatype, position, text)`, and **instance transforms are read
-   with gdspy** — it exposes the raw GDS `STRANS` rotation/magnification/reflection
+   with gdspy** - it exposes the raw GDS `STRANS` rotation/magnification/reflection
    directly, whereas KLayout's composed `ICplxTrans` angle can differ from the stored
    field for magnified references. Because one reader normalizes every writer's output,
    a divergence is attributable to the tool that **wrote** the file.
@@ -33,24 +33,24 @@ inside the pinned container and is re-runnable with `scripts/interop/run-interop
 
 ## Fixtures
 
-- **`clean.gds`** — well-formed and rectilinear-plus-45°: a rectangle, a Manhattan
+- **`clean.gds`** - well-formed and rectilinear-plus-45°: a rectangle, a Manhattan
   polygon, a 45° diamond polygon, a flush-ended path, a text label, a cell reference,
   and a 2×2 array of a sub-cell.
-- **`odd.gds`** — seeded quirks that tend to surface writer/reader divergences: a 1 nm
+- **`odd.gds`** - seeded quirks that tend to surface writer/reader divergences: a 1 nm
   sliver rectangle, a round-ended path, a custom-extension path, a polygon with a
   duplicate consecutive vertex, a **reference rotated 45° with magnification 2**, and a
   negative-coordinate rectangle.
 
 ## Results
 
-### `clean.gds` — no divergence
+### `clean.gds` - no divergence
 
 All three tools round-trip the clean design identically. Element census (box / polygon
 / path / text / sref / aref) is `2 / 3 / 0 / 1 / 1 / 1` for reticle, klayout, and gdspy
-alike; rendered geometry, labels, and instances all match. **OASIS read test: PASS** —
+alike; rendered geometry, labels, and instances all match. **OASIS read test: PASS** -
 KLayout read Reticle's `oasis_std` output (2 cells, 6 shapes, dbu = 0.001).
 
-### `odd.gds` — one documented divergence
+### `odd.gds` - one documented divergence
 
 Element census matches across all three tools (`4 / 2 / 0 / 0 / 1 / 0`); the sliver
 rectangle, the round and custom-extension paths, the degenerate-vertex polygon, and the
@@ -75,12 +75,12 @@ magnification (2×) and origin round-trip correctly in all three tools. This is 
 layout tool whose instance transforms are orthogonal by design; arbitrary-angle
 instance rotation is out of its scope and is snapped rather than silently dropped.
 
-## Conformant-OASIS writer (`oasis_std`) — validated
+## Conformant-OASIS writer (`oasis_std`) - validated
 
 The timeboxed conformant-OASIS writer **passed** its acceptance test on the first real
 attempt: KLayout reads Reticle's `oasis_std` output for both fixtures as OASIS
 (`OASIS-READ OK`, dbu = 0.001, correct cell and shape counts). The writer emits a
-practical SEMI P39 subset — uncompressed (no CBLOCK), `RECTANGLE`/`POLYGON`/`PATH`/
+practical SEMI P39 subset - uncompressed (no CBLOCK), `RECTANGLE`/`POLYGON`/`PATH`/
 `PLACEMENT`/`TEXT` with fully explicit modal state, `CELLNAME`+`CELL` tables, and
 `PLACEMENT` type 18 carrying magnification and angle. Documented subset gaps: arrays are
 expanded to individual placements (no OASIS repetition), a label's anchor is dropped
@@ -88,7 +88,7 @@ expanded to individual placements (no OASIS repetition), a label's anchor is dro
 extensions are flush / half-width / explicit only). See `crates/reticle-io/src/oasis_std.rs`.
 
 This is distinct from the in-house `oasis.rs`, which is the **Reticle container format
-(OASIS-inspired, ADR 0004)** — a proprietary binary container KLayout cannot read.
+(OASIS-inspired, ADR 0004)** - a proprietary binary container KLayout cannot read.
 
 ## Reproducing
 

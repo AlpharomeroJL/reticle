@@ -1,6 +1,6 @@
 //! Cross-PDK cleanliness oracle: every generator, over randomized valid parameters,
 //! must emit geometry the real DRC engine finds *zero* violations in for **both**
-//! shipped processes — SKY130 and IHP SG13G2.
+//! shipped processes - SKY130 and IHP SG13G2.
 //!
 //! This is the proof that the `GenTech` refactor is data-driven, not SKY130-shaped: the
 //! same generator code, handed a different [`Technology`] by name, draws against that

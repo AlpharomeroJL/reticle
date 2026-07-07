@@ -43,9 +43,11 @@ viewer surface a shared session presents.)
 Six parameterized generators turn a few numbers into the repetitive structure a layout
 engineer would otherwise draw by hand: a guard ring, a via farm, a pad ring, a seal ring,
 a density fill, or a probe-able test structure. Each generator is a pure function from
-typed parameters to geometry, and each is **DRC-clean by construction against the SKY130
-subset**: a property test runs every generator over 400 random valid parameter sets and
-asserts zero design-rule violations under the real checker (`crates/reticle-gen/tests/`).
+typed parameters to geometry, and each is **DRC-clean by construction**: a property test
+runs every generator over random valid parameter sets - now across **two PDKs, SKY130 and
+IHP SG13G2** - and asserts zero design-rule violations under each process's real checker
+(`crates/reticle-gen/tests/`). The process numbers are data (a `GenTech` derived from the
+technology), not baked constants, so the same generators run against either PDK.
 
 The same six generators surface three ways from one schema. The **Generate panel** builds
 a typed form from each generator's schema, previews the geometry live on the canvas, and
