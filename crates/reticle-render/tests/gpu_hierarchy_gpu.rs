@@ -2,7 +2,7 @@
 //! ([`GpuHierarchy`]).
 //!
 //! The GPU path expands array placements, culls each element against a viewport, and
-//! stream-compacts the survivors — all on the GPU. These tests check it against a
+//! stream-compacts the survivors  -  all on the GPU. These tests check it against a
 //! trivial CPU reference expansion of the same scene:
 //!
 //! * the compacted survivor SET equals the CPU reference (order is unspecified);
@@ -61,7 +61,7 @@ fn multiset(instances: &[RectInstanceT]) -> BTreeMap<[u32; 12], usize> {
     m
 }
 
-/// A single white 10x10 leaf rect at the origin — the minimal arrayed cell.
+/// A single white 10x10 leaf rect at the origin  -  the minimal arrayed cell.
 fn leaf() -> RectInstance {
     RectInstance {
         min_xy: [0.0, 0.0],
@@ -150,8 +150,8 @@ fn chunking_is_transparent_across_many_small_chunks() {
 
     let cells = vec![leaf()];
     // A 40x40 grid = 1,600 elements, split into 256-element chunks (7 chunks, the last
-    // partial). This exercises the cross-chunk path — the mechanism that escapes the
-    // single-dispatch cap — in miniature.
+    // partial). This exercises the cross-chunk path  -  the mechanism that escapes the
+    // single-dispatch cap  -  in miniature.
     let placements = vec![ArrayPlacement::new(
         0,
         InstanceTransform::IDENTITY,
