@@ -1,0 +1,22 @@
+[package]
+name = "reticle-room-worker"
+version = "0.1.0"
+edition = "2021"
+authors = ["Josef Long <Josefdean@protonmail.com>"]
+license = "MIT OR Apache-2.0"
+description = "Cloudflare Durable Object relay for Reticle live collaboration (workers-rs attempt)."
+
+# Detached from the parent Reticle workspace: the worker builds to wasm32 with
+# worker-build and must not join the native workspace's resolver or target dir.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+worker = "0.8.5"
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = "s"
+lto = true

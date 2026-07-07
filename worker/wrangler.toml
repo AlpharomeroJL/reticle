@@ -1,0 +1,16 @@
+name = "reticle-relay"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-11-01"
+
+[build]
+command = "worker-build --release"
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "ReticleRoom"
+
+# SQLite-backed Durable Objects are the free-plan storage backend. The worker
+# crate's Storage API (get/put/list/alarms) is identical over either backend.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ReticleRoom"]

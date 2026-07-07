@@ -1,0 +1,13 @@
+{
+  "name": "reticle-relay-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Durable Object relay for Reticle live collaboration.",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.82.2"
+  }
+}

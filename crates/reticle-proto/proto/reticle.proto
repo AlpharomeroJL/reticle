@@ -196,6 +196,15 @@ message Comment {
 }
 
 // Envelope for a single message on a live collaboration session.
+//
+// Wire invariant (frozen; see the `wire_invariant` test in src/lib.rs): because
+// `payload` is a oneof and protobuf encodes a message field length-delimited, the
+// FIRST BYTE of every serialized SyncMessage is the field tag of the active
+// variant: 0x0A for `update` (field 1), 0x12 for `presence` (field 2), 0x1A for
+// `comment` (field 3). A relay can therefore classify a frame by its first byte
+// alone, with no protobuf decoder. The Cloudflare Durable Object relay
+// (worker/) keys its presence-coalescing and update pass-through off exactly this
+// byte; do not renumber these fields.
 message SyncMessage {
   oneof payload {
     CrdtUpdate update = 1;

@@ -1,0 +1,25 @@
+[package]
+name = "reticle-relay-conformance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A two-target conformance suite proving the native and Durable Object relays honor one wire protocol."
+keywords = ["websocket", "conformance", "relay", "cloudflare", "collaboration"]
+categories = ["network-programming", "development-tools::testing"]
+
+[lints]
+workspace = true
+
+[dependencies]
+reticle-proto = { workspace = true }
+reticle-sync = { workspace = true }
+reticle-geometry = { workspace = true }
+reticle-server = { workspace = true }
+futures-util = "0.3.32"
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "sync", "net", "time", "process"] }
+# native-tls (SChannel on Windows) so the deployed-relay smoke can reach
+# wss://...workers.dev without a rustls CryptoProvider; local ws:// does not use it.
+tokio-tungstenite = { version = "0.29.0", features = ["native-tls"] }
