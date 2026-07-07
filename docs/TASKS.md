@@ -608,8 +608,12 @@ precheck are both operator steps here (CLI auth, multi-GB image); nothing is fak
   open CPU on the 4.19M design ~230 to ~31 ms. New interaction_latency + interaction_soak
   examples; the soak asserts zero geometry-buffer growth and bounded frame time over
   thousands of frames (passed). docs/PERF.md updated. Honest: wasm live-pan is
-  browser-only (not measured here); a GDS AREF-decode off-by-one found in passing is
-  filed as an independent follow-up.
+  browser-only (not measured here). CORRECTION (v7 finish): the "GDS AREF-decode
+  off-by-one found in passing" noted here was a misdiagnosis, not a parser bug; the AREF
+  import copies the COLROW counts verbatim and flatten loops `0..columns`, so counts are
+  launch-independent. The real launch-context effect was a working-directory bug in
+  `scripts/measure-run.ps1` (a relative `scratch/gen.gds` resolving against a stale CWD).
+  Retracted, root-caused, and closed with a regression test (ADR 0057).
 
 **Wave 5 complete: the README is a product page with a real captured generator GIF and
 the honest three-row table, and a measured 60%-plus flatten win (before/after in
