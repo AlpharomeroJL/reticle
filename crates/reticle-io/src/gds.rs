@@ -67,10 +67,13 @@ use reticle_model::{
 ///
 /// [`Gds::import`] never panics and never hangs, whatever bytes it is handed.
 /// `gds21` reads from an in-memory cursor and every record consumes at least four
-/// bytes, so parsing a finite slice terminates and allocates O(input) memory; the
-/// few inputs that make `gds21` itself panic (a zero-length string record, an
-/// out-of-range date field) are contained with [`std::panic::catch_unwind`] and
-/// returned as [`IoError`]. Before parsing, an input larger than
+/// bytes, so parsing a finite slice terminates and allocates O(input) memory. The
+/// one known input class that panics `gds21` internally (an out-of-range BGNLIB or
+/// BGNSTR date field, which panics chrono) is neutralized BEFORE parsing by an
+/// internal date-record sanitizer, which matters on wasm where panics abort and
+/// cannot be caught; any remaining unknown `gds21` panic (for example a zero-length
+/// string record) is contained with [`std::panic::catch_unwind`] on native targets
+/// and returned as [`IoError`]. Before parsing, an input larger than
 /// [`MAX_INPUT_BYTES`] is rejected outright so a hostile length can never force a
 /// huge allocation. After parsing, geometry that survived `gds21` but is
 /// degenerate or oversized is *not* fatal: [`Gds::import_with_warnings`] drops or
@@ -107,6 +110,104 @@ const USER_UNIT_METERS: f64 = 1e-6;
 /// the ubiquitous GDSII default.
 const DEFAULT_DBU_PER_MICRON: i64 = 1000;
 
+/// GDSII record type carrying the library modification/access date pair (BGNLIB).
+const RECTYPE_BGNLIB: u8 = 0x01;
+/// GDSII record type carrying a structure's date pair (BGNSTR).
+const RECTYPE_BGNSTR: u8 = 0x05;
+/// GDSII data type code for a two-byte signed integer array, the only encoding a
+/// conformant date record uses.
+const DATATYPE_I16: u8 = 0x02;
+/// The replacement written over an out-of-range date payload: 1970-01-01
+/// 00:00:00 for both the modification and access stamps. The model does not
+/// store file dates (export already writes a fixed stamp; ADR 0056), so
+/// normalizing a broken date loses nothing.
+const EPOCH_DATES: [i16; 12] = [1970, 1, 1, 0, 0, 0, 1970, 1, 1, 0, 0, 0];
+
+/// The number of days in `month` of `year`, Gregorian, matching chrono's
+/// calendar (which is what `gds21` feeds these fields into).
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+            if leap { 29 } else { 28 }
+        }
+        _ => 0,
+    }
+}
+
+/// Whether one six-field GDSII date (`year, month, day, hour, minute, second`,
+/// raw `i16`s) survives the exact calls `gds21` makes on it:
+/// `NaiveDate::from_ymd(y, m, d).and_hms(h, min, s)`, both of which panic on an
+/// out-of-range value. Negative fields are invalid outright because `gds21`
+/// casts them `as u32`, where a negative `i16` becomes a huge value.
+fn datetime_fields_valid(fields: &[i16]) -> bool {
+    debug_assert_eq!(fields.len(), 6);
+    let (year, month, day) = (fields[0], fields[1], fields[2]);
+    let (hour, minute, second) = (fields[3], fields[4], fields[5]);
+    if month < 1 || day < 1 || hour < 0 || minute < 0 || second < 0 {
+        return false;
+    }
+    let (month, day) = (
+        u32::from(month.unsigned_abs()),
+        u32::from(day.unsigned_abs()),
+    );
+    month <= 12
+        && day <= days_in_month(i32::from(year), month)
+        && hour <= 23
+        && minute <= 59
+        && second <= 59
+}
+
+/// Walks the raw GDSII record stream and rewrites any BGNLIB/BGNSTR date payload
+/// that would panic chrono inside `gds21` (`from_ymd`/`and_hms` on out-of-range
+/// fields) to the fixed [`EPOCH_DATES`] pair. Returns how many records were
+/// rewritten.
+///
+/// This runs BEFORE `gds21` sees the bytes so the known panic cannot fire at
+/// all, which matters beyond tidiness: on `wasm32-unknown-unknown` panics abort
+/// the instance and [`std::panic::catch_unwind`] cannot contain them, so a
+/// malformed file dropped into the browser would otherwise kill the tab. Found
+/// by the v8 fuzz campaign (see `tests/gds_fuzz_regressions.rs`).
+///
+/// The walk is conservative: it stops at the first malformed record header
+/// (length under four, odd, or past the end) and leaves everything else
+/// untouched; `gds21` reports those inputs itself. Only records with the exact
+/// conformant shape (i16-array data type, 24-byte payload) are candidates.
+fn sanitize_date_records(bytes: &mut [u8]) -> usize {
+    let mut rewritten = 0;
+    let mut i = 0usize;
+    while i + 4 <= bytes.len() {
+        let reclen = u16::from_be_bytes([bytes[i], bytes[i + 1]]) as usize;
+        if reclen < 4 || !reclen.is_multiple_of(2) || i + reclen > bytes.len() {
+            break;
+        }
+        let rectype = bytes[i + 2];
+        let datatype = bytes[i + 3];
+        if (rectype == RECTYPE_BGNLIB || rectype == RECTYPE_BGNSTR)
+            && datatype == DATATYPE_I16
+            && reclen == 4 + 24
+        {
+            let payload = &bytes[i + 4..i + 28];
+            let mut fields = [0i16; 12];
+            for (k, chunk) in payload.chunks_exact(2).enumerate() {
+                fields[k] = i16::from_be_bytes([chunk[0], chunk[1]]);
+            }
+            if !datetime_fields_valid(&fields[..6]) || !datetime_fields_valid(&fields[6..]) {
+                for (k, v) in EPOCH_DATES.iter().enumerate() {
+                    let [hi, lo] = v.to_be_bytes();
+                    bytes[i + 4 + k * 2] = hi;
+                    bytes[i + 4 + k * 2 + 1] = lo;
+                }
+                rewritten += 1;
+            }
+        }
+        i += reclen;
+    }
+    rewritten
+}
+
 /// The result of a GDSII import that kept its non-fatal warnings.
 ///
 /// Returned by [`Gds::import_with_warnings`]. The [`document`](GdsImport::document)
@@ -140,10 +241,13 @@ impl Gds {
     /// * An input larger than [`MAX_INPUT_BYTES`] is refused up front with an
     ///   [`IoError`], so a hostile length cannot force a huge allocation.
     /// * `gds21` parses from an in-memory cursor where every record consumes at
-    ///   least four bytes, so parsing a finite slice terminates. The handful of
-    ///   inputs that panic `gds21` internally are contained with
-    ///   [`std::panic::catch_unwind`] (safe Rust, no `unsafe`) and returned as an
-    ///   `Err`.
+    ///   least four bytes, so parsing a finite slice terminates. Calendar-invalid
+    ///   BGNLIB/BGNSTR dates, the known `gds21` panic class, are normalized to a
+    ///   fixed epoch before parsing (with a [`WarningKind::ValueClamped`] warning),
+    ///   so that panic cannot fire even on wasm where unwinding is unavailable; any
+    ///   other input that panics `gds21` internally is contained with
+    ///   [`std::panic::catch_unwind`] (safe Rust, no `unsafe`) on native targets
+    ///   and returned as an `Err`.
     /// * Geometry that parsed but is degenerate (too few vertices, zero area) or
     ///   oversized (more than [`MAX_SHAPE_VERTICES`] points) is not fatal: it is
     ///   skipped or clamped and an [`ImportWarning`] is recorded, so one bad
@@ -161,12 +265,33 @@ impl Gds {
             .into());
         }
 
-        // `gds21` panics on a few malformed inputs (for example a zero-length
-        // string record indexes `data[len - 1]`, and an out-of-range date field
-        // panics chrono). Contain any such panic so import upholds its contract of
-        // returning `Err` rather than unwinding across this parser boundary.
-        // `catch_unwind` is safe Rust; no `unsafe` is required.
-        let owned = bytes.to_vec();
+        let mut warnings = Warnings::new();
+
+        // Rewrite chrono-invalid BGNLIB/BGNSTR dates BEFORE `gds21` parses, so its
+        // known date panic cannot fire at all. This is the load-bearing guard on
+        // wasm, where panics abort and `catch_unwind` below offers no protection.
+        let mut owned = bytes.to_vec();
+        let rewritten = sanitize_date_records(&mut owned);
+        if rewritten > 0 {
+            warnings.push(ImportWarning::new(
+                WarningKind::ValueClamped,
+                "out-of-range GDSII date normalized",
+                format!(
+                    "{rewritten} BGNLIB/BGNSTR record(s) carried calendar-invalid date \
+                     fields; each was replaced with 1970-01-01 00:00:00 (file dates are \
+                     not modeled)"
+                ),
+            ));
+        }
+
+        // `gds21` can still panic on other malformed inputs (for example a
+        // zero-length string record indexes `data[len - 1]`). Contain any such
+        // panic so import upholds its contract of returning `Err` rather than
+        // unwinding across this parser boundary. `catch_unwind` is safe Rust; no
+        // `unsafe` is required. Note this backstop only exists where unwinding
+        // does (native targets); on wasm the sanitizer above is the real guard
+        // for the known case, and the fuzz targets exist to shrink the unknown
+        // set toward empty.
         let parsed = std::panic::catch_unwind(move || GdsLibrary::from_bytes(owned));
         let lib = match parsed {
             Ok(Ok(lib)) => lib,
@@ -175,8 +300,6 @@ impl Gds {
                 return Err(IoError::Malformed("gds21 panicked while parsing GDSII bytes").into());
             }
         };
-
-        let mut warnings = Warnings::new();
         let document = library_to_document(&lib, &mut warnings);
         Ok(GdsImport {
             document,
@@ -942,4 +1065,91 @@ fn saturating_add(base: Dbu, offset: i64) -> Dbu {
 /// Clamps a `u32` repetition count into GDSII's `i16` column/row field.
 fn clamp_i16(v: u32) -> i16 {
     i16::try_from(v).unwrap_or(i16::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EPOCH_DATES, datetime_fields_valid, days_in_month, sanitize_date_records};
+
+    /// Builds one GDS record: `[len_hi, len_lo, rectype, datatype, payload...]`.
+    fn record(rectype: u8, datatype: u8, payload: &[u8]) -> Vec<u8> {
+        let len = (4 + payload.len()) as u16;
+        let mut out = len.to_be_bytes().to_vec();
+        out.push(rectype);
+        out.push(datatype);
+        out.extend_from_slice(payload);
+        out
+    }
+
+    /// Encodes twelve `i16` date fields big-endian.
+    fn date_payload(fields: [i16; 12]) -> Vec<u8> {
+        fields.iter().flat_map(|v| v.to_be_bytes()).collect()
+    }
+
+    const VALID: [i16; 12] = [2023, 1, 1, 0, 0, 0, 2023, 1, 1, 0, 0, 0];
+
+    #[test]
+    fn calendar_validity_matches_chrono_semantics() {
+        assert!(datetime_fields_valid(&[2023, 1, 1, 0, 0, 0]));
+        assert!(datetime_fields_valid(&[2024, 2, 29, 23, 59, 59])); // leap day
+        assert!(!datetime_fields_valid(&[2023, 2, 29, 0, 0, 0])); // not a leap year
+        assert!(!datetime_fields_valid(&[2023, 2, 30, 0, 0, 0])); // in-range fields, invalid date
+        assert!(!datetime_fields_valid(&[2023, 16, 1, 0, 0, 0])); // the fuzz crash shape
+        assert!(!datetime_fields_valid(&[2023, 0, 1, 0, 0, 0]));
+        assert!(!datetime_fields_valid(&[2023, 1, 32, 0, 0, 0]));
+        assert!(!datetime_fields_valid(&[2023, 1, 1, 24, 0, 0]));
+        assert!(!datetime_fields_valid(&[2023, 1, 1, 0, 60, 0]));
+        assert!(!datetime_fields_valid(&[2023, 1, 1, 0, 0, 60]));
+        assert!(!datetime_fields_valid(&[2023, 1, 1, 0, -1, 0])); // negative casts huge as u32
+        assert_eq!(days_in_month(2000, 2), 29); // divisible by 400: leap
+        assert_eq!(days_in_month(1900, 2), 28); // divisible by 100 only: not leap
+    }
+
+    #[test]
+    fn valid_stream_is_untouched() {
+        let mut bytes = Vec::new();
+        bytes.extend(record(0x00, 0x02, &[0, 3])); // HEADER v3
+        bytes.extend(record(0x01, 0x02, &date_payload(VALID))); // BGNLIB
+        bytes.extend(record(0x05, 0x02, &date_payload(VALID))); // BGNSTR
+        let before = bytes.clone();
+        assert_eq!(sanitize_date_records(&mut bytes), 0);
+        assert_eq!(bytes, before);
+    }
+
+    #[test]
+    fn invalid_dates_are_rewritten_to_epoch() {
+        let mut bad = VALID;
+        bad[7] = 16; // month 16 in the access stamp, the fuzz crash shape
+        let mut bytes = Vec::new();
+        bytes.extend(record(0x00, 0x02, &[0, 3]));
+        bytes.extend(record(0x01, 0x02, &date_payload(bad)));
+        assert_eq!(sanitize_date_records(&mut bytes), 1);
+        let rewritten = &bytes[bytes.len() - 24..];
+        assert_eq!(rewritten, date_payload(EPOCH_DATES).as_slice());
+        // A second pass finds nothing left to fix (idempotent).
+        assert_eq!(sanitize_date_records(&mut bytes), 0);
+    }
+
+    #[test]
+    fn walk_is_conservative() {
+        // Wrong datatype: not a candidate even with a bad payload.
+        let mut bad = VALID;
+        bad[1] = 0;
+        let mut bytes = record(0x01, 0x03, &date_payload(bad));
+        let before = bytes.clone();
+        assert_eq!(sanitize_date_records(&mut bytes), 0);
+        assert_eq!(bytes, before);
+
+        // Wrong payload length: left alone for gds21 to report.
+        let mut bytes = record(0x01, 0x02, &[0, 16, 0, 1]);
+        let before = bytes.clone();
+        assert_eq!(sanitize_date_records(&mut bytes), 0);
+        assert_eq!(bytes, before);
+
+        // Malformed header (length runs past the end): the walk stops cleanly.
+        let mut bytes = vec![0xFF, 0xFF, 0x01, 0x02, 0, 0];
+        let before = bytes.clone();
+        assert_eq!(sanitize_date_records(&mut bytes), 0);
+        assert_eq!(bytes, before);
+    }
 }
