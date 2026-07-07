@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_intent_power_ground",
+    "model": "claude-sonnet-5",
+    "suite_version": "adhoc",
+    "success": true,
+    "iterations": 10,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 79496,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]

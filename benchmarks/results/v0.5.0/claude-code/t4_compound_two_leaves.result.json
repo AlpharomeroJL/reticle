@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t4_compound_two_leaves",
+    "model": "claude-sonnet-5",
+    "suite_version": "adhoc",
+    "success": true,
+    "iterations": 9,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 43201,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]
