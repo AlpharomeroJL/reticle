@@ -32,7 +32,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod convert;
 pub mod tt_precheck;
+
+pub use convert::{ConvertSummary, run_convert};
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -129,6 +132,8 @@ pub enum CliError {
     CellNotFound(String),
     /// A `--format` value that is neither GDS nor OASIS.
     UnknownFormat(String),
+    /// The `.rtla` archive builder failed while converting a GDSII file.
+    Build(reticle_index::BuildError),
 }
 
 impl fmt::Display for CliError {
@@ -144,6 +149,7 @@ impl fmt::Display for CliError {
             Self::UnknownFormat(name) => {
                 write!(f, "unknown format `{name}` (expected `gds` or `oasis`)")
             }
+            Self::Build(e) => write!(f, "{e}"),
         }
     }
 }
@@ -154,6 +160,7 @@ impl std::error::Error for CliError {
             Self::Io { source, .. } => Some(source),
             Self::Model(e) => Some(e),
             Self::Image(e) => Some(e),
+            Self::Build(e) => Some(e),
             _ => None,
         }
     }

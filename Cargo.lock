@@ -4142,13 +4142,16 @@ version = "7.0.0"
 dependencies = [
  "clap",
  "image",
+ "pollster",
  "reticle-drc",
  "reticle-extract",
  "reticle-geometry",
+ "reticle-index",
  "reticle-io",
  "reticle-model",
  "reticle-render",
  "reticle-route",
+ "rkyv",
 ]
 
 [[package]]

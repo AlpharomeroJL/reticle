@@ -13,7 +13,8 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use reticle_cli::{
     CliError, Format, RenderOutcome, flatten_top_cell, load_document, pick_top_cell, resolve_rules,
-    run_drc, run_export, run_extract, run_render, run_route, summarize, synth_route_request,
+    run_convert, run_drc, run_export, run_extract, run_render, run_route, summarize,
+    synth_route_request,
 };
 
 /// The Reticle headless layout pipeline.
@@ -62,6 +63,13 @@ enum Command {
         #[arg(long)]
         format: Option<String>,
     },
+    /// Convert a GDSII file into a streamable `.rtla` archive.
+    Convert {
+        /// The GDSII file to read.
+        file: PathBuf,
+        /// The `.rtla` archive to write.
+        out: PathBuf,
+    },
     /// Render the top cell offscreen and save it as a PNG.
     Render {
         /// The layout file to read.
@@ -99,6 +107,7 @@ fn run(command: Command) -> Result<ExitCode, CliError> {
         Command::Route { file } => cmd_route(&file),
         Command::Extract { file } => cmd_extract(&file),
         Command::Export { file, out, format } => cmd_export(&file, &out, format.as_deref()),
+        Command::Convert { file, out } => cmd_convert(&file, &out),
         Command::Render {
             file,
             out,
@@ -215,6 +224,21 @@ fn cmd_export(file: &Path, out: &Path, format: Option<&str>) -> Result<ExitCode,
         format.label(),
         file.display()
     );
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Handles `reticle convert`: stream a GDSII file into a streamable `.rtla` archive.
+fn cmd_convert(file: &Path, out: &Path) -> Result<ExitCode, CliError> {
+    let summary = run_convert(file, out)?;
+    let world = summary.world;
+    println!("wrote {} from {}", out.display(), file.display());
+    println!("records: {}", summary.record_count);
+    println!(
+        "world:   ({},{})-({},{}) DBU",
+        world.min.x, world.min.y, world.max.x, world.max.y
+    );
+    println!("dbu/µm:  {}", summary.dbu_per_micron);
+    println!("levels:  {}", summary.level_count);
     Ok(ExitCode::SUCCESS)
 }
 
