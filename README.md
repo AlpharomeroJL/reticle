@@ -30,13 +30,12 @@ room, goes live, and copies the viewer link; a permalink (`?cell=`, `?view=x,y,z
 `?layers=`) deep-links a specific cell, camera, and layer set on top of the file; and a
 phone that opens a shared link navigates by touch (pinch to zoom, two fingers to pan).
 
-The clip below is the query tour: a filter selects shapes by layer and size, and the
-outline tree locates a cell on the canvas. This is the browse-and-inspect surface a shared
-read-only session opens into. (The two-context live share is a browser-and-relay flow that
-the native capture harness cannot record; this reuses the query GIF, which shows the same
-viewer surface a shared session presents.)
+The clip below is the live share itself, captured from two real browser contexts talking
+over the relay: on the left an editor opens a chip and shares a room, on the right a
+read-only viewer materializes the same design as the sharer publishes it. The viewer browses
+the shared design on its own and cannot change it.
 
-<p align="center"><img src="assets/tour-query.gif" alt="Filtering shapes with a query by layer and size, then locating a cell from the outline tree, in the browse-and-inspect surface a shared read-only session opens into" width="100%" /></p>
+<p align="center"><img src="assets/tour-share.gif" alt="An editor sharing a live room on the left and a read-only viewer mirroring it over the relay on the right, the sharer's cursor moving in both panes" width="100%" /></p>
 
 ## Generate verified structures from language
 
