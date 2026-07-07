@@ -121,8 +121,11 @@ pub fn cmd_tapeout_example(out_dir: Option<&str>) -> ExitCode {
         transcript.final_hash,
     );
     println!(
-        "NOTE: DRC-clean against the SKY130 SUBSET only; NOT verified through the real \
-         TinyTapeout precheck. Run the operator step to get the authoritative verdict:"
+        "NOTE: DRC-subset-clean by construction. When last run through TinyTapeout's own \
+         precheck this tile passed every Magic + KLayout DRC and geometry check; the \
+         recorded verdict and the remaining submission-artifact gaps (LEF, Verilog, wired \
+         pins) are in examples/tapeout/precheck-results.md and docs/src/tapeout.md. \
+         Re-verify with:"
     );
     println!("  just tt-precheck {}", display_forward_slash(&gds_path));
     ExitCode::SUCCESS

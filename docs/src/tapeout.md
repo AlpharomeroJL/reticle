@@ -26,17 +26,51 @@ truth over this page.
   (see below).
 - **Built in this wave** (Lane 4B): a wrapper that runs TinyTapeout's own precheck as an
   external oracle, `just tt-precheck <gds>`, with a structured-failure parser and the
-  agent-loop seam (see below). The live Docker run is the operator's step, not run to a
-  verdict here.
+  agent-loop seam (see below). The live Docker run has now been executed to a verdict on
+  this host (ADR 0059); the "Live precheck verdict" section below records the result.
 - **Built in this wave** (Lane 4C): the worked in-repo example, a **generator-built**
-  test-structure tile in the TT template, DRC-clean against the SKY130 subset and
-  committed with its replayable transcript under `examples/tapeout/` (the packet's proof
-  artifact). It is DRC-subset-clean but **not** yet verified through the real precheck;
-  see "The worked example tile (Lane 4C)" below. It is generator-built, not
-  agent-authored: the Claude Code agent path is unauthenticated in this environment.
+  test-structure tile in the TT template, committed with its replayable transcript under
+  `examples/tapeout/` (the packet's proof artifact). It passes **every one of
+  TinyTapeout's own Magic + KLayout DRC and geometry checks** (the live run below), not
+  just our SKY130 subset. It is generator-built, not agent-authored.
 
 No shuttle purchase is in scope for this project. A paid submission is the operator's
 own decision, which the tooling above is meant to make straightforward at any time.
+
+## Live precheck verdict (measured 2026-07-06)
+
+`just tt-precheck examples/tapeout/tt_um_reticle_tile.gds` was run to completion in the
+pinned `hpretl/iic-osic-tools:2025.01` container against `tt-support-tools` `main`, tech
+`sky130A`. The raw report is committed at
+[`examples/tapeout/precheck-results.md`](https://github.com/AlpharomeroJL/reticle/blob/main/examples/tapeout/precheck-results.md).
+The tile passes **every geometry, DRC, and structural check** against TinyTapeout's own
+Magic and KLayout decks:
+
+- Magic DRC; KLayout FEOL, BEOL, offgrid, pin-label-overlap, zero-area; the KLayout
+  (prBoundary) checks; the boundary check; the layer whitelist; the cell-name check; and
+  the urpm/nwell check: all pass.
+
+The first real run earned the oracle its keep: it caught a bug the SKY130 subset could not,
+the tile drew its outline only on `areaid.sc (81/4)` (what Magic reads) and lacked
+`prBoundary.boundary (235/4)` (what the KLayout checks delimit the project area from). The
+tile was fixed (it now carries both markers), regenerated, and re-run; the prBoundary and
+boundary checks then passed (ADR 0059).
+
+Four checks still fail, and none is geometry or DRC. They are the submission artifacts a
+GDS-geometry generator does not produce, named plainly rather than faked:
+
+- **Pin check**: needs a `.lef` pin abstract. Reticle exports GDS, not LEF.
+- **Power pin check** and **Verilog syntax check**: need a `.v` interface view (and
+  `yowasp-yosys`); a GDS-mode tile still ships a Verilog stub declaring its ports.
+- **Analog pin check**: the six `ua[*]` pins are met4 landing pads, not wired to the
+  interior probe structure, because the worked tile is a template plus an isolated
+  test structure, not a wired design. TinyTapeout wants analog pins wired, or
+  `analog_pins: 0`.
+
+So the honest headline is: **Reticle generates a tile whose geometry is clean against
+TinyTapeout's own decks**, and a complete submission additionally needs a LEF, a Verilog
+view, and a wired design, which are the operator's design steps beyond the geometry the
+generator produces.
 
 ## What a GDS-mode submission is, and is not
 

@@ -54,6 +54,10 @@ param(
     # A real TinyTapeout project directory (with info.yaml + gds/) to mount instead of the
     # synthesized minimal project. When set, -Gds must live under it.
     [string]$ProjectDir = '',
+    # The tile footprint the precheck picks its DEF template from (1x2, 2x2, ...). The staged
+    # minimal info.yaml records it as `project.tiles`, which drives `tt_analog_<Tiles>.def`.
+    # A real -ProjectDir supplies its own info.yaml and ignores this.
+    [string]$Tiles = '1x2',
     # The container technology name passed to the precheck.
     [string]$Tech = 'sky130A'
 )
@@ -138,6 +142,7 @@ project:
   description: "GDS-mode tile prechecked by reticle just tt-precheck"
   language: "GDS"
   top_module: "$gdsStem"
+  tiles: "$Tiles"
   analog_pins: 6
   uses_vapwr: true
 pinout:
@@ -163,19 +168,33 @@ $outPath = (Get-Item -LiteralPath $OutDir).FullName
 #   $supportPath -> /support     (the pinned tt-support-tools checkout)
 # The precheck writes reports to /support/precheck/reports; we copy them out afterward.
 # PDK_ROOT and the tools are baked into the image.
+# The image bundles Magic, KLayout (klayout.db) and the SKY130 PDK, but not `gdstk`,
+# which precheck.py imports directly. Install the exact versions tt-support-tools pins in
+# precheck/requirements.txt: gdstk 0.9.52 is built against NumPy 1.x, and the image ships
+# NumPy 2.2.1, so the pinned numpy 1.26.4 must come too. This is how TinyTapeout intends
+# the precheck to run: the heavy EDA tools come from the image, the precheck's own Python
+# deps are pip-installed. The image entrypoint sets PYTHONPATH with system dist-packages
+# (NumPy 2) ahead of the user site, so prepend the user site to PYTHONPATH so the pinned
+# numpy 1.26.4 and gdstk resolve first while KLayout stays available from the image.
 $containerCmd = @"
 set -e
-cd /support
-python3 precheck/precheck.py --gds '$gdsMountArg' --tech '$Tech'
+cd /support/precheck
+pip install --quiet --no-input --break-system-packages gdstk==0.9.52 numpy==1.26.4
+export PYTHONPATH=/headless/.local/lib/python3.12/site-packages:`$PYTHONPATH
+python3 precheck.py --gds '$gdsMountArg' --tech '$Tech'
 "@
 
+# The iic-osic-tools image ships an entrypoint launcher (X11/VNC UI bootstrap) that
+# treats the container command as its own options unless `--skip` is the FIRST argument
+# after the image: `--skip` bypasses the UI startup and execs the assigned command. Without
+# it the launcher rejects `bash` ("Unexpected option") and never runs the precheck.
 $dockerArgs = @(
     'run', '--rm',
     '-v', "${projectPath}:/work",
     '-v', "${supportPath}:/support",
     '-e', 'PDK=sky130A',
     $image,
-    'bash', '-lc', $containerCmd
+    '--skip', 'bash', '-lc', $containerCmd
 )
 
 Write-Output "tt-precheck: docker $($dockerArgs -join ' ')"
