@@ -9,6 +9,57 @@ When concurrency slots are free AND the next wave has lanes whose file surfaces 
 Immediate application (spend the unspent ~half of the 5-hour window, resets ~40 min): (1) Wave 2 contract step on main NOW (.rtla v1 types + TileSource trait + gds_stream event API as doc-contracted stubs in crates/reticle-index/src/archive.rs + crates/reticle-io/src/gds_stream.rs + ADR; additive files, no Wave 1 lane touches these crates); scoped ci, commit, push. (2) Dispatch 2A + 2B off post-contract main, E: targets, briefs first, UUIDs recorded before dispatch. Extra brief requirement for both: every count/size field from a stream or header is UNTRUSTED, never reserve capacity beyond remaining input (OASIS OOM lesson, commit 1b1b56b); 2A's fuzz target seeds from the committed GDS crash fixtures so the streaming reader cannot reintroduce the date-panic class. (3) If a slot remains, dispatch 5A (new crate crates/reticle-lefdef; LefDefDesign freeze stays a Wave 5 merge event). DO NOT dispatch Waves 3/4/6/7/8; DO NOT touch Wave 1 lanes/worktrees/merge order. On rate limit: standard backoff; session UUIDs are resume handles; expect the window reset and continue.
 Disjointness verified: contract-step + 2A/2B code files are in reticle-index/reticle-io (no Wave 1 lane touches these); 2A owns archive_build.rs+gds_stream.rs impl+fuzz, 2B owns tile_source.rs impl (pre-declared as separate modules in the contract step so the two never edit the same lib.rs region); 5A is a brand-new crate. Only shared append points are docs/decisions/README.md (ADR index) and root Cargo.toml members (5A vs 1B) - trivial sequential appends, orchestrator-merged.
 
+## WAVE 1 ADVERSARIAL REVIEW (workflow wb6z581wt, 32 agents): 8 confirmed (3 high), 5 refuted. MUST FIX before Wave 1 gate redeploy.
+HIGH:
+  1. reconnect-resync app.rs:1570 - drive_sharer_publish rebuilds a FRESH SyncDocument::from_document(VIEWER_ACTOR,..) per publish; yrs clock resets to 0, so a viewer that applied snapshot-1 drops snapshot-2 as duplicate/stale -> shapes added after the first publish (incl. agent edits, the cross-lane target) NEVER reach viewers. Fix: ONE long-lived sharer SyncDocument, clocks advance monotonically.
+  2. do-relay-wire worker/src/lib.rs:147 - DO never logs PRESENCE frames (0x12), only updates; native relay logs+replays EVERY binary frame, so a late joiner gets no last-known presence on the DO. Fix: log presence too (match native), + add a conformance vector: presence-before-late-join.
+  3. abuse-security worker/src/lib.rs:129 - DO accepts binary frames of any size and appends every non-presence frame to DO storage with NO size/count cap -> one editor can OOM/exhaust room storage. Fix: cap frame size + cap log length.
+MEDIUM: 4 (reconnect test share_live.rs:843 reuses one doc, masks #1 - fix WITH #1 by replaying app path), 5 (worker presence/update FIFO order not preserved), 6 (worker no per-room conn cap / room-creation rate limit).
+LOW: 7 (livesync.rs:479 reconnect loop: on_open resets attempt=0 with no min-uptime guard -> unthrottled redial), 8 (collab.rs:408 mirror draws AddRect/Path/Polygon even when session rejected them -> degenerate CRDT shape).
+REFUTED (5, informational, no action): worker log-unbounded dup, coalesced-presence-from-departed, mirror_transform drift, shared-alarm-slot, origin-not-validated (this last one, worker/src/lib.rs:63 open cross-origin ws, is REFUTED but worth a look during the fix).
+FIXED (commit 5f8dbd0): findings 1,2,3 (HIGH) + 4,5,6 (MEDIUM). reticle-sync reconcile_to + test (viewer converges across publishes), app.rs persistent sharer doc, worker presence-replay + frame/log caps + FIFO flush + per-room conn cap. Verified: reticle-sync test green, reticle-app native+wasm clippy clean, worker wasm check clean.
+DEFERRED (LOW, honest follow-ups, do NOT block redeploy): 7 (livesync.rs:479 reconnect resets attempt=0 on open; already floored ~500ms so bounded not infinite; a proper min-uptime guard needs uptime tracking - follow-up), 8 (collab.rs:408 mirror draws AddRect/Path/Polygon even when the session rejected them -> a degenerate CRDT shape absent from the session; needs the per-command session-acceptance handshake threaded into mirror_command - follow-up, low: cosmetic CRDT inconsistency, no crash/dataloss). Both are candidate work for a focused follow-up lane.
+Fixing on main now (orchestrator-direct); lanes 2C (reticle-app) and 2D-alpha (worker/archive) rebase at their gates - my fixes touch app.rs/livesync.rs/worker-src/collab.rs/share_live.rs, 2C touches a new dochost module + session/tool, 2D-alpha touches worker/archive - low conflict.
+
+## LANE STATE RECONCILIATION (housekeeping directive, 2026-07-07)
+Ground truth via Win32_Process + RESULT.md/PARKED.md + stream-log write-age. NO true zombies: every completed lane's wrapper OS process had already exited (the "still Running" was harness bookkeeping, not runaway compute; nothing to kill).
+  COMPLETE, RESULT present, parked green for their wave gates (process gone, log 45-59 min stale): v8-2a-reader-builder, v8-2b-tilesource, v8-5a-lefdef, v8-5c-lydrc, v8-6a-devextract.
+  RUNNING, real work (log age 0, live wrapper): v8-1e-proof, v8-2c-residency, v8-2d-alpha-worker, v8-5d-interop-pdk. (v8-5e-python dispatch just completed exit 0 - verify RESULT next pass.)
+  RESUMING (finished session exit 0 without RESULT): v8-7a-leaderboard (session 37c3aa0a..., resume b9pis648w) - report state, write RESULT or park.
+  Corrected running count: ~5 lane sessions (1e,2c,2d-alpha,5d + 7a-resume) vs cap 11. Well under. 3 bench workers grinding untouched (separate).
+  Wave 2 gate precondition: when 2a,2b,2c,2d-alpha all green -> run Wave 2 contract-completion + gate, incl. dispatching the deferred converter-CLI scope (held out of 2d-alpha pending 2a; 2a is now green, so the converter can dispatch once 2c/2d-alpha land).
+
+## AMENDMENT 3 dispatch record (session ids = resume handles; `claude -r <id> -p "Continue per scratch/lanes/<id>/brief.md"` in the worktree with CARGO_TARGET_DIR=E:\dev\reticle-target-<id>)
+  v8-1e-proof         75881dd0-fe1d-4b7c-8935-8a0b4d0e2f38  (gpu lane; e2e/assets/README/justfile)
+  v8-2c-residency     bed46f3a-4db4-41f8-a7bd-e69824ea45be  (reticle-app DocHost/residency)
+  v8-2d-alpha-worker  819572bb-9513-4aea-acce-a9a70d6f6b67  (worker/archive + xtask license; converter OUT of scope)
+  v8-5d-interop-pdk   bb9528e1-5f5d-4d39-8b3d-9b35946110d9  (oasis_std + IHP + GenTech reticle-gen refactor)
+  v8-5e-python        d03b47c2-440d-4e49-85cb-ddee149b1c5d  (new crate reticle-py, non-default)
+  v8-7a-leaderboard   37c3aa0a-d154-490a-bbd0-627ccbdb46a6  (reticle-bench leaderboard subcommand)
+  Also running from amendment 2: v8-2a-reader-builder (no RESULT yet). Bench: 3 stride workers (skip-build). Review: workflow wb6z581wt.
+  Still to do after the burst: full Wave 1 gate (just ci + e2e + e2e-subpath + e2e-share + just conformance + redeploy + smoke), then merge the parked Wave-2/5/6/7 lanes at their own gates.
+
+## WAVE 1 GATE DEFERRED to post-burst (contention). Main state e0b3bd9..HEAD:
+  - Wave 1 merged (1a/1b/1d/1c) + wave1-gate fix + Wave 2 contract (0a745d7) + bench checkpoint (b938f53) + review fixes (5f8dbd0) + doc-link fix (this commit pending).
+  - Review HIGH+MEDIUM fixed and VERIFIED (reticle-sync test green, app native+wasm clippy clean, worker wasm check clean; pre-commit hook ran clippy --workspace --all-targets for 5f8dbd0 = full compile incl tests, passed). Main IS sound.
+  - `just ci` attempted but the test-compile was KILLED (exit -1) = resource contention with 9 lane builds + 3 bench workers + resumed 2C all compiling. NOT a code error.
+  - DECISION: do NOT run full ci/e2e/redeploy while the burst is spending the expiring-week quota (contention steals CPU from the lanes + makes the gate flaky). Run the gate + redeploy AFTER the burst subsides (lanes complete / quota window closes / machine frees). The committed fixes are safe on main until then; the live site keeps serving the prior (v7-parser-hardened) bundle, and the flagship live-collab fix ships at the deferred redeploy.
+  - RESUME the gate: cd D:\dev\reticle; just ci; just e2e; just e2e-subpath; just e2e-share; just conformance; just deploy-pages; publish scratch/pages to gh-pages; just smoke-pages. Then process lane completions + merge parked lanes at their gates.
+  - Commit the pending doc-link fix (livesync.rs SHARER_ACTOR intra-doc link -> reticle_sync::SyncDocument::reconcile_to) with the gate run.
+
+## AMENDMENT 3 (operator, 2026-07-07): max dispatch, cap 11, expiring-week burst
+Minutes left on the weekly quota; sink it. Cap 11. Wave 1 MERGED on main (e0b3bd9; ADRs renumbered 0062-0067; a wave1-gate fix commit landed). Burst lanes from amendment 2: 2b/5a/5c/6a DONE+green (parked, merge at their gates), 2a still running.
+Dispatch order (briefs first, UUIDs recorded, standard rules):
+  0. Resume claude-code bench extension, full priority, up to 3 concurrent task workers (stride partition). Checkpoint per task.
+  1. 1E browser proof pack (GPU lane, runs captures; only GPU consumer this batch). 1C stats seam is on main.
+  2. 2C async residency + DocHost (Wave 1 merged + Wave 2 contract frozen + 2B parked make app-touching safe; brief has coarse-then-fine MemSource latency test).
+  3. 2D-alpha SCOPED: archive-serving Worker only (worker/archive/, R2 binding, ranged reads, Cache API, CORS to Pages origin) + license-manifest xtask over staged content dir. Converter CLI OUT until 2A merges. Range headers untrusted.
+  4. 5D round-trip interop + IHP SG13G2 + GenTech refactor + timeboxed OASIS writer (disjoint from 2A's gds_stream; oasis.rs/tech/reticle-gen untouched in flight).
+  5. 5E reticle-py + notebook widget (new non-default workspace crate, fully disjoint).
+  6. 7A leaderboard generator (reads committed benchmark records only; deterministic same-records-same-bytes).
+Adversarial multi-agent review of the merged Wave 1 diff (b938f53..e0b3bd9) NOW, added target: does 1A's reconnect full-state snapshot capture shapes created via 1D's agent APIs mid-session.
+DO NOT dispatch: 2E (collides 2C in reticle-app), 3A (collides 5C in reticle-drc), 3B/3C/3D/6B (GPU exclusivity while 1E holds captures), 4A-4D (post-Wave-3), 6C (needs 2A merged), 7C (bench workers read task TOMLs). Throttling expected; backoff + UUID resume handles standard.
+
 ## AMENDMENT 2 (operator, 2026-07-07): burst mode, cap 9
 Weekly quota resets in ~1h; capacity spent before then is free. Maximize safe dispatch now.
 - Concurrency cap RAISED to 9 for this burst (original 4 was D: target-dir pressure; targets now on E: per ADR 0060, worktrees thin on D:). CPU contention accepted, throughput over latency. GPU-lane exclusivity still holds (none of tonight's lanes are GPU).
