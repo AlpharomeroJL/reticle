@@ -18,8 +18,26 @@ cargo +nightly fuzz run oasis_import
 cargo +nightly fuzz run geometry_boolean
 ```
 
-Seed corpora live under `fuzz/corpus/<target>/` and are committed; crash artifacts
-and coverage are not.
+Seed corpora live under `fuzz/corpus/<target>/` and are committed (a curated set of
+the smallest coverage-preserving inputs per target); crash artifacts and coverage are
+not. Crash and OOM regression inputs are pinned separately under
+`crates/reticle-io/tests/fuzz-regressions/` and asserted panic-free by the normal test
+suite, so they run in `just ci` on every platform.
+
+## Campaign history
+
+The v8.0.0 Wave 0 campaign (WSL Ubuntu, `cargo-fuzz` 0.13.2, `-fork=4`) ran all three
+targets and found three real `reticle-io` defects, each fixed with a committed
+regression fixture: an out-of-range-date panic and a zero-length-string panic in the
+GDSII importer (both would abort a wasm tab, where `catch_unwind` does not help), and
+an unbounded-allocation OOM in the OASIS importer. A clean-rebuilt confirmation pass
+produced zero surviving artifacts on all three targets. See `docs/STATUS.md` for the
+full accounting.
+
+Gotcha for re-runs: the `/mnt/d` 9p mount defeats cargo's incremental rebuild, so a
+fuzz build after editing source must use a fresh `CARGO_TARGET_DIR` (or it silently
+reuses a stale binary and reports already-fixed crashes). Confirm any fix by also
+running the crash artifact through the native importer, which links normally.
 
 ## Platform note
 

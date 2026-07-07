@@ -727,8 +727,14 @@ RUN_STATE.md.
   checks pass; the same four out-of-scope submission-artifact checks fail: LEF,
   Verilog x2, unwired analog pins; wall 28.6 s). No ADR needed: nothing was decided,
   only verified.
-- [ ] Fuzz campaign: one run per existing target (gds_import, oasis_import,
-  geometry_boolean) under WSL nightly, fork=4, 3600 s wall each; minimized seed
-  corpus committed under `fuzz/corpus/<target>/` (two `.oasis` seeds generated via
-  `reticle-cli export` since none were committed). IN PROGRESS (background).
+- [x] Fuzz campaign (WSL Ubuntu, cargo-fuzz 0.13.2, fork=4): all three targets run.
+  THREE real reticle-io defects found and fixed with regression fixtures, `just ci`
+  green: GDSII out-of-range-date panic (8d4457a), GDSII zero-length-string panic
+  (e8752f7), OASIS unbounded-allocation OOM (1b1b56b). All three would abort a wasm
+  tab (catch_unwind is a no-op on wasm; the fuzz build aborts on panic, which is why
+  it surfaced them). Clean-rebuilt confirmation run: 0 surviving artifacts on all
+  three (gds 0/15min from all 440 crash inputs, oasis 0/30min, boolean 0/30min).
+  Curated 50-input seed corpus per target committed; `fuzz/README.md` + `docs/STATUS.md`
+  record the campaign and correct the standing "fuzzing does not run" limitation
+  (it runs under WSL; native MSVC still will not link libFuzzer). ~8 CPU-hours.
 - [ ] Wave 0 gate + redeploy.

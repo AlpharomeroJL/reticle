@@ -1,7 +1,12 @@
 # v8.0.0 run state (single writer: orchestrator)
 
-updated: 2026-07-07T13:55:00-05:00
-phase: wave0/fuzz-campaign-running
+updated: 2026-07-07T14:40:00-05:00
+phase: wave0/fuzz-campaign-running (parallel relaunch)
+
+## dispatch mechanism VALIDATED (2026-07-07)
+- Headless dispatch works: `<prompt-on-stdin> | claude -p --permission-mode bypassPermissions --strict-mcp-config --session-id <uuid> --output-format text` in a pinned cwd ran a sub-session autonomously (no prompts), used its Write tool to create a file in the correct cwd, and returned clean (exit 0). This validates the Wave 1+ lane fan-out model.
+- Resume works: `claude -r <uuid> -p <prompt> ...` recalled the exact content the original session wrote, confirming context persistence across resume. This is the quota-backoff recovery lever; it is real.
+- For real lane dispatch use --output-format stream-json (machine-parseable) + 1>/2> capture to scratch/logs/<lane>.{stream.jsonl,err.log}.
 head: bbf853defd9bb8638709b4c4794cfad519cafde8
 plan: C:\Users\jo312\.claude\plans\reticle-v8-0-0-the-expressive-iverson.md
 disk: C: 37.9 GB free, D: 36.1 GB free, E: 780.2 GB free (measured 2026-07-07T12:45)
@@ -30,9 +35,22 @@ cloudflare: authed=yes (wrangler 4.82.2 OAuth, account 86e3e2cfeb39c385931af8bb9
     0.4 cloudflare bootstrap: done (bucket reticle-archives created)
     0.5 docker-to-E + precheck acceptance: done VERIFY-ONLY (already on E:; precheck reproduced committed verdict exactly, wall 28.6 s, exit 1 = the four documented out-of-scope artifact checks)
     0.6 bench verify-only: done (README rows match committed benchmarks/results/v0.5.0 records: 49/83, 29/83, 24/25-partial; labels honest)
-    0.7 fuzz campaign: RUNNING in background (WSL Ubuntu; fork=4, 3600 s per target; ~3.3 h; script scratch/fuzz-campaign.sh; logs $HOME/reticle-fuzz/<target>.log in WSL)
-    0.8 gate+redeploy: pending (after 0.7)
-- wave1..wave9: pending
+    0.7 fuzz campaign: THREE REAL BUGS FOUND AND FIXED (all reticle-io parsers); gds final re-confirm running.
+        Big-picture honesty win: prior STATUS (v4-v7) claimed "fuzzing does not run on this Windows/MSVC host (libFuzzer will not link)". FALSE for the WSL path: the campaign ran fine under WSL Ubuntu (nightly + cargo-fuzz 0.13.2, fork=4). STATUS must be corrected at Wave 0 close.
+        Bugs (all would ABORT a wasm tab; catch_unwind only saves native, and the fuzz build aborts on panic exactly like wasm, which is why it surfaced them):
+        - gds_import date panic: malformed BGNLIB/BGNSTR dates -> gds21 feeds chrono -> panic. Fixed pre-parse (commit 8d4457a). 4 crash fixtures.
+        - gds_import zero-length-string panic (gds21 read.rs:170 read_str indexes data[-1]): was KNOWN and relied on catch_unwind (native-only); fuzz proved catch_unwind insufficient for wasm. Fixed: guard rejects zero-length string records pre-parse (commit e8752f7). 3 crash fixtures. This was the 440-crash "second class" the date fix did not cover.
+        - oasis_import OOM: unbounded Vec::with_capacity(count) (53,321 oom artifacts from ~28-byte inputs). Fixed: Reader::prealloc caps at remaining/min_elem_bytes (commit 1b1b56b). 4 oom fixtures.
+        Confirmed clean (fresh clean build, 30 min each, 0 artifacts): oasis_import, geometry_boolean.
+        PROCESS LESSON (critical): the /mnt/d 9p mount defeats cargo incremental rebuild (a 4s "build" reused a pre-fix binary and reported 1063 already-fixed crashes as if new). ALWAYS use a FRESH CARGO_TARGET_DIR for fuzz builds after a source change; verified staleness by running 40/40 crash artifacts through the fixed NATIVE importer (all clean).
+        gds re-confirm (commit e8752f7, fresh target dir, seeded with all 440 crash inputs, 15 min): RUNNING (task b733dhx5r).
+    0.8 gate+redeploy: pending (after gds re-confirm clean + corpus commit + STATUS fuzz update)
+- wave1: briefs WRITTEN (scratch/lanes/v8-1{a-transport,b-relay,c-shareux,d-agentlive,e-proof}/brief.md); dispatch plan:
+    batch 1 (4 concurrent): v8-1a-transport, v8-1b-relay, v8-1c-shareux, v8-1d-agentlive
+    batch 2 (staggered, after 1c merges; gpu_lane runs alone): v8-1e-proof
+    declared merge order: 1a, 1b, 1d, 1c (app-UI-heaviest last), then 1e
+    file-ownership fences are in the briefs (livesync.rs=1a; share.rs/webopen.rs=1c; worker+conformance=1b; agent=1d; e2e+README media=1e)
+- wave2..wave9: pending
 
 ## not-run ledger (honest)
 
