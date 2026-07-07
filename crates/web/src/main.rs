@@ -44,7 +44,17 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                Box::new(move |_cc| Ok(boot.into_app())),
+                Box::new(move |_cc| {
+                    let mut app = boot.into_app();
+                    // A `?gds=` link may also carry a permalink (`?cell=`/`?view=x,y,z`/
+                    // `?layers=`); stash it so it is applied once the document opens (a
+                    // no-op for links without view-state params).
+                    let search = web_sys::window()
+                        .and_then(|w| w.location().search().ok())
+                        .unwrap_or_default();
+                    app.set_pending_permalink(reticle_app::share::parse_permalink(&search));
+                    Ok(app)
+                }),
             )
             .await;
 
@@ -91,6 +101,9 @@ enum Boot {
         relay: String,
         /// The room to publish into.
         room: String,
+        /// Whether `?e2e-edit=1` was also set: after going live, place one scripted rect
+        /// so lane v8-1e's browser test can observe the edit reach a viewer.
+        e2e_edit: bool,
     },
 }
 
@@ -107,8 +120,14 @@ impl Boot {
         match self {
             Boot::View(start_view) => Box::new(App::with_start_view(start_view)),
             Boot::Viewer(target) => Box::new(App::with_viewer(target)),
-            Boot::Share { relay, room } => {
-                Box::new(App::with_share_on_boot(StartView::Editor, relay, room))
+            Boot::Share {
+                relay,
+                room,
+                e2e_edit,
+            } => {
+                let mut app = App::with_share_on_boot(StartView::Editor, relay, room);
+                app.set_e2e_edit(e2e_edit);
+                Box::new(app)
             }
         }
     }
@@ -159,10 +178,15 @@ fn boot_from_url() -> Boot {
             .unwrap_or_else(|| reticle_app::share::DEFAULT_SERVER.to_owned());
         let room = params.get("room").unwrap_or_default();
         let room = reticle_app::share::room_id(&room);
+        let e2e_edit = reticle_app::share::parse_e2e_edit(search);
         web_sys::console::log_1(
             &format!("reticle: auto-share editor for room '{room}' on relay '{relay}'").into(),
         );
-        return Boot::Share { relay, room };
+        return Boot::Share {
+            relay,
+            room,
+            e2e_edit,
+        };
     }
 
     match params.get("view") {

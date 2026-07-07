@@ -241,6 +241,270 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
+/// A deep-link into an already-opened document: which cell to focus, where to point
+/// the camera, and which layers to show.
+///
+/// A permalink layers view state on top of the `?gds=<url>` open ([`crate::webopen`]):
+/// the bundle opens the document, then applies whichever of these three are present.
+/// All three are optional and independent, so a link may restore only a camera, only
+/// a cell, or all three. Emitting is [`emit_permalink`]; parsing is
+/// [`parse_permalink`], and the two round-trip (`emit -> parse` is the identity on the
+/// [`Permalink`] fields).
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct Permalink {
+    /// The cell to focus on open, if the link names one (URL-decoded).
+    pub cell: Option<String>,
+    /// The camera to restore as `(center_x, center_y, pixels_per_dbu)` in world DBU,
+    /// if the link carries a camera spec.
+    pub camera: Option<(f64, f64, f64)>,
+    /// The layers to show (every other layer hidden), each `(layer, datatype)`. `Some`
+    /// with an empty vec means "hide everything"; `None` means "leave layers alone".
+    pub layers: Option<Vec<(u16, u16)>>,
+}
+
+/// Parses the view-state permalink params out of a page query string.
+///
+/// Recognizes three keys, each independently optional:
+/// * `cell=<name>` - the focus cell, URL-decoded (UTF-8), ignored when empty.
+/// * `view=<x>,<y>,<zoom>` - a camera spec, **only** when the value parses as exactly
+///   three comma-separated `f64`s. The `view` key is also the start-view selector
+///   (`viewer`/`editor`/`replay`, ADR 0026); the two are disambiguated by shape here,
+///   so a `view=editor` leaves [`Permalink::camera`] `None` and a `view=1,2,3` fills it.
+/// * `layers=<csv>` - a comma-separated list of `layer/datatype` specs; malformed
+///   entries are skipped rather than failing the whole list, and a present-but-empty
+///   value yields `Some(vec![])` ("hide everything"). An absent key yields `None`.
+///
+/// Every value is parsed leniently: a malformed float, a bad layer spec, or an unknown
+/// key is ignored and never panics. A leading `?` is tolerated.
+#[must_use]
+pub fn parse_permalink(query: &str) -> Permalink {
+    let query = query.trim_start_matches('?');
+    let mut out = Permalink::default();
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        match key {
+            "cell" => {
+                let name = decode_permalink_value(value);
+                if !name.is_empty() {
+                    out.cell = Some(name);
+                }
+            }
+            // `view` is shared with the start-view selector (ADR 0026): a value that
+            // parses as exactly three floats is a camera spec; anything else (a
+            // `viewer`/`editor`/`replay` keyword, or junk) leaves the camera unset.
+            "view" => {
+                if let Some(camera) = parse_camera_spec(value) {
+                    out.camera = Some(camera);
+                }
+            }
+            // A present `layers` key always yields `Some` (even empty, meaning "hide
+            // all"); malformed specs inside are skipped, not fatal.
+            "layers" => out.layers = Some(parse_layer_csv(value)),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Parses a `view=<x>,<y>,<zoom>` value into a camera spec, or `None` when it is not
+/// exactly three finite comma-separated floats (so a start-view keyword, a truncated
+/// pair, or an over-long list is rejected rather than misread as a camera).
+fn parse_camera_spec(value: &str) -> Option<(f64, f64, f64)> {
+    let mut parts = value.split(',');
+    let x = parts.next()?.trim().parse::<f64>().ok()?;
+    let y = parts.next()?.trim().parse::<f64>().ok()?;
+    let zoom = parts.next()?.trim().parse::<f64>().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    if x.is_finite() && y.is_finite() && zoom.is_finite() {
+        Some((x, y, zoom))
+    } else {
+        None
+    }
+}
+
+/// Parses a `layers=` CSV of `layer/datatype` specs, skipping any entry that is not two
+/// `u16`s split by `/` (so an unknown or out-of-range spec is ignored, never fatal). An
+/// empty value yields an empty vec, which the caller reads as "hide every layer".
+fn parse_layer_csv(value: &str) -> Vec<(u16, u16)> {
+    let mut layers = Vec::new();
+    for spec in value.split(',') {
+        let spec = spec.trim();
+        if spec.is_empty() {
+            continue;
+        }
+        if let Some((layer, datatype)) = spec.split_once('/')
+            && let (Ok(layer), Ok(datatype)) =
+                (layer.trim().parse::<u16>(), datatype.trim().parse::<u16>())
+        {
+            layers.push((layer, datatype));
+        }
+    }
+    layers
+}
+
+/// Emits a shareable page URL carrying `gds` (when given) and the view-state params of
+/// `p`, hosted at page origin `base_page`.
+///
+/// The inverse of [`parse_permalink`]: the query it writes parses back to the same
+/// [`Permalink`]. An empty `base_page` yields a relative `?...` query (resolving against
+/// the loaded bundle), mirroring [`viewer_link`]; a non-empty one is joined as
+/// `base/?...`. The `gds` URL, cell name, and any values are percent-encoded so the
+/// link stays parseable. Absent [`Permalink`] fields emit no key at all.
+#[must_use]
+pub fn emit_permalink(base_page: &str, gds: Option<&str>, p: &Permalink) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(gds) = gds {
+        parts.push(format!("gds={}", encode_permalink_value(gds)));
+    }
+    if let Some(cell) = &p.cell {
+        parts.push(format!("cell={}", encode_permalink_value(cell)));
+    }
+    if let Some((x, y, zoom)) = p.camera {
+        // Rust's default float formatting is the shortest string that parses back
+        // exactly, so the camera round-trips without a chosen precision.
+        parts.push(format!("view={x},{y},{zoom}"));
+    }
+    if let Some(layers) = &p.layers {
+        let csv = layers
+            .iter()
+            .map(|(layer, datatype)| format!("{layer}/{datatype}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        parts.push(format!("layers={csv}"));
+    }
+    let query = parts.join("&");
+    let base = base_page.trim().trim_end_matches('/');
+    match (base.is_empty(), query.is_empty()) {
+        (true, true) => String::new(),
+        (true, false) => format!("?{query}"),
+        (false, true) => base.to_owned(),
+        (false, false) => format!("{base}/?{query}"),
+    }
+}
+
+/// Percent-encodes `s` as a permalink query-component value, byte by byte: the
+/// unreserved URL characters (`A-Za-z0-9-_.~`) are kept and every other byte -
+/// including each byte of a multi-byte UTF-8 character - becomes `%XX`.
+///
+/// This is a full RFC 3986 component encoding, unlike [`encode_query_component`] (which
+/// only escapes the handful of reserved characters a relay host can carry): a permalink
+/// value is a cell name or a URL and may hold spaces, `/`, `,`, or non-ASCII text, so it
+/// must be fully escaped to round-trip through [`decode_permalink_value`].
+fn encode_permalink_value(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(char::from(b));
+            }
+            _ => {
+                out.push('%');
+                out.push(char::from(hex_digit(b >> 4)));
+                out.push(char::from(hex_digit(b & 0x0f)));
+            }
+        }
+    }
+    out
+}
+
+/// Reverses [`encode_permalink_value`], decoding `%XX` byte escapes and rebuilding the
+/// UTF-8 string from the resulting bytes.
+///
+/// Invalid or truncated escapes are left verbatim so a hand-edited link never panics,
+/// and the byte buffer is decoded lossily to guarantee a valid `String`.
+fn decode_permalink_value(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && let (Some(h), Some(l)) = (
+                bytes.get(i + 1).and_then(|b| hex_val(*b)),
+                bytes.get(i + 2).and_then(|b| hex_val(*b)),
+            )
+        {
+            out.push(h * 16 + l);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The uppercase ASCII hex digit for a nibble in `0..=15`.
+fn hex_digit(nibble: u8) -> u8 {
+    match nibble {
+        0..=9 => b'0' + nibble,
+        _ => b'A' + (nibble - 10),
+    }
+}
+
+/// Builds the [`Permalink`] for the current session view: the focused cell (dropped
+/// when the name is empty), the camera as `(center_x, center_y, pixels_per_dbu)`, and
+/// the set of currently visible layers (each `(layer, datatype)`).
+///
+/// This is what the copy-permalink action serializes with [`emit_permalink`]; kept pure
+/// so the mapping from session state to a link is unit-tested without the app. The
+/// camera and layers are always `Some` (a copied permalink pins the exact view,
+/// including "no layers visible"); only the cell is optional.
+#[must_use]
+pub fn session_permalink(
+    cell: Option<&str>,
+    camera: (f64, f64, f64),
+    visible_layers: &[(u16, u16)],
+) -> Permalink {
+    Permalink {
+        cell: cell.filter(|c| !c.is_empty()).map(str::to_owned),
+        camera: Some(camera),
+        layers: Some(visible_layers.to_vec()),
+    }
+}
+
+/// Mints a fresh, shareable room id from a human-readable `base` name and a `seed`.
+///
+/// The seed drives a short url-safe suffix appended to the sanitized base, so a
+/// one-click Share gets a room that is recognizable (it carries the design name) yet
+/// unlikely to collide with an unrelated session. Deterministic in `(base, seed)` so a
+/// test can pin the seed and assert the exact room; the caller supplies real entropy
+/// (the frame clock) at runtime. The result is always a valid [`room_id`].
+#[must_use]
+pub fn minted_room_id(base: &str, seed: u64) -> String {
+    // A six-character base-36 suffix from the seed, appended to the sanitized base.
+    const DIGITS: &[u8; 36] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+    let mut n = seed;
+    let mut suffix = String::with_capacity(6);
+    for _ in 0..6 {
+        suffix.push(char::from(DIGITS[(n % 36) as usize]));
+        n /= 36;
+    }
+    room_id(&format!("{base}-{suffix}"))
+}
+
+/// Whether the page query requests the e2e edit-script mode (`?e2e-edit=1`).
+///
+/// When this and `?share=1` are both set, the publisher-on-boot places one scripted
+/// rect after going live so a browser test (lane v8-1e) can observe the edit propagate
+/// to a viewer. Accepts `1` or `true`; a leading `?` is tolerated. Pure, so it is
+/// unit-tested without a browser.
+#[must_use]
+pub fn parse_e2e_edit(query: &str) -> bool {
+    let query = query.trim_start_matches('?');
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if key == "e2e-edit" {
+            return matches!(value, "1" | "true");
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,5 +652,144 @@ mod tests {
             assert_eq!(target.room, "layout", "for {q:?}");
             assert_eq!(target.room, room_id(""));
         }
+    }
+
+    #[test]
+    fn permalink_round_trips_cell_camera_and_layers() {
+        // emit -> parse is the identity on the Permalink fields, including a cell name
+        // with a space and a non-ASCII character and a fractional zoom.
+        let p = Permalink {
+            cell: Some("my cell µ".to_owned()),
+            camera: Some((1000.0, -500.0, 0.25)),
+            layers: Some(vec![(68, 20), (69, 20)]),
+        };
+        let url = emit_permalink("", None, &p);
+        let query = url.trim_start_matches('?');
+        assert_eq!(parse_permalink(query), p, "round trip via {url}");
+    }
+
+    #[test]
+    fn permalink_emit_includes_gds_and_a_page_base() {
+        let p = Permalink {
+            cell: Some("TOP".to_owned()),
+            camera: None,
+            layers: None,
+        };
+        let url = emit_permalink("https://reticle.example", Some("https://h/c.gds"), &p);
+        assert!(
+            url.starts_with("https://reticle.example/?"),
+            "base joined: {url}"
+        );
+        assert!(
+            url.contains("gds=https%3A%2F%2Fh%2Fc.gds"),
+            "gds encoded: {url}"
+        );
+        assert!(url.contains("cell=TOP"), "cell present: {url}");
+        // The gds round-trips through the webopen parser, and the cell through ours.
+        let query = url.split_once('?').expect("query").1;
+        assert_eq!(parse_permalink(query).cell.as_deref(), Some("TOP"));
+    }
+
+    #[test]
+    fn permalink_camera_is_disambiguated_from_the_start_view_selector() {
+        // A three-float `view` is a camera spec...
+        let cam = parse_permalink("view=1000,-500,0.25").camera;
+        assert_eq!(cam, Some((1000.0, -500.0, 0.25)));
+        // ...while a start-view keyword leaves the camera empty (it is handled by the
+        // boot's StartView selector, not the permalink).
+        for q in ["view=editor", "view=viewer", "view=replay"] {
+            assert_eq!(parse_permalink(q).camera, None, "for {q:?}");
+        }
+    }
+
+    #[test]
+    fn permalink_parses_a_layer_csv_and_hides_all_on_empty() {
+        assert_eq!(
+            parse_permalink("layers=68/20,69/20").layers,
+            Some(vec![(68, 20), (69, 20)])
+        );
+        // A present-but-empty `layers` means "hide everything".
+        assert_eq!(parse_permalink("layers=").layers, Some(vec![]));
+        // An absent key leaves layers untouched.
+        assert_eq!(parse_permalink("cell=TOP").layers, None);
+    }
+
+    #[test]
+    fn permalink_ignores_malformed_values_without_panicking() {
+        // A non-numeric camera value is ignored (not a camera, not a panic).
+        assert_eq!(parse_permalink("view=abc").camera, None);
+        assert_eq!(parse_permalink("view=1,2").camera, None);
+        assert_eq!(parse_permalink("view=1,2,3,4").camera, None);
+        // A layer that is out of range or malformed is skipped; valid siblings survive.
+        assert_eq!(
+            parse_permalink("layers=68/20,junk,99,70/5,999999/0").layers,
+            Some(vec![(68, 20), (70, 5)])
+        );
+        // A leading '?' is tolerated and the whole thing never panics.
+        let p = parse_permalink("?cell=&view=&layers=&bogus");
+        assert_eq!(p.cell, None);
+        assert_eq!(p.camera, None);
+        assert_eq!(p.layers, Some(vec![]));
+    }
+
+    #[test]
+    fn session_permalink_captures_cell_camera_and_visible_layers() {
+        let p = session_permalink(Some("TOP"), (10.0, -20.0, 0.5), &[(68, 20), (69, 20)]);
+        assert_eq!(p.cell.as_deref(), Some("TOP"));
+        assert_eq!(p.camera, Some((10.0, -20.0, 0.5)));
+        assert_eq!(p.layers, Some(vec![(68, 20), (69, 20)]));
+        // No cell focused (empty name) drops the cell; an empty visible set stays `Some`
+        // so the link still pins "nothing visible".
+        let none = session_permalink(Some(""), (0.0, 0.0, 1.0), &[]);
+        assert_eq!(none.cell, None);
+        assert_eq!(none.layers, Some(vec![]));
+        // And it round-trips through the URL form.
+        let url = emit_permalink("", None, &p);
+        assert_eq!(parse_permalink(url.trim_start_matches('?')), p);
+    }
+
+    #[test]
+    fn minted_room_id_is_deterministic_valid_and_varies_by_seed() {
+        let a = minted_room_id("CHIP_TOP", 42);
+        // Deterministic in (base, seed).
+        assert_eq!(a, minted_room_id("CHIP_TOP", 42));
+        // A valid, idempotent room id.
+        assert_eq!(room_id(&a), a, "minted id is already a room id");
+        assert!(!a.is_empty());
+        // Different seeds yield different rooms.
+        assert_ne!(a, minted_room_id("CHIP_TOP", 43));
+        // An empty/junk base still mints a usable room.
+        let j = minted_room_id("!!!", 7);
+        assert_eq!(room_id(&j), j);
+        assert!(!j.is_empty());
+    }
+
+    #[test]
+    fn parse_e2e_edit_reads_the_flag() {
+        assert!(parse_e2e_edit("e2e-edit=1"));
+        assert!(parse_e2e_edit("?share=1&e2e-edit=1"));
+        assert!(parse_e2e_edit("e2e-edit=true"));
+        assert!(!parse_e2e_edit("e2e-edit=0"));
+        assert!(!parse_e2e_edit("share=1"));
+        assert!(!parse_e2e_edit(""));
+        // Not a partial-key match.
+        assert!(!parse_e2e_edit("e2eedit=1"));
+    }
+
+    #[test]
+    fn permalink_absent_fields_emit_no_keys() {
+        let empty = emit_permalink("", None, &Permalink::default());
+        assert_eq!(empty, "", "an empty permalink with no gds emits nothing");
+        // Only a camera: exactly the view key, no cell or layers.
+        let cam_only = emit_permalink(
+            "",
+            None,
+            &Permalink {
+                cell: None,
+                camera: Some((0.0, 0.0, 1.0)),
+                layers: None,
+            },
+        );
+        assert_eq!(cam_only, "?view=0,0,1");
     }
 }

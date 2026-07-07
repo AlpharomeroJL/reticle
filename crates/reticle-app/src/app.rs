@@ -325,6 +325,12 @@ pub struct App {
     /// The page origin the read-only viewer link points at (where the web bundle
     /// is served). Empty yields a relative viewer link (see [`crate::share`]).
     share_page: String,
+    /// A permalink (`?cell=`/`?view=x,y,z`/`?layers=`) parsed from the page URL at boot,
+    /// applied once the `?gds=` open completes so the shared cell, camera, and layer set
+    /// are restored on top of the loaded document (see [`App::apply_permalink`]). `None`
+    /// when the URL carried no view-state params. Consumed only on the wasm open path.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pending_permalink: Option<crate::share::Permalink>,
     /// The most recent status-bar message.
     status: Status,
     /// Non-fatal warnings from the most recent document open (see [`crate::open`]).
@@ -405,6 +411,12 @@ pub struct App {
     /// is egui-canvas-painted and not DOM-clickable). `false` in normal use.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     share_on_boot: bool,
+    /// Whether the page requested the e2e edit-script mode (`?e2e-edit=1`, see
+    /// [`crate::share::parse_e2e_edit`]). When set together with [`share_on_boot`](Self::share_on_boot),
+    /// the publisher places one scripted rect after going live so lane v8-1e's browser
+    /// test can observe the edit reach a viewer. `false` in normal use; only read on wasm.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    e2e_edit: bool,
     /// The last world position under the cursor, for the status readout.
     cursor_world: Option<Point>,
     /// The canvas screen rectangle from the last frame, cached so the live-share sharer
@@ -671,6 +683,7 @@ impl App {
             share_server: crate::share::DEFAULT_SERVER.to_owned(),
             share_room: crate::share::room_id(demo::TOP_CELL),
             share_page: String::new(),
+            pending_permalink: None,
             status: Status::default(),
             open_warnings: Vec::new(),
             notifications: crate::notify::Notifications::new(),
@@ -689,6 +702,7 @@ impl App {
             live_started: false,
             published_revision: 0,
             share_on_boot: false,
+            e2e_edit: false,
             cursor_world: None,
             frame_meter: FrameMeter::default(),
             start_view,
@@ -861,6 +875,148 @@ impl App {
     /// Clears the stored open-warnings (dismisses the warnings window).
     pub fn clear_open_warnings(&mut self) {
         self.open_warnings.clear();
+    }
+
+    /// Stashes a permalink parsed from the page URL to apply once a `?gds=` open
+    /// completes (through the private `apply_permalink`).
+    ///
+    /// Stores `None` when the link carried no view-state params, so an ordinary open is
+    /// unaffected; the stashed link is consumed on the wasm open path when the fetched
+    /// document is installed, restoring the shared cell, camera, and layers on top of it.
+    pub fn set_pending_permalink(&mut self, permalink: crate::share::Permalink) {
+        let empty =
+            permalink.cell.is_none() && permalink.camera.is_none() && permalink.layers.is_none();
+        self.pending_permalink = if empty { None } else { Some(permalink) };
+    }
+
+    /// Applies a permalink to the currently open document: focuses the named cell,
+    /// restores the camera, and applies the layer visibility set.
+    ///
+    /// Ordering matters. An explicit camera is the final view, so it wins over both the
+    /// auto-fit a fresh open would otherwise run and the frame-the-cell jump; when no
+    /// camera is given, a named cell is framed with the existing jump-to-cell machinery
+    /// (a deferred locate the canvas consumes next frame). A `Some` layer set hides every
+    /// layer, then shows the listed ones (an empty set hides all); `None` leaves layer
+    /// visibility alone. Unknown cells and layers are ignored, so a stale link degrades
+    /// gracefully rather than blanking the view.
+    fn apply_permalink(&mut self, permalink: &crate::share::Permalink) {
+        // The link, not the open's auto-fit, controls the view when it positions it.
+        if permalink.cell.is_some() || permalink.camera.is_some() {
+            self.fit_requested = false;
+        }
+        if let Some(layers) = &permalink.layers {
+            self.layer_state.hide_all();
+            for &(layer, datatype) in layers {
+                self.layer_state
+                    .set_visible(LayerId::new(layer, datatype), true);
+            }
+        }
+        // Frame the cell only when no explicit camera overrides the view.
+        if permalink.camera.is_none()
+            && let Some(cell) = &permalink.cell
+            && let Some(bbox) = self.history.document().cell_bbox(cell)
+        {
+            self.search.pending_locate = Some(bbox);
+        }
+        if let Some((x, y, zoom)) = permalink.camera {
+            self.camera = ViewCamera::new(Point::new(x as i32, y as i32), zoom);
+            // An explicit camera supersedes any pending cell framing.
+            self.search.pending_locate = None;
+        }
+    }
+
+    /// Builds the permalink describing the current view: the focused top cell, the
+    /// camera, and the visible layer set (see [`crate::share::session_permalink`]).
+    fn session_permalink(&self) -> crate::share::Permalink {
+        let camera = self.camera;
+        let visible: Vec<(u16, u16)> = self
+            .layer_state
+            .rows()
+            .iter()
+            .filter(|r| r.visible)
+            .map(|r| (r.id.layer, r.id.datatype))
+            .collect();
+        let cell = (!self.top_cell.is_empty()).then_some(self.top_cell.as_str());
+        crate::share::session_permalink(
+            cell,
+            (
+                f64::from(camera.center().x),
+                f64::from(camera.center().y),
+                camera.pixels_per_dbu(),
+            ),
+            &visible,
+        )
+    }
+
+    /// Serializes the current view to a permalink and copies it to the clipboard.
+    ///
+    /// The link carries the focused cell, camera, and visible layers on top of the page
+    /// origin; opening it restores the same view (see [`App::apply_permalink`]). The
+    /// serialization is [`App::session_permalink`]; this is the thin UI action over it.
+    fn copy_permalink(&mut self, ctx: &egui::Context) {
+        let link = crate::share::emit_permalink(&self.share_page, None, &self.session_permalink());
+        ctx.copy_text(link);
+        self.status.set("Permalink copied");
+    }
+
+    /// Sets whether the e2e edit-script mode is active (`?e2e-edit=1`): in that mode the
+    /// publisher-on-boot places one scripted rect after going live. Threaded in by the
+    /// web entry at boot.
+    pub fn set_e2e_edit(&mut self, on: bool) {
+        self.e2e_edit = on;
+    }
+
+    /// Places one fixed scripted rectangle so lane v8-1e's browser test can observe an
+    /// edit propagate from this publisher to a viewer (only reached in `?e2e-edit=1`
+    /// mode, after going live).
+    #[cfg(target_arch = "wasm32")]
+    fn place_e2e_rect(&mut self) {
+        let shape = DrawShape::new(
+            LayerId::new(68, 20),
+            ShapeKind::Rect(Rect::new(Point::new(0, 0), Point::new(1000, 1000))),
+        );
+        self.add_shapes_undoable(vec![shape]);
+        self.status.set("Placed the e2e scripted rect");
+    }
+
+    /// Bumps the wasm-only `window.__reticle_stats` counters lane v8-1e's browser e2e
+    /// reads: `applied_frames` increments by one and `applied_shapes` is set to the shape
+    /// count now in the mirrored top cell. A no-op if the window or stats object is
+    /// unavailable, so it never disturbs a normal viewer session.
+    #[cfg(target_arch = "wasm32")]
+    fn record_viewer_stats(&self) {
+        use wasm_bindgen::JsValue;
+        let shapes = self
+            .history
+            .document()
+            .cell(&self.top_cell)
+            .map_or(0, |c| c.shapes.len()) as f64;
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let key = JsValue::from_str("__reticle_stats");
+        let stats = match js_sys::Reflect::get(window.as_ref(), &key) {
+            Ok(v) if v.is_object() => v,
+            _ => {
+                let obj = js_sys::Object::new();
+                let _ = js_sys::Reflect::set(window.as_ref(), &key, obj.as_ref());
+                JsValue::from(obj)
+            }
+        };
+        let frames = js_sys::Reflect::get(&stats, &JsValue::from_str("applied_frames"))
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("applied_frames"),
+            &JsValue::from_f64(frames + 1.0),
+        );
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("applied_shapes"),
+            &JsValue::from_f64(shapes),
+        );
     }
 
     /// Reports a hard failure to the app's one human-readable error surface.
@@ -1217,6 +1373,11 @@ impl App {
                     self.record_recent_file(recent);
                     self.load_progress = crate::webopen::LoadProgress::Idle;
                     self.persist_recent_files();
+                    // A `?gds=` link may also carry a permalink (cell/camera/layers) to
+                    // restore on top of the freshly opened document.
+                    if let Some(permalink) = self.pending_permalink.take() {
+                        self.apply_permalink(&permalink);
+                    }
                 }
                 Err(e) => {
                     self.status.set(e.to_string());
@@ -1270,6 +1431,11 @@ impl App {
                 // Publisher side of the browser share-live e2e: go live without a click.
                 self.live_started = true;
                 self.go_live(ctx);
+                // In edit-script mode, place one scripted rect so lane v8-1e can observe
+                // the edit reach a viewer.
+                if self.e2e_edit {
+                    self.place_e2e_rect();
+                }
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -1287,6 +1453,9 @@ impl App {
         // following, snap the local camera to the sharer's viewport.
         if geometry_changed {
             self.install_viewer_mirror();
+            // Expose the applied-frame/shape counters lane v8-1e's browser test reads.
+            #[cfg(target_arch = "wasm32")]
+            self.record_viewer_stats();
         }
     }
 
@@ -4228,6 +4397,30 @@ impl App {
             return;
         }
 
+        // One-click Share: mint a fresh room, go live, and copy the read-only viewer
+        // link in a single action, so sharing is one button rather than three fields and
+        // a sequence of clicks. The advanced relay/room/page fields stay reachable below.
+        if ui
+            .button("Share this session")
+            .on_hover_text("Mint a room, go live, and copy the viewer link")
+            .clicked()
+        {
+            // Seed the room suffix from the frame clock (present on native and wasm); the
+            // minting itself is deterministic, so the unit test pins a seed instead.
+            let seed = ui.input(|i| (i.time * 1_000_000.0) as u64);
+            self.share_room = crate::share::minted_room_id(&self.top_cell, seed);
+            let ctx = ui.ctx().clone();
+            self.go_live(&ctx);
+            let link =
+                crate::share::viewer_link(&self.share_page, &self.share_server, &self.share_room);
+            ctx.copy_text(link.clone());
+            self.status
+                .set("Shared: room minted, live, viewer link copied");
+            self.notifications.info("Viewer link copied", link);
+        }
+
+        ui.separator();
+
         // The collaborator (read-write) join link.
         let link = crate::share::room_link(&self.share_server, &self.share_room);
         ui.monospace(&link);
@@ -4267,6 +4460,19 @@ impl App {
             self.status.set("Read-only viewer link copied");
         }
         ui.label("Viewers see live edits, pan and zoom independently, and can follow your view.");
+
+        ui.separator();
+
+        // A permalink deep-links the current view (cell, camera, visible layers) on top
+        // of the opened document, so a collaborator opening it lands on the same spot.
+        if ui
+            .button("Copy permalink to this view")
+            .on_hover_text("A link that restores this cell, camera, and visible layers")
+            .clicked()
+        {
+            let ctx = ui.ctx().clone();
+            self.copy_permalink(&ctx);
+        }
     }
 
     /// Draws the Share section for a **read-only viewer** session: the joined room, the
@@ -5003,6 +5209,25 @@ impl App {
             {
                 let factor = (f64::from(scroll) * 0.0015).exp();
                 self.camera.zoom_about(screen, factor, pos.x, pos.y);
+            }
+        }
+
+        // Touch: two-finger pinch-zoom anchored at the gesture centroid, plus two-finger
+        // pan. egui aggregates the active fingers into one multi-touch gesture; a single
+        // finger is delivered as ordinary pointer drags instead (which the Pan tool below
+        // turns into a pan), so only the multi-touch gesture is wired here. Placed before
+        // the tool match so navigating a design by touch always wins the gesture, and the
+        // pinch math (the anchoring invariant) lives in the pure `camera::apply_pinch`.
+        if let Some(touch) = ctx.multi_touch() {
+            self.camera = crate::camera::apply_pinch(
+                self.camera,
+                screen,
+                (touch.center_pos.x, touch.center_pos.y),
+                f64::from(touch.zoom_delta),
+            );
+            if touch.translation_delta != egui::Vec2::ZERO {
+                self.camera
+                    .pan_pixels(touch.translation_delta.x, touch.translation_delta.y);
             }
         }
 
@@ -7611,6 +7836,119 @@ mod tests {
         let _ = ctx.end_pass();
         // The default selection generates a non-empty preview.
         assert!(!app.generate_preview_shapes().is_empty());
+    }
+
+    /// The Share section renders headlessly without panicking, including the one-click
+    /// Share and Copy-permalink buttons added this lane. It does not click them (that
+    /// would dial a socket), only lays them out.
+    #[test]
+    fn share_section_renders_without_panic() {
+        let mut app = App::new();
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        egui::Window::new("share test").show(&ctx, |ui| {
+            app.share_section(ui);
+        });
+        let _ = ctx.end_pass();
+        assert!(!app.share_server.is_empty());
+        assert!(!app.share_room.is_empty());
+    }
+
+    /// A permalink emitted from a session restores the same cell, camera, and layer set
+    /// on a freshly opened document: emit the current view, round-trip it through the URL
+    /// string, disturb the view, then apply and prove each piece came back.
+    #[test]
+    fn permalink_restores_cell_camera_and_layers_on_an_opened_document() {
+        let mut app = App::new();
+        let outcome = crate::startscreen::ExampleChip::TinyTapeoutMin
+            .open()
+            .expect("the bundled sample opens");
+        app.open_outcome(outcome);
+        let top = app.top_cell.clone();
+        assert!(
+            app.layer_state.rows().len() >= 2,
+            "the sample has layers to toggle"
+        );
+
+        // Author a distinctive view: a specific camera and a single visible layer.
+        app.camera = ViewCamera::new(Point::new(1234, -5678), 0.5);
+        let target = app.layer_state.rows()[0].id;
+        app.layer_state.hide_all();
+        app.layer_state.set_visible(target, true);
+
+        // Serialize exactly what the copy-permalink action serializes, then round-trip
+        // it through the URL string a share link is.
+        let emitted = app.session_permalink();
+        let url = crate::share::emit_permalink("", None, &emitted);
+        let parsed = crate::share::parse_permalink(url.trim_start_matches('?'));
+        assert_eq!(parsed.cell.as_deref(), Some(top.as_str()), "cell carried");
+
+        // Disturb the view, then prove applying the link restores it exactly.
+        app.camera = ViewCamera::new(Point::ORIGIN, 0.05);
+        app.layer_state.show_all();
+        app.fit_requested = true;
+        app.apply_permalink(&parsed);
+
+        assert_eq!(
+            app.camera.center(),
+            Point::new(1234, -5678),
+            "camera center restored"
+        );
+        assert!(
+            (app.camera.pixels_per_dbu() - 0.5).abs() < 1e-9,
+            "zoom restored"
+        );
+        assert!(!app.fit_requested, "the permalink camera cancels auto-fit");
+        for row in app.layer_state.rows() {
+            assert_eq!(
+                row.visible,
+                row.id == target,
+                "layer {:?} visibility restored",
+                row.id
+            );
+        }
+
+        // And the jump-to-cell path: a cell-only permalink (no camera to override it)
+        // frames that cell by setting the deferred locate to the cell's world bbox.
+        app.search.pending_locate = None;
+        app.apply_permalink(&crate::share::Permalink {
+            cell: Some(top.clone()),
+            camera: None,
+            layers: None,
+        });
+        assert_eq!(
+            app.search.pending_locate,
+            app.history.document().cell_bbox(&top),
+            "a cell-only permalink frames the cell"
+        );
+        assert!(
+            app.search.pending_locate.is_some(),
+            "the sample's top cell has a bbox to frame"
+        );
+    }
+
+    /// A permalink naming an unknown cell or unknown layers is applied without panicking
+    /// and never leaves the view in a broken state.
+    #[test]
+    fn apply_permalink_ignores_unknown_cell_and_layers() {
+        let mut app = App::new();
+        app.open_outcome(
+            crate::startscreen::ExampleChip::TinyTapeoutMin
+                .open()
+                .expect("opens"),
+        );
+        app.apply_permalink(&crate::share::Permalink {
+            cell: Some("NO_SUCH_CELL".to_owned()),
+            camera: None,
+            layers: Some(vec![(65535, 65535)]),
+        });
+        // An all-unknown layer set hides everything (hide_all, then the unknown miss);
+        // the unknown cell sets no locate; nothing panicked.
+        assert!(app.layer_state.rows().iter().all(|r| !r.visible));
+        assert!(
+            app.search.pending_locate.is_none(),
+            "an unknown cell frames nothing"
+        );
     }
 
     /// Generating through the app places the whole structure as one undo step: the
