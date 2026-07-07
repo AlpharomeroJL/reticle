@@ -14,6 +14,47 @@ command you can run yourself (see [How to verify each claim](#how-to-verify-each
   cases; nextest reports **291 passed, 1 skipped** (the one skip is a corpus-
   regeneration utility, not a hidden failure, see below).
 
+## v8.0.0 run in progress (Wave 0 recorded 2026-07-07)
+
+The v8 packet's outward push is under way. Wave 0 correction, recorded here because it
+overturns a standing claim below: **fuzzing now runs, under WSL.** Every prior release
+(v4 through v7) recorded "fuzzing does not run on this Windows/MSVC host, libFuzzer will
+not link" and leaned on the gate's proptests instead. That is true only for the native
+MSVC toolchain; under WSL Ubuntu (nightly + `cargo-fuzz` 0.13.2, libFuzzer, `-fork=4`)
+the existing three targets run cleanly. The v8 Wave 0 campaign ran all three and found
+**three real defects, all in `reticle-io`, all now fixed with regression fixtures and
+`just ci` green**:
+
+- **GDSII out-of-range date panic** (commit 8d4457a). Malformed BGNLIB/BGNSTR date
+  fields flow into chrono inside `gds21` and panic. `catch_unwind` contains this on
+  native, but on `wasm32-unknown-unknown` a panic aborts the instance, so a malformed
+  file dropped into the browser would kill the tab. Fixed by sanitizing date records
+  before `gds21` parses; four minimized crash fixtures.
+- **GDSII zero-length string panic** (commit e8752f7). A string record with no payload
+  makes `gds21`'s `read_str` index `data[len - 1]` on an empty slice. This panic was
+  already known and guarded only by `catch_unwind`; the fuzz build (which aborts on
+  panic, exactly as wasm does) surfaced 440 instances of it, proving the native-only
+  guard insufficient. Fixed by rejecting zero-length string records before `gds21`;
+  three minimized crash fixtures.
+- **OASIS unbounded-allocation OOM** (commit 1b1b56b). Three `Vec::with_capacity(count)`
+  calls trusted a count read from the stream; a ~28-byte input naming billions of
+  elements reserved gigabytes before reading one. The campaign produced 53,321 such
+  inputs. Fixed by capping every count-driven reservation at `remaining_bytes /
+  min_element_bytes`; four minimized OOM fixtures.
+
+After the fixes, a clean-rebuilt confirmation run (fresh target dir, seeded from the
+crash corpora) produced **zero surviving artifacts** on all three targets:
+`gds_import` 0 over 15 min from all 440 crash inputs, `oasis_import` 0 over 30 min from
+its OOM corpus, `geometry_boolean` 0 over 30 min. Fuzz CPU-time this campaign is
+roughly 8 CPU-hours (fork=4, three targets, the initial hour plus the confirmation and
+re-confirmation passes). A curated 50-input seed corpus per target is committed under
+`fuzz/corpus/`; crash and OOM fixtures live under
+`crates/reticle-io/tests/fuzz-regressions/` and are asserted panic-free by
+`tests/gds_fuzz_regressions.rs` and `tests/oasis_fuzz_regressions.rs`. One process note
+for future runs: the `/mnt/d` 9p mount defeats cargo's incremental rebuild, so a fuzz
+build after a source change must use a fresh `CARGO_TARGET_DIR` or it silently reuses a
+stale binary; verify a "fix" by running the crash artifacts through the native importer.
+
 ## Headline
 
 Reticle is **real**. Every subsystem's core algorithm genuinely computes from its
