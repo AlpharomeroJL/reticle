@@ -207,6 +207,33 @@ impl ViewCamera {
     }
 }
 
+/// Applies a pinch-zoom gesture to `camera`, returning the updated camera.
+///
+/// `centroid` is the two-finger gesture centroid in screen pixels and `zoom_delta` is
+/// egui's multiplicative pinch factor (`ctx.input(|i| i.zoom_delta())`): `1.0` is no
+/// change, `> 1.0` zooms in, `< 1.0` zooms out. The world point under the centroid stays
+/// pinned to that pixel across the zoom - the pinch-anchoring invariant - by deferring to
+/// [`ViewCamera::zoom_about`], and the zoom is clamped to the camera's supported range.
+///
+/// A `zoom_delta` of exactly `1.0` (egui's rest value when no pinch is active) or a
+/// non-positive factor leaves the camera untouched, so calling this every frame is a
+/// no-op until the user actually pinches. Pure and window-free, so the invariant is
+/// unit-tested without a touch device.
+#[must_use]
+pub fn apply_pinch(
+    mut camera: ViewCamera,
+    screen: &ScreenRect,
+    centroid: (f32, f32),
+    zoom_delta: f64,
+) -> ViewCamera {
+    // Ignore egui's rest value (exactly 1.0) and any non-positive factor, so an idle
+    // frame or a degenerate gesture never disturbs the camera.
+    if zoom_delta > 0.0 && (zoom_delta - 1.0).abs() > f64::EPSILON {
+        camera.zoom_about(screen, zoom_delta, centroid.0, centroid.1);
+    }
+    camera
+}
+
 /// A canvas rectangle in egui screen pixels, with `+y` down.
 ///
 /// This mirrors the parts of an `egui::Rect` the camera needs without depending on
@@ -397,6 +424,45 @@ mod tests {
         cam.zoom_to_rect(&s, point, 0.1);
         assert_eq!(cam.center(), Point::new(500, 700));
         assert!((cam.pixels_per_dbu() - before_zoom).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pinch_keeps_world_point_under_the_centroid_fixed() {
+        // The anchoring invariant: the world point under the pinch centroid stays fixed
+        // to that pixel while the zoom changes.
+        let cam = ViewCamera::new(Point::new(0, 0), 1.0);
+        let s = screen();
+        let centroid = (610.0_f32, 155.0_f32);
+        let before = cam.screen_to_world(&s, centroid.0, centroid.1);
+        let zoomed = apply_pinch(cam, &s, centroid, 1.8);
+        let after = zoomed.screen_to_world(&s, centroid.0, centroid.1);
+        assert!(
+            (before.x - after.x).abs() <= 2 && (before.y - after.y).abs() <= 2,
+            "centroid world point moved: {before:?} -> {after:?}"
+        );
+        // A pinch-out (delta > 1) zooms in.
+        assert!(zoomed.pixels_per_dbu() > cam.pixels_per_dbu());
+    }
+
+    #[test]
+    fn pinch_of_unity_delta_is_a_noop() {
+        // egui reports a zoom_delta of exactly 1.0 when there is no active pinch;
+        // applying it must leave the camera bit-for-bit unchanged.
+        let cam = ViewCamera::new(Point::new(100, -50), 3.0);
+        let s = screen();
+        assert_eq!(apply_pinch(cam, &s, (10.0, 20.0), 1.0), cam);
+        // A non-positive factor is ignored rather than corrupting the zoom.
+        assert_eq!(apply_pinch(cam, &s, (10.0, 20.0), 0.0), cam);
+    }
+
+    #[test]
+    fn pinch_zoom_is_clamped() {
+        let cam = ViewCamera::new(Point::ORIGIN, 1.0);
+        let s = screen();
+        let hard_in = apply_pinch(cam, &s, (0.0, 0.0), 1e12);
+        assert!(hard_in.pixels_per_dbu() <= MAX_ZOOM);
+        let hard_out = apply_pinch(cam, &s, (0.0, 0.0), 1e-24);
+        assert!(hard_out.pixels_per_dbu() >= MIN_ZOOM);
     }
 
     #[test]
