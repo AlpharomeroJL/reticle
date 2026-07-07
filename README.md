@@ -186,6 +186,13 @@ re-checks only the changed neighbourhood: 5 us at 100k shapes and 37 us at 1M, a
 100 ms interactive target. A property test pins the engine to a naive reference oracle over
 400 random layouts. A cited SKY130 rule subset grounds the periphery rules.
 
+**Metrology.** _(placeholder row, pending the Wave 3 merge.)_ A CPU metrology pass reports
+exact per-layer area and perimeter (union on the `i_overlay` integer engine, overlaps counted
+once), connectivity statistics (net count, shapes per net, max fanout), and a simplified
+per-net antenna ratio over a SKY130 layer subset, exported to byte-stable CSV and Markdown. A
+property test pins area and perimeter to a coordinate-compression oracle. The GPU density
+overlay is deferred; see [ADR 0074](docs/decisions/0074-cpu-metrology-reports.md).
+
 **Generators.** Each of the six generators is a pure function from a typed `ParamSchema` to
 geometry. One schema drives all three surfaces (the Generate panel, the MCP tools, the
 benchmark checker), and a property test runs every generator over 400 random valid parameter

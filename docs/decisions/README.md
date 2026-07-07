@@ -82,3 +82,4 @@ superseded decision is marked and linked to its replacement.
 | [0074](0074-drc-as-you-type-live-underlines.md) | DRC as you type: a throttled snapshot rebuild with synchronous per-edit re-check and spell-checker underlines |
 | [0075](0075-gpu-drc-heatmap-compute-overlay.md) | GPU DRC heatmap: a bin-and-check compute overlay whose flags are pinned to the CPU oracle |
 | [0076](0076-gpu-resident-hierarchy-chunked-expansion.md) | Fully GPU-resident hierarchy: chunked expand + cull + compact past the single-dispatch cap |
+| [0077](0077-cpu-metrology-reports.md) | CPU metrology reports (exact per-layer area/perimeter, connectivity stats, a simplified antenna screen, byte-stable export); GPU density overlay deferred |

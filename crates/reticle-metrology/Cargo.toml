@@ -1,0 +1,23 @@
+[package]
+name = "reticle-metrology"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Exact CPU metrology reports (area, perimeter, connectivity, antenna) over a Reticle Document."
+keywords = ["eda", "metrology", "layout", "verification"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+reticle-geometry = { workspace = true }
+reticle-model = { workspace = true }
+reticle-extract = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+proptest = "1.11.0"

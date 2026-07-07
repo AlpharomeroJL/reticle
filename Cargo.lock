@@ -4277,6 +4277,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "reticle-metrology"
+version = "7.0.0"
+dependencies = [
+ "proptest",
+ "reticle-extract",
+ "reticle-geometry",
+ "reticle-model",
+ "serde",
+]
+
+[[package]]
 name = "reticle-model"
 version = "7.0.0"
 dependencies = [
