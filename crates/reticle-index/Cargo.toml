@@ -26,6 +26,33 @@ rstar = "0.13.0"
 criterion = "0.8.2"
 proptest = "1.11.0"
 # Wave 1 wires `proptest` (vs the linear oracle here) and `criterion`.
+# Wave 2 (lane 2B) uses `pollster` as a runtime-light executor to drive the async
+# `TileSource` trait in the native streamed-query proptest, so `reticle-index` gains no
+# heavy async runtime (it stays lighter than `reticle-server`'s tokio). Already in the
+# lockfile via other crates, so no new dependency version is introduced.
+pollster = "0.4.0"
+
+# The wasm `HttpRangeTileSource` fetches tiles over HTTP Range and caches them in OPFS.
+# Its DOM/fetch/OPFS glue is `cfg(target_arch = "wasm32")`; the pure LRU and cache-key
+# logic it sits on is target-independent and unit-tested natively. Versions match
+# `reticle-app`/`web` so the wasm lockfile gains nothing new.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Request",
+    "Headers",
+    "Response",
+    "Navigator",
+    "StorageManager",
+    "FileSystemDirectoryHandle",
+    "FileSystemFileHandle",
+    "FileSystemGetFileOptions",
+    "FileSystemGetDirectoryOptions",
+    "FileSystemSyncAccessHandle",
+] }
 
 [[bench]]
 name = "index_build"
