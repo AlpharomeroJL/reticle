@@ -1,6 +1,6 @@
-//! Concrete [`TileSource`](crate::archive::TileSource) implementations (Wave 2 lane 2B).
+//! Concrete [`TileSource`] implementations (Wave 2 lane 2B).
 //!
-//! ADR 0062 freezes the [`TileSource`](crate::archive::TileSource) trait and the
+//! ADR 0062 freezes the [`TileSource`] trait and the
 //! `.rtla` types in [`crate::archive`]; this module fills the read side of that
 //! contract with three sources plus a small viewport query layer:
 //!
@@ -8,7 +8,7 @@
 //!   directory once, and serves a tile by slicing the mapped range. It reuses the
 //!   [`crate::streaming`] mmap discipline exactly (validated `rkyv` access, the one
 //!   documented `unsafe`).
-//! - [`HttpRangeTileSource`] (wasm): fetches the header with two ranged GETs, then a
+//! - `HttpRangeTileSource` (wasm): fetches the header with two ranged GETs, then a
 //!   tile per `fetch` with a `Range: bytes=offset-end` header, in front of an
 //!   in-memory [`LruByteCache`] (a byte-budgeted LRU) and an OPFS persistent cache
 //!   keyed by the archive so a revisit is instant. The pure cache and cache-key logic
@@ -305,7 +305,7 @@ fn finest_level(header: &RtlaHeader) -> Option<(u32, u32, u32)> {
 
 /// A least-recently-used tile cache under a fixed byte budget, keyed by [`TileCoord`].
 ///
-/// The wasm [`HttpRangeTileSource`] keeps one of these in front of the network so a
+/// The wasm `HttpRangeTileSource` keeps one of these in front of the network so a
 /// tile revisited while panning does not re-fetch. The logic is deliberately
 /// target-independent and has no DOM dependency, so eviction is proven in plain unit
 /// tests: inserting past the budget evicts the least-recently-used tiles first, a
@@ -985,10 +985,12 @@ pub async fn query_viewport<S: TileSource>(
     if viewport.is_empty() {
         return Ok(Vec::new());
     }
+    // A viewport partly or wholly outside the world still maps to the border tiles it
+    // clamps onto: a record whose rectangle spills past the world edge is packed into
+    // those same border tiles, so scanning them and filtering by `intersects` stays
+    // exact. (An early "viewport disjoint from world" return would be unsound here,
+    // dropping records that stick out past the edge into an outside viewport.)
     let world = header.world_rect();
-    if !viewport.intersects(&world) {
-        return Ok(Vec::new());
-    }
 
     let (tx0, tx1) = axis_tile_range(
         world.min.x,
