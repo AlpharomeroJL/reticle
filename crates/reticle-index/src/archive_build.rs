@@ -167,7 +167,7 @@ where
     // and append the tiles, recording each tile's absolute offset and length.
     let file = File::create(out_path)?;
     let mut out = BufWriter::new(file);
-    write_preamble(&mut out, header_off, header_len, dir_off, dir_len)?;
+    write_preamble(&mut out, header_len, dir_len)?;
     let mut offset = header_off;
     out.write_all(&header_bytes)?;
     offset += header_len;
@@ -340,18 +340,23 @@ fn merge_and_emit(
     Ok(directory)
 }
 
-/// Writes the fixed 32-byte preamble.
+/// Writes the fixed 32-byte preamble in the canonical `.rtla` framing shared with
+/// the reader ([`crate::tile_source`], ADR 0069): magic, version, reserved flags,
+/// then the header and directory byte lengths. The header and directory *offsets*
+/// are not stored because they are derivable (`header` at [`PREAMBLE_LEN`], the
+/// directory at the next [`BLOCK_ALIGN`] boundary after it), and the reader derives
+/// them identically. Magic-and-version first means a reader rejects a foreign or
+/// wrong-version file before trusting any length.
 fn write_preamble(
     out: &mut BufWriter<File>,
-    header_off: u64,
     header_len: u64,
-    dir_off: u64,
     dir_len: u64,
 ) -> Result<(), BuildError> {
     let mut preamble = [0u8; PREAMBLE_LEN as usize];
-    preamble[0..8].copy_from_slice(&header_off.to_le_bytes());
-    preamble[8..16].copy_from_slice(&header_len.to_le_bytes());
-    preamble[16..24].copy_from_slice(&dir_off.to_le_bytes());
+    preamble[0..8].copy_from_slice(&RTLA_MAGIC);
+    preamble[8..12].copy_from_slice(&RTLA_VERSION.to_le_bytes());
+    // preamble[12..16] are reserved flags, left zero in v1.
+    preamble[16..24].copy_from_slice(&header_len.to_le_bytes());
     preamble[24..32].copy_from_slice(&dir_len.to_le_bytes());
     out.write_all(&preamble)?;
     Ok(())
