@@ -44,9 +44,10 @@
 
 use crate::IoError;
 use crate::error::{ImportWarning, WarningKind};
+use chrono::NaiveDate;
 use gds21::{
-    GdsArrayRef, GdsBoundary, GdsElement, GdsLibrary, GdsPath, GdsPoint, GdsStrans, GdsStruct,
-    GdsStructRef, GdsTextElem, GdsUnits,
+    GdsArrayRef, GdsBoundary, GdsDateTimes, GdsElement, GdsLibrary, GdsPath, GdsPoint, GdsStrans,
+    GdsStruct, GdsStructRef, GdsTextElem, GdsUnits,
 };
 use reticle_geometry::{
     Dbu, LayerId, Magnification, Orientation, Path, Point, Polygon, Rect, Transform,
@@ -643,6 +644,26 @@ fn magnification_from_f64(
 // Export direction: Document -> GdsLibrary
 // ---------------------------------------------------------------------------
 
+/// The fixed modification/access timestamp stamped into every BGNLIB and BGNSTR
+/// record on export.
+///
+/// `gds21` defaults these date fields to `Utc::now`, so an otherwise fully
+/// deterministic document exports to different bytes on every run (the seconds
+/// field ticks between two exports, e.g. two `xtask gen-layout` invocations).
+/// Writing a fixed, valid date instead makes GDSII export byte-reproducible and
+/// free of build time, upholding the generator's determinism contract. The
+/// constant matches the corpus generator's `valid_dates`, so every reproducible
+/// GDSII in the tree carries the same stamp.
+fn reproducible_dates() -> GdsDateTimes {
+    let stamp = NaiveDate::from_ymd_opt(2023, 1, 1)
+        .and_then(|date| date.and_hms_opt(0, 0, 0))
+        .expect("2023-01-01T00:00:00 is a valid timestamp");
+    GdsDateTimes {
+        modified: stamp,
+        accessed: stamp,
+    }
+}
+
 /// Converts a Reticle [`Document`] into a [`GdsLibrary`] ready to serialize.
 fn document_to_library(doc: &Document) -> GdsLibrary {
     let dbu_per_micron = {
@@ -657,6 +678,7 @@ fn document_to_library(doc: &Document) -> GdsLibrary {
 
     let mut lib = GdsLibrary::new(name);
     lib.version = GDS_VERSION;
+    lib.dates = reproducible_dates();
     lib.units = units_from_dbu_per_micron(dbu_per_micron);
 
     // Emit cells in a deterministic order: top cells first (in their declared
@@ -690,6 +712,7 @@ fn document_to_library(doc: &Document) -> GdsLibrary {
 /// bytes.
 fn cell_to_struct(cell: &Cell) -> GdsStruct {
     let mut strukt = GdsStruct::new(cell.name.clone());
+    strukt.dates = reproducible_dates();
     for shape in &cell.shapes {
         strukt.elems.push(shape_to_element(shape));
     }

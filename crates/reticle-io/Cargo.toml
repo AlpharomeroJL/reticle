@@ -22,6 +22,10 @@ corpus-tools = []
 
 [dependencies]
 gds21 = "0.2.0"
+# `chrono` is already in the tree via `gds21`; the exporter uses it to stamp
+# BGNLIB/BGNSTR with a fixed date instead of `gds21`'s default wall-clock
+# `Utc::now`, so identical documents export to byte-identical GDSII.
+chrono = "0.4.45"
 reticle-geometry = { workspace = true }
 reticle-model = { workspace = true }
 # Wave 1 wires `gds21` (GDSII) and, later, VLSIR/layout21 interop (ADR 0004).
