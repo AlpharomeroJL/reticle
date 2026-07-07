@@ -47,4 +47,5 @@
 - [Productivity editing](productivity.md)
 - [Layer and technology editing](layer-tech-editing.md)
 - [Deployment](deployment.md)
+  - [Archive hosting](archive-hosting.md)
 - [Contributing](contributing.md)

@@ -75,3 +75,4 @@ superseded decision is marked and linked to its replacement.
 | [0067](0067-permalink-view-param-disambiguation.md) | Permalinks reuse `?view=`, disambiguated by shape (three floats is a camera, else the start-view selector) |
 | [0068](0068-rtla-onwire-framing-and-external-build.md) | .rtla on-disk framing and the external two-pass builder |
 | [0069](0069-rtla-physical-framing-and-tile-caches.md) | .rtla physical byte framing, the untrusted-count rule, and the wasm tile-source LRU and OPFS cache policy |
+| [0070](0070-archive-serving-worker-and-license-gate.md) | The archive-serving Worker (R2 range proxy, Cache API, CORS lock, untrusted-Range 416) and the redistribution license gate |
