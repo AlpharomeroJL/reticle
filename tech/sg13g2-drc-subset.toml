@@ -1,0 +1,169 @@
+# IHP SG13G2 DRC rule subset for Reticle.
+#
+# A SUBSET of the IHP SG13G2 back-end-of-line (BEOL) rules for the digital metal
+# stack. Passing this deck is NOT tape-out clean; it covers min width, min spacing,
+# the contact/via sizes, and the via metal enclosures for Metal1..Metal4 and the
+# Cont/Via1/Via2/Via3 cuts. It deliberately omits rules the Reticle generators do not
+# draw against: the wide-metal and pattern-density spacing variants (M*.e/M*.f, which
+# the reticle-drc engine cannot express as width-conditional), the FEOL Activ/GatPoly
+# contact enclosures (the generators draw no Activ/GatPoly), and the thick TopMetal
+# stack. See the second-PDK chapter of the book for the coverage table.
+#
+# Source: IHP-GmbH/IHP-Open-PDK (branch main), the KLayout DRC runset under
+#   ihp-sg13g2/libs.tech/klayout/tech/drc/rule_decks/ . Rule ids (e.g. "M1.a") are
+#   quoted verbatim from those files. License: Apache-2.0 (repo LICENSE).
+#   Metal1:   .../beol/5_16_metal1.drc
+#   Metal2-5: .../beol/5_17_metaln.drc
+#   Via1:     .../beol/5_19_via1.drc
+#   Via2-4:   .../beol/5_20_vian.drc
+#   Cont:     .../feol/5_14_cont.drc
+#   Layer GDS map: .../drc/rule_decks/layers_def.drc
+#   dbu:      ihp-sg13g2/libs.tech/klayout/tech/sg13g2.lyt (<dbu>0.001</dbu>)
+#
+# Values are in database units (1 dbu = 1 nm; per sg13g2.lyt, 0.001 um resolution),
+# so a 0.16 um rule is 160. `layer`/`other_layer` are [gds_layer, datatype]; drawing
+# purpose is datatype 0. `kind` is one of: width, spacing, enclosure.
+
+# --- Metal1 (8/0) ---
+[[rule]]
+id = "M1.a"
+kind = "width"
+layer = [8, 0]
+value_dbu = 160
+description = "Min width of Metal1 (0.16 um)"
+
+[[rule]]
+id = "M1.b"
+kind = "spacing"
+layer = [8, 0]
+value_dbu = 180
+description = "Min spacing of Metal1 to Metal1 (0.18 um)"
+
+# --- Metal2 (10/0) ---
+[[rule]]
+id = "M2.a"
+kind = "width"
+layer = [10, 0]
+value_dbu = 200
+description = "Min width of Metal2 (0.20 um)"
+
+[[rule]]
+id = "M2.b"
+kind = "spacing"
+layer = [10, 0]
+value_dbu = 210
+description = "Min spacing of Metal2 to Metal2 (0.21 um)"
+
+# --- Metal3 (30/0) ---
+[[rule]]
+id = "M3.a"
+kind = "width"
+layer = [30, 0]
+value_dbu = 200
+description = "Min width of Metal3 (0.20 um)"
+
+[[rule]]
+id = "M3.b"
+kind = "spacing"
+layer = [30, 0]
+value_dbu = 210
+description = "Min spacing of Metal3 to Metal3 (0.21 um)"
+
+# --- Metal4 (50/0) ---
+[[rule]]
+id = "M4.a"
+kind = "width"
+layer = [50, 0]
+value_dbu = 200
+description = "Min width of Metal4 (0.20 um)"
+
+[[rule]]
+id = "M4.b"
+kind = "spacing"
+layer = [50, 0]
+value_dbu = 210
+description = "Min spacing of Metal4 to Metal4 (0.21 um)"
+
+# --- Cont (6/0): substrate/gate contact ---
+[[rule]]
+id = "Cnt.a"
+kind = "width"
+layer = [6, 0]
+value_dbu = 160
+description = "Exact width of Cont (0.16 um)"
+
+[[rule]]
+id = "Cnt.b"
+kind = "spacing"
+layer = [6, 0]
+value_dbu = 180
+description = "Min spacing of Cont to Cont (0.18 um)"
+
+# --- Via1 (19/0): bridges Metal1 and Metal2 ---
+[[rule]]
+id = "V1.a"
+kind = "width"
+layer = [19, 0]
+value_dbu = 190
+description = "Exact width of Via1 (0.19 um)"
+
+[[rule]]
+id = "V1.b"
+kind = "spacing"
+layer = [19, 0]
+value_dbu = 220
+description = "Min spacing of Via1 to Via1 (0.22 um)"
+
+[[rule]]
+id = "V1.c"
+kind = "enclosure"
+layer = [19, 0]
+other_layer = [8, 0]
+value_dbu = 10
+description = "Min Metal1 enclosure of Via1 (0.01 um)"
+
+# --- Via2 (29/0): bridges Metal2 and Metal3 ---
+[[rule]]
+id = "Via2.a"
+kind = "width"
+layer = [29, 0]
+value_dbu = 190
+description = "Exact width of Via2 (0.19 um)"
+
+[[rule]]
+id = "Via2.b"
+kind = "spacing"
+layer = [29, 0]
+value_dbu = 220
+description = "Min spacing of Via2 to Via2 (0.22 um)"
+
+[[rule]]
+id = "Via2.c"
+kind = "enclosure"
+layer = [29, 0]
+other_layer = [30, 0]
+value_dbu = 5
+description = "Min Metal3 enclosure of Via2 (0.005 um)"
+
+# --- Via3 (49/0): bridges Metal3 and Metal4 ---
+[[rule]]
+id = "Via3.a"
+kind = "width"
+layer = [49, 0]
+value_dbu = 190
+description = "Exact width of Via3 (0.19 um)"
+
+[[rule]]
+id = "Via3.b"
+kind = "spacing"
+layer = [49, 0]
+value_dbu = 220
+description = "Min spacing of Via3 to Via3 (0.22 um)"
+
+[[rule]]
+id = "Via3.c"
+kind = "enclosure"
+layer = [49, 0]
+other_layer = [50, 0]
+value_dbu = 5
+description = "Min Metal4 enclosure of Via3 (0.005 um)"

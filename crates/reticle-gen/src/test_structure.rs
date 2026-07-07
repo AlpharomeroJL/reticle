@@ -378,10 +378,12 @@ fn emit_van_der_pauw(params: &TestStructureParams, cell: &mut Cell, gt: &GenTech
     push_rect(cell, layer, vertical);
 }
 
-/// A series contact chain: `count` `mcon` contacts in a row, alternating `met1` and
-/// `li1` bridges so current threads metal-contact-metal along the chain. Each contact
-/// is enclosed by a `met1` feature (a bridge, or an end pad for the last contact when
-/// the last bridge is `li1`) by at least the `m1.4` margin.
+/// A series contact chain: `count` base cuts in a row, alternating `next` and `base`
+/// interconnect bridges so current threads metal-contact-metal along the chain. Each
+/// contact is enclosed by **both** bridging conductor levels, so whichever level the
+/// process asks to enclose the cut is satisfied (`met1` encloses `mcon` on SKY130,
+/// `Metal1` encloses `Via1` on SG13G2). Interior contacts get both frames from the two
+/// bridges that meet at them; the two end contacts get the missing frame as an end pad.
 fn emit_contact_chain(params: &TestStructureParams, cell: &mut Cell, gt: &GenTech) {
     // The chain threads the base cut between the base and next interconnect levels
     // (mcon between li1/met1 on SKY130; Via1 between Metal1/Metal2 on SG13G2).
@@ -431,30 +433,49 @@ fn emit_contact_chain(params: &TestStructureParams, cell: &mut Cell, gt: &GenTec
         push_rect(cell, layer, bridge);
     }
 
-    // Every interior contact is enclosed by the met1 bridge that has it at an end.
-    // Contact 0 sits under bridge 0 (always met1). The last contact (n-1) sits under
-    // bridge n-2; if that bridge is li1 (n even), add a met1 end pad enclosing it, big
-    // enough for the met1 minimum area.
+    // Enclose every contact by both bridging conductor levels. Interior contacts
+    // already sit under one `next` and one `base` bridge (adjacent bridges alternate
+    // parity), so they are framed on both. The two end contacts sit under a single
+    // bridge, so add the frame each one lacks:
+    //   * contact 0 is always under bridge 0 (`next`), so it lacks a `base` frame;
+    //   * contact n-1 is under bridge n-2, which is `next` when its index is even and
+    //     `base` otherwise, so it lacks the opposite level.
     let last = n - 1;
+    emit_chain_pad(cell, gt, base, contact_x(0), band_y0, s, enc);
     let last_bridge_is_next = n < 2 || (n - 2).is_multiple_of(2);
-    if !last_bridge_is_next {
-        let side = met1_square_side(gt); // >= s + 2*enc and >= sqrt(next-level area)
-        let cx = contact_x(last) + s / 2;
-        let cy = band_y0 + enc + s / 2;
-        let pad = Rect::new(
-            Point::new(cx - side / 2, cy - side / 2),
-            Point::new(cx - side / 2 + side, cy - side / 2 + side),
-        );
-        push_rect(cell, next.layer, pad);
-    }
+    let missing = if last_bridge_is_next { base } else { next };
+    emit_chain_pad(cell, gt, missing, contact_x(last), band_y0, s, enc);
 }
 
-/// The side of a square `met1` pad that both encloses an `mcon` (by at least the
-/// `m1.4` margin) and clears the `met1` minimum area: the larger of the enclosure-
-/// derived side and the area-derived side.
-fn met1_square_side(gt: &GenTech) -> i32 {
+/// Emits a square frame on `cond`'s layer centered on the contact whose left edge is
+/// at `x`, large enough to enclose the base cut by the chain enclosure on all sides and
+/// to clear `cond`'s minimum area. Used to give an end contact the conductor-level frame
+/// its single bridge does not provide.
+fn emit_chain_pad(
+    cell: &mut Cell,
+    gt: &GenTech,
+    cond: Conductor,
+    x: i32,
+    band_y0: i32,
+    s: i32,
+    enc: i32,
+) {
+    let side = enclosing_pad_side(gt, cond);
+    let cx = x + s / 2;
+    let cy = band_y0 + enc + s / 2;
+    let pad = Rect::new(
+        Point::new(cx - side / 2, cy - side / 2),
+        Point::new(cx - side / 2 + side, cy - side / 2 + side),
+    );
+    push_rect(cell, cond.layer, pad);
+}
+
+/// The side of a square pad on `cond` that both encloses the base cut (by at least the
+/// chain enclosure) and clears `cond`'s minimum area where the process carries one: the
+/// larger of the enclosure-derived side and the area-derived side.
+fn enclosing_pad_side(gt: &GenTech, cond: Conductor) -> i32 {
     let enclosure_side = gt.cut(0).size + 2 * TestStructureParams::CHAIN_ENC;
-    let area_side = gt.conductor(1).min_area.map_or(0, isqrt_ceil_i32);
+    let area_side = cond.min_area.map_or(0, isqrt_ceil_i32);
     enclosure_side.max(area_side)
 }
 
