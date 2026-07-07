@@ -73,3 +73,4 @@ superseded decision is marked and linked to its replacement.
 | [0065](0065-relay-conformance-vector-format.md) | The relay conformance vector format: one table, two targets, presence coalescing the only target-aware branch |
 | [0066](0066-agent-live-room-and-id-addressed-mirroring.md) | The agent in a real relay room: id-addressed (transform/delete) mirroring and a native live client |
 | [0067](0067-permalink-view-param-disambiguation.md) | Permalinks reuse `?view=`, disambiguated by shape (three floats is a camera, else the start-view selector) |
+| [0068](0068-python-bindings-abi3-nondefault.md) | Python bindings: PyO3 `abi3` (one wheel for 3.9+) in a workspace-excluded crate so `just ci` stays Python-free |

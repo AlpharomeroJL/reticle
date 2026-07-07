@@ -40,7 +40,12 @@ members = [
 ]
 # MCP servers and the fuzz crate are intentionally out of the main workspace so
 # they never slow the `just ci` gate. See docs/decisions/0005 and 0006.
-exclude = ["tools/reticle-dev-mcp", "tools/crate-docs-mcp", "fuzz"]
+# reticle-py is a native-only PyO3 extension whose build needs the Python
+# toolchain; it is excluded for the same reason so `just ci` stays Python-free.
+# The gate runs clippy/test/doc with `--workspace`, which ignores
+# `default-members`, so `exclude` is the only mechanism that truly keeps it out.
+# See docs/decisions/0068.
+exclude = ["tools/reticle-dev-mcp", "tools/crate-docs-mcp", "fuzz", "crates/reticle-py"]
 
 [workspace.package]
 version = "7.0.0"
