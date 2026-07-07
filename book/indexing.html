@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-59f53b74.js";
+            window.path_to_searchindex_js = "searchindex-158f0b0f.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-924db6f9.js"></script>
+        <script src="toc-702c5735.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -205,6 +205,26 @@ straight from the bytes with no parsing or allocation, validated by <code>rkyv</
 on. The disk/mmap paging layer and its renderer integration are <strong>not yet wired up</strong>
 today (the API is exercised over in-memory buffers); the out-of-core streaming ADR and
 <code>STATUS.md</code> record this precisely.</p>
+<h2 id="streaming-a-rtla-archive-over-a-tilesource"><a class="header" href="#streaming-a-rtla-archive-over-a-tilesource">Streaming a <code>.rtla</code> archive over a <code>TileSource</code></a></h2>
+<p>The <code>.rtla</code> container (ADR 0062) turns a layout into a network transport for renderable
+silicon: a header with the world box and per-level grid dimensions, a tile directory of
+byte ranges, then byte-contiguous tiles, each an independently-validated <code>rkyv</code>
+<code>TilePayload</code>. A <code>TileSource</code> is the read seam over one such archive: fetch the header,
+fetch one tile’s bytes by address. Three sources implement it. <code>MmapTileSource</code> maps a
+local file and serves a tile by slicing the mapped range, reusing the zero-copy archive
+discipline above (the one documented <code>unsafe</code>, every block validated). <code>HttpRangeTileSource</code>
+runs in the browser: it fetches the header with two ranged GETs, then a tile per <code>fetch</code>
+with a <code>Range: bytes=offset-end</code> header, in front of a byte-budgeted in-memory LRU and an
+OPFS persistent cache so revisiting an archive is instant (ADR 0063). <code>MemTileSource</code> is an
+in-memory double for tests.</p>
+<p>A small query layer resolves a viewport against the archive’s finest level (coarser levels
+are paint-only), fetches the overlapping tiles, and returns the records that intersect the
+view. That streamed result is proven equal to the in-RAM R-tree’s answer over 600
+randomized layouts. Every count read from a header or directory is untrusted: tile counts
+are summed with checked arithmetic, a header inconsistent with its directory is rejected,
+and the header fetch is capped, so a directory claiming billions of tiles errors rather
+than exhausting memory. The physical byte framing and the OPFS/LRU cache policy are fixed
+in ADR 0063.</p>
 <h2 id="targets"><a class="header" href="#targets">Targets</a></h2>
 <p>The bulk index build of one million shapes should complete in well under a second,
 and point or rubber-band picking over a million shapes should return in under a

@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-59f53b74.js";
+            window.path_to_searchindex_js = "searchindex-158f0b0f.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-924db6f9.js"></script>
+        <script src="toc-702c5735.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -504,6 +504,26 @@ straight from the bytes with no parsing or allocation, validated by <code>rkyv</
 on. The disk/mmap paging layer and its renderer integration are <strong>not yet wired up</strong>
 today (the API is exercised over in-memory buffers); the out-of-core streaming ADR and
 <code>STATUS.md</code> record this precisely.</p>
+<h2 id="streaming-a-rtla-archive-over-a-tilesource"><a class="header" href="#streaming-a-rtla-archive-over-a-tilesource">Streaming a <code>.rtla</code> archive over a <code>TileSource</code></a></h2>
+<p>The <code>.rtla</code> container (ADR 0062) turns a layout into a network transport for renderable
+silicon: a header with the world box and per-level grid dimensions, a tile directory of
+byte ranges, then byte-contiguous tiles, each an independently-validated <code>rkyv</code>
+<code>TilePayload</code>. A <code>TileSource</code> is the read seam over one such archive: fetch the header,
+fetch one tile’s bytes by address. Three sources implement it. <code>MmapTileSource</code> maps a
+local file and serves a tile by slicing the mapped range, reusing the zero-copy archive
+discipline above (the one documented <code>unsafe</code>, every block validated). <code>HttpRangeTileSource</code>
+runs in the browser: it fetches the header with two ranged GETs, then a tile per <code>fetch</code>
+with a <code>Range: bytes=offset-end</code> header, in front of a byte-budgeted in-memory LRU and an
+OPFS persistent cache so revisiting an archive is instant (ADR 0063). <code>MemTileSource</code> is an
+in-memory double for tests.</p>
+<p>A small query layer resolves a viewport against the archive’s finest level (coarser levels
+are paint-only), fetches the overlapping tiles, and returns the records that intersect the
+view. That streamed result is proven equal to the in-RAM R-tree’s answer over 600
+randomized layouts. Every count read from a header or directory is untrusted: tile counts
+are summed with checked arithmetic, a header inconsistent with its directory is rejected,
+and the header fetch is capped, so a directory claiming billions of tiles errors rather
+than exhausting memory. The physical byte framing and the OPFS/LRU cache policy are fixed
+in ADR 0063.</p>
 <h2 id="targets"><a class="header" href="#targets">Targets</a></h2>
 <p>The bulk index build of one million shapes should complete in well under a second,
 and point or rubber-band picking over a million shapes should return in under a
@@ -698,9 +718,38 @@ anything unsupported is a clear error rather than silent data loss. See ADR 0004
 (numbers, datatypes, names, and display colors), and the design rules. Reticle
 parses a simple, readable text format into the model’s <code>Technology</code>, which then
 drives layer display and the <a href="#design-rule-checking">design-rule checker</a>.</p>
+<h2 id="streaming-a-die-the-record-reader-and-the-rtla-builder"><a class="header" href="#streaming-a-die-the-record-reader-and-the-rtla-builder">Streaming a die: the record reader and the <code>.rtla</code> builder</a></h2>
+<p>The GDSII importer above reads a whole library into memory under a 256 MiB cap. A
+full shuttle die is several gigabytes and the in-browser converter runs in a worker,
+so both need to pull one record at a time without ever holding the whole file. Two
+pieces make that possible (Wave 2, ADR 0062 and ADR 0063).</p>
+<p><code>GdsRecordReader&lt;R: Read&gt;</code> is a forward-only GDSII reader over any byte source. It
+hand-rolls the record framing (<code>2-byte length, record type, data type, payload</code>) with
+no <code>gds21</code> dependency, so it is wasm-clean, and it yields a small flat vocabulary of
+<code>GdsEvent</code>s (library and struct boundaries, boundaries, paths, references, arrays,
+text) in document order. It carries the same hardening as the DOM importer: a
+zero-length string record is rejected before anyone can index <code>data[-1]</code>, dates are
+skipped rather than parsed (so the out-of-range-date panic class cannot fire), and a
+record length is a 16-bit field, so no count ever drives an allocation past the
+remaining input. A differential test asserts the streaming reader accepts everything
+the DOM importer accepts and reports the same cells and per-layer shape counts across
+the real corpora; a fuzz target (<code>gds_stream</code>) drives it over arbitrary bytes.</p>
+<p><code>build_rtla</code> writes a <code>.rtla</code> streamed archive from a lazy record source using bounded
+memory. It is external and two-pass: pass 1 streams the records and spills them to
+sorted run files on disk; pass 2 merges the runs and emits the tiles in directory
+order, holding at most one sort chunk and one tile in memory. The finest pyramid level
+is exact (every record reaches it and round-trips); coarser levels are subsampled
+paint-only approximations. On the 30M-entry generated layout the build peaks at
+127 MiB of RSS (far under a 2 GiB budget), and a 120M-record build produces a 2.42 GB
+archive to completion under the same bound. The on-disk framing (a 32-byte preamble
+locating the rkyv header and directory blocks, then byte-contiguous tiles) is
+specified in ADR 0063 so the native and wasm tile sources read to the same layout.</p>
 <h2 id="robustness"><a class="header" href="#robustness">Robustness</a></h2>
 <p>The parsers are fuzzed. A parser must never panic or hang on malformed input; it
-either produces a document or returns an error.</p>
+either produces a document or returns an error. The streaming <code>GdsRecordReader</code> holds
+the same guarantee: its <code>gds_stream</code> fuzz target seeds from the committed GDS crash
+fixtures so it cannot reintroduce a fixed panic class, and a native regression test
+drives it over those fixtures on every platform (libFuzzer cannot link on MSVC).</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="rendering-and-scale"><a class="header" href="#rendering-and-scale">Rendering and scale</a></h1>
 <p><code>reticle-render</code> is the <code>wgpu</code> renderer. It targets WebGPU in the browser and
@@ -730,6 +779,63 @@ highlighted nets, and a 3D layer-stack cross-section), are tracked follow-ups no
 interactive at 30 fps or better, and hierarchical designs with effectively billions
 of leaf shapes at 60 fps through cell culling and LOD. Measured numbers are in the
 <a href="#performance-methodology">performance chapter</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="streamed-documents"><a class="header" href="#streamed-documents">Streamed documents</a></h1>
+<p>A layout that fits in RAM is opened, edited, and undone through the in-memory document
+model. A multi-gigabyte die does not fit, and cannot be built in a browser tab at all, so
+it is <em>streamed</em>: written once into a tiled <code>.rtla</code> archive (the Wave 2 container, ADR
+0062) and then fetched a tile at a time over HTTP Range requests as the camera moves. This
+chapter covers what a streamed document can and cannot do, and how the view stays
+responsive while tiles are still in flight.</p>
+<h2 id="streamed-documents-are-read-mostly"><a class="header" href="#streamed-documents-are-read-mostly">Streamed documents are read-mostly</a></h2>
+<p>A streamed document is browse, measure, query, and share only. It is deliberately <strong>not</strong>
+editable, and that is enforced by the type system rather than by a runtime check.</p>
+<p>An open document in the app is a <code>DocHost</code>, which is one of two things:</p>
+<ul>
+<li><code>Edited(History)</code>, an in-memory document with its undo/redo history, or</li>
+<li><code>Streamed(StreamedScene)</code>, a document paged in from an <code>.rtla</code> archive.</li>
+</ul>
+<p>Every mutating path in the app (drawing a shape, running a boolean, undo, redo) takes a
+<code>&amp;mut History</code>. A <code>DocHost</code> hands out a <code>History</code> only when you match its <code>Edited</code> arm.
+There is no total accessor that returns a <code>&amp;mut History</code> regardless of which arm is
+active; the only mutable accessor is fallible and returns <code>Option</code>, and a <code>StreamedScene</code>
+carries no mutation method of any kind. So an editing tool cannot even name a <code>History</code>
+to mutate on a streamed document: code that tries either fails to compile because it never
+destructured <code>Edited</code>, or fails to compile because it called a mutator on an <code>Option</code> it
+did not unwrap. Editing a streamed document is a compile error, not a runtime refusal that
+a later feature could forget to add.</p>
+<p>This is the scope line drawn in ADR 0062 and made concrete in ADR 0068. The payoff is
+that the read-mostly guarantee holds for free as the app grows: any new edit path, written
+the ordinary way against <code>&amp;mut History</code>, is automatically inapplicable to a streamed
+document, with no reviewer needing to remember to guard it.</p>
+<h2 id="coarse-then-fine-painting-while-tiles-stream-in"><a class="header" href="#coarse-then-fine-painting-while-tiles-stream-in">Coarse-then-fine: painting while tiles stream in</a></h2>
+<p>When the camera moves over a streamed document, the tiles that cover the new viewport at
+the zoom’s level of detail may not be resident yet. Blocking the frame on the network
+would stutter the view; painting nothing would flash it blank. Instead the scene refines
+progressively.</p>
+<p>The <code>StreamedScene</code> keeps a working set of resident tiles, bounded by an LRU so RAM does
+not grow without limit, and a viewport-to-tile mapper built from the archive’s level grid.
+On a camera move:</p>
+<ol>
+<li>It computes the tiles that cover the viewport at the target (finest appropriate) level
+and fetches the ones not already resident, over the archive’s <code>TileSource</code>. Each
+fetched tile is validated and decoded exactly as the memory-mapped path is, so a
+truncated or corrupt tile is an error, never undefined behaviour.</li>
+<li>Until those fine tiles arrive, it paints the <strong>coarsest resident level that still fully
+covers the viewport</strong>. Coarse levels have fewer, larger tiles, so they are far more
+likely to be complete; the view shows less detail for a moment rather than going blank.</li>
+<li>As tiles arrive (on the browser microtask queue in wasm, on a task in native), they are
+posted to an inbox the UI loop drains, become resident, and the painted level rises to
+the fine level.</li>
+</ol>
+<p>The fetched tiles’ vertices are uploaded into the renderer’s existing paged GPU buffers;
+streaming changes what is paged into memory, never the silicon, so it is not an edit.</p>
+<p>This behaviour is proven headlessly. A residency test stands up an in-memory archive
+behind a source that injects a per-tile fetch latency and asserts the full sequence:
+immediately after a zoom-in the scene paints from the coarse resident level with no fine
+tile resident, and after the injected delay elapses the resident set has transitioned
+coarse to fine, the painted level is the fine level, and the painted record set matches
+the fine-level query exactly.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="view-and-export"><a class="header" href="#view-and-export">View and export</a></h1>
 <p>The editor’s right-hand column ends with a <strong>View and export</strong> panel that groups
@@ -2997,6 +3103,70 @@ just book                # -&gt; docs/book
 <p>The published <code>index.html</code> and the web entry point default a public visitor to the
 replay theater view (with the editor one click away). Nothing about the browser
 bundle needs a key: the theater replays a committed scripted transcript.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="archive-hosting"><a class="header" href="#archive-hosting">Archive hosting</a></h1>
+<p>A <code>.rtla</code> archive (the streamed-archive format, ADR 0062) is a network transport for
+renderable silicon: a header, a tile directory, and byte-contiguous tiles, so a
+browser fetches exactly one tile with a single HTTP Range request. Two pieces of
+infrastructure put those archives on the open web safely: a Cloudflare Worker that
+serves the bytes, and an <code>xtask</code> gate that decides which archives are allowed to be
+staged for hosting in the first place.</p>
+<h2 id="the-serving-worker"><a class="header" href="#the-serving-worker">The serving Worker</a></h2>
+<p><code>worker/archive/</code> is a Cloudflare Worker with an R2 binding to the private bucket
+<code>reticle-archives</code>. It is separate from the collaboration relay in <code>worker/</code> (a
+Durable Object); the two share nothing and deploy independently.</p>
+<ul>
+<li><strong>Served through the binding, never the public URL.</strong> The bucket is reached only
+through the Worker’s R2 binding, never the rate-limited public <code>r2.dev</code> URL, so the
+archives stay off the rate-limited path and behind the Worker’s CORS lock.</li>
+<li><strong>Range.</strong> A <code>Range: bytes=a-b</code> request is answered <code>206 Partial Content</code> with a
+<code>Content-Range</code> header and exactly those bytes; a request with no <code>Range</code> returns
+the whole object as <code>200</code>. <code>Accept-Ranges: bytes</code> is always advertised. This is the
+point of the format: one tile is one Range request over its <code>[offset, offset+len)</code>
+slice of the archive.</li>
+<li><strong>Cache.</strong> The Cache API sits in front, keyed by object key plus requested range,
+so each distinct byte range is cached as its own entry. Because the Cache API will
+not store a <code>206</code> or a <code>Content-Range</code> response, a ranged body is cached as a
+normalized <code>200</code> that records the real status and range in internal headers, then
+reconstructed on a hit.</li>
+<li><strong>CORS.</strong> <code>Access-Control-Allow-Origin</code> is locked to the Pages origin
+<code>https://alpharomerojl.github.io</code> (never <code>*</code>), and an <code>OPTIONS</code> preflight is
+answered <code>204</code> with the allowed methods and headers.</li>
+</ul>
+<h3 id="the-range-header-is-untrusted"><a class="header" href="#the-range-header-is-untrusted">The Range header is untrusted</a></h3>
+<p>The <code>Range</code> header is attacker controlled, so the parser (<code>worker/archive/src/range.js</code>)
+is the trust boundary between the network and the R2 read. It resolves every input to
+one of three verdicts: serve the whole object, serve a bounded <code>[offset, offset+len)</code>
+slice already clamped to the object size, or reject. A malformed, backwards, or
+overflowing range is answered <code>416 Range Not Satisfiable</code> with
+<code>Content-Range: bytes */size</code>, never a silent full transfer and never an out-of-range
+read. Every satisfiable range is clamped to the object, so the Worker can never be
+driven to read past the object or to request an absurd length. The parser is covered
+by a <code>node --test</code> unit suite; a <code>wrangler dev</code> local ranged fetch is the hermetic
+integration check (see <code>worker/archive/README.md</code>).</p>
+<h2 id="the-redistribution-license-gate"><a class="header" href="#the-redistribution-license-gate">The redistribution license gate</a></h2>
+<p>Before an archive is staged for hosting, <code>xtask verify-licenses &lt;dir&gt;</code> decides whether
+it may be redistributed at all. For every <code>*.rtla</code> archive in a staged content
+directory it reads a sibling NOTICE manifest (<code>&lt;archive&gt;.rtla.NOTICE</code>, the provenance
+style of <code>corpus/tinytapeout/NOTICE.md</code>: a <code>Source:</code> URL and an
+<code>SPDX-License-Identifier:</code>), and it verifies the SPDX license is on a small
+redistribution allowlist:</p>
+<ul>
+<li><code>Apache-2.0</code>, <code>MIT</code>, <code>CC-BY-4.0</code></li>
+<li>the CERN Open Hardware Licence family (<code>CERN-OHL-S</code>, <code>-W</code>, <code>-P</code>, any variant)</li>
+<li>public-domain dedications (<code>CC0-1.0</code>, <code>Unlicense</code>, <code>public-domain</code>)</li>
+</ul>
+<p>The gate <strong>fails closed</strong>: an archive ships only when its license is positively
+verified. Any archive whose terms cannot be verified is EXCLUDED, with a printed
+<code>STATUS EXCLUDED</code> line naming the reason: no manifest, no SPDX line, a compound SPDX
+expression the gate will not guess at, or a license not on the allowlist. A run that
+excludes anything exits non-zero, so a staging step that would ship unverifiable
+content fails loudly:</p>
+<pre><code class="language-text">STATUS VERIFIED good.rtla (Apache-2.0) [https://github.com/TinyTapeout/tinytapeout-03]
+STATUS EXCLUDED mystery.rtla: license not on redistribution allowlist: NoSuchLicense-9.9
+STATUS EXCLUDED orphan.rtla: no license manifest (expected orphan.rtla.NOTICE)
+verify-licenses: 3 archive(s): 1 verified, 2 excluded
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="contributing"><a class="header" href="#contributing">Contributing</a></h1>
 <h2 id="the-build-gate"><a class="header" href="#the-build-gate">The build gate</a></h2>
