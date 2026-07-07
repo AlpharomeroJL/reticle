@@ -35,10 +35,12 @@
 //! ```
 
 pub mod area;
+pub mod connectivity;
 
 mod polyize;
 
 pub use area::{LayerMetrics, report as area_report};
+pub use connectivity::ConnectivityStats;
 
 /// Returns the name of the first top cell, if the document declares one.
 ///
