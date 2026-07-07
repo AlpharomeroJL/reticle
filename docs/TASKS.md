@@ -737,4 +737,7 @@ RUN_STATE.md.
   Curated 50-input seed corpus per target committed; `fuzz/README.md` + `docs/STATUS.md`
   record the campaign and correct the standing "fuzzing does not run" limitation
   (it runs under WSL; native MSVC still will not link libFuzzer). ~8 CPU-hours.
-- [ ] Wave 0 gate + redeploy.
+- [x] Wave 0 gate + redeploy. `just ci` green; `just e2e` (3 passed, 1 honest WebGPU
+  skip), `just e2e-subpath`, `just e2e-share` all pass; redeployed the hardened-parser
+  bundle to gh-pages (web-db328fe1) and `just smoke-pages` PASS against the live URL;
+  main and gh-pages pushed. **Wave 0 complete.**

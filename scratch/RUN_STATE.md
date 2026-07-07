@@ -1,7 +1,8 @@
 # v8.0.0 run state (single writer: orchestrator)
 
-updated: 2026-07-07T14:40:00-05:00
-phase: wave0/fuzz-campaign-running (parallel relaunch)
+updated: 2026-07-07T15:40:00-05:00
+phase: wave1/dispatch
+head: (Wave 0 closed; main pushed) e18cc43 + wave0-close commit
 
 ## dispatch mechanism VALIDATED (2026-07-07)
 - Headless dispatch works: `<prompt-on-stdin> | claude -p --permission-mode bypassPermissions --strict-mcp-config --session-id <uuid> --output-format text` in a pinned cwd ran a sub-session autonomously (no prompts), used its Write tool to create a file in the correct cwd, and returned clean (exit 0). This validates the Wave 1+ lane fan-out model.
@@ -44,7 +45,8 @@ cloudflare: authed=yes (wrangler 4.82.2 OAuth, account 86e3e2cfeb39c385931af8bb9
         Confirmed clean (fresh clean build, 30 min each, 0 artifacts): oasis_import, geometry_boolean.
         PROCESS LESSON (critical): the /mnt/d 9p mount defeats cargo incremental rebuild (a 4s "build" reused a pre-fix binary and reported 1063 already-fixed crashes as if new). ALWAYS use a FRESH CARGO_TARGET_DIR for fuzz builds after a source change; verified staleness by running 40/40 crash artifacts through the fixed NATIVE importer (all clean).
         gds re-confirm (commit e8752f7, fresh target dir, seeded with all 440 crash inputs, 15 min): RUNNING (task b733dhx5r).
-    0.8 gate+redeploy: pending (after gds re-confirm clean + corpus commit + STATUS fuzz update)
+    0.8 gate+redeploy: DONE. gds re-confirm CLEAN (0/15min). Corpus committed (e18cc43, 150 seed files). STATUS+fuzz README corrected. Gate: just ci GREEN, just e2e 3-pass-1-skip, just e2e-subpath 1-pass, just e2e-share 1-pass. Redeployed: gh-pages 4bb08b1 (web-db328fe1, hardened parsers live), just smoke-pages PASS against live URL. main + gh-pages pushed, origin synced.
+  WAVE 0 COMPLETE.
 - wave1: briefs WRITTEN (scratch/lanes/v8-1{a-transport,b-relay,c-shareux,d-agentlive,e-proof}/brief.md); dispatch plan:
     batch 1 (4 concurrent): v8-1a-transport, v8-1b-relay, v8-1c-shareux, v8-1d-agentlive
     batch 2 (staggered, after 1c merges; gpu_lane runs alone): v8-1e-proof
