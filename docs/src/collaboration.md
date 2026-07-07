@@ -35,8 +35,8 @@ laptop sleeps, Wi-Fi hiccups, a phone changes networks. The live transport
 transport redials with **capped exponential backoff**: the wait doubles each attempt
 from a 500 ms base up to a 30 s ceiling, with deterministic jitter (each wait lands
 in `[ceiling/2, ceiling]`) so a fleet of tabs recovering from the same outage does
-not stampede the relay in lockstep. Attempts are unbounded — only closing the session
-stops them — because an outage of any length should heal on its own.
+not stampede the relay in lockstep. Attempts are unbounded (only closing the session
+stops them) because an outage of any length should heal on its own.
 
 While waiting between tries the status line reads *"reconnecting to the shared session
 (attempt N)…"*, counting the tries so a person can see progress; it returns to
@@ -46,7 +46,7 @@ Two things resync on reconnect, from the two ends:
 
 * **The sharer** republishes its **whole document as one full-state snapshot** the
   instant its socket reopens, before resuming incremental updates. So any edit made
-  while the socket was down still reaches viewers — carried by that snapshot, not lost
+  while the socket was down still reaches viewers, carried by that snapshot, not lost
   with the dropped socket. Because `yrs` updates are idempotent, a viewer that already
   saw part of the document applies the snapshot without duplicating anything.
 * **A viewer** needs no resend logic at all: on rejoining a room the relay replays the

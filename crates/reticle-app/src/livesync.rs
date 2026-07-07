@@ -358,7 +358,7 @@ mod wasm {
     /// Both transports own a `Rc<RefCell<Core>>`. The socket's lifecycle closures capture
     /// a [`Weak`] to it (never a strong `Rc`), so the transport's own `Rc` is the *only*
     /// owner: dropping the transport drops the `Core`, which drops the closures, so no
-    /// event or timer fires after cancel — there is no reference cycle and nothing leaks.
+    /// event or timer fires after cancel: there is no reference cycle and nothing leaks.
     ///
     /// A monotonically increasing `generation` disambiguates events: each redial bumps it
     /// and its closures capture that value, so a stale `close` that follows an `error` on
@@ -624,7 +624,7 @@ mod wasm {
     /// Called from each transport's `Drop`. It clears any pending reconnect timer, detaches
     /// the socket's handlers (so a late browser event cannot call an about-to-be-dropped
     /// closure), and closes the socket. This is the only thing that ends the reconnect loop
-    /// — attempts are otherwise unbounded, capped only by the user closing the session.
+    /// (attempts are otherwise unbounded, capped only by the user closing the session).
     fn cancel(core: &Rc<RefCell<Core>>) {
         let mut c = core.borrow_mut();
         c.cancelled = true;
@@ -743,7 +743,7 @@ mod wasm {
     ///
     /// On reconnect the socket reopens and posts [`LiveStatus::Open`], which the App reads
     /// to re-publish the whole document (via [`SyncDocument::encode_full_state`]) before
-    /// resuming incremental updates — so any edit made while the socket was down reaches
+    /// resuming incremental updates, so any edit made while the socket was down reaches
     /// viewers as a single idempotent full-state frame.
     ///
     /// [`SyncDocument::encode_full_state`]: reticle_sync::SyncDocument::encode_full_state
