@@ -692,3 +692,43 @@ share-live transport shipped, the three benchmark rows are honest, and the relea
 Not yet frozen. `reticle-gen` `Generator` trait + param schemas freeze at the Wave 2
 batch-1 merge; the server-side transcript JSONL schema freezes at the Wave 3 serial
 step; the TT template bundle format freezes at the Wave 4A merge.
+
+## v8.0.0 run (started 2026-07-07)
+
+One packet delivers the remaining roadmap as a single tag v8.0.0, live site redeployed
+at every wave merge. Machine state lives in `scratch/RUN_STATE.md` (force-added,
+committed at every wave boundary); this section is the narrative tracker. Frozen-surface
+amendments for the run: ADR 0061. Disk and lane-target policy: ADR 0060 (lane
+`CARGO_TARGET_DIR` on E: for this run). Conventions carried forward unchanged: lane
+worktrees via `just lane`, briefs at `scratch/lanes/<id>/brief.md`, `just ci` before
+every commit, wave gates add `just e2e-share` (mandatory from Wave 1) and
+`just conformance` (from Wave 1). GPU-bound lanes never run concurrently with each
+other. Quota backoff: 15m/30m/60m then clean exit with resume instructions in
+RUN_STATE.md.
+
+### Wave 0 (serial, orchestrator-direct)
+
+- [x] Preflight + RUN_STATE bootstrap. v7.0.0 anchor VERIFIED (tag, non-draft GitHub
+  release with 4 binaries, `just smoke-pages` PASS live). Benchmark rows verified
+  already-v0.5.0/83-task on main; claude-code row extension deferred to Wave 7B
+  (quota). Tapeout precheck verified already-passed in v7 (ADR 0059); re-run scheduled
+  as the Docker-relocation acceptance test. Tool versions and claude CLI dispatch
+  flags recorded in RUN_STATE.md.
+- [x] Disk policy (ADR 0060): stale v7 lane target deleted (D: 36.1 -> 51.5 GB free);
+  E: vs D: cold-build probe 16.2 s vs 13.2 s (1.23x); lane targets on E: this run.
+- [x] Cloudflare bootstrap: `wrangler whoami` authenticated; R2 bucket
+  `reticle-archives` CREATED (Standard class; binding snippet recorded for the Wave 2D
+  serving Worker).
+- [x] Docker data root: VERIFIED already on E: (`CustomWslDistroDir=E:\DockerDesktopWSL`,
+  `docker_data.vhdx` 50.6 GB on E:, all images intact incl. the pinned
+  `hpretl/iic-osic-tools:2025.01`); no relocation performed, none needed. Acceptance
+  re-run of `just tt-precheck examples/tapeout/tt_um_reticle_tile.gds` REPRODUCED the
+  committed v7 verdict check-for-check (all Magic+KLayout DRC/geometry/structural
+  checks pass; the same four out-of-scope submission-artifact checks fail: LEF,
+  Verilog x2, unwired analog pins; wall 28.6 s). No ADR needed: nothing was decided,
+  only verified.
+- [ ] Fuzz campaign: one run per existing target (gds_import, oasis_import,
+  geometry_boolean) under WSL nightly, fork=4, 3600 s wall each; minimized seed
+  corpus committed under `fuzz/corpus/<target>/` (two `.oasis` seeds generated via
+  `reticle-cli export` since none were committed). IN PROGRESS (background).
+- [ ] Wave 0 gate + redeploy.
