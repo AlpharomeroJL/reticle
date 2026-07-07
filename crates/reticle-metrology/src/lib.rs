@@ -37,12 +37,14 @@
 pub mod antenna;
 pub mod area;
 pub mod connectivity;
+pub mod export;
 
 mod polyize;
 
 pub use antenna::{AntennaCheck, AntennaViolation};
 pub use area::{LayerMetrics, report as area_report};
 pub use connectivity::ConnectivityStats;
+pub use export::MetrologyReport;
 
 /// Returns the name of the first top cell, if the document declares one.
 ///
