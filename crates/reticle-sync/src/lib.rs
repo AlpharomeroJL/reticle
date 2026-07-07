@@ -447,6 +447,28 @@ impl StepEdit<'_, '_> {
     pub fn set_top_cell(&mut self, name: &str, is_top: bool) {
         mapping::set_top_cell(self.txn, name, is_top, self.next_id);
     }
+
+    /// Overwrites the shape stored under CRDT element `id` (owned by `cell`) with
+    /// `shape`, in place, as part of the step.
+    ///
+    /// `id` must be an element id an earlier [`add_shape`](Self::add_shape) returned
+    /// (or the `SyncDocument` equivalent): the record keeps its id and only its
+    /// geometry changes, so a converged peer sees the same element *move* rather than
+    /// a delete-and-recreate. This is the write a mirrored in-place transform makes;
+    /// an `id` no shape is stored under simply creates one, so callers resolve the id
+    /// before calling.
+    pub fn set_shape(&mut self, cell: &str, id: &str, shape: &DrawShape) {
+        mapping::overwrite_shape(self.txn, cell, id, shape);
+    }
+
+    /// Removes the shape stored under CRDT element `id`, as part of the step.
+    ///
+    /// Mirrors a delete of a single shape (by the element id an earlier
+    /// [`add_shape`](Self::add_shape) returned); every other record, including a
+    /// concurrent peer's, is untouched. Removing an absent id is a no-op.
+    pub fn remove_shape(&mut self, id: &str) {
+        mapping::remove_shape_by_id(self.txn, id);
+    }
 }
 
 /// Derives a stable `yrs` client id from an actor id by hashing.
@@ -458,4 +480,110 @@ fn client_id_for(actor: &str) -> u64 {
     actor.hash(&mut hasher);
     // `yrs` client ids are compared for seniority; any non-zero value works.
     hasher.finish()
+}
+
+#[cfg(test)]
+mod step_edit_tests {
+    use super::SyncDocument;
+    use reticle_geometry::{LayerId, Point, Rect};
+    use reticle_model::{DrawShape, ShapeKind};
+
+    /// A met1 rectangle from `(x0,y0)` to `(x1,y1)`.
+    fn rect(x0: i32, y0: i32, x1: i32, y1: i32) -> DrawShape {
+        DrawShape::new(
+            LayerId::new(68, 20),
+            ShapeKind::Rect(Rect::new(Point::new(x0, y0), Point::new(x1, y1))),
+        )
+    }
+
+    /// The single rectangle in `cell`, or a panic if the shape is not a rectangle.
+    fn only_rect(doc: &SyncDocument, cell: &str) -> Rect {
+        let c = doc.document().cell(cell).expect("cell present");
+        assert_eq!(c.shapes.len(), 1, "exactly one shape");
+        match c.shapes[0].kind {
+            ShapeKind::Rect(r) => r,
+            ref other => panic!("expected a rect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn set_shape_moves_a_shape_in_place_keeping_its_id() {
+        let mut doc = SyncDocument::new("agent");
+        let id = doc.step(|edit| {
+            edit.add_empty_cell("top");
+            edit.add_rect(
+                "top",
+                LayerId::new(68, 20),
+                Rect::new(Point::ORIGIN, Point::new(10, 10)),
+            )
+        });
+        // Overwrite the shape at its id with moved geometry.
+        doc.step(|edit| edit.set_shape("top", &id, &rect(100, 0, 110, 10)));
+        assert_eq!(
+            only_rect(&doc, "top"),
+            Rect::new(Point::new(100, 0), Point::new(110, 10)),
+            "the shape moved in place"
+        );
+    }
+
+    #[test]
+    fn remove_shape_deletes_only_that_shape() {
+        let mut doc = SyncDocument::new("agent");
+        let (a, _b) = doc.step(|edit| {
+            edit.add_empty_cell("top");
+            let a = edit.add_rect(
+                "top",
+                LayerId::new(68, 20),
+                Rect::new(Point::ORIGIN, Point::new(4, 4)),
+            );
+            let b = edit.add_rect(
+                "top",
+                LayerId::new(68, 20),
+                Rect::new(Point::new(8, 0), Point::new(12, 4)),
+            );
+            (a, b)
+        });
+        doc.step(|edit| edit.remove_shape(&a));
+        assert_eq!(
+            only_rect(&doc, "top"),
+            Rect::new(Point::new(8, 0), Point::new(12, 4)),
+            "the surviving shape is the one not removed"
+        );
+    }
+
+    #[test]
+    fn a_mirrored_transform_converges_with_a_concurrent_peer_edit() {
+        // The agent overwrites its own shape in place while a human adds a shape to the
+        // same cell concurrently; the two peers converge to the union with the move applied.
+        let mut agent = SyncDocument::new("agent");
+        let id = agent.step(|edit| {
+            edit.add_empty_cell("shared");
+            edit.add_rect(
+                "shared",
+                LayerId::new(68, 20),
+                Rect::new(Point::ORIGIN, Point::new(10, 10)),
+            )
+        });
+        let mut human = SyncDocument::new("human");
+        human.add_empty_cell("shared");
+        human.add_shape("shared", &rect(50, 50, 60, 60));
+
+        // Concurrent: the agent moves its shape in place.
+        agent.step(|edit| edit.set_shape("shared", &id, &rect(200, 0, 210, 10)));
+
+        let sv_a = agent.state_vector();
+        let sv_h = human.state_vector();
+        let a_to_h = agent.encode_update(&sv_h).expect("a->h");
+        let h_to_a = human.encode_update(&sv_a).expect("h->a");
+        agent.apply_update(&h_to_a).expect("apply h->a");
+        human.apply_update(&a_to_h).expect("apply a->h");
+
+        assert_eq!(agent.document(), human.document(), "peers converge");
+        let cell = agent.document().cell("shared").expect("shared cell");
+        assert_eq!(
+            cell.shapes.len(),
+            2,
+            "union of the moved agent shape and the human shape"
+        );
+    }
 }
