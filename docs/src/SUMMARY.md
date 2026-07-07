@@ -21,6 +21,7 @@
 - [SKY130 grounding](sky130.md)
 - [Routing](routing.md)
 - [Connectivity extraction](extraction.md)
+  - [Device recognition](device-extraction.md)
 - [Collaboration](collaboration.md)
 - [Scripting](scripting.md)
 
