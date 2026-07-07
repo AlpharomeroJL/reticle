@@ -26,3 +26,7 @@ criterion = "0.8.2"
 [[bench]]
 name = "bbox"
 harness = false
+
+[[bench]]
+name = "flatten"
+harness = false
