@@ -19,7 +19,7 @@
 //!   third-party tool (`KLayout`, `gdstk`) can read it; see [`mod@oasis`] for the
 //!   honest scope and gaps.
 //! - [`OasisStd`], a genuine **conformant OASIS (SEMI P39) writer** for a practical
-//!   subset — `KLayout` reads its output. Export only (no reader). See
+//!   subset - `KLayout` reads its output. Export only (no reader). See
 //!   [`mod@oasis_std`] for the subset and documented gaps.
 //! - [`parse_technology`] and [`write_technology`], a line-oriented
 //!   technology-file format (resolution, layer table, DRC rules) and its

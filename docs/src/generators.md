@@ -6,6 +6,9 @@ fill, or a probe-able test structure. Each one is a pure function from typed
 parameters plus a technology to geometry, and every generator is
 [DRC-clean by construction](sky130-drc-coverage.md) against the SKY130 subset (see
 [ADR 0043](https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0043-generators-drc-clean-by-construction.md)).
+The process numbers are data (a `GenTech` derived from the technology), so the same
+generators run DRC-clean against a **second PDK** too - see
+[A second PDK: IHP SG13G2](second-pdk.md).
 The generator framework itself, the typed [`Generator`](https://docs.rs/reticle-gen)
 trait and the type-erased [`Registry`](https://docs.rs/reticle-gen) that drives it by
 id, is described in

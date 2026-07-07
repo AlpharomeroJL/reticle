@@ -269,11 +269,11 @@ def report(workdir, out_md):
                 nsh = sum(c.shapes(li).size() for c in lyo.each_cell()
                           for li in lyo.layer_indexes())
                 lines.append(f"**OASIS read test:** KLayout read Reticle's conformant-OASIS "
-                             f"(`oasis_std`) output — PASS ({lyo.cells()} cells, {nsh} shapes, "
+                             f"(`oasis_std`) output - PASS ({lyo.cells()} cells, {nsh} shapes, "
                              f"dbu={lyo.dbu}).")
             except Exception as e:  # noqa: BLE001
                 lines.append(f"**OASIS read test:** KLayout FAILED to read Reticle's "
-                             f"conformant-OASIS output — {e}")
+                             f"conformant-OASIS output - {e}")
             lines.append("")
         sections.append("\n".join(lines))
 

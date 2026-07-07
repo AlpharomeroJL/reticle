@@ -12,7 +12,7 @@ Source (gdspy): dbu = 1.0 nm, cells = ['SUB', 'TOP'], element census = {'box': 2
 
 **gdspy vs klayout:** geometry, labels, and instances all match after round-trip.
 
-**OASIS read test:** KLayout read Reticle's conformant-OASIS (`oasis_std`) output — PASS (2 cells, 6 shapes, dbu=0.001).
+**OASIS read test:** KLayout read Reticle's conformant-OASIS (`oasis_std`) output - PASS (2 cells, 6 shapes, dbu=0.001).
 
 ## Fixture `odd.gds`
 
@@ -29,4 +29,4 @@ Source (gdspy): dbu = 1.0 nm, cells = ['SUB', 'TOP'], element census = {'box': 4
 
 **gdspy vs klayout:** geometry, labels, and instances all match after round-trip.
 
-**OASIS read test:** KLayout read Reticle's conformant-OASIS (`oasis_std`) output — PASS (2 cells, 6 shapes, dbu=0.001).
+**OASIS read test:** KLayout read Reticle's conformant-OASIS (`oasis_std`) output - PASS (2 cells, 6 shapes, dbu=0.001).
