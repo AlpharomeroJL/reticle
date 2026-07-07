@@ -13,6 +13,32 @@
 //!
 //! Everything here reads the public APIs of `reticle-model`, `reticle-geometry`,
 //! and `reticle-extract`.
+//!
+//! ```
+//! use reticle_geometry::{LayerId, Point, Rect};
+//! use reticle_model::{Cell, Document, DrawShape, ShapeKind};
+//!
+//! let metal = LayerId::new(68, 20);
+//! let mut cell = Cell::new("top");
+//! cell.shapes.push(DrawShape::new(
+//!     metal,
+//!     ShapeKind::Rect(Rect::new(Point::new(0, 0), Point::new(10, 10))),
+//! ));
+//! let mut doc = Document::new();
+//! doc.insert_cell(cell);
+//! doc.set_top_cells(vec!["top".into()]);
+//!
+//! let layers = reticle_metrology::area::report(&doc);
+//! assert_eq!(layers.len(), 1);
+//! assert_eq!(layers[0].area, 100.0);
+//! assert_eq!(layers[0].perimeter, 40.0);
+//! ```
+
+pub mod area;
+
+mod polyize;
+
+pub use area::{LayerMetrics, report as area_report};
 
 /// Returns the name of the first top cell, if the document declares one.
 ///
