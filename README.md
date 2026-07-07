@@ -193,6 +193,15 @@ per-net antenna ratio over a SKY130 layer subset, exported to byte-stable CSV an
 property test pins area and perimeter to a coordinate-compression oracle. The GPU density
 overlay is deferred; see [ADR 0074](docs/decisions/0074-cpu-metrology-reports.md).
 
+**Layout diff.** _(placeholder row, pending the Wave 4 merge.)_ A pure `reticle-diff` crate
+answers "what changed between two versions?": `diff(before, after)` compares the flattened top
+cells as multisets keyed by exact geometry and reports the shapes added, removed, and (deferred
+in v1) changed. Property tests pin it, including a single-insertion oracle. The app paints the
+result over the canvas (added green, removed red, changed amber) with a show/hide toggle, fed
+by a snapshot/diff flow over two in-memory documents. A comparison-document file loader and a
+true `changed` classification are deferred; see
+[ADR 0078](docs/decisions/0078-layout-diff-overlay.md).
+
 **Generators.** Each of the six generators is a pure function from a typed `ParamSchema` to
 geometry. One schema drives all three surfaces (the Generate panel, the MCP tools, the
 benchmark checker), and a property test runs every generator over 400 random valid parameter
