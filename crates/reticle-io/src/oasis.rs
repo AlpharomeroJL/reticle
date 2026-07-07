@@ -180,7 +180,8 @@ impl Importer for Oasis {
         expect_tag(&mut r, TAG_START, "START")?;
         let dbu_per_micron = r.u64()? as i64;
         let top_count = r.u32()?;
-        let mut tops = Vec::with_capacity(top_count as usize);
+        // A string costs at least its 2-byte length prefix, so cap the reserve.
+        let mut tops = Vec::with_capacity(r.prealloc(top_count, 2));
         for _ in 0..top_count {
             tops.push(r.string()?);
         }
@@ -336,7 +337,8 @@ fn read_shape(r: &mut Reader) -> Result<DrawShape> {
         TAG_POLYGON => {
             let layer = r.layer()?;
             let n = r.u32()?;
-            let mut verts = Vec::with_capacity(n as usize);
+            // Each vertex is two i32s (8 bytes); cap the reserve to the input.
+            let mut verts = Vec::with_capacity(r.prealloc(n, 8));
             for _ in 0..n {
                 verts.push(Point::new(r.i32()?, r.i32()?));
             }
@@ -350,7 +352,8 @@ fn read_shape(r: &mut Reader) -> Result<DrawShape> {
             let width = r.i32()?;
             let endcap = r.endcap()?;
             let n = r.u32()?;
-            let mut points = Vec::with_capacity(n as usize);
+            // Each point is two i32s (8 bytes); cap the reserve to the input.
+            let mut points = Vec::with_capacity(r.prealloc(n, 8));
             for _ in 0..n {
                 points.push(Point::new(r.i32()?, r.i32()?));
             }
@@ -583,6 +586,24 @@ struct Reader<'a> {
 impl<'a> Reader<'a> {
     fn new(bytes: &'a [u8]) -> Self {
         Self { bytes, pos: 0 }
+    }
+    /// Bytes not yet consumed.
+    fn remaining(&self) -> usize {
+        self.bytes.len().saturating_sub(self.pos)
+    }
+    /// A safe pre-allocation size for a collection the input claims has `count`
+    /// elements, each costing at least `min_elem_bytes` in the stream.
+    ///
+    /// A hostile or truncated container can name a `count` of billions in a few
+    /// bytes; pre-allocating `count` directly is an out-of-memory vector (found
+    /// by the v8 fuzz campaign). Since each element consumes at least
+    /// `min_elem_bytes` of not-yet-read input, the stream can hold at most
+    /// `remaining / min_elem_bytes` of them, so capping the reservation there
+    /// bounds the allocation to the input size while never over-reserving for an
+    /// honest file. The loop that fills the vector still reads element by element
+    /// and errors cleanly at end of input if the count was a lie.
+    fn prealloc(&self, count: u32, min_elem_bytes: usize) -> usize {
+        (count as usize).min(self.remaining() / min_elem_bytes.max(1))
     }
     /// Returns the next `n` bytes, or a malformed error if the input is short.
     fn take(&mut self, n: usize) -> Result<&'a [u8]> {
