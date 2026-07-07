@@ -1,0 +1,21 @@
+[package]
+name = "reticle-diff"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure geometric diff (added/removed/changed shapes) between two Reticle Documents."
+keywords = ["eda", "diff", "layout", "verification"]
+categories = ["science", "algorithms"]
+
+[lints]
+workspace = true
+
+[dependencies]
+reticle-geometry = { workspace = true }
+reticle-model = { workspace = true }
+
+[dev-dependencies]
+proptest = "1.11.0"

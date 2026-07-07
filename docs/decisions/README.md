@@ -84,3 +84,4 @@ superseded decision is marked and linked to its replacement.
 | [0076](0076-gpu-resident-hierarchy-chunked-expansion.md) | Fully GPU-resident hierarchy: chunked expand + cull + compact past the single-dispatch cap |
 | [0077](0077-cpu-metrology-reports.md) | CPU metrology reports (exact per-layer area/perimeter, connectivity stats, a simplified antenna screen, byte-stable export); GPU density overlay deferred |
 | [0078](0078-installable-pwa-app-shell-offline.md) | Installable PWA: a relative manifest, a scope-derived service worker, and an offline app shell, subpath-correct under /reticle/ |
+| [0079](0079-layout-diff-overlay.md) | Layout diff: a pure `reticle-diff` crate keyed on exact geometry over the flattened top cell, an app overlay (added/removed/changed) fed by a two-snapshot flow; `changed` and a file loader deferred |

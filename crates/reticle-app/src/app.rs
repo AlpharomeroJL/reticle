@@ -280,6 +280,10 @@ pub struct App {
 
     /// The DRC panel state: the last run's violations and the highlighted one.
     drc: DrcResults,
+    /// The layout-diff overlay: a baseline document snapshot, the computed diff
+    /// against the current document, and whether it is painted (see
+    /// [`crate::diff_overlay`]).
+    diff_overlay: crate::diff_overlay::DiffOverlay,
     /// DRC-as-you-type: the incremental checker re-run on every edit so violations are
     /// underlined the moment geometry is drawn (see [`crate::live_drc`]).
     live_drc: crate::live_drc::LiveDrc,
@@ -736,6 +740,7 @@ impl App {
             store: Box::new(crate::store::default_store()),
             agent_history: crate::agent_history::HistoryBrowser::new(),
             drc: DrcResults::new(),
+            diff_overlay: crate::diff_overlay::DiffOverlay::new(),
             live_drc: crate::live_drc::LiveDrc::new(),
             live_drc_on: false,
             live_pending: crate::history::Dirty::None,
@@ -876,6 +881,9 @@ impl App {
         self.selection.clear();
         self.netlight.clear();
         self.drc.clear();
+        // Drop the diff baseline: it snapshotted the previous document, so a diff
+        // against the fresh one would be meaningless until re-snapshotted.
+        self.diff_overlay.clear();
         // Drop the live index and its underlines; the new document builds a fresh one
         // on the next edit (and the pending dirt from `History::new` is drained then).
         self.live_drc.clear();
@@ -2595,6 +2603,8 @@ impl App {
                         ui.separator();
                         self.drc_panel(ui);
                         ui.separator();
+                        self.diff_panel(ui);
+                        ui.separator();
                         self.agent_section(ui);
                         ui.separator();
                         self.share_section(ui);
@@ -3897,6 +3907,69 @@ impl App {
                 let context = drc_panel::fix_violation_prompt(v);
                 self.ask_agent_to_fix(context);
             }
+        }
+    }
+
+    /// Draws the layout-diff panel: snapshot/diff/clear actions, a show/hide
+    /// toggle, and the added/removed/changed counts.
+    ///
+    /// This ships the two-snapshot flow (no comparison-document file loader exists
+    /// in this build): "Snapshot" captures the current document as the baseline,
+    /// and after the user edits, "Diff vs snapshot" compares the baseline against
+    /// the now-current document and paints the difference on the canvas.
+    fn diff_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Layout diff");
+        ui.horizontal(|ui| {
+            if ui
+                .button("Snapshot")
+                .on_hover_text("Capture the current layout as the baseline to diff against")
+                .clicked()
+            {
+                self.diff_overlay.snapshot(self.history.document());
+                self.status.set("Diff: snapshot captured");
+            }
+            let can_diff = self.diff_overlay.has_baseline();
+            if ui
+                .add_enabled(can_diff, egui::Button::new("Diff vs snapshot"))
+                .on_hover_text("Compare the current layout against the captured snapshot")
+                .clicked()
+            {
+                self.compute_diff();
+            }
+            if ui.button("Clear").clicked() {
+                self.diff_overlay.clear();
+                self.status.set("Diff cleared");
+            }
+        });
+        let mut visible = self.diff_overlay.visible();
+        if ui.checkbox(&mut visible, "Show diff overlay").changed() {
+            self.diff_overlay.set_visible(visible);
+        }
+        if self.diff_overlay.has_run() {
+            ui.label(format!(
+                "+{} added   -{} removed   ~{} changed",
+                self.diff_overlay.added_count(),
+                self.diff_overlay.removed_count(),
+                self.diff_overlay.changed_count(),
+            ));
+        } else if self.diff_overlay.has_baseline() {
+            ui.label("Snapshot captured; edit, then Diff");
+        } else {
+            ui.label("No snapshot");
+        }
+    }
+
+    /// Diffs the captured baseline against the current document and reports the
+    /// result on the status line.
+    fn compute_diff(&mut self) {
+        match self.diff_overlay.compute(self.history.document()) {
+            Some(0) => self.status.set("Diff: no differences"),
+            Some(n) => self.status.set(format!(
+                "Diff: +{} -{} ({n} total)",
+                self.diff_overlay.added_count(),
+                self.diff_overlay.removed_count(),
+            )),
+            None => self.status.set("Diff: snapshot first"),
         }
     }
 
@@ -5282,6 +5355,7 @@ impl App {
             self.draw_generate_preview(&painter, &screen, viewport);
             self.draw_drc_markers(&painter, &screen);
             self.draw_live_drc_underlines(&painter, &screen);
+            self.draw_diff_overlay(&painter, &screen);
         }
 
         // User guides under the ruler bars, then the rulers cover their ends.
@@ -6335,6 +6409,37 @@ impl App {
                     .collect();
             if pts.len() >= 2 {
                 painter.add(Shape::line(pts, stroke));
+            }
+        }
+    }
+
+    /// Paints the layout-diff overlay: added shapes green, removed red, changed
+    /// amber.
+    ///
+    /// Each reported [`DiffShape`](reticle_diff::DiffShape) is drawn as an outlined,
+    /// faintly filled rectangle at its bounding box (world to screen via the
+    /// camera). Nothing paints when the overlay is hidden or no diff has been
+    /// computed (see [`crate::diff_overlay::DiffOverlay::should_paint`]); `changed`
+    /// is always empty in v1, so the amber pass draws nothing today.
+    fn draw_diff_overlay(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        if !self.diff_overlay.should_paint() {
+            return;
+        }
+        let added = Color32::from_rgb(90, 220, 120);
+        let removed = Color32::from_rgb(255, 90, 90);
+        let changed = Color32::from_rgb(255, 190, 60);
+        for (shapes, color) in [
+            (self.diff_overlay.added(), added),
+            (self.diff_overlay.removed(), removed),
+            (self.diff_overlay.changed(), changed),
+        ] {
+            let stroke = Stroke::new(2.0, color);
+            let fill = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 40);
+            for shape in shapes {
+                // Inflate a touch so a zero-area shape still shows as a small box.
+                let e = self.world_rect_to_screen(screen, shape.rect).expand(1.0);
+                painter.rect_filled(e, 0.0, fill);
+                painter.rect_stroke(e, 0.0, stroke, StrokeKind::Middle);
             }
         }
     }

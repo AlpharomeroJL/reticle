@@ -4100,6 +4100,7 @@ dependencies = [
  "image",
  "js-sys",
  "reticle-agent-api",
+ "reticle-diff",
  "reticle-drc",
  "reticle-extract",
  "reticle-gen",
@@ -4187,6 +4188,15 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tower",
+]
+
+[[package]]
+name = "reticle-diff"
+version = "7.0.0"
+dependencies = [
+ "proptest",
+ "reticle-geometry",
+ "reticle-model",
 ]
 
 [[package]]
