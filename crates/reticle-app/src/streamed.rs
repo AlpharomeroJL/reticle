@@ -334,6 +334,13 @@ fn tile_id_to_coord(id: TileId) -> TileCoord {
 #[derive(Clone, Default, Debug)]
 pub struct TileInbox {
     inner: std::rc::Rc<std::cell::RefCell<std::collections::VecDeque<(TileCoord, TilePayload)>>>,
+    /// Cumulative raw transport bytes fetched over the lifetime of every fetch that
+    /// posted through [`post_metered`](Self::post_metered), for the streaming HUD. Shared
+    /// (an [`std::rc::Rc`]) so every in-flight fetch increments the same total.
+    fetched_bytes: std::rc::Rc<std::cell::Cell<u64>>,
+    /// The number of tile fetches that have completed and posted, the denominator of the
+    /// HUD's mean-tile-size estimate.
+    fetch_count: std::rc::Rc<std::cell::Cell<u64>>,
 }
 
 impl TileInbox {
@@ -346,6 +353,30 @@ impl TileInbox {
     /// Posts a decoded tile for the scene to adopt next frame.
     pub fn post(&self, coord: TileCoord, payload: TilePayload) {
         self.inner.borrow_mut().push_back((coord, payload));
+    }
+
+    /// Posts a decoded tile *and* records the `nbytes` of raw transport it cost, so the
+    /// streaming HUD can total network traffic and estimate the mean tile size.
+    ///
+    /// This is what the fetch path ([`fetch_tile`]) uses; the plain [`post`](Self::post)
+    /// stays unmetered for synthetic tiles inserted by a test or a non-network source.
+    pub fn post_metered(&self, coord: TileCoord, payload: TilePayload, nbytes: usize) {
+        self.fetched_bytes
+            .set(self.fetched_bytes.get().saturating_add(nbytes as u64));
+        self.fetch_count.set(self.fetch_count.get() + 1);
+        self.post(coord, payload);
+    }
+
+    /// The cumulative raw transport bytes fetched through [`post_metered`](Self::post_metered).
+    #[must_use]
+    pub fn fetched_bytes(&self) -> u64 {
+        self.fetched_bytes.get()
+    }
+
+    /// The number of tile fetches that have posted through [`post_metered`](Self::post_metered).
+    #[must_use]
+    pub fn fetch_count(&self) -> u64 {
+        self.fetch_count.get()
     }
 
     /// Whether no fetched tiles are waiting.
@@ -392,7 +423,8 @@ pub async fn fetch_tile<S: TileSource>(
     let bytes = source.tile_bytes(coord).await?;
     let payload = rkyv::from_bytes::<TilePayload, rkyv::rancor::Error>(&bytes)
         .map_err(|e| reticle_index::TileSourceError::Malformed(e.to_string()))?;
-    inbox.post(coord, payload);
+    // Meter the raw transport cost (before decode) so the HUD can total network bytes.
+    inbox.post_metered(coord, payload, bytes.len());
     Ok(())
 }
 
@@ -592,6 +624,25 @@ mod tests {
         assert!(scene.is_resident(a), "a was touched, stays resident");
         assert!(scene.is_resident(c), "c is newest");
         assert!(!scene.is_resident(b), "b was the LRU and was evicted");
+    }
+
+    #[test]
+    fn inbox_meters_fetched_bytes_but_plain_post_does_not() {
+        let inbox = TileInbox::new();
+        let coord = TileCoord {
+            level: 0,
+            col: 0,
+            row: 0,
+        };
+        // A plain post is unmetered (a synthetic/non-network tile).
+        inbox.post(coord, TilePayload::default());
+        assert_eq!(inbox.fetched_bytes(), 0);
+        assert_eq!(inbox.fetch_count(), 0);
+        // A metered post accumulates raw transport bytes and the fetch count.
+        inbox.post_metered(coord, TilePayload::default(), 128);
+        inbox.post_metered(coord, TilePayload::default(), 64);
+        assert_eq!(inbox.fetched_bytes(), 192);
+        assert_eq!(inbox.fetch_count(), 2);
     }
 
     #[test]

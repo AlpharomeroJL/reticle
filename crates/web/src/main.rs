@@ -90,6 +90,10 @@ fn set_overlay_error(document: &web_sys::Document, message: &str) {
 enum Boot {
     /// Open into a normal start view (editor or replay theater), per `?view=`.
     View(reticle_app::StartView),
+    /// Browse a served `.rtla` archive streamed over HTTP-range, named by an `?archive=`
+    /// link (lane v8-2e, ADR 0062). The bundle opens the archive on its first frame and
+    /// paints the read-only streamed die with progressive residency.
+    Archive(String),
     /// Open as a read-only viewer of the shared session named by a viewer link
     /// (`?view=viewer&room=..&relay=..`, ADR 0038/0058).
     Viewer(reticle_app::share::ViewerTarget),
@@ -119,6 +123,7 @@ impl Boot {
         use reticle_app::{App, StartView};
         match self {
             Boot::View(start_view) => Box::new(App::with_start_view(start_view)),
+            Boot::Archive(url) => Box::new(App::with_archive(url)),
             Boot::Viewer(target) => Box::new(App::with_viewer(target)),
             Boot::Share {
                 relay,
@@ -147,6 +152,13 @@ fn boot_from_url() -> Boot {
     let search = web_sys::window()
         .and_then(|w| w.location().search().ok())
         .unwrap_or_default();
+
+    // An `?archive=` link boots the served-archive browse: it streams a read-only
+    // `.rtla` die rather than opening an editable document (lane v8-2e, ADR 0062).
+    if let Some(url) = reticle_app::share::archive_url_from_query(&search) {
+        web_sys::console::log_1(&format!("reticle: browse served archive '{url}'").into());
+        return Boot::Archive(url);
+    }
 
     // A viewer link wins: it boots the live read-only viewer transport (ADR 0058).
     if let Some(target) = viewer_target_from_search(&search) {

@@ -27,6 +27,14 @@ const SUBPATH_PORT = Number(process.env.SUBPATH_PORT || 8081);
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 const SUBPATH_BASE_URL = `http://127.0.0.1:${SUBPATH_PORT}/reticle/`;
 
+// The served-archive e2e (lane v8-2e) opens `?archive=<url>` pointing at a committed
+// `.rtla` fixture served with HTTP Range support by serve-archive.mjs on ARCHIVE_PORT
+// (8082). It runs against this LOCAL ranged server regardless of any cloud hosting (a
+// Wave 2 gate requirement), and on a different port than the bundle so the fetch is
+// cross-origin (which the local server answers with permissive CORS).
+const ARCHIVE_PORT = Number(process.env.ARCHIVE_PORT || 8082);
+const ARCHIVE_HEALTH_URL = `http://127.0.0.1:${ARCHIVE_PORT}/fixture.rtla`;
+
 // The share-live e2e (ADR 0058) needs a real reticle-server relay running alongside
 // the bundle. It is opt-in (SHARE_LIVE=1, set by `just e2e-share`) so the ordinary
 // e2e run does not require the relay binary to be built. serve-relay.mjs launches the
@@ -65,12 +73,12 @@ export default defineConfig({
     {
       name: "webgl2",
       // The subpath and share-live specs run in their own projects.
-      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts/,
+      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts/,
       use: { launchOptions: { args: WEBGL2_ARGS } },
     },
     {
       name: "webgpu",
-      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts/,
+      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts/,
       use: { launchOptions: { args: WEBGPU_ARGS } },
     },
     {
@@ -90,6 +98,15 @@ export default defineConfig({
       testMatch: /share-live\.spec\.ts/,
       use: { launchOptions: { args: WEBGL2_ARGS } },
     },
+    {
+      // The served-archive streaming e2e (lane v8-2e). The bundle is served at root by
+      // serve-dist.mjs (8080); the `.rtla` fixture it streams comes from the ranged
+      // serve-archive.mjs (8082). WebGL2 fallback, since headless Chromium has no
+      // WebGPU adapter here.
+      name: "served-archive",
+      testMatch: /served-archive\.spec\.ts/,
+      use: { launchOptions: { args: WEBGL2_ARGS } },
+    },
   ],
   webServer: [
     {
@@ -104,6 +121,17 @@ export default defineConfig({
       command: "node serve-subpath.mjs",
       // Wait on the subpath URL so Playwright confirms the mount is live.
       url: SUBPATH_BASE_URL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+    {
+      // The Range-capable server for the served-archive spec's `.rtla` fixture. Cheap
+      // and dependency-free, so it runs alongside every project (only served-archive
+      // fetches from it). Wait on the fixture URL to confirm it is serving.
+      command: "node serve-archive.mjs",
+      url: ARCHIVE_HEALTH_URL,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
       stdout: "pipe",

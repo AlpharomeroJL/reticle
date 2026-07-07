@@ -63,3 +63,33 @@ immediately after a zoom-in the scene paints from the coarse resident level with
 tile resident, and after the injected delay elapses the resident set has transitioned
 coarse to fine, the painted level is the fine level, and the painted record set matches
 the fine-level query exactly.
+
+## Opening a served archive in the browser: `?archive=`
+
+The browser build turns a served `.rtla` into a browsable die from a URL alone. A page
+opened with `?archive=<url>` (parsed by `share::archive_url_from_query`, a pure,
+round-tripped parser distinct from the `?gds=` open that imports an *editable* document)
+boots into a read-only browse: on the first frame it constructs an `HttpRangeTileSource`
+over `<url>`, reads and validates the header, builds a `StreamedScene`, and installs it as
+a `DocHost::Streamed`. From then on the canvas paints the streamed die with the
+coarse-then-fine residency described above, driven once per frame from the live camera
+viewport; browse, measure, and query work, while an edit stays a compile error because the
+`Streamed` arm hands out no `History`.
+
+The streamed source is designed for a Web Worker, whose synchronous OPFS access handles let
+it persist tiles across reloads. Wired into the *main-thread* `DocHost`, that OPFS path is
+unavailable (the synchronous access handle exists only in a worker), so the browse reports
+OPFS as absent and falls back to the network plus the source's in-memory LRU cache. Losing
+the cross-reload persistence is the only cost; a worker-hosted source (a later lane) regains
+it without changing this wiring.
+
+### The streaming HUD
+
+While a served archive is open, an on-canvas HUD reports the stream in real time: the bytes
+fetched over the network against the archive's total size (probed once with a ranged
+`bytes=0-0` GET reading the `Content-Range` total), the number of tiles currently resident,
+the records painted this frame, a working-set estimate (resident tiles times the mean
+fetched tile size), and the frame rate. The counter arithmetic is a pure `ArchiveStats`
+value, unit-tested without a window, and is also published each frame to a
+`window.__reticle_stats` seam that the served-archive end-to-end test polls to prove tiles
+stream in over HTTP Range and records actually paint.
