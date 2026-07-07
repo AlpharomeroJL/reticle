@@ -461,15 +461,17 @@ dependencies = [
 
 [[package]]
 name = "reticle-geometry"
-version = "0.1.0"
+version = "7.0.0"
 dependencies = [
  "i_overlay",
+ "serde",
 ]
 
 [[package]]
 name = "reticle-io"
-version = "0.1.0"
+version = "7.0.0"
 dependencies = [
+ "chrono",
  "gds21",
  "reticle-geometry",
  "reticle-model",
@@ -477,7 +479,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-model"
-version = "0.1.0"
+version = "7.0.0"
 dependencies = [
  "reticle-geometry",
 ]

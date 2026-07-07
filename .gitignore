@@ -36,6 +36,11 @@ Thumbs.db
 # Local environment.
 .env
 
+# Cloudflare Wrangler local state (auth cache, DO/miniflare sim state). The
+# committed relay config lives under worker/; this is machine-local runtime.
+/.wrangler/
+**/.wrangler/
+
 # Local tooling/config and the internal build specification (not shipped).
 /.claude/
 /.mcp.json
