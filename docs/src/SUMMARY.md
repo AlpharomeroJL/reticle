@@ -33,6 +33,8 @@
 - [MCP server](mcp.md)
 - [Agent benchmark suite](benchmarks.md)
   - [Benchmark methodology](benchmark.md)
+  - [Leaderboard](leaderboard.md)
+  - [Submitting a run](submitting.md)
 
 # Tape-out
 
