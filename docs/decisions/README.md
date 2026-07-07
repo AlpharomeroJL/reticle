@@ -73,3 +73,4 @@ superseded decision is marked and linked to its replacement.
 | [0065](0065-relay-conformance-vector-format.md) | The relay conformance vector format: one table, two targets, presence coalescing the only target-aware branch |
 | [0066](0066-agent-live-room-and-id-addressed-mirroring.md) | The agent in a real relay room: id-addressed (transform/delete) mirroring and a native live client |
 | [0067](0067-permalink-view-param-disambiguation.md) | Permalinks reuse `?view=`, disambiguated by shape (three floats is a camera, else the start-view selector) |
+| [0068](0068-static-leaderboard-record-format-as-api.md) | A deterministic static leaderboard with the record format as its API |
