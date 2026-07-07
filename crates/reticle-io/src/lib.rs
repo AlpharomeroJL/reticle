@@ -27,10 +27,12 @@
 
 pub mod error;
 pub mod gds;
+pub mod gds_stream;
 pub mod oasis;
 pub mod technology;
 
 pub use error::{ImportWarning, IoError, WarningKind};
 pub use gds::{Gds, GdsImport};
+pub use gds_stream::{GdsEvent, GdsRecordReader};
 pub use oasis::Oasis;
 pub use technology::{parse_technology, write_technology};
