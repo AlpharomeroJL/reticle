@@ -400,8 +400,12 @@ New subsystems, itemized with their honest limits:
   longer recomputes the array-placement transform per copy, a measured 68% drop on the
   flatten bench (open CPU on a 4.19M-leaf design ~230 to ~31 ms), correctness pinned by an
   equivalence test, with a zero-buffer-growth soak (before/after in `docs/PERF.md`).
-  *Honest:* wasm live-pan latency is browser-only and not measured here; a GDS AREF-decode
-  off-by-one found in passing is filed as an independent follow-up.
+  *Honest:* wasm live-pan latency is browser-only and not measured here. (An earlier
+  revision filed a "GDS AREF-decode off-by-one found in passing"; that was a misdiagnosis.
+  The AREF import copies the COLROW counts verbatim and flatten loops `0..columns`, so the
+  parse is launch-independent; the real launch-context effect was a working-directory bug in
+  `scripts/measure-run.ps1`. Retracted and closed at the v7 finish, the decode pinned correct
+  by a round-trip leaf-count test. See ADR 0057 and `docs/PERF.md`.)
 
 Honest limitations (v7), consolidated: (1) the Claude Code benchmark row is a **not-run**
 (CLI unauthenticated in this environment); (2) the TinyTapeout **precheck** live run and
