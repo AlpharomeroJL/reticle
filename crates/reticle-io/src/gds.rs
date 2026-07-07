@@ -68,11 +68,11 @@ use reticle_model::{
 /// [`Gds::import`] never panics and never hangs, whatever bytes it is handed.
 /// `gds21` reads from an in-memory cursor and every record consumes at least four
 /// bytes, so parsing a finite slice terminates and allocates O(input) memory. The
-/// one known input class that panics `gds21` internally (an out-of-range BGNLIB or
-/// BGNSTR date field, which panics chrono) is neutralized BEFORE parsing by an
-/// internal date-record sanitizer, which matters on wasm where panics abort and
-/// cannot be caught; any remaining unknown `gds21` panic (for example a zero-length
-/// string record) is contained with [`std::panic::catch_unwind`] on native targets
+/// input classes known to panic `gds21` internally (an out-of-range BGNLIB or
+/// BGNSTR date field that panics chrono; a zero-length string record whose
+/// `read_str` indexes `data[-1]`) are neutralized BEFORE parsing by an internal
+/// record guard, which matters on wasm where panics abort and cannot be caught;
+/// any remaining unknown `gds21` panic is contained with `catch_unwind` on native
 /// and returned as [`IoError`]. Before parsing, an input larger than
 /// [`MAX_INPUT_BYTES`] is rejected outright so a hostile length can never force a
 /// huge allocation. After parsing, geometry that survived `gds21` but is
@@ -117,6 +117,10 @@ const RECTYPE_BGNSTR: u8 = 0x05;
 /// GDSII data type code for a two-byte signed integer array, the only encoding a
 /// conformant date record uses.
 const DATATYPE_I16: u8 = 0x02;
+/// GDSII data type code for an ASCII string payload. `gds21` reads every such
+/// record through `read_str`, which indexes `data[len - 1]` and so panics on a
+/// zero-length (payload-less) string record.
+const DATATYPE_STR: u8 = 0x06;
 /// The replacement written over an out-of-range date payload: 1970-01-01
 /// 00:00:00 for both the modification and access stamps. The model does not
 /// store file dates (export already writes a fixed stamp; ADR 0056), so
@@ -160,22 +164,27 @@ fn datetime_fields_valid(fields: &[i16]) -> bool {
         && second <= 59
 }
 
-/// Walks the raw GDSII record stream and rewrites any BGNLIB/BGNSTR date payload
-/// that would panic chrono inside `gds21` (`from_ymd`/`and_hms` on out-of-range
-/// fields) to the fixed [`EPOCH_DATES`] pair. Returns how many records were
-/// rewritten.
+/// Walks the raw GDSII record stream and neutralizes the inputs known to panic
+/// `gds21` internally, before `gds21` ever sees the bytes. Returns the number of
+/// date records rewritten, or an [`IoError`] for a malformed record that `gds21`
+/// would panic on rather than reject (a zero-length string record).
 ///
-/// This runs BEFORE `gds21` sees the bytes so the known panic cannot fire at
-/// all, which matters beyond tidiness: on `wasm32-unknown-unknown` panics abort
-/// the instance and [`std::panic::catch_unwind`] cannot contain them, so a
-/// malformed file dropped into the browser would otherwise kill the tab. Found
-/// by the v8 fuzz campaign (see `tests/gds_fuzz_regressions.rs`).
+/// This pre-pass exists because on `wasm32-unknown-unknown` a panic aborts the
+/// whole instance and [`std::panic::catch_unwind`] cannot contain it, so a
+/// malformed file dropped into the browser would kill the tab. The two panic
+/// classes the v8 fuzz campaign found (see `tests/gds_fuzz_regressions.rs`):
+///
+/// * A BGNLIB/BGNSTR date field out of chrono's calendar range: rewritten to
+///   [`EPOCH_DATES`] (dates are not modeled, so this loses nothing) and counted.
+/// * A string-typed record (`gds21`'s `read_str`) with a zero-length payload:
+///   `read_str` indexes `data[len - 1]`, so `len == 0` panics. Such a record is
+///   malformed (a GDSII string is non-empty and even-length), and `gds21` cannot
+///   parse past it, so this returns a clean `Err` rather than trying to repair it.
 ///
 /// The walk is conservative: it stops at the first malformed record header
-/// (length under four, odd, or past the end) and leaves everything else
-/// untouched; `gds21` reports those inputs itself. Only records with the exact
-/// conformant shape (i16-array data type, 24-byte payload) are candidates.
-fn sanitize_date_records(bytes: &mut [u8]) -> usize {
+/// (length under four, odd, or past the end) and leaves the rest untouched;
+/// `gds21` reports those inputs itself via its own `Err` path.
+fn guard_gds21_records(bytes: &mut [u8]) -> Result<usize> {
     let mut rewritten = 0;
     let mut i = 0usize;
     while i + 4 <= bytes.len() {
@@ -185,6 +194,16 @@ fn sanitize_date_records(bytes: &mut [u8]) -> usize {
         }
         let rectype = bytes[i + 2];
         let datatype = bytes[i + 3];
+        let payload_len = reclen - 4;
+
+        // Zero-length string record: gds21's read_str panics on data[len - 1].
+        if datatype == DATATYPE_STR && payload_len == 0 {
+            return Err(IoError::Malformed(
+                "GDSII zero-length string record (gds21 read_str would panic)",
+            )
+            .into());
+        }
+
         if (rectype == RECTYPE_BGNLIB || rectype == RECTYPE_BGNSTR)
             && datatype == DATATYPE_I16
             && reclen == 4 + 24
@@ -205,7 +224,7 @@ fn sanitize_date_records(bytes: &mut [u8]) -> usize {
         }
         i += reclen;
     }
-    rewritten
+    Ok(rewritten)
 }
 
 /// The result of a GDSII import that kept its non-fatal warnings.
@@ -267,11 +286,11 @@ impl Gds {
 
         let mut warnings = Warnings::new();
 
-        // Rewrite chrono-invalid BGNLIB/BGNSTR dates BEFORE `gds21` parses, so its
-        // known date panic cannot fire at all. This is the load-bearing guard on
-        // wasm, where panics abort and `catch_unwind` below offers no protection.
+        // Neutralize the inputs known to panic `gds21` (out-of-range dates,
+        // zero-length string records) BEFORE it parses. This is the load-bearing
+        // guard on wasm, where panics abort and `catch_unwind` below cannot help.
         let mut owned = bytes.to_vec();
-        let rewritten = sanitize_date_records(&mut owned);
+        let rewritten = guard_gds21_records(&mut owned)?;
         if rewritten > 0 {
             warnings.push(ImportWarning::new(
                 WarningKind::ValueClamped,
@@ -1069,7 +1088,7 @@ fn clamp_i16(v: u32) -> i16 {
 
 #[cfg(test)]
 mod tests {
-    use super::{EPOCH_DATES, datetime_fields_valid, days_in_month, sanitize_date_records};
+    use super::{EPOCH_DATES, datetime_fields_valid, days_in_month, guard_gds21_records};
 
     /// Builds one GDS record: `[len_hi, len_lo, rectype, datatype, payload...]`.
     fn record(rectype: u8, datatype: u8, payload: &[u8]) -> Vec<u8> {
@@ -1112,7 +1131,7 @@ mod tests {
         bytes.extend(record(0x01, 0x02, &date_payload(VALID))); // BGNLIB
         bytes.extend(record(0x05, 0x02, &date_payload(VALID))); // BGNSTR
         let before = bytes.clone();
-        assert_eq!(sanitize_date_records(&mut bytes), 0);
+        assert_eq!(guard_gds21_records(&mut bytes).unwrap(), 0);
         assert_eq!(bytes, before);
     }
 
@@ -1123,11 +1142,28 @@ mod tests {
         let mut bytes = Vec::new();
         bytes.extend(record(0x00, 0x02, &[0, 3]));
         bytes.extend(record(0x01, 0x02, &date_payload(bad)));
-        assert_eq!(sanitize_date_records(&mut bytes), 1);
+        assert_eq!(guard_gds21_records(&mut bytes).unwrap(), 1);
         let rewritten = &bytes[bytes.len() - 24..];
         assert_eq!(rewritten, date_payload(EPOCH_DATES).as_slice());
         // A second pass finds nothing left to fix (idempotent).
-        assert_eq!(sanitize_date_records(&mut bytes), 0);
+        assert_eq!(guard_gds21_records(&mut bytes).unwrap(), 0);
+    }
+
+    #[test]
+    fn zero_length_string_record_is_rejected() {
+        // A string-typed record (dtype 0x06) with no payload: gds21's read_str
+        // would index data[-1] and panic. Preceded by a valid HEADER so the walk
+        // reaches it. The guard must return Err, not rewrite.
+        let mut bytes = Vec::new();
+        bytes.extend(record(0x00, 0x02, &[0, 3])); // HEADER v3
+        bytes.extend(record(0x02, 0x06, &[])); // LIBNAME, string type, empty
+        assert!(guard_gds21_records(&mut bytes).is_err());
+
+        // A non-empty string record of the same type is fine (even length).
+        let mut ok = Vec::new();
+        ok.extend(record(0x00, 0x02, &[0, 3]));
+        ok.extend(record(0x02, 0x06, b"AB"));
+        assert_eq!(guard_gds21_records(&mut ok).unwrap(), 0);
     }
 
     #[test]
@@ -1137,19 +1173,19 @@ mod tests {
         bad[1] = 0;
         let mut bytes = record(0x01, 0x03, &date_payload(bad));
         let before = bytes.clone();
-        assert_eq!(sanitize_date_records(&mut bytes), 0);
+        assert_eq!(guard_gds21_records(&mut bytes).unwrap(), 0);
         assert_eq!(bytes, before);
 
         // Wrong payload length: left alone for gds21 to report.
         let mut bytes = record(0x01, 0x02, &[0, 16, 0, 1]);
         let before = bytes.clone();
-        assert_eq!(sanitize_date_records(&mut bytes), 0);
+        assert_eq!(guard_gds21_records(&mut bytes).unwrap(), 0);
         assert_eq!(bytes, before);
 
         // Malformed header (length runs past the end): the walk stops cleanly.
         let mut bytes = vec![0xFF, 0xFF, 0x01, 0x02, 0, 0];
         let before = bytes.clone();
-        assert_eq!(sanitize_date_records(&mut bytes), 0);
+        assert_eq!(guard_gds21_records(&mut bytes).unwrap(), 0);
         assert_eq!(bytes, before);
     }
 }
