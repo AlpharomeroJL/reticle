@@ -5,13 +5,13 @@
 //! element into a per-placement transform buffer *on the CPU* once, then redraws it.
 //! That is fine to tens of millions of placements, but the CPU expansion and the
 //! materialized per-placement buffer both scale with the flat-equivalent shape count,
-//! so a 100M-element arrayed design (a large via/fill/bit-cell array — routine in real
+//! so a 100M-element arrayed design (a large via/fill/bit-cell array  -  routine in real
 //! layout) pays a large one-time CPU cost and stores every placement.
 //!
 //! [`GpuHierarchy`] keeps the scene *compact and GPU-resident*: a small table of
 //! [`ArrayPlacement`] records (one per array reference, not per element) and a table of
 //! leaf [`crate::RectInstance`] cells are uploaded once. Every frame a single compute
-//! pass — [`expand_cull_compact.wgsl`](../../shaders/expand_cull_compact.wgsl) —
+//! pass  -  [`expand_cull_compact.wgsl`](../../shaders/expand_cull_compact.wgsl)  -
 //! expands the arrays element-by-element, culls each against the viewport, and
 //! stream-compacts the survivors into ready-to-draw [`RectInstanceT`] buffers, filling
 //! an indirect `instance_count` so the GPU decides how many to draw.
@@ -30,8 +30,8 @@
 //!
 //! The per-frame path ([`GpuHierarchy::expand`] + [`GpuHierarchy::draw`]) iterates only
 //! the chunk list (a handful of entries), never per-placement or per-element data. The
-//! [`cpu_expand_ops`] counter — bumped only by the CPU reference expansion used in
-//! tests — stays flat across frames, which the crate tests assert.
+//! [`cpu_expand_ops`] counter  -  bumped only by the CPU reference expansion used in
+//! tests  -  stays flat across frames, which the crate tests assert.
 
 use crate::context::WgpuContext;
 use crate::geometry::RectInstance;
@@ -51,7 +51,7 @@ use wgpu::{
 ///
 /// Only [`GpuHierarchy::cpu_reference`] (a test/validation helper) bumps this, once per
 /// expanded element. The per-frame GPU path never does, so a steady-state frame loop
-/// leaves it unchanged — the observable form of "zero per-frame CPU draw-list touch".
+/// leaves it unchanged  -  the observable form of "zero per-frame CPU draw-list touch".
 static CPU_EXPAND_OPS: AtomicU64 = AtomicU64::new(0);
 
 /// The current value of the CPU per-element expansion counter (`CPU_EXPAND_OPS`).

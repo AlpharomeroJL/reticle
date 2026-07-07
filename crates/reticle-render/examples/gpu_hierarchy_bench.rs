@@ -1,7 +1,7 @@
 //! Fully GPU-resident hierarchy throughput at 30M and 100M flat-equivalent shapes.
 //!
-//! Builds a large arrayed scene — one leaf rect referenced by a single huge array (a
-//! via/fill/bit-cell array, routine in real IC layout) — uploads it once as a compact
+//! Builds a large arrayed scene  -  one leaf rect referenced by a single huge array (a
+//! via/fill/bit-cell array, routine in real IC layout)  -  uploads it once as a compact
 //! [`GpuHierarchy`] (one array record plus one cell, a few dozen bytes), and then each
 //! frame runs the GPU expand + cull + compact pass and one indirect draw per chunk. The
 //! CPU never expands, culls, or stores a per-element draw list.
@@ -9,11 +9,11 @@
 //! Two viewport regimes are timed per N, because they stress different things:
 //!
 //! - **zoomed-out (whole design):** every element is expanded, most survive the cull,
-//!   and all are drawn — so this includes the full rasterization/overdraw cost of N
+//!   and all are drawn  -  so this includes the full rasterization/overdraw cost of N
 //!   sub-pixel quads. This is the worst case for the draw.
 //! - **zoomed-in (a small window):** every element is still expanded and culled on the
 //!   GPU each frame, but only a handful survive to be drawn. This isolates the
-//!   expand+cull throughput — the honest "pan/zoom over a 100M design" number.
+//!   expand+cull throughput  -  the honest "pan/zoom over a 100M design" number.
 //!
 //! A third figure, **expand-only**, times just the compute pass (forced to GPU
 //! completion) with no draw or readback, so it reports the raw expand+cull rate in
