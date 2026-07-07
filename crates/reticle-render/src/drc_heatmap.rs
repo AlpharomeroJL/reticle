@@ -432,6 +432,12 @@ impl DrcHeatmap {
     ///
     /// An empty input returns an output over a trivial `1 x 1` grid with a zero-length
     /// flag buffer, without dispatching.
+    ///
+    /// The input is capped to [`device_instance_cap`] instances (what a single compute
+    /// dispatch and one storage binding hold on this device); a larger slice is processed
+    /// over its leading `cap` instances rather than tripping wgpu validation. The overlay
+    /// targets the visible (culled) instance set, which sits far below the cap in
+    /// practice; the CPU `DrcEngine` remains the unbounded, authoritative oracle.
     #[must_use]
     pub fn run(
         &self,
@@ -439,7 +445,21 @@ impl DrcHeatmap {
         instances: &[RectInstanceT],
         rules: DrcRules,
     ) -> DrcOutput {
+        self.run_with_cap(ctx, instances, rules, device_instance_cap(ctx.device()))
+    }
+
+    /// [`DrcHeatmap::run`] with an explicit instance `cap`, so a test can exercise the
+    /// capping path without allocating a device-limit-sized input.
+    #[must_use]
+    fn run_with_cap(
+        &self,
+        ctx: &WgpuContext,
+        instances: &[RectInstanceT],
+        rules: DrcRules,
+        cap: usize,
+    ) -> DrcOutput {
         let device = ctx.device();
+        let instances = &instances[..instances.len().min(cap)];
         let plan = plan_grid(instances, rules.min_spacing);
         let count = u32::try_from(instances.len()).unwrap_or(u32::MAX);
         let bins = plan.bins();
@@ -820,6 +840,22 @@ impl DrcHeatmapOverlay {
     }
 }
 
+/// The largest instance count [`DrcHeatmap::run`] processes on `device` in one dispatch.
+///
+/// Bounded by the storage-binding limit and max buffer size (the instance buffer is one
+/// `size_of::<RectInstanceT>()`-stride storage binding) and by the compute dispatch count
+/// (`max_compute_workgroups_per_dimension * WORKGROUP_SIZE` threads). Mirrors
+/// `GpuHierarchy::derive_chunk_cap`; a larger input is capped, never panicking wgpu.
+fn device_instance_cap(device: &wgpu::Device) -> usize {
+    let limits = device.limits();
+    let stride = core::mem::size_of::<RectInstanceT>() as u64;
+    let by_binding = limits.max_storage_buffer_binding_size / stride;
+    let by_buffer = limits.max_buffer_size / stride;
+    let by_dispatch =
+        u64::from(limits.max_compute_workgroups_per_dimension) * u64::from(WORKGROUP_SIZE);
+    usize::try_from(by_binding.min(by_buffer).min(by_dispatch)).unwrap_or(usize::MAX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -854,6 +890,35 @@ mod tests {
     fn plan_grid_empty_is_trivial() {
         let plan = plan_grid(&[], 5);
         assert_eq!(plan.grid, [1, 1]);
+    }
+
+    #[test]
+    fn run_caps_oversized_input_without_panicking() {
+        let Some(ctx) = WgpuContext::new_blocking() else {
+            eprintln!("no GPU adapter available; skipping");
+            return;
+        };
+        let heatmap = DrcHeatmap::new(&ctx);
+        let insts: Vec<RectInstanceT> = (0..6)
+            .map(|i| {
+                let x = i as f32 * 100.0;
+                ident([x, 0.0], [x + 10.0, 10.0])
+            })
+            .collect();
+        let rules = DrcRules {
+            min_width: 5,
+            min_spacing: 20,
+        };
+
+        // A tiny artificial cap forces the clamp path: only the leading two instances are
+        // processed, and the dispatch runs without tripping wgpu validation.
+        let capped = heatmap.run_with_cap(&ctx, &insts, rules, 2);
+        assert_eq!(capped.count, 2, "run_with_cap must clamp to `cap`");
+
+        // The real device cap is positive and does not clamp a normal, small input.
+        assert!(device_instance_cap(ctx.device()) >= insts.len());
+        let full = heatmap.run(&ctx, &insts, rules);
+        assert_eq!(full.count, insts.len() as u32);
     }
 
     /// The corners are exact integers below `2^24`, so `f32` holds them precisely;
