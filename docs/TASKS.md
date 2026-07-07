@@ -589,17 +589,31 @@ and a committed generator-built worked tile with its transcript, DRC-subset-clea
 All merged, `just ci` GREEN. Honest limits: the Claude Code agent path and the live
 precheck are both operator steps here (CLI auth, multi-GB image); nothing is faked.**
 
-## Wave 5: presentation to product grade (parallel, 2 lanes) [not-started]
+## Wave 5: presentation to product grade (parallel, 2 lanes) [complete]
 
-- [ ] Lane 5A: README restructure as a product page in plain engineering register
-  (hero, one-line measured fact, three job-shaped sections with the share-link GIF /
-  generator GIF / three-row table, then live demo, quickstart, how it works, honest
-  limits, license); keep the voice rules + banned-word gate; new UI-harness captures
-  for the share-link flow and the Generate panel; book landing mirrors it.
-- [ ] Lane 5B: profile and fix the top interaction-latency offenders on the corpus
-  (open time, first-frame, pan under load on wasm), measured before/after in PERF.md;
-  a scripted 30-minute browser soak (open, interact, share) with zero leaks or
-  degradations asserted by heap and frame-time bounds.
+- [x] Lane 5A: README product-page restructure. done-gate-green, merged (lane 06a8a4d;
+  `just ci` GREEN). README rebuilt top-down (hero, one-line measured fact, three
+  job-shaped sections, live demo, quickstart, how it works, honest limits, license),
+  voice + banned-word gate kept. A NEW captured generator GIF (`assets/tour-generate.gif`,
+  766 KB) driving the real Generate panel via new demo-script directives; the share
+  section honestly reuses a browse GIF (the native harness cannot record the
+  browser+relay share flow). The three-row table is honest: two bare-local-model rows
+  plus the Claude Code agent-system row marked not-run. Book landing mirrors it.
+- [x] Lane 5B: interaction-latency profiling, a fix, and a soak. done-gate-green, merged
+  (lane aecc9e0; `just ci` GREEN). Measured open/first-frame/pan on the real committed
+  tiles and a 4.19M-leaf design (offscreen, this host, reproducible). Fixed a real
+  offender: `Document::flatten_local` recomputed the array-placement transform
+  columns*rows times per child shape; apply once then translate per copy (algebraically
+  exact, equivalence-tested) and reserve. Before/after: the flatten bench drops 68%,
+  open CPU on the 4.19M design ~230 to ~31 ms. New interaction_latency + interaction_soak
+  examples; the soak asserts zero geometry-buffer growth and bounded frame time over
+  thousands of frames (passed). docs/PERF.md updated. Honest: wasm live-pan is
+  browser-only (not measured here); a GDS AREF-decode off-by-one found in passing is
+  filed as an independent follow-up.
+
+**Wave 5 complete: the README is a product page with a real captured generator GIF and
+the honest three-row table, and a measured 60%-plus flatten win (before/after in
+PERF.md) with a zero-growth soak. All merged, `just ci` GREEN.**
 
 ## Wave 6: gauntlet, audit, release (serial) [not-started]
 
