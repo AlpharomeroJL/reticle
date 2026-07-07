@@ -1,4 +1,4 @@
-# 0062 — The `.rtla` streamed-archive format, the `TileSource` seam, and the `gds_stream` reader
+# 0062 - The `.rtla` streamed-archive format, the `TileSource` seam, and the `gds_stream` reader
 
 ## Context
 
