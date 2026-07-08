@@ -1,0 +1,156 @@
+# Lucide glyph subset for Reticle chrome (lane 1B, ADR 0097).
+#
+# One Lucide icon name per line (kebab-case, as in the Lucide codepoint map).
+# Blank lines and lines starting with '#' are ignored. scripts/subset-fonts.ps1
+# reads this file to (a) subset lucide.ttf to exactly these glyphs and (b)
+# regenerate crates/reticle-app/src/theme/icons.rs (one SCREAMING_SNAKE_CASE
+# `char` constant per name, sorted).
+#
+# Source of the list: docs/design/ia-inventory.md, walked top to bottom. Every
+# reserved CommandId (section 4), every menu item (section 2), every Inspector
+# group and section, the status bar, overlays, toasts, and the Layers panel gets
+# a glyph. Extending the set is a one-line add plus a subset-fonts.ps1 rerun. We
+# err on inclusion (ADR 0097): a few unused glyphs cost bytes, a missing one
+# blocks a lane.
+
+# --- File menu ---
+folder-open
+globe
+history
+package
+house
+download
+image
+file-code
+table
+
+# --- Edit menu ---
+undo-2
+redo-2
+copy
+scissors
+clipboard-paste
+move
+grid-2x2
+square-stack
+combine
+
+# --- View menu ---
+maximize
+scan
+ratio
+maximize-2
+bookmark
+grid-3x3
+magnet
+tag
+map
+ruler
+square
+rows-2
+columns-2
+box
+layers-2
+panel-right
+presentation
+zoom-in
+zoom-out
+
+# --- Select menu ---
+square-dashed
+layers
+text-search
+
+# --- Draw tools ---
+mouse-pointer-2
+hand
+slice
+pentagon
+pen-tool
+waypoints
+settings-2
+
+# --- Verify menu ---
+shield-check
+scan-eye
+shield-x
+camera
+git-compare
+diff
+
+# --- Share menu ---
+share-2
+link
+external-link
+message-square-plus
+message-square
+navigation
+
+# --- Help menu ---
+compass
+keyboard
+book-open
+sparkles
+settings
+info
+square-plus
+clapperboard
+circle-help
+
+# --- Command palette and navigation ---
+command
+crosshair
+boxes
+focus
+
+# --- Inspector groups and sections ---
+inspect
+clipboard-check
+bot
+sliders-horizontal
+list-tree
+wand-2
+table-properties
+
+# --- Status bar and overlays ---
+box-select
+gauge
+database
+signal
+list
+
+# --- Toasts ---
+circle-check
+circle-x
+triangle-alert
+circle-alert
+loader-circle
+x
+
+# --- Layers panel ---
+eye
+eye-off
+target
+funnel
+grip-vertical
+palette
+paint-bucket
+lock
+
+# --- Shared chrome (chevrons, add/remove, common actions) ---
+chevron-right
+chevron-down
+chevron-up
+chevron-left
+ellipsis
+menu
+plus
+minus
+check
+rotate-ccw
+save
+trash-2
+upload
+search
+play
+square-pen

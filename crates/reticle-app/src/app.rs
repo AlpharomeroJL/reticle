@@ -7236,13 +7236,16 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        // Boot styling hook (ADR 0095): install the tokened dark style once, not
-        // per frame. `theme_dirty` starts true so the first frame applies it, and
-        // a future density or reduced-motion change re-applies by setting the flag
-        // again (lane 4C's Settings dialog in Wave 2). The theme module pins both
-        // egui theme slots to the dark style, so an OS light preference cannot
-        // resurrect the retired stock-light look.
+        // Boot styling hook (ADR 0095, 0097): install the embedded subset faces
+        // (lane 1B) and the tokened dark style (lane 1A) once, not per frame.
+        // `theme_dirty` starts true so the first frame applies both, and a future
+        // density or reduced-motion change re-applies by setting the flag again
+        // (lane 4C's Settings dialog in Wave 2). Fonts do not depend on density,
+        // so re-running install on a density change is a harmless idempotent call.
+        // The theme module pins both egui theme slots to the dark style, so an OS
+        // light preference cannot resurrect the retired stock-light look.
         if self.theme_dirty {
+            crate::theme::fonts::install(&ctx);
             crate::theme::apply::apply(&ctx, self.ui_density, self.reduced_motion);
             self.theme_dirty = false;
         }

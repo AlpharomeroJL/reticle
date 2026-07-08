@@ -22,7 +22,9 @@
 pub mod apply;
 pub mod components;
 pub mod contrast;
+pub mod fonts;
 pub mod gallery;
+pub mod icons;
 pub mod tokens;
 
 /// The color theme selection, persisted with the session.
