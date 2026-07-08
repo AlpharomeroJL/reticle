@@ -74,32 +74,34 @@ that produced it.
 
 The suite is [`benchmarks/layout-tasks/manifest.toml`](benchmarks/layout-tasks/manifest.toml),
 now version 0.5.0, 83 tasks across five tiers (the generator tasks above are among them).
-Two rows below are bare local models driven by Reticle's own propose-verify-correct loop.
-The third is an agent system that brings its own loop, so it is not head-to-head
-comparable.
+The rows below are aggregated from the committed result records by
+[the leaderboard](docs/src/leaderboard.md), which is generated deterministically from
+`benchmarks/results/` and is the live source of truth for these numbers. The recorded runs
+predate the current suite, so each row carries the suite it actually ran and its own
+denominator; the numbers are never compared across different denominators.
 
-| What it is | Detail | Result |
+| What it is | Suite it ran | Result |
 |---|---|---:|
-| `gpt-oss:16k` (MXFP4) | a bare local model driven by Reticle's own loop | 49/83 (59%), v0.5.0 |
-| `qwen2.5-coder:16k` (Q4_K_M) | a bare local model driven by Reticle's own loop | 29/83 (35%), v0.5.0 |
-| Claude Code (`claude-sonnet-5`) | an agent system (its own loop) | 24/25 that ran passed (partial) |
+| `gpt-oss:16k` (MXFP4), a bare local model on Reticle's own loop | 0.4.0 (75 tasks) | 52/75 (69%) |
+| `qwen2.5-coder:16k` (Q4_K_M), a bare local model on Reticle's own loop | 0.4.0 (75 tasks) | 29/75 (39%) |
+| `claude-sonnet-5` via Claude Code, an agent system (its own loop) | 81 of 83 recorded | 72/81 (89%) |
 
-The two local rows are the full 83-task v0.5.0 suite. They are small quantized local
-models, so the numbers are a floor, not an upper bound.
+The two bare rows ran the full 75-task 0.4.0 suite. They are small quantized local models,
+so the numbers are a floor, not an upper bound.
 
 The distinction the table makes is real. The two local models are *bare models*: Reticle
 supplies the loop, feeds the checker's violations back, and decides when a task passes.
 Claude Code is an *agent system* with its own planning-and-tool loop, so pointed at
-Reticle's MCP server it does not run the same harness the two local rows do; its row is not
-a like-for-like comparison. It is a real authenticated run, not a fabricated score, but a
-**partial** one: 25 of the 83 tasks ran (tiers 1 through 3) and 24 passed before the
-subscription rate limits stopped the run, so its denominator differs from the full-suite
-local rows and the tier 4 and 5 tasks were not reached. Per task the harness launches
-`reticle-mcp`, runs `claude -p` over it, replays the captured transcript, and runs the
-task's checker; a rate-limited or unauthenticated session is recorded as an honest not-run,
-never a pass or fail. To run the full suite when the rate window is clear:
-`just bench-agent-claude-code` (on Windows set `RETICLE_CLAUDE_BIN` to the resolved
-`claude.cmd` and `RETICLE_MCP_BIN` to a current `reticle-mcp`). See
+Reticle's MCP server it does not run the same harness the two bare rows do; its row is not
+a like-for-like comparison with them, and its 81-task denominator is a different task set
+than the bare rows' 75. It is a real authenticated run: 72 of 81 recorded tasks passed
+across all five tiers. The denominator is 81, not 83, because 2 tier-5 tasks were never
+recorded when the subscription rate limits stopped the run; an unrecorded task is an honest
+not-run, never a pass or a fail. Per task the harness launches `reticle-mcp`, runs
+`claude -p` over it, replays the captured transcript, and runs the task's checker. To run
+the full suite when the rate window is clear: `just bench-agent-claude-code` (on Windows set
+`RETICLE_CLAUDE_BIN` to the resolved `claude.cmd` and `RETICLE_MCP_BIN` to a current
+`reticle-mcp`). See [the leaderboard](docs/src/leaderboard.md) for the aggregated records and
 [Benchmark methodology](docs/src/benchmark.md) for how a run is scored and replayed.
 
 ## The live demo
@@ -190,12 +192,12 @@ re-checks only the changed neighbourhood: 5 us at 100k shapes and 37 us at 1M, a
 subset of KLayout `.lydrc` DRC decks compiles down to the same engine, validated
 verdict-for-verdict against KLayout headless in the pinned container.
 
-**Metrology.** _(placeholder row, pending the Wave 3 merge.)_ A CPU metrology pass reports
+**Metrology.** A CPU metrology pass reports
 exact per-layer area and perimeter (union on the `i_overlay` integer engine, overlaps counted
 once), connectivity statistics (net count, shapes per net, max fanout), and a simplified
 per-net antenna ratio over a SKY130 layer subset, exported to byte-stable CSV and Markdown. A
 property test pins area and perimeter to a coordinate-compression oracle. The GPU density
-overlay is deferred; see [ADR 0074](docs/decisions/0074-cpu-metrology-reports.md).
+overlay is deferred; see [ADR 0077](docs/decisions/0077-cpu-metrology-reports.md).
 
 **Installable PWA.** The browser bundle is an installable Progressive Web App whose app shell
 loads offline: a relative web manifest, a service worker that caches the shell and the hashed
@@ -270,7 +272,26 @@ component, and pin counts and the die area, a corrupted DEF diverges, and the ch
 honestly when Docker is absent. The live cross-check ran on the development host in about
 22 seconds.
 
-**In-browser conversion.** _(placeholder row, pending the Wave 6 merge.)_ The browser
+**Conformant OASIS writer.** Alongside Reticle's in-house archive format, an `OasisStd`
+writer emits standards-conformant OASIS (SEMI P39) for a practical subset: rectangles,
+polygons, paths, placements (carrying magnification and angle), and text, with fully
+explicit modal state and cell-name and cell tables. It is export-only and uncompressed,
+and arrays are expanded to individual placements, so large arrays inflate and it is not a
+general exporter. Its output is validated by KLayout reading it back in the pinned
+container (correct cells, shapes, and database unit), so a third-party tool accepts the
+file rather than only Reticle round-tripping it. See
+[ADR 0086](docs/decisions/0086-conformant-oasis-writer-scope-and-oasis-rename.md).
+
+**Python bindings.** A `reticle-py` PyO3 extension exposes the read, generate, render, and
+save paths to Python as a stable-ABI (`abi3`) wheel, so one wheel imports on any CPython
+3.9 or newer (built against 3.14, verified importing the same wheel under 3.13). From
+Python it opens a GDSII or OASIS-subset document, lists cells, places a generator by id,
+renders a PNG, and shows a layout inline in a Jupyter notebook. It is native-only (a host
+with no GPU returns no render rather than failing) and lives outside the Cargo workspace,
+so the local gate stays Python-free. See
+[ADR 0087](docs/decisions/0087-python-bindings-abi3-nondefault.md).
+
+**In-browser conversion.** The browser
 converts a GDS to a streamable `.rtla` archive itself, with no server and no upload: a Web
 Worker runs the frozen streaming GDS reader and an additive in-memory archive builder
 (`build_rtla_to_vec`, byte-identical to the native builder for browser-scale layouts),
@@ -293,19 +314,21 @@ layout, not a production EDA tool. It is honest about its edges, audited in
   count and terminal nets, checked against Magic's own extraction of a production
   inverter; it stops short of device-parameter and parasitic matching, so it is not a
   full LVS. The SKY130 DRC subset is a fast first filter, not tape-out clean.
-- The benchmark is small quantized local models, a realistic floor rather than a ceiling.
-  The Claude Code row is not run here (the CLI is unauthenticated) and is not head-to-head
-  comparable with the bare-model rows in any case.
+- The benchmark's bare rows are small quantized local models, a realistic floor rather
+  than a ceiling. The Claude Code row is a real authenticated run recorded in the
+  leaderboard, but as an agent system with its own loop it is not head-to-head comparable
+  with the bare-model rows, and it ran a different task set than they did.
 - The in-editor "ask the agent to fix this violation" button scopes the run by narration,
   not yet by a hard region constraint on the model.
 - The fuzz targets are committed but libFuzzer does not link under Windows/MSVC; parser and
   boolean robustness are covered instead by proptests in the gate. Run the fuzzers on Linux.
 - OASIS round-trips rectangles, polygons, paths, instances, and arrays; GDSII carries the
   full hierarchy.
-- A streamed-archive path (`.rtla`) is landing as infrastructure: a forward-only GDSII
+- A streamed-archive path (`.rtla`) underpins large-layout browsing: a forward-only GDSII
   record reader with no `gds21` dependency (wasm-clean) and an external, bounded-memory
   tiled-archive builder that turns a 30M-entry layout into an archive at 127 MiB peak RSS.
-  The in-browser residency and converter that consume it are separate Wave 2 lanes.
+  The in-browser converter that produces one in a Web Worker into OPFS now ships (above);
+  very large dies still stay a native-converter job.
 
 For where Reticle sits among layout tools and the full list of non-goals, see
 [Positioning](docs/src/positioning.md).
