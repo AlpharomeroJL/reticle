@@ -104,6 +104,7 @@ pub mod generate_panel;
 pub mod grid;
 pub mod history;
 pub mod inspector;
+pub mod inspector_layout;
 pub mod keymap;
 pub mod labels;
 pub mod layers;

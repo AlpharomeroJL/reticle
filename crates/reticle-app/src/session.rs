@@ -51,6 +51,17 @@ pub struct SessionState {
     /// the tour auto-starts once; set `true` after it finishes so it never shows
     /// again unprompted (the Help menu can still relaunch it). See [`crate::tour`].
     pub tour_seen: bool,
+    /// The right Inspector panel width, in points (lane 2B, catalog 61). Seeds the
+    /// panel's default width and tracks user drags.
+    pub panel_right_w: f32,
+    /// The selected Inspector group, as its [`crate::inspector_layout::PanelGroup`]
+    /// index (lane 2B).
+    pub panel_group: u8,
+    /// Whether the Inspector is collapsed to its icon rail (lane 2B, catalog 59).
+    pub panels_collapsed: bool,
+    /// The open Inspector sections, as a comma-separated key list (lane 2B,
+    /// catalog 61). Empty means "no record": the default open set applies.
+    pub panel_open: String,
 }
 
 impl Default for SessionState {
@@ -68,6 +79,10 @@ impl Default for SessionState {
             ui_density: Density::Comfortable,
             reduced_motion: false,
             tour_seen: false,
+            panel_right_w: crate::inspector_layout::DEFAULT_WIDTH,
+            panel_group: 0,
+            panels_collapsed: false,
+            panel_open: String::new(),
         }
     }
 }
@@ -103,6 +118,10 @@ impl SessionState {
             ui_density,
             reduced_motion,
             tour_seen,
+            // The panel-layout keys (lane 2B) are not part of the view snapshot the
+            // camera/tool/grid capture carries; the app sets them on the captured
+            // state before saving. Default here so this constructor stays total.
+            ..Self::default()
         }
     }
 
@@ -149,7 +168,7 @@ impl SessionState {
             .map(|(l, d)| format!("{l}/{d}"))
             .collect();
         format!(
-            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nui_density={}\nreduced_motion={}\nhidden={}\ntour_seen={}\n",
+            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nui_density={}\nreduced_motion={}\nhidden={}\ntour_seen={}\npanel_right_w={}\npanel_group={}\npanels_collapsed={}\npanel_open={}\n",
             self.center_x,
             self.center_y,
             self.pixels_per_dbu,
@@ -161,7 +180,11 @@ impl SessionState {
             self.ui_density.tag(),
             self.reduced_motion,
             hidden.join(","),
-            self.tour_seen
+            self.tour_seen,
+            self.panel_right_w,
+            self.panel_group,
+            self.panels_collapsed,
+            self.panel_open
         )
     }
 
@@ -210,6 +233,18 @@ impl SessionState {
                 "reduced_motion" => s.reduced_motion = value == "true",
                 "hidden" => s.hidden_layers = parse_hidden(value),
                 "tour_seen" => s.tour_seen = value == "true",
+                "panel_right_w" => {
+                    if let Ok(v) = value.parse() {
+                        s.panel_right_w = v;
+                    }
+                }
+                "panel_group" => {
+                    if let Ok(v) = value.parse() {
+                        s.panel_group = v;
+                    }
+                }
+                "panels_collapsed" => s.panels_collapsed = value == "true",
+                "panel_open" => value.clone_into(&mut s.panel_open),
                 _ => {}
             }
         }
@@ -330,6 +365,10 @@ mod tests {
             ui_density: Density::Compact,
             reduced_motion: true,
             tour_seen: true,
+            panel_right_w: 300.0,
+            panel_group: 2,
+            panels_collapsed: true,
+            panel_open: "properties,drc,agent".to_owned(),
         }
     }
 
@@ -409,6 +448,32 @@ mod tests {
         // an upgrade shows the tour once rather than suppressing it.
         let older = SessionState::from_text("center_x=1\n").expect("parses");
         assert!(!older.tour_seen);
+    }
+
+    #[test]
+    fn panel_layout_keys_round_trip_and_default() {
+        // The lane-2B panel keys round-trip through the text format...
+        let s = SessionState {
+            panel_right_w: 320.0,
+            panel_group: 3,
+            panels_collapsed: true,
+            panel_open: "drc,diff".to_owned(),
+            ..SessionState::default()
+        };
+        let parsed = SessionState::from_text(&s.to_text()).expect("parses");
+        assert!((parsed.panel_right_w - 320.0).abs() < f32::EPSILON);
+        assert_eq!(parsed.panel_group, 3);
+        assert!(parsed.panels_collapsed);
+        assert_eq!(parsed.panel_open, "drc,diff");
+        // ...and an older file without them keeps the panel defaults (unknown-key
+        // tolerance makes the addition non-breaking).
+        let older = SessionState::from_text("center_x=1\n").expect("parses");
+        assert!(
+            (older.panel_right_w - crate::inspector_layout::DEFAULT_WIDTH).abs() < f32::EPSILON
+        );
+        assert_eq!(older.panel_group, 0);
+        assert!(!older.panels_collapsed);
+        assert!(older.panel_open.is_empty());
     }
 
     #[test]

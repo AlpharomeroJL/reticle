@@ -26,6 +26,13 @@ pub struct CommentPins {
     comments: Vec<Comment>,
     /// The index of the comment the user last selected, if any.
     selected: Option<usize>,
+    /// Comment ids the user has marked resolved (lane 2B, catalog 65). This is a
+    /// client-side review state, not part of the persisted document, so a comment
+    /// can be triaged without editing the shared `Document.comments` set.
+    resolved: std::collections::BTreeSet<String>,
+    /// Whether the panel shows resolved comments (the resolved filter, catalog 65).
+    /// Off by default so the list leads with what still needs attention.
+    pub show_resolved: bool,
 }
 
 impl CommentPins {
@@ -84,6 +91,32 @@ impl CommentPins {
         if index < self.comments.len() {
             self.selected = Some(index);
         }
+    }
+
+    /// Whether the comment with id `id` is marked resolved (catalog 65).
+    #[must_use]
+    pub fn is_resolved(&self, id: &str) -> bool {
+        self.resolved.contains(id)
+    }
+
+    /// Flips the resolved flag for the comment with id `id` (catalog 65).
+    pub fn toggle_resolved(&mut self, id: &str) {
+        if self.resolved.contains(id) {
+            self.resolved.remove(id);
+        } else {
+            self.resolved.insert(id.to_owned());
+        }
+    }
+
+    /// The number of thread-root comments not marked resolved: the unresolved
+    /// badge count (catalog 65). Replies are not counted, so the badge tracks open
+    /// threads, not messages.
+    #[must_use]
+    pub fn unresolved_count(&self) -> usize {
+        self.comments
+            .iter()
+            .filter(|c| c.is_root() && !self.resolved.contains(&c.id))
+            .count()
     }
 }
 
