@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-90a3ba69.js";
+            window.path_to_searchindex_js = "searchindex-155cd532.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-8280aaae.js"></script>
+        <script src="toc-76930c15.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -210,6 +210,26 @@ loop, so its result is not head-to-head comparable with a bare model. See the
 tools; a full drawing and vertex-editing suite; boolean and transform operations; a
 design-rule checker; a router; connectivity extraction; GDSII and OASIS import and export;
 embedded scripting; and real-time multi-user collaboration.</p>
+<h2 id="what-is-new-in-v8"><a class="header" href="#what-is-new-in-v8">What is new in v8</a></h2>
+<p>v8 widens the surface on every side while keeping the same evidence discipline. The browser
+bundle is now an installable Progressive Web App whose shell loads offline
+(<a href="pwa.html">Install and offline</a>). A <code>reticle-diff</code> crate and a canvas overlay answer what
+changed between two versions (<a href="layout-diff.html">Layout diff</a>). Notes anchor to a shape or cell
+and survive a lossless V1-to-V2 document migration (<a href="comments.html">Comments</a>), and several
+editors’ edits converge to a byte-identical document with per-editor selective undo and a
+view-only permission enforced in the relay (<a href="multi-writer.html">Multi-writer</a>). On the formats
+side there is LEF/DEF import cross-checked against OpenROAD (<a href="lef-def.html">LEF/DEF</a>), a
+documented subset of KLayout <code>.lydrc</code> DRC decks validated against KLayout headless
+(<a href="lydrc-compat.html">.lydrc compatibility</a>), a standards-conformant OASIS writer whose output
+KLayout reads (<a href="interop.html">GDS / OASIS interop</a>), and a second PDK, IHP SG13G2, that every
+generator runs against DRC-clean (<a href="second-pdk.html">A second PDK</a>). Extraction now recognizes
+SKY130 MOSFETs and runs a device-level LVS-lite cross-checked against Magic
+(<a href="device-extraction.html">Device recognition</a>). A second, best-effort vision oracle
+(<code>llava:7b</code>) corroborates the authoritative checker on a small sample
+(<a href="multimodal-verification.html">Multimodal verification</a>). The core read, generate, render, and
+save paths are exposed to Python as a stable-ABI wheel (<a href="python.html">Python bindings</a>), and the
+browser can convert a GDS to a streamable archive in a Web Worker into the Origin Private File
+System with no server (<a href="in-browser-conversion.html">In-browser conversion</a>).</p>
 <h2 id="why-it-exists"><a class="header" href="#why-it-exists">Why it exists</a></h2>
 <p>Reticle works the exact problem a semiconductor tooling team solves: visualizing and editing
 massive layout geometry at interactive speed. That one problem pulls together performance

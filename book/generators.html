@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-90a3ba69.js";
+            window.path_to_searchindex_js = "searchindex-155cd532.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-8280aaae.js"></script>
+        <script src="toc-76930c15.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -184,6 +184,9 @@ fill, or a probe-able test structure. Each one is a pure function from typed
 parameters plus a technology to geometry, and every generator is
 <a href="sky130-drc-coverage.html">DRC-clean by construction</a> against the SKY130 subset (see
 <a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0043-generators-drc-clean-by-construction.md">ADR 0043</a>).
+The process numbers are data (a <code>GenTech</code> derived from the technology), so the same
+generators run DRC-clean against a <strong>second PDK</strong> too - see
+<a href="second-pdk.html">A second PDK: IHP SG13G2</a>.
 The generator framework itself, the typed <a href="https://docs.rs/reticle-gen"><code>Generator</code></a>
 trait and the type-erased <a href="https://docs.rs/reticle-gen"><code>Registry</code></a> that drives it by
 id, is described in

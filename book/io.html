@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-90a3ba69.js";
+            window.path_to_searchindex_js = "searchindex-155cd532.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-8280aaae.js"></script>
+        <script src="toc-76930c15.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -187,12 +187,26 @@ Layout21 project), mapping its structures, boundaries, paths, and references ont
 Reticle cells, shapes, instances, and arrays. Round-trip fidelity is tested: a
 document exported to GDSII and re-imported preserves its geometry, layers, and
 hierarchy.</p>
-<h2 id="oasis"><a class="header" href="#oasis">OASIS</a></h2>
-<p>OASIS is the newer, compressed successor to GDSII. It has no mature Rust library,
-so Reticle implements a focused in-house subset covering the records it emits plus
-the common records seen in practice, sufficient to round-trip its own exports and
-import typical files. The supported record set and its limits are documented, and
-anything unsupported is a clear error rather than silent data loss. See ADR 0004.</p>
+<h2 id="the-reticle-container-format-oasis-inspired-adr-0004"><a class="header" href="#the-reticle-container-format-oasis-inspired-adr-0004">The Reticle container format (OASIS-inspired, ADR 0004)</a></h2>
+<p>OASIS is the newer, compressed successor to GDSII, but it has no mature Rust
+library. Reticle’s <code>Oasis</code> type is therefore <strong>not</strong> a conformant OASIS reader or
+writer: it is an in-house binary <strong>container</strong>, OASIS-<em>inspired</em> (it borrows the
+spirit - a magic string, a <code>START</code>/<code>END</code> frame, and <code>CELL</code>/<code>RECTANGLE</code>/<code>POLYGON</code>/
+<code>PATH</code>/<code>TEXT</code>/<code>PLACEMENT</code>/<code>ARRAY</code> records with explicit layer and datatype) but not
+its wire format. <strong>No third-party tool (KLayout, gdstk) can read it.</strong> It exists to
+round-trip Reticle’s own geometry and hierarchy compactly and losslessly for the
+supported record set; anything unsupported is a clear error rather than silent data
+loss. See ADR 0004 for the container layout and honest gaps.</p>
+<h2 id="conformant-oasis-writer-oasis_std"><a class="header" href="#conformant-oasis-writer-oasis_std">Conformant OASIS writer (<code>oasis_std</code>)</a></h2>
+<p>Separately, <code>OasisStd</code> is a genuine <strong>SEMI P39 OASIS writer</strong> for a practical
+subset - its output <em>is</em> read by KLayout as OASIS. It is export-only (a reader is
+out of scope) and uncompressed (no <code>CBLOCK</code>), emitting <code>RECTANGLE</code>, <code>POLYGON</code>,
+<code>PATH</code>, <code>PLACEMENT</code>, and <code>TEXT</code> with fully explicit modal state, <code>CELLNAME</code>+<code>CELL</code>
+tables, and <code>PLACEMENT</code> records carrying magnification and angle. Documented subset
+gaps: arrays are expanded to individual placements, a label’s anchor is dropped
+(OASIS <code>TEXT</code> is a point), and a path’s round end cap is written flush. KLayout
+reading <code>oasis_std</code> output is verified in-container by the interop harness; see the
+<a href="interop.html">interop chapter</a> and ADR 0086.</p>
 <h2 id="technology-files"><a class="header" href="#technology-files">Technology files</a></h2>
 <p>A technology file describes the process: the database resolution, the layer table
 (numbers, datatypes, names, and display colors), and the design rules. Reticle
@@ -261,7 +275,7 @@ drives it over those fixtures on every platform (libFuzzer cannot link on MSVC).
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="rendering.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="interop.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -275,7 +289,7 @@ drives it over those fixtures on every platform (libFuzzer cannot link on MSVC).
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="rendering.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="interop.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

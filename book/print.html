@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-90a3ba69.js";
+            window.path_to_searchindex_js = "searchindex-155cd532.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-8280aaae.js"></script>
+        <script src="toc-76930c15.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -211,6 +211,26 @@ loop, so its result is not head-to-head comparable with a bare model. See the
 tools; a full drawing and vertex-editing suite; boolean and transform operations; a
 design-rule checker; a router; connectivity extraction; GDSII and OASIS import and export;
 embedded scripting; and real-time multi-user collaboration.</p>
+<h2 id="what-is-new-in-v8"><a class="header" href="#what-is-new-in-v8">What is new in v8</a></h2>
+<p>v8 widens the surface on every side while keeping the same evidence discipline. The browser
+bundle is now an installable Progressive Web App whose shell loads offline
+(<a href="#install-and-offline-pwa">Install and offline</a>). A <code>reticle-diff</code> crate and a canvas overlay answer what
+changed between two versions (<a href="#layout-diff">Layout diff</a>). Notes anchor to a shape or cell
+and survive a lossless V1-to-V2 document migration (<a href="#comments-and-annotations">Comments</a>), and several
+editors’ edits converge to a byte-identical document with per-editor selective undo and a
+view-only permission enforced in the relay (<a href="#multi-writer-collaboration">Multi-writer</a>). On the formats
+side there is LEF/DEF import cross-checked against OpenROAD (<a href="#lefdef-import">LEF/DEF</a>), a
+documented subset of KLayout <code>.lydrc</code> DRC decks validated against KLayout headless
+(<a href="#klayout-lydrc-compatibility">.lydrc compatibility</a>), a standards-conformant OASIS writer whose output
+KLayout reads (<a href="#gds--oasis-interop">GDS / OASIS interop</a>), and a second PDK, IHP SG13G2, that every
+generator runs against DRC-clean (<a href="#a-second-pdk-ihp-sg13g2">A second PDK</a>). Extraction now recognizes
+SKY130 MOSFETs and runs a device-level LVS-lite cross-checked against Magic
+(<a href="#device-recognition">Device recognition</a>). A second, best-effort vision oracle
+(<code>llava:7b</code>) corroborates the authoritative checker on a small sample
+(<a href="#multimodal-verification">Multimodal verification</a>). The core read, generate, render, and
+save paths are exposed to Python as a stable-ABI wheel (<a href="#python-bindings">Python bindings</a>), and the
+browser can convert a GDS to a streamable archive in a Web Worker into the Origin Private File
+System with no server (<a href="#in-browser-conversion">In-browser conversion</a>).</p>
 <h2 id="why-it-exists"><a class="header" href="#why-it-exists">Why it exists</a></h2>
 <p>Reticle works the exact problem a semiconductor tooling team solves: visualizing and editing
 massive layout geometry at interactive speed. That one problem pulls together performance
@@ -301,10 +321,12 @@ not a production EDA tool.</p>
 flows that Reticle does not have. This list is deliberately blunt.</p>
 <ul>
 <li><strong>Full-fidelity format coverage.</strong> Reticle reads and writes GDSII with full
-hierarchy (via <code>gds21</code>), but its OASIS support is a <strong>subset</strong>: rectangles,
-polygons, paths, instances, and arrays round-trip, and anything outside that subset
-is rejected with an explicit <code>Unsupported</code> error rather than silently dropped.
-KLayout’s format coverage is far broader.</li>
+hierarchy (via <code>gds21</code>). Its <code>Oasis</code> type is <strong>not</strong> interoperable OASIS: it is an
+in-house, OASIS-inspired <em>container</em> (ADR 0004) that no other tool reads, used only
+to round-trip Reticle’s own geometry. A separate conformant-OASIS <strong>writer</strong>
+(<code>oasis_std</code>) emits a practical SEMI P39 subset that KLayout does read - export only,
+verified against KLayout in-container (see the <a href="#gds--oasis-interop">GDS / OASIS interop</a>
+chapter). Even so, KLayout’s format coverage is far broader.</li>
 <li><strong>A production DRC rule language.</strong> Reticle’s DRC is a fixed set of eight rule
 kinds (width, spacing, enclosure, extension, notch, area, density, angle) evaluated
 over indexed geometry. It is not a general rule-scripting language, and its SKY130
@@ -707,12 +729,26 @@ Layout21 project), mapping its structures, boundaries, paths, and references ont
 Reticle cells, shapes, instances, and arrays. Round-trip fidelity is tested: a
 document exported to GDSII and re-imported preserves its geometry, layers, and
 hierarchy.</p>
-<h2 id="oasis"><a class="header" href="#oasis">OASIS</a></h2>
-<p>OASIS is the newer, compressed successor to GDSII. It has no mature Rust library,
-so Reticle implements a focused in-house subset covering the records it emits plus
-the common records seen in practice, sufficient to round-trip its own exports and
-import typical files. The supported record set and its limits are documented, and
-anything unsupported is a clear error rather than silent data loss. See ADR 0004.</p>
+<h2 id="the-reticle-container-format-oasis-inspired-adr-0004"><a class="header" href="#the-reticle-container-format-oasis-inspired-adr-0004">The Reticle container format (OASIS-inspired, ADR 0004)</a></h2>
+<p>OASIS is the newer, compressed successor to GDSII, but it has no mature Rust
+library. Reticle’s <code>Oasis</code> type is therefore <strong>not</strong> a conformant OASIS reader or
+writer: it is an in-house binary <strong>container</strong>, OASIS-<em>inspired</em> (it borrows the
+spirit - a magic string, a <code>START</code>/<code>END</code> frame, and <code>CELL</code>/<code>RECTANGLE</code>/<code>POLYGON</code>/
+<code>PATH</code>/<code>TEXT</code>/<code>PLACEMENT</code>/<code>ARRAY</code> records with explicit layer and datatype) but not
+its wire format. <strong>No third-party tool (KLayout, gdstk) can read it.</strong> It exists to
+round-trip Reticle’s own geometry and hierarchy compactly and losslessly for the
+supported record set; anything unsupported is a clear error rather than silent data
+loss. See ADR 0004 for the container layout and honest gaps.</p>
+<h2 id="conformant-oasis-writer-oasis_std"><a class="header" href="#conformant-oasis-writer-oasis_std">Conformant OASIS writer (<code>oasis_std</code>)</a></h2>
+<p>Separately, <code>OasisStd</code> is a genuine <strong>SEMI P39 OASIS writer</strong> for a practical
+subset - its output <em>is</em> read by KLayout as OASIS. It is export-only (a reader is
+out of scope) and uncompressed (no <code>CBLOCK</code>), emitting <code>RECTANGLE</code>, <code>POLYGON</code>,
+<code>PATH</code>, <code>PLACEMENT</code>, and <code>TEXT</code> with fully explicit modal state, <code>CELLNAME</code>+<code>CELL</code>
+tables, and <code>PLACEMENT</code> records carrying magnification and angle. Documented subset
+gaps: arrays are expanded to individual placements, a label’s anchor is dropped
+(OASIS <code>TEXT</code> is a point), and a path’s round end cap is written flush. KLayout
+reading <code>oasis_std</code> output is verified in-container by the interop harness; see the
+<a href="#gds--oasis-interop">interop chapter</a> and ADR 0086.</p>
 <h2 id="technology-files"><a class="header" href="#technology-files">Technology files</a></h2>
 <p>A technology file describes the process: the database resolution, the layer table
 (numbers, datatypes, names, and display colors), and the design rules. Reticle
@@ -772,6 +808,213 @@ either produces a document or returns an error. The streaming <code>GdsRecordRea
 the same guarantee: its <code>gds_stream</code> fuzz target seeds from the committed GDS crash
 fixtures so it cannot reintroduce a fixed panic class, and a native regression test
 drives it over those fixtures on every platform (libFuzzer cannot link on MSVC).</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="gds--oasis-interop"><a class="header" href="#gds--oasis-interop">GDS / OASIS interop</a></h1>
+<p>Reticle’s interchange formats are only as good as what other tools make of them.
+This chapter records how Reticle’s GDS round-trip compares against two independent
+external tools, and whether KLayout can read Reticle’s conformant-OASIS writer.</p>
+<h2 id="the-harness"><a class="header" href="#the-harness">The harness</a></h2>
+<p><code>scripts/interop/</code> drives a comparison headless inside the pinned
+<code>hpretl/iic-osic-tools</code> container (KLayout 0.29.x + gdspy 1.6), re-runnable with
+<code>scripts/interop/run-interop.ps1</code>. It:</p>
+<ol>
+<li>generates two fixtures with gdspy (1 dbu = 1 nm);</li>
+<li>round-trips each fixture (read then re-export) through <strong>Reticle</strong> (a standalone
+<code>reticle-roundtrip</code> driver on the host), <strong>KLayout</strong>, and <strong>gdspy</strong>;</li>
+<li>normalizes every output with a single authoritative reader - KLayout renders each
+shape to an integer-dbu polygon (so path-vs-box representation differences are
+neutralized), and instance transforms are read with gdspy, which exposes the raw
+GDS <code>STRANS</code> rotation/magnification directly; and</li>
+<li>exports each fixture as conformant OASIS (<code>oasis_std</code>) and has KLayout read it.</li>
+</ol>
+<p>Because one reader normalizes every writer’s output, a divergence is attributable to
+the tool that <em>wrote</em> the file. The committed report and its machine-generated
+companion live under <code>docs/interop/</code> in the repository.</p>
+<blockquote>
+<p><strong>Tooling note.</strong> The packet named gdstk; it is not preinstalled in the image and
+PEP 668 blocks a clean in-container <code>pip install</code>, so the harness uses gdspy (its
+same-author predecessor, preinstalled) as the second tool and stays reproducible
+with no network. If Docker is unavailable the runner prints the exact skipped
+command and exits 3, so the comparison can be recorded as not-run while the writer,
+the second PDK, and the GenTech refactor still ship.</p>
+</blockquote>
+<h2 id="what-the-round-trip-preserves"><a class="header" href="#what-the-round-trip-preserves">What the round-trip preserves</a></h2>
+<p>On the <strong>clean</strong> fixture (a rectangle, a Manhattan polygon, a 45° polygon, a path, a
+label, a cell reference, and a 2×2 array), Reticle, KLayout, and gdspy round-trip the
+design <strong>identically</strong> - rendered geometry, labels, and instances all match, and
+KLayout reads Reticle’s OASIS output.</p>
+<h2 id="the-documented-divergence"><a class="header" href="#the-documented-divergence">The documented divergence</a></h2>
+<p>On the <strong>odd</strong> fixture (seeded with a 1 nm sliver, round and custom-extension paths, a
+degenerate-vertex polygon, and a <strong>reference rotated 45° with magnification 2×</strong>), the
+geometry all round-trips cleanly, but one divergence surfaces in instance transforms:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>tool</th><th>recovered rotation</th><th>magnification</th></tr>
+</thead>
+<tbody>
+<tr><td>source / gdspy / KLayout</td><td>45°</td><td>2×</td></tr>
+<tr><td><strong>Reticle</strong></td><td><strong>90°</strong></td><td>2×</td></tr>
+</tbody>
+</table>
+</div>
+<p>Reticle’s placement model, <code>Orientation</code>, encodes only the eight orthogonal
+orientations (R0/R90/R180/R270 and mirrors). A non-orthogonal <code>STRANS</code> angle has no
+exact representation, so Reticle’s GDS importer snaps 45° to the nearest orthogonal
+orientation (90°) rather than dropping it silently; the magnification and origin
+survive. This is a <strong>modelling limitation, not a reader/writer bug</strong> - Reticle is a
+Manhattan-plus-45°-fill layout tool whose instance transforms are orthogonal by
+design. It is called out here and in the committed report rather than hidden.</p>
+<p>See the full report at <code>docs/interop/gds-oasis-divergence-report.md</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="lefdef-import"><a class="header" href="#lefdef-import">LEF/DEF import</a></h1>
+<p>The <code>reticle-lefdef</code> crate imports the two text formats an OpenROAD/OpenLane run
+emits, LEF (the technology and the macro cell abstracts) and DEF (the placed,
+routed design), and lowers them into a <code>reticle-model</code> <code>Document</code> plus the run-level
+metadata a viewer overlays. The single public result is <code>LefDefDesign</code>, the contract
+the run viewer consumes.</p>
+<p>It is a new crate, not an extension of <code>reticle-io</code>: <code>reticle-io</code> is hardened and
+frozen-adjacent, and LEF/DEF are a different concern (a design-and-technology
+interchange, not a layout binary). The crate has no external dependencies and no
+native-only code, so it builds for <code>wasm32-unknown-unknown</code> alongside the rest.</p>
+<h2 id="entry-points"><a class="header" href="#entry-points">Entry points</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub fn import_lef_def(lef: &amp;[u8], def: &amp;[u8]) -&gt; Result&lt;LefDefDesign, LefDefError&gt;;
+pub fn import_run_dir(dir: &amp;Path) -&gt; Result&lt;LefDefDesign, LefDefError&gt;;
+<span class="boring">}</span></code></pre>
+<p><code>import_lef_def</code> takes a LEF byte slice (or several LEF files concatenated, which is
+valid) and a DEF byte slice. <code>import_run_dir</code> walks a flow output directory (bounded
+in depth and file count), concatenates the <code>*.lef</code> files it finds, and imports the
+<code>*.def</code> whose name sorts last, which selects the later flow stage (for example
+<code>6_final.def</code> over <code>2_floorplan.def</code>).</p>
+<h2 id="the-lefdefdesign-contract"><a class="header" href="#the-lefdefdesign-contract">The <code>LefDefDesign</code> contract</a></h2>
+<p><code>LefDefDesign</code> keeps the lowered layout separate from the run metadata a viewer
+overlays:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>field</th><th>source</th><th>meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>document</code></td><td>LEF macros + DEF placement/routing</td><td>the lowered <code>Document</code>: a cell per macro, a top cell of placed instances and routed shapes, and the layer table</td></tr>
+<tr><td><code>design_name</code></td><td>DEF <code>DESIGN</code></td><td>the top cell name</td></tr>
+<tr><td><code>die_area</code></td><td>DEF <code>DIEAREA</code></td><td>the die outline (a rectilinear outline is reduced to its bounding box)</td></tr>
+<tr><td><code>sites</code></td><td>LEF <code>SITE</code></td><td>placement site definitions</td></tr>
+<tr><td><code>rows</code></td><td>DEF <code>ROW</code></td><td>placement rows</td></tr>
+<tr><td><code>nets</code></td><td>DEF <code>NETS</code></td><td>the routed net list, each with its wire and via segments</td></tr>
+<tr><td><code>pins</code></td><td>DEF <code>PINS</code></td><td>external I/O pins</td></tr>
+<tr><td><code>overlays</code></td><td>reports (viewer)</td><td>congestion, utilization, and timing-critical-net slots, empty after a LEF/DEF import</td></tr>
+<tr><td><code>warnings</code></td><td>import</td><td>non-fatal problems (skipped keywords, dropped degenerate shapes, unresolved references)</td></tr>
+</tbody>
+</table>
+</div>
+<p>The layout lives in <code>document</code> because the renderer already draws cells, instances,
+and shapes. The rest is run-level metadata a viewer treats differently: rows and the
+die area are chrome, nets are selectable by name, and the <code>overlays</code> slots are filled
+in later from a run’s report files, which is a separate concern from the layout
+import.</p>
+<h2 id="supported-subset"><a class="header" href="#supported-subset">Supported subset</a></h2>
+<p>This is a deliberate subset, chosen to render an OpenROAD run, not a full LEF/DEF
+implementation. ADR 0082 records the scope and the reasons.</p>
+<p><strong>LEF</strong></p>
+<ul>
+<li><code>UNITS DATABASE MICRONS</code> sets the database resolution.</li>
+<li><code>LAYER &lt;name&gt;</code> with <code>TYPE</code> (<code>ROUTING</code>, <code>CUT</code>, or other) and <code>WIDTH</code>. Each layer
+name is interned to a <code>LayerId</code> in declaration order and given a palette color;
+routing widths become the default wire width for that layer.</li>
+<li><code>SITE &lt;name&gt;</code> with <code>CLASS</code> and <code>SIZE</code>.</li>
+<li><code>MACRO &lt;name&gt;</code> with <code>CLASS</code>, <code>SIZE</code>, <code>PIN</code> (with <code>DIRECTION</code> and <code>PORT</code>/<code>LAYER</code>/
+<code>RECT</code> geometry), and <code>OBS</code>. Each macro becomes a <code>Cell</code>; each pin becomes a model
+<code>Pin</code> and its port rectangles are drawn on their layers; obstructions are drawn.</li>
+</ul>
+<p>Via geometry, spacing and antenna tables, and property definitions are skipped with
+a warning. Only <code>RECT</code> geometry is lowered from ports and obstructions; a <code>POLYGON</code>
+is skipped with a warning.</p>
+<p><strong>DEF</strong></p>
+<ul>
+<li><code>DESIGN</code>, <code>UNITS DISTANCE MICRONS</code>, <code>DIEAREA</code>.</li>
+<li><code>ROW</code>, including the <code>DO</code>/<code>BY</code>/<code>STEP</code> repeat.</li>
+<li><code>COMPONENTS</code>: each <code>PLACED</code> or <code>FIXED</code> component becomes an <code>Instance</code> at its
+location and orientation. A component whose macro the LEF never defined is skipped
+with a warning.</li>
+<li><code>PINS</code>: <code>NET</code>, <code>DIRECTION</code>, a <code>LAYER</code> rectangle, and <code>PLACED</code> location.</li>
+<li><code>NETS</code>: <code>ROUTED</code> (and <code>FIXED</code>) wires and vias, including <code>NEW</code> layer breaks and the
+<code>*</code> repeated-coordinate shorthand. Each wire is drawn into the top cell as a path
+and recorded in the net list.</li>
+</ul>
+<p><code>SPECIALNETS</code>, <code>GROUPS</code>, <code>REGIONS</code>, and <code>BLOCKAGES</code> are skipped with a warning.
+Coordinates are read as they appear: DEF coordinates are already DBU, LEF microns are
+converted to DBU on the shared resolution.</p>
+<h2 id="orientation-mapping"><a class="header" href="#orientation-mapping">Orientation mapping</a></h2>
+<p>DEF names the eight placements <code>N</code>, <code>S</code>, <code>E</code>, <code>W</code> and their flipped forms <code>FN</code>, <code>FS</code>,
+<code>FE</code>, <code>FW</code>. The DEF flip is a mirror about the Y axis applied before the rotation;
+Reticle’s <code>Orientation</code> models a reflect-about-X-then-rotate (the GDSII convention).
+The exact correspondence, verified in the crate’s tests by comparing the point
+transforms directly, is:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>DEF</th><th>Reticle</th><th>DEF</th><th>Reticle</th></tr>
+</thead>
+<tbody>
+<tr><td><code>N</code></td><td><code>R0</code></td><td><code>FN</code></td><td><code>MirrorX180</code></td></tr>
+<tr><td><code>W</code></td><td><code>R90</code></td><td><code>FW</code></td><td><code>MirrorX270</code></td></tr>
+<tr><td><code>S</code></td><td><code>R180</code></td><td><code>FS</code></td><td><code>MirrorX</code></td></tr>
+<tr><td><code>E</code></td><td><code>R270</code></td><td><code>FE</code></td><td><code>MirrorX90</code></td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="robustness-1"><a class="header" href="#robustness-1">Robustness</a></h2>
+<p>LEF and DEF are untrusted input, so import never panics or hangs on any byte
+sequence. Inputs over 256 MiB are refused before parsing, so a hostile length cannot
+force a large allocation (the OASIS out-of-memory lesson). Bytes are decoded lossily,
+so invalid UTF-8 never panics. The tokenizer and parsers advance by at least one
+token per step over a finite stream, so no parse loops forever, and no collection is
+ever pre-sized from a count read out of the input. A statement that cannot be parsed
+is a clean <code>LefDefError</code> naming its line; a recoverable problem is a <code>LefDefWarning</code>
+and the rest of the design still imports.</p>
+<h2 id="validated-against-a-tool"><a class="header" href="#validated-against-a-tool">Validated against a tool</a></h2>
+<p>A subset importer is only trustworthy if its reading of a file matches what a real EDA
+tool reads from the same file. The <code>reticle-cli</code> <code>lefdef_oracle</code> module cross-checks the
+import against OpenROAD, a real place-and-route tool, run over the exact same LEF and DEF
+inside a pinned Docker container. It follows the external-oracle pattern ADR 0054 set for
+the TinyTapeout precheck: pin the tool image by digest, run it non-interactively over a
+mounted work directory, parse its structured output, and skip honestly (never fail) when
+Docker or the image is absent. ADR 0088 records the choice.</p>
+<p>The oracle is OpenROAD, bundled in <code>hpretl/iic-osic-tools:2025.01</code> (the same image the
+precheck pins). A short Tcl script does <code>read_lef</code> then <code>read_def</code> and prints four
+structural facts as <code>ORACLE &lt;key&gt;=&lt;value&gt;</code> lines that the parser reads back into an
+<code>OracleCounts</code>:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>fact</th><th>reticle-lefdef</th><th>OpenROAD</th></tr>
+</thead>
+<tbody>
+<tr><td>macros</td><td>cells other than the top design cell</td><td>library masters</td></tr>
+<tr><td>components</td><td>top cell placed instances</td><td>block instances</td></tr>
+<tr><td>pins</td><td><code>DesignPin</code> count</td><td>block terminals</td></tr>
+<tr><td>die area</td><td><code>die_area</code> box in DBU</td><td><code>getDieArea</code> box in DBU</td></tr>
+</tbody>
+</table>
+</div>
+<p>The cross-check is proven both ways. A faithful import matches the oracle on all four
+facts; a deliberately corrupted DEF (one component deleted) reports one fewer component,
+so the counts disagree, which proves the oracle actually discriminates rather than always
+agreeing. Two layers of test carry this: a parser-level test that always runs in the
+ordinary gate (no Docker) against committed OpenROAD output captured from the pinned
+image, and a live container test that runs OpenROAD when Docker and the image are present
+and skips honestly otherwise.</p>
+<p>Net-level routing is not compared: it is the richest and least standardized part of DEF,
+and the four facts above already discriminate a faithful import from a corrupted one. The
+die area is compared with a documented per-coordinate tolerance for the case where a tool
+reports it on a different unit grid; here the tolerance is zero, because both sides read
+DEF database units directly. To stay inside what OpenROAD’s strict reader accepts, the
+committed fixtures omit the optional <code>BUSBITCHARS</code>/<code>DIVIDERCHAR</code> header lines (OpenROAD
+rejects the non-standard plural <code>DIVIDERCHARS</code>) and keep their routing via-free (an
+undefined via is a hard OpenROAD error). <code>reticle-lefdef</code>, being lenient, imports those
+same files without complaint.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="rendering-and-scale"><a class="header" href="#rendering-and-scale">Rendering and scale</a></h1>
 <p><code>reticle-render</code> is the <code>wgpu</code> renderer. It targets WebGPU in the browser and
@@ -969,6 +1212,58 @@ fetched tile size), and the frame rate. The counter arithmetic is a pure <code>A
 value, unit-tested without a window, and is also published each frame to a
 <code>window.__reticle_stats</code> seam that the served-archive end-to-end test polls to prove tiles
 stream in over HTTP Range and records actually paint.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="in-browser-conversion"><a class="header" href="#in-browser-conversion">In-browser conversion</a></h1>
+<p>A <code>.rtla</code> archive is normally produced by the native <code>reticle convert</code> command (see <a href="decisions/0072-gds-to-rtla-converter-flatten-and-leveling.html">ADR
+0072</a>) and then hosted for
+streaming. The browser can also do the conversion itself: drop a GDS into the page and it
+becomes a streamable archive stored locally, with no server and no upload. This is the
+in-browser converter (ADR 0091).</p>
+<h2 id="what-happens"><a class="header" href="#what-happens">What happens</a></h2>
+<ol>
+<li>
+<p><strong>A Web Worker converts.</strong> Picking a GDS runs <code>convert_gds_to_rtla</code> inside a dedicated
+Web Worker (<code>crates/web/src/bin/convert_worker.rs</code>), off the main thread, so a large
+file never freezes the UI. The worker streams the bytes through the same frozen Wave 2
+surface the native converter uses: the forward-only <code>GdsRecordReader</code> (ADR 0062) pulls
+one record at a time, and the archive builder assembles the tiled <code>.rtla</code>.</p>
+</li>
+<li>
+<p><strong>The archive is written to OPFS.</strong> The finished bytes are written into the Origin
+Private File System (OPFS) under <code>archives/&lt;name&gt;.rtla</code>, using a synchronous access
+handle. OPFS is a per-origin, private, persistent store; the archive stays in the
+browser and survives a reload.</p>
+</li>
+<li>
+<p><strong>The app reopens it through the streaming path.</strong> The page then opens
+<code>?archive=&lt;url&gt;</code> pointing at the OPFS file, and the existing streamed-archive reader
+(<a href="#streamed-documents">Streamed documents</a>) pages tiles in on demand. The service worker
+bridges the two: it serves <code>opfs-archive/&lt;path&gt;</code> by reading the OPFS file and answering
+HTTP <code>Range</code> requests, so the archive streams through the ordinary <code>HttpRangeTileSource</code>
+with no new reader. The converted die opens read-only, exactly like a hosted one.</p>
+</li>
+</ol>
+<h2 id="scope-v1"><a class="header" href="#scope-v1">Scope (v1)</a></h2>
+<p>The browser converter mirrors the native converter’s v1 scope exactly (ADR 0072): only
+directly drawn geometry becomes a record (each <code>BOUNDARY</code> and <code>PATH</code> bounding box, in
+authored database units), <code>SREF</code>/<code>AREF</code> placements are not composed into world space, and
+the pyramid depth follows the world span. A flat GDS (the common tape-out case) converts
+faithfully; a deeply hierarchical one drops its instanced placements until hierarchical
+flattening lands.</p>
+<p>The one implementation difference from the native path is memory. The native builder
+spills sorted runs to disk so it scales to multi-gigabyte dies; a browser tab has no
+filesystem for that, so the browser uses an in-memory builder (<code>build_rtla_to_vec</code>) that
+holds the finished archive in RAM. For any input that fits in a single sort chunk (every
+browser-scale layout) the two builders produce <strong>byte-identical</strong> output, so a die
+converted in the browser is the same archive the CLI would have written. Very large dies
+remain a native-converter job.</p>
+<h2 id="opfs-availability"><a class="header" href="#opfs-availability">OPFS availability</a></h2>
+<p>Writing a whole archive at once needs a <code>FileSystemSyncAccessHandle</code>, which is only
+available inside a Worker and only in a secure context (HTTPS or <code>localhost</code>). Where OPFS
+is unavailable, the conversion is reported as unsupported rather than failing loudly, and
+the browser end-to-end test skips the convert step honestly (mirroring the streamed-cache
+OPFS fallback). On a current Chromium or Firefox over a secure origin it runs; the
+<code>browser-convert</code> e2e (<code>just e2e-convert</code>) exercises the full path headless.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="view-and-export"><a class="header" href="#view-and-export">View and export</a></h1>
 <p>The editor’s right-hand column ends with a <strong>View and export</strong> panel that groups
@@ -1354,6 +1649,123 @@ as violations.</p>
 <p>If a layout must be manufacturable, run the full SkyWater deck in a sign-off
 tool. This subset is a fast, honest first filter, nothing more.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="klayout-lydrc-compatibility"><a class="header" href="#klayout-lydrc-compatibility">KLayout <code>.lydrc</code> compatibility</a></h1>
+<p>Reticle can run a documented subset of a real <a href="https://www.klayout.de/">KLayout</a> <code>.lydrc</code>
+DRC deck. <code>reticle_drc::parse_lydrc</code> compiles the deck into the same <code>Vec&lt;Rule&gt;</code> the
+<a href="#design-rule-checking">design-rule engine</a> already runs, so a KLayout rule deck (restricted to the subset
+below) produces Reticle violations. Anything outside the subset fails with a clear error that
+names the construct and the line; the parser never panics on untrusted input.</p>
+<p>The syntax is pinned to the current KLayout DRC reference, not to memory of the DSL:
+<a href="https://www.klayout.de/doc/about/drc_ref_layer.html">DRC Layer reference</a> and
+<a href="https://www.klayout.de/doc/about/drc_ref_global.html">DRC global functions</a>, read against
+KLayout 0.29.10 (the version in the pinned <code>hpretl/iic-osic-tools:2025.01</code> container). See
+<a href="../decisions/0083-lydrc-drc-deck-compatibility-subset.html">ADR 0083</a> for the scope decision.</p>
+<h2 id="the-file-format"><a class="header" href="#the-file-format">The file format</a></h2>
+<p>A <code>.lydrc</code> file is KLayout’s DRC <em>macro</em> format: an XML wrapper whose <code>&lt;text&gt;</code> element holds
+the Ruby DRC DSL script.</p>
+<pre><code class="language-xml">&lt;klayout-macro&gt;
+ &lt;category&gt;drc&lt;/category&gt;
+ &lt;interpreter&gt;dsl&lt;/interpreter&gt;
+ &lt;dsl-interpreter-name&gt;drc-dsl-xml&lt;/dsl-interpreter-name&gt;
+ &lt;text&gt;
+met1 = input(68, 20)
+met1.width(0.14).output("m1.1", "met1 minimum width")
+ &lt;/text&gt;
+&lt;/klayout-macro&gt;
+</code></pre>
+<p>The parser extracts and XML-unescapes the <code>&lt;text&gt;</code> body; a bare <code>.drc</code> script (no wrapper)
+is also accepted.</p>
+<h2 id="units"><a class="header" href="#units">Units</a></h2>
+<p>Following the DSL, a <strong>floating-point</strong> dimension is micrometres and an <strong>integer</strong> dimension
+is database units; an explicit <code>.um</code> or <code>.dbu</code> suffix overrides. Reticle’s database units are
+nanometres (1 dbu = 1 nm, as in the SKY130 table), so a micrometre value is scaled by 1000
+(areas by <code>1_000_000</code>) into dbu. Thus <code>width(0.14)</code>, <code>width(0.14.um)</code>, and
+<code>width(140)</code> all mean 140 dbu.</p>
+<h2 id="supported-constructs"><a class="header" href="#supported-constructs">Supported constructs</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th><code>.lydrc</code> construct</th><th>Compiles to</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td><code>name = input(layer)</code> / <code>input(layer, datatype)</code></td><td>a layer binding</td><td>datatype defaults to 0</td></tr>
+<tr><td><code>source(...)</code>, <code>report(...)</code></td><td>ignored</td><td>KLayout I/O header, not a rule</td></tr>
+<tr><td><code>layer.width(v)</code></td><td><code>RuleKind::Width</code></td><td>single layer</td></tr>
+<tr><td><code>layer.space(v)</code></td><td><code>RuleKind::Spacing</code></td><td>single layer</td></tr>
+<tr><td><code>layer.notch(v)</code></td><td><code>RuleKind::Notch</code></td><td>single layer (see divergence note)</td></tr>
+<tr><td><code>layer.separation(other, v)</code> / <code>layer.sep(other, v)</code></td><td><code>RuleKind::Spacing</code></td><td><code>other_layer = other</code></td></tr>
+<tr><td><code>outer.enclosing(inner, v)</code></td><td><code>RuleKind::Enclosure</code></td><td>receiver is the enclosing layer; the parser swaps it into <code>other_layer</code> and the argument into <code>layer</code></td></tr>
+<tr><td><code>layer.with_area(0, v)</code> / <code>with_area(0.0, v)</code> / <code>with_area(nil, v)</code></td><td><code>RuleKind::Area</code></td><td>below-threshold selection only</td></tr>
+<tr><td>trailing <code>.output("name"[, "desc"])</code></td><td>rule name</td><td>optional; names the reported rule</td></tr>
+</tbody>
+</table>
+</div>
+<p>The <strong>enclosing swap</strong> matters: KLayout writes <code>outer.enclosing(inner, v)</code> with the receiver
+being the enclosing (outer) layer, while the engine’s <code>Rule.layer</code> is the enclosed (inner)
+shape and <code>Rule.other_layer</code> is the enclosing (outer) one. The parser exchanges the two so
+the verdicts agree.</p>
+<h2 id="not-supported"><a class="header" href="#not-supported">Not supported</a></h2>
+<p>Everything else, which fails with an <code>UnsupportedConstruct</code> error naming the construct and
+line:</p>
+<ul>
+<li><strong>Extension, density, and angle</strong> rules. No <code>.lydrc</code> construct maps to these unambiguously
+within a bounding-box engine, so a deck using them is out of the supported subset.</li>
+<li><strong>Boolean layer algebra</strong> (<code>&amp;</code>, <code>|</code>, <code>-</code>, <code>^</code>), <strong>sizing</strong> (<code>sized</code>), <strong>merging</strong>, and the
+<strong>universal <code>drc</code> expression</strong>. The engine checks declarative rules, not derived layers.</li>
+<li><strong>Connectivity</strong> (<code>connect</code>, <code>netter</code>, antenna). The engine is connectivity-free.</li>
+<li><strong>Two-sided <code>with_area(min, max)</code> bands</strong> and the aggregate scalar <code>layer.area</code>. Only a
+minimum-area (below-threshold) selection maps to <code>RuleKind::Area</code>.</li>
+</ul>
+<h2 id="divergence-note"><a class="header" href="#divergence-note">Divergence note</a></h2>
+<p>The committed fixture (<code>crates/reticle-drc/tests/fixtures/subset.lydrc</code> over <code>subset.gds</code>) is
+run both through <code>parse_lydrc</code> + <code>DrcEngine</code> and through KLayout headless, and their verdicts
+are compared. The comparison is at the <strong>layout-level verdict</strong> granularity: for each rule,
+did the tool report at least one violation, or none. The two engines agree on every
+supported-subset rule of the fixture:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Rule</th><th>Kind</th><th style="text-align: right">Reticle count</th><th style="text-align: right">KLayout count</th><th style="text-align: center">Verdict agrees</th></tr>
+</thead>
+<tbody>
+<tr><td><code>m1.1</code></td><td>Width</td><td style="text-align: right">1</td><td style="text-align: right">1</td><td style="text-align: center">yes</td></tr>
+<tr><td><code>m1.2</code></td><td>Spacing</td><td style="text-align: right">1</td><td style="text-align: right">1</td><td style="text-align: center">yes</td></tr>
+<tr><td><code>m1.4</code></td><td>Enclosure</td><td style="text-align: right">1</td><td style="text-align: right">4</td><td style="text-align: center">yes</td></tr>
+<tr><td><code>li.6</code></td><td>Area</td><td style="text-align: right">1</td><td style="text-align: right">1</td><td style="text-align: center">yes</td></tr>
+<tr><td><code>m2.1</code></td><td>Width (clean)</td><td style="text-align: right">0</td><td style="text-align: right">0</td><td style="text-align: center">yes</td></tr>
+</tbody>
+</table>
+</div>
+<p>Raw marker counts are <strong>not</strong> required to match, and <code>m1.4</code> shows why: KLayout emits one
+edge-pair marker per offending edge (four, one per side of the under-enclosed cut), while the
+engine emits one violation per offending shape. The fired/not-fired verdict is what both
+tools agree on.</p>
+<p>Two constructs are deliberately excluded from the verdict comparison:</p>
+<ul>
+<li><strong><code>notch</code>.</strong> KLayout’s <code>notch</code> is an <em>intra-polygon</em> concavity check (a narrow gap within
+one polygon). The engine’s <code>Notch</code> is an <em>inter-shape</em> same-layer gap measured on bounding
+boxes, and a bounding-box engine cannot see an intra-polygon notch at all. The parser
+accepts <code>notch</code> and maps it to <code>RuleKind::Notch</code>, but the two tools measure different
+things, so the fixture does not compare <code>notch</code> verdicts.</li>
+<li><strong>Non-rectilinear geometry.</strong> The engine reduces every shape to its bounding box, exact for
+rectangles and conservative (never under-reporting) for polygons and paths. The fixture is
+rectangles only, so bounding-box area equals true area and the comparison is exact.</li>
+</ul>
+<h2 id="reproducing-the-comparison"><a class="header" href="#reproducing-the-comparison">Reproducing the comparison</a></h2>
+<p>The reticle side runs in the normal gate:</p>
+<pre><code>cargo nextest run -p reticle-drc --test lydrc_engine
+</code></pre>
+<p>The KLayout side needs Docker and the pinned container (the same image and invocation as
+<code>just tt-precheck</code>). It mirrors the container run, parses KLayout’s report database, and
+asserts each supported-subset rule’s fired verdict matches the reticle side:</p>
+<pre><code>powershell -File scripts/lydrc-compare.ps1
+</code></pre>
+<p>The exact underlying command, for a WSL or Linux fallback, is:</p>
+<pre><code>klayout -b -r crates/reticle-drc/tests/fixtures/subset.lydrc \
+  -rd input=crates/reticle-drc/tests/fixtures/subset.gds \
+  -rd report=out.lyrdb
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="sky130-grounding"><a class="header" href="#sky130-grounding">SKY130 grounding</a></h1>
 <p>Reticle uses real data from the open SkyWater SKY130 PDK so that its technology file,
 its 3D layer stack, its DRC subset, and its tier-5 benchmark tasks are grounded in cited
@@ -1500,6 +1912,70 @@ full rules, not from the cells being illegal in the real PDK. This is documented
 than hidden, and it is exactly why the deck is described as a first filter and not a
 sign-off check.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="a-second-pdk-ihp-sg13g2"><a class="header" href="#a-second-pdk-ihp-sg13g2">A second PDK: IHP SG13G2</a></h1>
+<p>Reticle’s generators were written against the SKY130 subset, but the process numbers
+they draw against are <strong>data</strong>, not baked constants. This chapter describes that
+data-driven design (<code>GenTech</code>) and the second process it enables: IHP’s open
+SG13G2 (a 130 nm SiGe BiCMOS process).</p>
+<h2 id="gentech-numbers-as-data"><a class="header" href="#gentech-numbers-as-data">GenTech: numbers as data</a></h2>
+<p>Every generator needs the same small set of per-process numbers: the interconnect
+conductors it may route on (each with a minimum width, spacing, and optional minimum
+area), the cut layers that bridge adjacent conductors (each with an exact drawn size
+and the enclosure a covering plate owes it), the substrate-tap contact under the base
+conductor, and a conservative cut pitch for layers whose deck carries no cut-to-cut
+spacing. <code>GenTech</code> gathers exactly those into one value.</p>
+<p>The generators read <code>GenTech</code> from the <code>Technology</code> argument threaded into
+<code>generate()</code> (<code>GenTech::for_technology</code>, which selects a built-in by process name and
+defaults to SKY130 so every existing caller is unaffected). The ring / serpentine /
+fill / via-array <strong>topology</strong>, the parameter <strong>schemas</strong>, and the <strong>validation</strong> stay
+code; only the numbers are data. <code>GenTech::sky130()</code> is authored from the committed
+SKY130 subset and cross-checked against <code>reticle_drc::sky130_drc_rules()</code> by test; a
+<code>derive_gentech()</code> function reconstructs a <code>GenTech</code> from any parsed <code>Technology</code>,
+proving the values are faithful to the deck (and to the stack ordering). See ADR 0084.</p>
+<h2 id="roles-not-layer-names"><a class="header" href="#roles-not-layer-names">Roles, not layer names</a></h2>
+<p>A <code>GenTech</code> is four stacked interconnect conductors (index 0 = base), three cuts where
+<code>cut[i]</code> bridges <code>conductor[i]</code> and <code>conductor[i+1]</code>, and one substrate-tap cut. The
+generators address these by <em>role</em> (level index), so a generator enum variant like
+<code>RingLayer::Li1</code> means “the base interconnect” - <code>li1</code> on SKY130 and <code>Metal1</code> on
+SG13G2. The role binding for the two shipped processes:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>role</th><th>SKY130</th><th>SG13G2</th><th>SG13G2 GDS</th></tr>
+</thead>
+<tbody>
+<tr><td>conductor 0</td><td>li1</td><td>Metal1</td><td>8/0</td></tr>
+<tr><td>conductor 1</td><td>met1</td><td>Metal2</td><td>10/0</td></tr>
+<tr><td>conductor 2</td><td>met2</td><td>Metal3</td><td>30/0</td></tr>
+<tr><td>conductor 3</td><td>met3</td><td>Metal4</td><td>50/0</td></tr>
+<tr><td>cut 0 (0↔1)</td><td>mcon</td><td>Via1</td><td>19/0</td></tr>
+<tr><td>cut 1 (1↔2)</td><td>via</td><td>Via2</td><td>29/0</td></tr>
+<tr><td>cut 2 (2↔3)</td><td>via2</td><td>Via3</td><td>49/0</td></tr>
+<tr><td>substrate tap</td><td>licon1</td><td>Cont</td><td>6/0</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="the-sg13g2-data-and-its-provenance"><a class="header" href="#the-sg13g2-data-and-its-provenance">The SG13G2 data and its provenance</a></h2>
+<p><code>tech/ihp-sg13g2.tech</code> carries the layer table, the physical stack, and the DRC subset
+inline; <code>tech/sg13g2-drc-subset.toml</code> is the cited source of record. Every number is
+transcribed from the open IHP-Open-PDK (github.com/IHP-GmbH/IHP-Open-PDK, branch main,
+<strong>Apache-2.0</strong>), with the KLayout DRC rule ids preserved (e.g. <code>M1.a</code>, <code>V1.c</code>). The
+subset mirrors the digital routing stack (Metal1–Metal4 width/spacing, the Cont/Via1–3
+sizes and via enclosures) and deliberately omits what the generators do not draw
+against: the wide-metal and pattern-density spacing variants (which the DRC engine
+cannot express as width-conditional), the FEOL Activ/GatPoly contact enclosures, and
+the thick TopMetal stack. Passing it is not tape-out clean. See ADR 0085.</p>
+<h2 id="the-proof-both-pdks-clean-by-construction"><a class="header" href="#the-proof-both-pdks-clean-by-construction">The proof: both PDKs, clean by construction</a></h2>
+<p>The cleanliness oracle runs every generator over <strong>both</strong> processes: it samples random
+valid parameters, generates into a fresh cell using each process’s <code>Technology</code>, and
+asserts the real DRC engine finds <strong>zero</strong> violations under that process’s own deck.
+The same generator code, handed a different technology by name, draws against that
+process’s own layers and numbers and stays clean. Making this hold for the second
+process took exactly one generator change - the contact chain now encloses each contact
+by <em>both</em> bridging conductor levels, so whichever level a process’s deck requires to
+enclose the cut (<code>met1</code> encloses <code>mcon</code> on SKY130, <code>Metal1</code> encloses <code>Via1</code> on SG13G2)
+is satisfied. Everything else was already portable once the numbers became data.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="routing"><a class="header" href="#routing">Routing</a></h1>
 <p><code>reticle-route</code> connects nets across the layout while respecting obstacles and
 spacing.</p>
@@ -1534,6 +2010,72 @@ check.</p>
 <p>Extraction is validated against an independent union-find oracle over randomized
 geometry, so the optimized traversal cannot disagree with the definition of
 connectivity.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="device-recognition"><a class="header" href="#device-recognition">Device recognition</a></h1>
+<p>Connectivity extraction recovers nets; device recognition goes one level up and
+recovers the <strong>transistors</strong> those nets connect. It is a new module in
+<code>reticle-extract</code> (<code>device</code>), a sibling of the connectivity types, not a change to
+them.</p>
+<h2 id="a-gate-is-poly-over-diffusion"><a class="header" href="#a-gate-is-poly-over-diffusion">A gate is poly over diffusion</a></h2>
+<p>A MOSFET is where a poly shape crosses a diffusion shape: that overlap is the
+channel (the gate). The extractor:</p>
+<ol>
+<li>Flattens the cell and finds every poly-over-diffusion overlap that fully
+crosses the diffusion (a partial overlap leaves diffusion on only one side and
+is not a channel).</li>
+<li>Classifies each gate as <strong>NMOS</strong> or <strong>PMOS</strong> from the surrounding implant and
+well: p+ select (<code>psdm</code>) or an <code>nwell</code> means PMOS; n+ select (<code>nsdm</code>) or bare
+substrate means NMOS.</li>
+<li>Measures the channel: gate <strong>length</strong> is the poly extent across the channel,
+gate <strong>width</strong> is the diffusion extent under the poly.</li>
+</ol>
+<h2 id="why-a-transistor-needs-more-than-connectivity"><a class="header" href="#why-a-transistor-needs-more-than-connectivity">Why a transistor needs more than connectivity</a></h2>
+<p>Pure connectivity sees a single diffusion rectangle as <strong>one</strong> net: a plain wire
+and a transistor look identical to a same-layer union-find, so source and drain
+come out shorted. That is wrong for a transistor, whose channel does not conduct
+at DC.</p>
+<p>Device recognition fixes this by <strong>splitting the diffusion by its gate</strong> before it
+assigns terminal nets. Each diffusion is cut into the lobes on either side of every
+channel, and connectivity is extracted over that cut geometry (reusing the same
+<code>Extractor</code>, with the SKY130 contact/via stack plus a body-tie path). The result is
+that a transistor’s source and drain land on distinct nets exactly when the layout
+wires them apart, and the gate, source, drain, and bulk terminals each bind to a
+real net.</p>
+<h2 id="device-level-lvs-lite"><a class="header" href="#device-level-lvs-lite">Device-level LVS-lite</a></h2>
+<p><code>compare_devices</code> compares an extracted device netlist against an expected one by
+<strong>device kind and terminal-net connectivity</strong>: each device reduces to its kind,
+gate, unordered source/drain, and bulk net names, and devices are matched by that
+signature. It reports the devices each side has that the other does not, catching
+device-count and terminal-net mismatches. The match is name-based, so both sides
+name their nets (the layout through label geometry, the schematic directly). This
+extends the connectivity <code>compare_netlists</code> additively; that function is unchanged.</p>
+<h2 id="scope-and-limits"><a class="header" href="#scope-and-limits">Scope and limits</a></h2>
+<p>This is deliberately “lite” and honest about its edges:</p>
+<ul>
+<li>Recognizes NMOS and PMOS only: no parasitic devices (diodes, capacitors,
+bipolars), no JFETs, no ESD structures.</li>
+<li>No device-parameter matching beyond reporting W/L: <code>compare_devices</code> matches on
+connectivity, not on W/L tolerance or model name.</li>
+<li>No series/parallel device folding and no hierarchical device extraction; it works
+over the flattened cell.</li>
+<li>Bulk binding is best-effort from the nearest matching body tap; an untapped body
+is left unbound rather than guessed.</li>
+<li>Source and drain are geometrically symmetric, so their labelling is a stable
+low/high convention, not a claim about circuit function.</li>
+</ul>
+<h2 id="oracle"><a class="header" href="#oracle">Oracle</a></h2>
+<p>The recognition is checked against an independent tool. <code>scripts/device-oracle.ps1</code>
+runs Magic’s own device extraction on a GDS inside the pinned
+<code>hpretl/iic-osic-tools</code> container (Magic + the sky130A PDK, the same image the
+tt-precheck recipe uses). On the production cell <code>sky130_fd_sc_hd__inv_1</code> Magic
+extracts 1 NMOS + 1 PMOS with gate <code>A</code>, drains <code>Y</code>, and sources on <code>VGND</code> / <code>VPWR</code>,
+the same device count, kinds, and terminal connectivity the extractor recovers from
+the hand-built golden fixture (<code>crates/reticle-extract/tests/fixtures/inverter.md</code>).
+When Docker or the image is unavailable the tests fall back to that committed golden
+fixture and state the limitation.</p>
+<p>A full multimodal oracle and an oracle-agreement table across more cells are a
+separate lane; this chapter documents only the device recognition and its Magic
+device-count agreement.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="metrology"><a class="header" href="#metrology">Metrology</a></h1>
 <p><code>reticle-metrology</code> turns a laid-out <a href="#document-model"><code>Document</code></a> into a small set of
@@ -2251,6 +2793,9 @@ fill, or a probe-able test structure. Each one is a pure function from typed
 parameters plus a technology to geometry, and every generator is
 <a href="#sky130-rule-coverage">DRC-clean by construction</a> against the SKY130 subset (see
 <a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0043-generators-drc-clean-by-construction.md">ADR 0043</a>).
+The process numbers are data (a <code>GenTech</code> derived from the technology), so the same
+generators run DRC-clean against a <strong>second PDK</strong> too - see
+<a href="#a-second-pdk-ihp-sg13g2">A second PDK: IHP SG13G2</a>.
 The generator framework itself, the typed <a href="https://docs.rs/reticle-gen"><code>Generator</code></a>
 trait and the type-erased <a href="https://docs.rs/reticle-gen"><code>Registry</code></a> that drives it by
 id, is described in
@@ -2381,6 +2926,62 @@ real stdio subprocess and asserts each one, so the wire contract is covered end 
 end.</p>
 <p>See ADR <a href="https://github.com/AlpharomeroJL/reticle/blob/main/docs/decisions/0005-rust-mcp-servers.md">0005</a>
 and the <a href="#agent-api-and-harness">agent chapter</a> for the command surface these tools mirror.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="python-bindings"><a class="header" href="#python-bindings">Python bindings</a></h1>
+<p>The <code>reticle-py</code> crate exposes the document and layout-generator APIs to Python
+through <a href="https://pyo3.rs">PyO3</a>. It is a native extension built with
+<a href="https://www.maturin.rs">maturin</a> as a stable-ABI (<code>abi3</code>) wheel, so one wheel
+loads on every CPython 3.9 and later. The package is a mixed Rust and Python
+project: the compiled module is imported as <code>reticle_py._core</code>, and a small pure
+Python layer re-exports it and adds a Jupyter inline viewer.</p>
+<p><code>reticle-py</code> is native only and is deliberately not part of the default Cargo
+workspace, so the <code>just ci</code> gate never needs a Python toolchain. The reasoning is
+recorded in <a href="decisions/0087-python-bindings-abi3-nondefault.html">ADR 0087</a>.</p>
+<h2 id="api-surface"><a class="header" href="#api-surface">API surface</a></h2>
+<pre><code class="language-python">import reticle_py as rp
+
+rp.version()                       # crate version string
+rp.generators()                    # list of {id, title, description} dicts
+
+doc = rp.Document.open("design.gds")   # GDSII, or the OASIS subset, chosen by extension
+doc.cell_names()                   # sorted list of cell names
+doc.top_cells()                    # the document's top (root) cells
+doc.cell_count()                   # number of cells
+doc.summary()                      # dict of counts, top cells, and layers in use
+doc.shapes("TOP")                  # list of {layer, datatype, kind, bbox} for a cell
+
+# Place a built-in generator by id with JSON parameters. Empty "{}" uses the
+# generator's own defaults. Returns {shapes_added, bbox}.
+doc.place_generator("TOP", "guard_ring", "{}")
+
+png = doc.render_png("TOP", 800, 600)   # PNG bytes, or None if no GPU is available
+doc.save("out.gds")                     # format inferred, or pass "gds" / "oasis"
+</code></pre>
+<p>Everything that crosses the boundary is treated as untrusted and validated
+before it reaches native code: render dimensions must be between 1 and 16384 on
+each axis, cell names are checked against the document (a miss raises
+<code>KeyError</code>), and generator parameters are parsed and range-checked by the
+registry, which reports the offending field as a <code>ValueError</code>.</p>
+<h2 id="the-jupyter-widget"><a class="header" href="#the-jupyter-widget">The Jupyter widget</a></h2>
+<p>The v1 viewer renders a cell to a PNG with the same offscreen GPU path the CLI
+uses and displays it inline:</p>
+<pre><code class="language-python">rp.show(doc, "TOP", width=640, height=480)     # inline image, or a note if no GPU
+</code></pre>
+<p><code>rp.LayoutView(doc, "TOP")</code> is a lazy alternative whose <code>_repr_png_</code> renders when
+a notebook displays it, falling back to a text representation when no GPU adapter
+is present. A richer interactive widget (browser pan and zoom) is a follow-up; an
+image is enough to see a layout today.</p>
+<p>The committed example notebook, <code>crates/reticle-py/examples/reticle_intro.ipynb</code>,
+opens the bundled <code>basic.gds</code>, lists the generators, places a guard ring, renders
+the cell, and saves the result.</p>
+<h2 id="building-the-wheel"><a class="header" href="#building-the-wheel">Building the wheel</a></h2>
+<p>The build runs maturin under <a href="https://docs.astral.sh/uv">uv</a>:</p>
+<pre><code class="language-powershell">uv tool install maturin
+cd crates/reticle-py
+maturin build --release        # writes a wheel under the shared target's wheels/ dir
+</code></pre>
+<p>For local development against the current interpreter, <code>maturin develop</code> builds
+and installs the extension into the active virtual environment in one step.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="agent-benchmark-suite"><a class="header" href="#agent-benchmark-suite">Agent benchmark suite</a></h1>
 <p>The benchmark suite measures whether a model, driven through the Reticle agent API,
@@ -2713,6 +3314,175 @@ is legible when reading the results. For agents that instead want to shrink the 
 at the source, a scoped run can hand the model a region-local
 <a href="#scoped-sessions-and-context-packs-reticle-agentcontext_pack">context pack</a>
 rather than the whole document, which is a different lever on the same constraint.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="multimodal-verification"><a class="header" href="#multimodal-verification">Multimodal verification</a></h1>
+<p>The <a href="#benchmark-methodology">benchmark methodology</a> chapter makes one thing central: the checker is
+the oracle, and it is two-way tested. That oracle reads a single modality, the geometry of
+the document. This subsection describes a <strong>second oracle of a different modality</strong>: render
+the layout to an image and ask a local vision model whether the render shows what the task
+intended. It sits <em>beside</em> the authoritative checker and never replaces it.</p>
+<h2 id="why-a-second-modality"><a class="header" href="#why-a-second-modality">Why a second modality</a></h2>
+<p>Two oracles that reach a verdict by unrelated means, geometry versus pixels, agreeing on
+the same faithful-versus-corrupt distinction is stronger evidence than either alone, and a
+disagreement is a signal worth surfacing rather than a failure. Reticle already renders a
+document region to a PNG headlessly (the <code>render_png</code> / <code>RenderPng</code> path the run writer
+uses for its per-run artifact). The vision oracle reuses that path unchanged, base64-encodes
+the PNG, and posts it with a yes/no question to a local vision model over Ollama’s native
+<code>{base}/api/generate</code> endpoint.</p>
+<p>The authoritative pass/fail is still the deterministic checker’s. The vision verdict and the
+<strong>agreement rate</strong> it produces are provenance reported alongside the score, not the verdict
+of record. This is the same second-reading role the
+<a href="#tinytapeout-submission">Tiny Tapeout precheck</a> and the LEF/DEF import oracle play: an independent
+corroboration, never an override.</p>
+<h2 id="honest-not-run"><a class="header" href="#honest-not-run">Honest not-run</a></h2>
+<p>A vision model is heavy and may not be installed, or may be VRAM-bound on a given host, so
+it is never a hard dependency of the gate. The oracle probes availability the same cheap way
+the container oracles do: the <code>ollama</code> CLI must be on the path and the model must already be
+pulled. When the model is absent, when the host has no GPU adapter to render, or when any
+transport or parse step fails, the oracle returns a printable <em>skip</em> reason, never an error
+and never a panic. The adapter-gated test runs when a model is present and skips honestly
+otherwise, printing why. Numbers are only ever reported when the oracle actually ran;
+nothing here fabricates a verdict.</p>
+<h2 id="model-and-vram-budget"><a class="header" href="#model-and-vram-budget">Model and VRAM budget</a></h2>
+<p>The default model is <code>llava:7b</code> (about 4.7 GB resident), pulled with
+<code>ollama pull llava:7b</code>. It fits comfortably in a 16 GB card, well under the ~8 GB resident
+budget, leaving room for the wgpu render to share the GPU. It is overridable with
+<code>RETICLE_VISION_MODEL</code> (for example <code>qwen2.5vl:7b</code> or <code>moondream</code>), and the endpoint with
+<code>RETICLE_VISION_BASE_URL</code>. The request pins <code>temperature: 0</code> so a given render yields a
+stable verdict rather than drifting at Ollama’s default sampling temperature.</p>
+<h2 id="what-the-second-oracle-can-and-cannot-judge"><a class="header" href="#what-the-second-oracle-can-and-cannot-judge">What the second oracle can and cannot judge</a></h2>
+<p>The prompt asks a binary question, <em>does this render contain drawn geometry (filled colored
+shapes) or is it an empty/blank layout?</em>, with the task intent appended as a trailing hint.
+This phrasing is deliberate. A 7B <code>llava</code> reliably answers the present-versus-blank question,
+but on this host it flips to a spurious “no” when the same question is framed as “does it
+<em>match</em> the intent”, and it hallucinates geometry into a genuinely blank image when it is
+forced to justify its answer. So the oracle is scoped as a coarse “non-empty layout
+consistent with the intent” second opinion, not a fine intent-conformance judge. That is the
+honest ceiling of a small local vision model, and it is enough to corroborate a faithful
+layout against an empty or corrupt one.</p>
+<p>Concretely, the oracle is compared against the authoritative checker over a fixture pair: a
+faithful layout (a cell with separated metal rectangles, which the <code>RectPresent</code> checker
+passes) and a corrupt one (the same cell with no geometry, which the checker fails). The
+<code>AgreementTally</code> records, for each fixture, whether the vision verdict matched the checker’s
+pass/fail, and reports the fraction. The safety property the pair demonstrates, that a
+corrupt layout is caught by <em>at least one</em> oracle, holds regardless of the vision model’s
+answer because the authoritative checker always catches it; the vision oracle’s contribution
+is the corroboration and the disagreement signal on top of that.</p>
+<p>On the development host the live oracle ran (<code>llava:7b</code>) and agreed with the authoritative
+checker on both fixtures of the pair. That is a demonstration of the mechanism over a small,
+hand-built fixture pair, not a suite-wide benchmark headline. See
+<a href="../decisions/0090-multimodal-vision-second-oracle.html">ADR 0090</a> for the model choice, the
+VRAM budget, and the honest-not-run policy.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="leaderboard"><a class="header" href="#leaderboard">Leaderboard</a></h1>
+<p>This page is generated deterministically from the committed benchmark result records under <code>benchmarks/results/</code>. It does not run the suite; it aggregates the <code>*.result.json</code> records the runs already wrote. Regenerate it with <code>cargo run -p reticle-bench -- leaderboard</code>. The record format is the API: to add a row, run the suite and open a pull request with your records (see <a href="#submitting-a-run">Submitting a run</a>).</p>
+<p>It aggregates <strong>231</strong> committed result record(s) into <strong>3</strong> row(s), one per <code>backend</code> / <code>model</code> / <code>quantization</code> triple. The numbers are exactly what the committed records say and grow as more runs are committed.</p>
+<h2 id="how-to-read-a-row"><a class="header" href="#how-to-read-a-row">How to read a row</a></h2>
+<ul>
+<li><strong>Kind</strong> labels a row as a <em>bare model</em> (a model driven through Reticle’s own propose-verify-correct loop), an <em>agent system</em> (a system that brings its own loop and scaffold, such as Claude Code), or a <em>multi-agent</em> system. A bare-model row and an agent-system row measure different things and are <strong>not</strong> comparable head to head (see the <a href="#benchmark-methodology">methodology</a>).</li>
+<li><strong>Quantization</strong> is carried where the backend reports one (for example <code>Q4_K_M</code> on a local GGUF model), so a small quantized local model is never conflated with a full-precision or frontier one.</li>
+<li><strong>PARTIAL</strong> marks a row that has no result in one or more tiers, so it did not span the full difficulty range and its denominator is not comparable to a full-tier row.</li>
+<li>Each <strong>Tier</strong> cell is <code>passed/total</code>, and <strong>Overall</strong> is <code>passed/total (rate)</code> over every committed record for that row.</li>
+</ul>
+<h2 id="rankings"><a class="header" href="#rankings">Rankings</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Kind</th><th>Model</th><th>Backend</th><th>Quantization</th><th>Suite</th><th style="text-align: right">Tier 1</th><th style="text-align: right">Tier 2</th><th style="text-align: right">Tier 3</th><th style="text-align: right">Tier 4</th><th style="text-align: right">Tier 5</th><th style="text-align: right">Overall</th><th></th></tr>
+</thead>
+<tbody>
+<tr><td>agent system</td><td><code>claude-sonnet-5</code></td><td>claude-code</td><td>-</td><td>adhoc</td><td style="text-align: right">8/9</td><td style="text-align: right">10/11</td><td style="text-align: right">38/41</td><td style="text-align: right">7/11</td><td style="text-align: right">9/9</td><td style="text-align: right"><strong>72/81 (89%)</strong></td><td></td></tr>
+<tr><td>bare model</td><td><code>gpt-oss:16k</code></td><td>ollama</td><td>MXFP4</td><td>0.4.0</td><td style="text-align: right">9/9</td><td style="text-align: right">11/11</td><td style="text-align: right">19/34</td><td style="text-align: right">5/11</td><td style="text-align: right">8/10</td><td style="text-align: right"><strong>52/75 (69%)</strong></td><td></td></tr>
+<tr><td>bare model</td><td><code>qwen2.5-coder:16k</code></td><td>ollama</td><td>Q4_K_M</td><td>0.4.0</td><td style="text-align: right">6/9</td><td style="text-align: right">8/11</td><td style="text-align: right">6/34</td><td style="text-align: right">3/11</td><td style="text-align: right">6/10</td><td style="text-align: right"><strong>29/75 (39%)</strong></td><td></td></tr>
+</tbody>
+</table>
+</div>
+<p>The labeling rules above are the honest account preserved from the <a href="#benchmark-methodology">benchmark methodology</a>: a machinery baseline, a local model, and an agent system are always distinguishable, and a partial run is never published as a full-suite score.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="submitting-a-run"><a class="header" href="#submitting-a-run">Submitting a run</a></h1>
+<p>The <a href="#leaderboard">leaderboard</a> is built from committed result records, and the record
+format is the whole API. There is no server, no account, and no upload endpoint: you run
+the suite, you get JSON records, you open a pull request that adds them, and the next time
+the page is generated your row appears. This chapter is the exact recipe.</p>
+<h2 id="1-run-the-suite"><a class="header" href="#1-run-the-suite">1. Run the suite</a></h2>
+<p>The suite lives under <code>benchmarks/layout-tasks/</code> (a <code>manifest.toml</code> and one TOML per
+task). Pick the backend that matches what you are measuring:</p>
+<pre><code>just bench-agent                     # the deterministic mock (machinery baseline, no key)
+just bench-agent-ollama              # a local model over an Ollama endpoint
+just bench-agent-claude-code         # Claude Code as an agent system (consumes your quota)
+</code></pre>
+<p>Each recipe takes the same scoping flags, so you can run a tier or a single task while you
+iterate:</p>
+<pre><code>just bench-agent-ollama --tier 1
+just bench-agent-ollama --task t1_place_met1_rect
+</code></pre>
+<p>The model and its provenance come from the environment and the backend. For a local model
+over Ollama, set the model name and (where you know it) the quantization so your row is
+labeled honestly:</p>
+<pre><code>$env:RETICLE_MODEL_NAME = 'gpt-oss:16k'
+just bench-agent-ollama --quantization MXFP4
+</code></pre>
+<p>The mock is deterministic end to end and solves only the three sample tasks; it is a
+<strong>machinery baseline, not a model score</strong>, and the leaderboard labels it as such. A real
+score comes from a real model.</p>
+<h2 id="2-find-your-records"><a class="header" href="#2-find-your-records">2. Find your records</a></h2>
+<p>A suite run writes an aggregate result file (a JSON array of records) under
+<code>scratch/agent-suite-results/</code> by default (<code>suite.json</code> for a whole-suite run, or
+<code>tier-&lt;n&gt;.json</code> / <code>task-&lt;id&gt;.json</code> for a scoped one). The Claude Code backend also writes
+one artifact per task under <code>scratch/agent-runs/</code>, including a <code>&lt;task_id&gt;.result.json</code>
+record and, separately, a <code>&lt;task_id&gt;.notrun.json</code> for any task that could not run at all.</p>
+<p>A <strong>not-run is never a result.</strong> A task that the backend could not even start (the CLI
+missing, the session unauthenticated, out of quota) is recorded as a distinct
+<code>*.notrun.json</code> artifact and is never counted as a pass or a fail. Only <code>*.result.json</code>
+records reach the leaderboard.</p>
+<h2 id="3-the-record-schema"><a class="header" href="#3-the-record-schema">3. The record schema</a></h2>
+<p>Every record is a <a href="#agent-benchmark-suite"><code>ResultRecord</code></a> with these fields (the shape is frozen;
+<code>backend</code> and <code>quantization</code> default so older JSON still parses):</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>task_id</code></td><td>string</td><td>The task that ran. Must begin with a <code>t&lt;N&gt;_</code> tier prefix (for example <code>t1_place_met1_rect</code>); the leaderboard reads the tier from it.</td></tr>
+<tr><td><code>model</code></td><td>string</td><td>The model identifier (or <code>mock</code>).</td></tr>
+<tr><td><code>suite_version</code></td><td>string</td><td>The suite version the task came from.</td></tr>
+<tr><td><code>success</code></td><td>bool</td><td>Whether the two-way-tested checker passed.</td></tr>
+<tr><td><code>iterations</code></td><td>number</td><td>Propose-verify-correct iterations used.</td></tr>
+<tr><td><code>first_proposal_violations</code></td><td>number</td><td>DRC violations in the first proposal.</td></tr>
+<tr><td><code>final_violations</code></td><td>number</td><td>DRC violations in the final document.</td></tr>
+<tr><td><code>wall_ms</code></td><td>number</td><td>Wall-clock time for the task, in milliseconds.</td></tr>
+<tr><td><code>backend</code></td><td>string</td><td>The client kind: <code>mock</code>, <code>ollama</code>, <code>anthropic</code>, <code>claude-code</code>, …</td></tr>
+<tr><td><code>quantization</code></td><td>string or null</td><td>The model’s quantization when the backend reports one (for example <code>Q4_K_M</code>), else null.</td></tr>
+</tbody>
+</table>
+</div>
+<p>A file is a JSON array of these records, exactly as the runner writes it.</p>
+<h2 id="4-validate-before-you-submit"><a class="header" href="#4-validate-before-you-submit">4. Validate before you submit</a></h2>
+<p>Reject a malformed record before it ever reaches a reviewer. The validator reuses the same
+<code>ResultRecord</code> shape the runner writes, so a record that validates is a record the
+leaderboard can render:</p>
+<pre><code>cargo run -p reticle-bench -- validate-records scratch/agent-suite-results/suite.json
+</code></pre>
+<p>It accepts a single file or a whole directory. A valid set prints a count and exits 0; a
+malformed record is rejected with a message naming the file, the record index, and the
+reason (an empty <code>task_id</code>, a <code>task_id</code> with no tier prefix, an empty <code>model</code> or
+<code>suite_version</code>, or a file that is not a JSON array of records), and exits non-zero.</p>
+<h2 id="5-open-the-pull-request"><a class="header" href="#5-open-the-pull-request">5. Open the pull request</a></h2>
+<p>Commit your records under <code>benchmarks/results/</code>, in a directory that names your run, with a
+file name ending in <code>.result.json</code> (the extension the leaderboard aggregates; a
+<code>*.notrun.json</code> is deliberately not aggregated):</p>
+<pre><code>benchmarks/results/&lt;your-label&gt;/&lt;model-or-run&gt;.result.json
+</code></pre>
+<p>Then regenerate the page so your row is included, and commit the regenerated page too:</p>
+<pre><code>cargo run -p reticle-bench -- leaderboard
+</code></pre>
+<p>Open the pull request with both the records and the regenerated <code>docs/src/leaderboard.md</code>.
+Your row is aggregated per <code>backend</code> / <code>model</code> / <code>quantization</code> triple, labeled by
+<a href="#how-to-read-a-row">kind</a> (a bare model, an agent system, or a multi-agent
+system), and marked <strong>PARTIAL</strong> if it does not span all five tiers. A bare-model row and an
+agent-system row are not comparable head to head; both are welcome, and the labeling keeps
+them honest.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tinytapeout-submission"><a class="header" href="#tinytapeout-submission">TinyTapeout submission</a></h1>
 <p>Reticle exists to open, inspect, share, and generate real IC layout. TinyTapeout is
