@@ -1,0 +1,88 @@
+VERSION 5.8 ;
+UNITS
+  DATABASE MICRONS 1000 ;
+END UNITS
+
+MANUFACTURINGGRID 0.005 ;
+
+LAYER li1
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  WIDTH 0.17 ;
+END li1
+
+LAYER mcon
+  TYPE CUT ;
+END mcon
+
+LAYER met1
+  TYPE ROUTING ;
+  DIRECTION VERTICAL ;
+  WIDTH 0.14 ;
+END met1
+
+SITE unithd
+  CLASS CORE ;
+  SYMMETRY Y ;
+  SIZE 0.46 BY 2.72 ;
+END unithd
+
+MACRO INV
+  CLASS CORE ;
+  ORIGIN 0 0 ;
+  SIZE 1.38 BY 2.72 ;
+  SYMMETRY X Y ;
+  SITE unithd ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER li1 ;
+        RECT 0.20 1.00 0.40 1.20 ;
+    END
+  END A
+  PIN Y
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER li1 ;
+        RECT 0.90 1.00 1.10 1.20 ;
+    END
+  END Y
+  PIN VPWR
+    DIRECTION INOUT ;
+    USE POWER ;
+    PORT
+      LAYER met1 ;
+        RECT 0.00 2.55 1.38 2.72 ;
+    END
+  END VPWR
+  OBS
+    LAYER li1 ;
+      RECT 0.55 0.30 0.75 0.60 ;
+  END
+END INV
+
+MACRO BUF
+  CLASS CORE ;
+  SIZE 1.84 BY 2.72 ;
+  SITE unithd ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER li1 ;
+        RECT 0.20 1.00 0.40 1.20 ;
+    END
+  END A
+  PIN Z
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER li1 ;
+        RECT 1.40 1.00 1.60 1.20 ;
+    END
+  END Z
+END BUF
+
+END LIBRARY
