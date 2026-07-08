@@ -29,10 +29,20 @@
 //! Linux-native in a pinned Docker container via `just tt-precheck <gds>`
 //! (`scripts/tt-precheck.ps1`); the parser here needs neither Docker nor the PDK and is
 //! unit-tested against the precheck's committed output format.
+//!
+//! # The LEF/DEF import oracle
+//!
+//! The [`lefdef_oracle`] module applies the same pinned-container-oracle pattern to
+//! `reticle-lefdef`: it cross-checks that crate's LEF/DEF import against `OpenROAD` running
+//! in the pinned image, asserting the two agree on the structural facts (macro, component,
+//! and pin counts, and the die area). Like the precheck, it skips honestly when Docker or
+//! the image is unavailable, and a committed set of fixtures proves the cross-check both
+//! ways (a faithful import matches; a corrupted DEF diverges) with no Docker in the gate.
 
 #![forbid(unsafe_code)]
 
 pub mod convert;
+pub mod lefdef_oracle;
 pub mod tt_precheck;
 
 pub use convert::{ConvertSummary, run_convert};
