@@ -4275,6 +4275,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reticle-lefdef"
+version = "7.0.0"
+dependencies = [
+ "reticle-geometry",
+ "reticle-model",
+]
+
+[[package]]
 name = "reticle-mcp"
 version = "7.0.0"
 dependencies = [

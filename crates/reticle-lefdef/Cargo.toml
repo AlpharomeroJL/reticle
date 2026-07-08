@@ -1,0 +1,21 @@
+[package]
+name = "reticle-lefdef"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "LEF/DEF import: parse OpenROAD/OpenLane technology, cells, placement, and routing into the Reticle document model."
+keywords = ["lef", "def", "openroad", "eda", "layout"]
+categories = ["parser-implementations", "science"]
+
+[lints]
+workspace = true
+
+[dependencies]
+reticle-geometry = { workspace = true }
+reticle-model = { workspace = true }
+# No external dependencies: LEF/DEF are text, parsed with std only. This keeps the
+# crate wasm-clean (the run viewer, lane 5B, may target wasm) and free of any
+# native-only I/O or codec crate.

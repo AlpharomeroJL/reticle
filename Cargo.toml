@@ -16,6 +16,7 @@ members = [
     "crates/reticle-proto",
     "crates/reticle-index",
     "crates/reticle-io",
+    "crates/reticle-lefdef",
     "crates/reticle-model",
     "crates/reticle-render",
     "crates/reticle-drc",
@@ -62,6 +63,7 @@ reticle-geometry = { path = "crates/reticle-geometry", version = "7.0.0" }
 reticle-proto = { path = "crates/reticle-proto", version = "7.0.0" }
 reticle-index = { path = "crates/reticle-index", version = "7.0.0" }
 reticle-io = { path = "crates/reticle-io", version = "7.0.0" }
+reticle-lefdef = { path = "crates/reticle-lefdef", version = "7.0.0" }
 reticle-model = { path = "crates/reticle-model", version = "7.0.0" }
 reticle-render = { path = "crates/reticle-render", version = "7.0.0" }
 reticle-drc = { path = "crates/reticle-drc", version = "7.0.0" }
