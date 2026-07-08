@@ -35,3 +35,7 @@ lod = "lod"
 iy = "iy"
 # RFC 4648 base64 test vector ("" f fo foo foob fooba foobar) in reticle-mcp.
 fo = "fo"
+# IHP SG13G2 process layer name: the active-area layer is spelled "Activ" (not "Active").
+Activ = "Activ"
+# OASIS extension-scheme byte notation `0000SSEE` (two S bits, two E bits) in oasis_std.
+SSEE = "SSEE"
