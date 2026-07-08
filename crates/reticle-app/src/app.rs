@@ -69,7 +69,7 @@ impl Status {
 
 /// A zoom preset that needs the real canvas size to resolve, so it is recorded when the
 /// command fires and applied in [`App::canvas`] once the pane rectangle is known (item
-/// 28). [`ViewPreset::Fit`] uses the existing `fit_requested` path; these are the three
+/// 28). `Fit` uses the existing `fit_requested` path; these are the three
 /// that frame a computed world rectangle.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ViewPreset {
@@ -114,7 +114,7 @@ enum StartAction {
     OpenDialog,
     /// Open the New Tiny Tapeout tile wizard (catalog 24).
     OpenTileWizard,
-    /// Toggle the pin on a recent-files entry, keyed by its [`recent_key`]
+    /// Toggle the pin on a recent-files entry, keyed by its [`recent_key`](crate::startscreen::recent_key)
     /// (catalog 9).
     PinRecent(String),
     /// Dismiss the Start screen and keep the demo document.
@@ -327,7 +327,7 @@ pub struct App {
     /// Capped at nine slots so the palette list stays short.
     bookmarks: Vec<ViewCamera>,
     /// Text queued for the system clipboard (the copy-permalink action, item 35), flushed
-    /// through egui in [`App::ui`] where the `Context` is available.
+    /// through egui in `App::ui` where the `Context` is available.
     pending_clipboard: Option<String>,
 
     /// The canvas pane layout: split mode, focused pane, and per-pane cameras.
@@ -3997,7 +3997,7 @@ impl App {
     /// Builds the persisted session snapshot from the live view, settings, and
     /// onboarding state.
     ///
-    /// [`SessionState::capture`] carries the view and the settings (density, motion,
+    /// [`SessionState::capture`](crate::session::SessionState::capture) carries the view and the settings (density, motion,
     /// wheel, touch); the onboarding bits (hints, checklist, GPU card) are not view
     /// state, so they are grafted on here. This is the single place both the native
     /// session file and the web localStorage mirror are built from.
@@ -4882,7 +4882,7 @@ impl App {
             .rect
     }
 
-    /// A [`components::Ctx`](crate::theme::components::Ctx) for this frame, carrying
+    /// A [`components::Ctx`] for this frame, carrying
     /// the app's resolved density and reduced-motion so lane 2D chrome draws from the
     /// same component library and tokens as every other panel.
     fn theme_ctx(&self) -> theme::components::Ctx {
@@ -9871,7 +9871,7 @@ impl App {
     }
 
     /// Advances an in-flight animated camera move by `dt`, clearing it when it settles.
-    /// The per-frame repaint at the end of [`App::ui`] keeps the animation running.
+    /// The per-frame repaint at the end of `App::ui` keeps the animation running.
     fn advance_camera_tween(&mut self, dt: f32) {
         if let Some(tween) = self.camera_tween.as_mut() {
             self.camera = tween.advance(dt);
@@ -12606,7 +12606,7 @@ fn tour_already_seen() -> bool {
 /// the lane 4c settings and onboarding state).
 ///
 /// On native this is the saved session file; on the web it is the localStorage
-/// mirror. A missing or unreadable store falls back to [`SessionState::default`], so
+/// mirror. A missing or unreadable store falls back to [`SessionState`](crate::session::SessionState)'s default, so
 /// a fresh install boots with the comfortable, motion-on, zoom-wheel defaults and no
 /// onboarding progress.
 #[cfg(not(target_arch = "wasm32"))]
