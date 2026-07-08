@@ -272,6 +272,25 @@ component, and pin counts and the die area, a corrupted DEF diverges, and the ch
 honestly when Docker is absent. The live cross-check ran on the development host in about
 22 seconds.
 
+**Conformant OASIS writer.** Alongside Reticle's in-house archive format, an `OasisStd`
+writer emits standards-conformant OASIS (SEMI P39) for a practical subset: rectangles,
+polygons, paths, placements (carrying magnification and angle), and text, with fully
+explicit modal state and cell-name and cell tables. It is export-only and uncompressed,
+and arrays are expanded to individual placements, so large arrays inflate and it is not a
+general exporter. Its output is validated by KLayout reading it back in the pinned
+container (correct cells, shapes, and database unit), so a third-party tool accepts the
+file rather than only Reticle round-tripping it. See
+[ADR 0086](docs/decisions/0086-conformant-oasis-writer-scope-and-oasis-rename.md).
+
+**Python bindings.** A `reticle-py` PyO3 extension exposes the read, generate, render, and
+save paths to Python as a stable-ABI (`abi3`) wheel, so one wheel imports on any CPython
+3.9 or newer (built against 3.14, verified importing the same wheel under 3.13). From
+Python it opens a GDSII or OASIS-subset document, lists cells, places a generator by id,
+renders a PNG, and shows a layout inline in a Jupyter notebook. It is native-only (a host
+with no GPU returns no render rather than failing) and lives outside the Cargo workspace,
+so the local gate stays Python-free. See
+[ADR 0087](docs/decisions/0087-python-bindings-abi3-nondefault.md).
+
 **In-browser conversion.** _(placeholder row, pending the Wave 6 merge.)_ The browser
 converts a GDS to a streamable `.rtla` archive itself, with no server and no upload: a Web
 Worker runs the frozen streaming GDS reader and an additive in-memory archive builder
