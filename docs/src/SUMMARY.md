@@ -41,6 +41,7 @@
 - [In-app agent UX](agent-ux.md)
 - [Layout generators](generators.md)
 - [MCP server](mcp.md)
+- [Python bindings](python.md)
 - [Agent benchmark suite](benchmarks.md)
   - [Benchmark methodology](benchmark.md)
 
