@@ -32,8 +32,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::GenError;
 use crate::generator::{GenOutput, GenParams, Generator};
+use crate::gentech::{Conductor, Cut, GenTech};
 use crate::schema::{FieldSchema, ParamSchema};
-use crate::sky130::{self, Conductor, Cut};
 
 /// The cut layer a via farm arrays, which fixes the two conductor layers it bridges.
 ///
@@ -53,35 +53,31 @@ pub enum CutKind {
 }
 
 impl CutKind {
-    /// The cut, the lower plate layer, the upper plate layer, and the enclosure
-    /// margin (DBU) the plates grow the cut array by.
-    ///
-    /// The margin is the subset's enclosure value for the enclosing plate; for
-    /// `via2`, which the subset gives no enclosure rule, a conservative positive
-    /// margin is used so the plates still fully cover the cuts.
-    fn spec(self) -> CutSpec {
+    /// The stack cut level this kind arrays: `mcon`/`via`/`via2` are the base-up cut
+    /// levels 0/1/2, which bind to the process's own cut layers via [`GenTech`].
+    fn level(self) -> usize {
         match self {
-            Self::Mcon => CutSpec {
-                cut: sky130::MCON,
-                lower: sky130::LI1,
-                upper: sky130::MET1,
-                // m1.4: mcon enclosed by met1 by 30 (the upper plate).
-                enclosure: sky130::MCON.enclosure.expect("mcon enclosure").1,
-            },
-            Self::Via => CutSpec {
-                cut: sky130::VIA,
-                lower: sky130::MET1,
-                upper: sky130::MET2,
-                // m2.4: via enclosed by met2 by 55 (the upper plate).
-                enclosure: sky130::VIA.enclosure.expect("via enclosure").1,
-            },
-            Self::Via2 => CutSpec {
-                cut: sky130::VIA2,
-                lower: sky130::MET2,
-                upper: sky130::MET3,
-                // No subset via2 enclosure; a conservative positive margin.
-                enclosure: 65,
-            },
+            Self::Mcon => 0,
+            Self::Via => 1,
+            Self::Via2 => 2,
+        }
+    }
+
+    /// The cut, the lower plate layer, the upper plate layer, and the enclosure
+    /// margin (DBU) the plates grow the cut array by, resolved against `gt`.
+    ///
+    /// The margin is the deck's enclosure value for the cut (grown on both plates);
+    /// where the deck gives no enclosure rule, [`GenTech`] carries a conservative
+    /// positive margin so the plates still fully cover the cuts.
+    fn spec(self, gt: &GenTech) -> CutSpec {
+        let level = self.level();
+        let cut = gt.cut(level);
+        let (_, enclosure) = cut.enclosure.expect("via-farm cut has an enclosure margin");
+        CutSpec {
+            cut,
+            lower: gt.cut_lower(level),
+            upper: gt.cut_upper(level),
+            enclosure,
         }
     }
 
@@ -210,13 +206,14 @@ impl Generator for ViaFarm {
     fn generate(
         &self,
         params: &Self::Params,
-        _tech: &Technology,
+        tech: &Technology,
         cell: &mut Cell,
     ) -> Result<GenOutput, GenError> {
         let start = cell.shapes.len();
-        let spec = params.cut.spec();
+        let gt = GenTech::for_technology(tech);
+        let spec = params.cut.spec(&gt);
         let size = spec.cut.size;
-        let pitch = size + sky130::SAFE_CUT_MARGIN;
+        let pitch = size + gt.safe_cut_margin();
 
         // Emit the cut grid with its lower-left cut at the origin. Track the array
         // bounding box for the plates.
@@ -327,6 +324,7 @@ fn check_range(field: &'static str, value: i64, min: i64, max: i64) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sky130;
 
     fn build(params: &ViaFarmParams) -> Cell {
         let mut cell = Cell::new("top");

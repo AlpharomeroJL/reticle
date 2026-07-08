@@ -22,3 +22,8 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 proptest = "1.11.0"
+# Test-only: parse the committed tech files so the cleanliness proptests can run the
+# real DRC engine over both PDKs, and the second-PDK GenTech can be reconstructed from
+# a parsed Technology. Not a library dependency (keeps the lib wasm32-clean).
+reticle-io = { workspace = true }
+toml = "=1.1.2"

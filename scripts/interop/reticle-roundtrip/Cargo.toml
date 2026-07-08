@@ -1,0 +1,21 @@
+# Standalone interop-harness driver: Reticle's own GDS/OASIS round-trip.
+#
+# Detached from the main workspace (own [workspace] table) so it is a script, not a
+# workspace member: it path-depends on the lane's reticle-io and drives one import +
+# re-export, so the interop harness can compare Reticle's round-trip against KLayout
+# and gdspy without adding a binary to the frozen reticle-io crate.
+[package]
+name = "reticle-roundtrip"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+reticle-io = { path = "../../../crates/reticle-io" }
+reticle-model = { path = "../../../crates/reticle-model" }
+
+[[bin]]
+name = "reticle-roundtrip"
+path = "src/main.rs"

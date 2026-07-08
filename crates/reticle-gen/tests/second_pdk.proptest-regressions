@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2d31b5e868f785d4ffbfa6de35bb1c2190663e9fbe5ff42795df43e3569ff144 # shrinks to params = TestStructureParams { kind: ContactChain, layer: Li1, feature_width: 300, feature_length: 1400, count: 2 }

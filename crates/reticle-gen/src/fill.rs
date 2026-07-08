@@ -64,8 +64,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::GenError;
 use crate::generator::{GenOutput, GenParams, Generator};
+use crate::gentech::{Conductor, GenTech};
 use crate::schema::{FieldSchema, ParamSchema};
-use crate::sky130::{self, Conductor};
 
 /// The conductor layer fill tiles are drawn on.
 ///
@@ -87,13 +87,15 @@ pub enum FillLayer {
 }
 
 impl FillLayer {
-    /// The SKY130 subset data (layer, width, spacing, area) for this choice.
-    fn conductor(self) -> Conductor {
+    /// The conductor data (layer, width, spacing, area) for this choice in the given
+    /// technology. The variants name interconnect *levels* (0 = base): `li1..met3` on
+    /// SKY130, `Metal1..Metal4` on SG13G2.
+    fn conductor(self, gt: &GenTech) -> Conductor {
         match self {
-            Self::Li1 => sky130::LI1,
-            Self::Met1 => sky130::MET1,
-            Self::Met2 => sky130::MET2,
-            Self::Met3 => sky130::MET3,
+            Self::Li1 => gt.conductor(0),
+            Self::Met1 => gt.conductor(1),
+            Self::Met2 => gt.conductor(2),
+            Self::Met3 => gt.conductor(3),
         }
     }
 
@@ -271,7 +273,10 @@ impl GenParams for FillParams {
     }
 
     fn validate(&self) -> Result<(), GenError> {
-        let cond = self.layer.conductor();
+        // Validation bounds are the reference (SKY130) technology; `generate` floors
+        // dimensions up to the active technology to stay clean on any process.
+        let gt = GenTech::sky130();
+        let cond = self.layer.conductor(&gt);
         let tile_floor = Self::tile_floor(cond);
 
         check_range("tile", self.tile, i64::from(tile_floor), Self::TILE_MAX)?;
@@ -329,8 +334,8 @@ impl FillGen {
     /// This is the single source of the pitch, shared by [`generate`](Generator::generate)
     /// and [`achieved_density_permille`](Self::achieved_density_permille), so the
     /// reported density is derived from the same grid that is drawn.
-    fn pitch(params: &FillParams) -> i32 {
-        let cond = params.layer.conductor();
+    fn pitch(params: &FillParams, gt: &GenTech) -> i32 {
+        let cond = params.layer.conductor(gt);
         let min_pitch = params.tile.saturating_add(cond.min_spacing);
         // p = tile / sqrt(density_fraction) = tile * sqrt(1000 / permille).
         let ratio = 1000.0_f64 / f64::from(params.target_density_permille);
@@ -364,8 +369,8 @@ impl FillGen {
     /// The number of whole tiles this generator will place for `params`, after edge
     /// clipping and keep-out filtering. Pure and side-effect free; the honest density
     /// and the drawn geometry both derive from it.
-    fn placed_tile_count(params: &FillParams) -> u64 {
-        let pitch = Self::pitch(params);
+    fn placed_tile_count(params: &FillParams, gt: &GenTech) -> u64 {
+        let pitch = Self::pitch(params, gt);
         let xs = Self::tile_origins(params.region_width, params.tile, pitch);
         let ys = Self::tile_origins(params.region_height, params.tile, pitch);
         // Block any tile that touches a keep-out: expand each keep-out by the tile
@@ -399,7 +404,10 @@ impl FillGen {
     /// above or below the target, and edge clipping or keep-outs pull it further down.
     #[must_use]
     pub fn achieved_density_permille(params: &FillParams) -> i64 {
-        let placed = Self::placed_tile_count(params);
+        // The density of the grid this helper describes is computed against the
+        // reference (SKY130) technology; `generate` draws the grid using the active
+        // technology's spacing floor, which equals this on the default technology.
+        let placed = Self::placed_tile_count(params, &GenTech::sky130());
         let tile_area = i64::from(params.tile) * i64::from(params.tile);
         let covered = (placed as i64).saturating_mul(tile_area);
         let region_area = i64::from(params.region_width) * i64::from(params.region_height);
@@ -431,12 +439,13 @@ impl Generator for FillGen {
     fn generate(
         &self,
         params: &Self::Params,
-        _tech: &Technology,
+        tech: &Technology,
         cell: &mut Cell,
     ) -> Result<GenOutput, GenError> {
         let start = cell.shapes.len();
-        let layer = params.layer.conductor().layer;
-        let pitch = Self::pitch(params);
+        let gt = GenTech::for_technology(tech);
+        let layer = params.layer.conductor(&gt).layer;
+        let pitch = Self::pitch(params, &gt);
 
         let xs = Self::tile_origins(params.region_width, params.tile, pitch);
         let ys = Self::tile_origins(params.region_height, params.tile, pitch);
@@ -531,6 +540,7 @@ fn check_range(field: &'static str, value: i32, min: i64, max: i64) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sky130;
 
     fn build(params: &FillParams) -> Cell {
         let mut cell = Cell::new("top");
@@ -669,7 +679,7 @@ mod tests {
             target_density_permille: 900,
             ..FillParams::default()
         };
-        let pitch = FillGen::pitch(&p);
+        let pitch = FillGen::pitch(&p, &GenTech::sky130());
         assert!(
             pitch >= p.tile + sky130::LI1.min_spacing,
             "pitch {pitch} below the min-spacing floor"

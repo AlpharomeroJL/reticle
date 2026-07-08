@@ -89,3 +89,6 @@ superseded decision is marked and linked to its replacement.
 | [0081](0081-multi-writer-convergence-view-permission-selective-undo.md) | Multi-writer collaboration: per-actor `yrs` origin + scoped `UndoManager` give selective undo that reverts only the local editor's edit and reconverges; view-mode read-only enforced on relay and client; client ids masked below 2^53; editor CRDT-rearchitecture deferred |
 | [0082](0082-lef-def-subset-and-lefdefdesign-shape.md) | LEF/DEF import: the supported subset and the LefDefDesign shape (Wave 5 contract) |
 | [0083](0083-lydrc-drc-deck-compatibility-subset.md) | KLayout .lydrc DRC deck compatibility: the supported subset, compiled down to the frozen rule vocabulary and validated against KLayout headless |
+| [0084](0084-gentech-data-driven-generator-numbers.md) | GenTech: the generator process numbers become data, threaded through the tech argument |
+| [0085](0085-second-pdk-ihp-sg13g2.md) | A second PDK (IHP SG13G2) as data, proven by the both-PDK cleanliness proptests |
+| [0086](0086-conformant-oasis-writer-scope-and-oasis-rename.md) | A conformant-OASIS writer subset (oasis_std), and renaming the in-house format honestly |

@@ -27,14 +27,14 @@
 //!   subset carries no contact-to-contact spacing rule, so the pitch is a
 //!   conservative choice, not a required one).
 
-use reticle_geometry::{LayerId, Point, Rect};
+use reticle_geometry::{Point, Rect};
 use reticle_model::{Cell, DrawShape, ShapeKind, Technology};
 use serde::{Deserialize, Serialize};
 
 use crate::error::GenError;
 use crate::generator::{GenOutput, GenParams, Generator};
+use crate::gentech::{Conductor, GenTech};
 use crate::schema::{FieldSchema, ParamSchema};
-use crate::sky130::{self, Conductor};
 
 /// The conductor layer a guard ring is drawn on.
 ///
@@ -56,13 +56,15 @@ pub enum RingLayer {
 }
 
 impl RingLayer {
-    /// The SKY130 subset data (layer, width, spacing, area) for this choice.
-    fn conductor(self) -> Conductor {
+    /// The conductor data (layer, width, spacing, area) for this choice in the given
+    /// technology. The variants name interconnect *levels* (0 = base), so they bind to
+    /// `li1..met3` on SKY130 and `Metal1..Metal4` on SG13G2.
+    fn conductor(self, gt: &GenTech) -> Conductor {
         match self {
-            Self::Li1 => sky130::LI1,
-            Self::Met1 => sky130::MET1,
-            Self::Met2 => sky130::MET2,
-            Self::Met3 => sky130::MET3,
+            Self::Li1 => gt.conductor(0),
+            Self::Met1 => gt.conductor(1),
+            Self::Met2 => gt.conductor(2),
+            Self::Met3 => gt.conductor(3),
         }
     }
 
@@ -121,13 +123,12 @@ impl GuardRingParams {
     /// minimum width in the subset (`met3`, 300).
     const RING_MIN: i64 = 300;
 
-    /// The minimum `ring_width` that keeps a `licon` tap enclosed by an `li1` strip:
-    /// the contact size plus the `li.5` enclosure on both sides.
-    fn tap_ring_min() -> i32 {
-        let (_, enc) = sky130::LICON
-            .enclosure
-            .expect("licon has a subset enclosure");
-        sky130::LICON.size + 2 * enc
+    /// The minimum `ring_width` that keeps a substrate-tap contact enclosed by the base
+    /// interconnect strip: the contact size plus its enclosure on both sides.
+    fn tap_ring_min(gt: &GenTech) -> i32 {
+        let tap = gt.tap_cut();
+        let (_, enc) = tap.enclosure.expect("tap cut has an enclosure");
+        tap.size + 2 * enc
     }
 }
 
@@ -180,7 +181,11 @@ impl GenParams for GuardRingParams {
     }
 
     fn validate(&self) -> Result<(), GenError> {
-        let cond = self.layer.conductor();
+        // Validation bounds are the reference (SKY130) technology; the generate path
+        // floors dimensions up to the active technology so the output stays clean on
+        // any process (see `generate`).
+        let gt = GenTech::sky130();
+        let cond = self.layer.conductor(&gt);
 
         check_range(
             "region_width",
@@ -208,7 +213,7 @@ impl GenParams for GuardRingParams {
                     reason: "tap contacts are only supported on the li1 layer",
                 });
             }
-            if self.ring_width < Self::tap_ring_min() {
+            if self.ring_width < Self::tap_ring_min(&gt) {
                 return Err(GenError::Invalid {
                     field: "ring_width",
                     reason: "too thin to enclose a licon tap by the li.5 enclosure on both sides",
@@ -248,11 +253,12 @@ impl Generator for GuardRing {
     fn generate(
         &self,
         params: &Self::Params,
-        _tech: &Technology,
+        tech: &Technology,
         cell: &mut Cell,
     ) -> Result<GenOutput, GenError> {
         let start = cell.shapes.len();
-        let cond = params.layer.conductor();
+        let gt = GenTech::for_technology(tech);
+        let cond = params.layer.conductor(&gt);
         let layer = cond.layer;
         let rw = params.ring_width;
 
@@ -275,7 +281,7 @@ impl Generator for GuardRing {
         }
 
         if params.taps {
-            emit_taps(cell, layer, outer_w, rw);
+            emit_taps(cell, &gt, outer_w, rw);
         }
 
         let added = cell.shapes.len() - start;
@@ -287,16 +293,16 @@ impl Generator for GuardRing {
     }
 }
 
-/// Places a centered row of `licon` tap contacts along the bottom strip.
+/// Places a centered row of substrate-tap contacts along the bottom strip.
 ///
 /// Contacts are square at the exact drawn size, centered on the strip's mid-height
 /// (so the strip encloses them top and bottom), and stepped along x at a pitch of
-/// the contact size plus a safe margin, keeping the whole row within the enclosed
-/// span. `ring_width` is guaranteed by `validate` to leave room for the enclosure.
-fn emit_taps(cell: &mut Cell, ring_layer: LayerId, outer_w: i32, rw: i32) {
-    debug_assert_eq!(ring_layer, sky130::LI1.layer, "taps validated to li1 only");
-    let cut = sky130::LICON;
-    let (_, enc) = cut.enclosure.expect("licon has a subset enclosure");
+/// the contact size plus the technology's safe cut margin, keeping the whole row
+/// within the enclosed span. `ring_width` is guaranteed by `validate` to leave room
+/// for the enclosure.
+fn emit_taps(cell: &mut Cell, gt: &GenTech, outer_w: i32, rw: i32) {
+    let cut = gt.tap_cut();
+    let (_, enc) = cut.enclosure.expect("tap cut has an enclosure");
 
     // The x-span within which a contact's left edge keeps `enc` clearance to both
     // ends of the bottom strip.
@@ -309,7 +315,7 @@ fn emit_taps(cell: &mut Cell, ring_layer: LayerId, outer_w: i32, rw: i32) {
     // Center each contact vertically in the strip; validated `rw` guarantees `enc`
     // clearance above and below.
     let y0 = (rw - cut.size) / 2;
-    let pitch = cut.size + sky130::SAFE_CUT_MARGIN;
+    let pitch = cut.size + gt.safe_cut_margin();
 
     let mut x = first_x;
     while x <= last_x {
@@ -338,6 +344,7 @@ fn check_range(field: &'static str, value: i32, min: i64, max: i64) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sky130;
 
     fn build(params: &GuardRingParams) -> Cell {
         let mut cell = Cell::new("top");

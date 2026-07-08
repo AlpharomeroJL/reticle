@@ -4230,9 +4230,11 @@ dependencies = [
  "proptest",
  "reticle-drc",
  "reticle-geometry",
+ "reticle-io",
  "reticle-model",
  "serde",
  "serde_json",
+ "toml 1.1.2+spec-1.1.0",
 ]
 
 [[package]]
