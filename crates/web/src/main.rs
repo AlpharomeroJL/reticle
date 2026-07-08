@@ -90,6 +90,10 @@ fn set_overlay_error(document: &web_sys::Document, message: &str) {
 enum Boot {
     /// Open into a normal start view (editor or replay theater), per `?view=`.
     View(reticle_app::StartView),
+    /// Render the hidden component gallery full-window (`?gallery=1`, lane 1C): a
+    /// deterministic screenshot surface over the theme's component library, used
+    /// by the visual-regression suite. Carries no document or session state.
+    Gallery,
     /// Browse a served `.rtla` archive streamed over HTTP-range, named by an `?archive=`
     /// link (lane v8-2e, ADR 0062). The bundle opens the archive on its first frame and
     /// paints the read-only streamed die with progressive residency.
@@ -123,6 +127,7 @@ impl Boot {
         use reticle_app::{App, StartView};
         match self {
             Boot::View(start_view) => Box::new(App::with_start_view(start_view)),
+            Boot::Gallery => Box::new(App::gallery()),
             Boot::Archive(url) => Box::new(App::with_archive(url)),
             Boot::Viewer(target) => Box::new(App::with_viewer(target)),
             Boot::Share {
@@ -152,6 +157,18 @@ fn boot_from_url() -> Boot {
     let search = web_sys::window()
         .and_then(|w| w.location().search().ok())
         .unwrap_or_default();
+
+    // `?gallery=1` renders the hidden component gallery (lane 1C), a deterministic
+    // screenshot surface for the visual-regression suite. Checked first so the dev
+    // flag wins over the normal view selection; every other parameter is untouched.
+    if let Ok(params) = web_sys::UrlSearchParams::new_with_str(&search)
+        && params
+            .get("gallery")
+            .is_some_and(|v| matches!(v.as_str(), "1" | "true"))
+    {
+        web_sys::console::log_1(&"reticle: render the component gallery".into());
+        return Boot::Gallery;
+    }
 
     // An `?archive=` link boots the served-archive browse: it streams a read-only
     // `.rtla` die rather than opening an editable document (lane v8-2e, ADR 0062).

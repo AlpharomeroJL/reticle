@@ -20,6 +20,7 @@
 //! * `components` (lane 1C), the widget library every panel builds from.
 
 pub mod apply;
+pub mod components;
 pub mod contrast;
 pub mod gallery;
 pub mod tokens;

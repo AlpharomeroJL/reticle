@@ -18,6 +18,9 @@ fn main() -> eframe::Result {
     //   --out <dir>                where captured frames + manifest are written.
     // Capture runs use a larger window (the script's viewport, else 1600x1000) so the
     // media is legible.
+    // --gallery renders the hidden component gallery full-window (lane 1C), a
+    // deterministic screenshot surface for the visual-regression suite.
+    let gallery = args.iter().any(|a| a == "--gallery");
     let smoke = flag_value(&args, "--screenshot-smoke");
     let demo_path = flag_value(&args, "--demo-script");
     let out_dir = flag_value(&args, "--out").unwrap_or_else(|| "scratch/ui-frames".to_owned());
@@ -53,7 +56,7 @@ fn main() -> eframe::Result {
         "Reticle",
         native_options,
         Box::new(move |_cc| {
-            let mut app = App::new();
+            let mut app = if gallery { App::gallery() } else { App::new() };
             if let Some(path) = smoke {
                 app.set_screenshot_smoke(std::path::PathBuf::from(path));
             }

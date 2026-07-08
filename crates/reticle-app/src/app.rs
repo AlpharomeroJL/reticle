@@ -519,6 +519,12 @@ pub struct App {
     /// persists with the session so the automatic tour shows only once.
     tour: Tour,
 
+    /// When set, the app renders the hidden component gallery full-window instead
+    /// of the editor (`?gallery=1` web flag / `--gallery` native flag), a stable
+    /// screenshot surface for the visual-regression suite (lane 1C/1D). `None` in
+    /// every normal session.
+    gallery: Option<crate::theme::gallery::GalleryState>,
+
     /// Active one-shot screenshot smoke, set only by the native `--screenshot-smoke`
     /// launcher; `None` otherwise. Drives a single full-window egui screenshot to
     /// de-risk the capture path (see [`crate::demoscript`]); native only.
@@ -692,6 +698,20 @@ impl App {
         app
     }
 
+    /// Creates the app in **gallery mode**: it renders the hidden component
+    /// gallery full-window instead of the editor (`?gallery=1` web flag /
+    /// `--gallery` native flag). The gallery is a pure, deterministic surface
+    /// over the [`theme::components`](crate::theme::components) library, used by
+    /// the visual-regression suite to snapshot every component state without
+    /// booting the editor (lane 1C/1D).
+    #[must_use]
+    pub fn gallery() -> Self {
+        let mut app = Self::build(StartView::Editor);
+        app.start_screen = false;
+        app.gallery = Some(crate::theme::gallery::GalleryState::default());
+        app
+    }
+
     /// Applies the recorded [`StartView`] to the constructed app.
     ///
     /// For [`StartView::ReplayTheater`] it opens the theater window and loads the
@@ -828,6 +848,7 @@ impl App {
             reduced_motion,
             theme_dirty: true,
             tour: Tour::from_seen(tour_already_seen()),
+            gallery: None,
             #[cfg(not(target_arch = "wasm32"))]
             capture: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -7224,6 +7245,17 @@ impl eframe::App for App {
         if self.theme_dirty {
             crate::theme::apply::apply(&ctx, self.ui_density, self.reduced_motion);
             self.theme_dirty = false;
+        }
+
+        // Gallery mode renders the hidden component library full-window and
+        // returns before any editor state is built: a deterministic screenshot
+        // surface (`?gallery=1` / `--gallery`, lane 1C). Kept minimal on purpose.
+        if let Some(gallery) = &mut self.gallery {
+            egui::CentralPanel::default().show(ui, |ui| {
+                crate::theme::gallery::ui(ui, gallery);
+            });
+            ctx.request_repaint();
+            return;
         }
 
         // Sample this frame's duration up front: both the Start screen and the editor
