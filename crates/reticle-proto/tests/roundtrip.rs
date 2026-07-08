@@ -85,6 +85,7 @@ fn sample_document() -> Document {
         technology: Some(technology),
         cells: vec![leaf_cell, top_cell],
         top_cells: vec!["TOP".to_owned()],
+        comments: vec![],
     }
 }
 
@@ -122,7 +123,7 @@ fn migrate_supports_the_current_and_no_other_versions() {
 
 #[test]
 fn schema_version_constant_matches_the_proto_enum() {
-    assert_eq!(SCHEMA_VERSION, 1);
+    assert_eq!(SCHEMA_VERSION, 2);
     // The Rust constant and the wire enum must agree on the current version.
-    assert_eq!(SCHEMA_VERSION as i32, SchemaVersion::V1 as i32);
+    assert_eq!(SCHEMA_VERSION as i32, SchemaVersion::V2 as i32);
 }

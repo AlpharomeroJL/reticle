@@ -47,7 +47,7 @@ mod frame;
 mod mapping;
 mod presence;
 
-pub use comment::{Comment, CommentThread};
+pub use comment::{Comment, CommentThread, from_proto_comments, to_proto_comments};
 pub use error::{Result, SyncError};
 pub use frame::{
     Frame, decode_frame, encode_presence_frame, encode_update_frame, encode_update_frame_for,

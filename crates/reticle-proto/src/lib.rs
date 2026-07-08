@@ -27,7 +27,10 @@ pub mod v1 {
 
 /// The current schema version. Bump on any breaking change to
 /// `proto/reticle.proto` and add a migration keyed on the previous value.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// V2 (ADR 0080) adds the additive `Document.comments` field. V1 documents
+/// remain readable and upgrade losslessly through [`migrate::migrate_document`].
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Encodes a [`v1::Document`] into a freshly allocated Protobuf byte buffer.
 ///
@@ -50,16 +53,80 @@ pub fn decode_document(bytes: &[u8]) -> Result<v1::Document, prost::DecodeError>
 
 /// Schema migration between versions.
 ///
-/// Wave 1 fills this in as generated types land. It exists in Wave 0 so the
-/// versioning contract is visible to dependents.
+/// The migration contract (ADR 0080): a document tagged with any supported
+/// version upgrades in place to the current [`SCHEMA_VERSION`] losslessly. The
+/// V1 to V2 step is purely additive - it stamps the version to V2 and leaves the
+/// (already empty) `comments` list untouched, so every V1 geometry byte is
+/// preserved. The frozen V1 golden fixture proves this against real pre-V2 bytes.
 pub mod migrate {
-    use super::SCHEMA_VERSION;
+    use super::{SCHEMA_VERSION, v1};
+
+    /// Reason a [`v1::Document`] could not be migrated to the current schema.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum MigrationError {
+        /// The `schema_version` field was `SCHEMA_VERSION_UNSPECIFIED` (0), which
+        /// carries no version and cannot be interpreted.
+        Unspecified,
+        /// The document was tagged with a version this build does not know how to
+        /// read (newer than [`SCHEMA_VERSION`]). The wrapped value is that tag.
+        Unsupported(u32),
+    }
+
+    impl core::fmt::Display for MigrationError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            match self {
+                Self::Unspecified => f.write_str("document has an unspecified schema version"),
+                Self::Unsupported(v) => {
+                    write!(
+                        f,
+                        "document schema version {v} is newer than supported {SCHEMA_VERSION}"
+                    )
+                }
+            }
+        }
+    }
+
+    impl core::error::Error for MigrationError {}
 
     /// Returns `true` if a document tagged `version` can be read by this build,
     /// possibly after migration.
     #[must_use]
     pub fn is_supported(version: u32) -> bool {
         (1..=SCHEMA_VERSION).contains(&version)
+    }
+
+    /// Upgrades `document` in place to the current [`SCHEMA_VERSION`], preserving
+    /// all geometry losslessly.
+    ///
+    /// A V1 document is upgraded to V2 by stamping `schema_version` to V2; the
+    /// additive `comments` field is left as it decoded (empty for genuine V1
+    /// bytes). A document already at the current version is left unchanged. The
+    /// technology, cells and top-cell list are never touched, so the geometry is
+    /// byte-for-byte identical before and after (verified by the golden-fixture
+    /// migration test).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MigrationError::Unspecified`] if `schema_version` is the 0
+    /// sentinel, or [`MigrationError::Unsupported`] if it is newer than this
+    /// build understands.
+    pub fn migrate_document(document: &mut v1::Document) -> Result<(), MigrationError> {
+        // `schema_version` is stored as the enum's i32; treat unknown negatives as
+        // out of range too by going through u32.
+        let version = u32::try_from(document.schema_version)
+            .map_err(|_| MigrationError::Unsupported(SCHEMA_VERSION + 1))?;
+
+        match version {
+            0 => return Err(MigrationError::Unspecified),
+            v if v > SCHEMA_VERSION => return Err(MigrationError::Unsupported(v)),
+            _ => {}
+        }
+
+        // Every supported version reads forward to the current one. The only
+        // versioned change from V1 to V2 is the additive `comments` field, which
+        // needs no data movement; stamp the current version and return.
+        document.schema_version = v1::SchemaVersion::V2 as i32;
+        Ok(())
     }
 }
 
