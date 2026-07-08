@@ -116,6 +116,24 @@ impl Comment {
     }
 }
 
+/// Encodes a slice of comments into their proto form, for persistence in a
+/// schema-V2 `reticle_proto::v1::Document`'s `comments` field.
+///
+/// This is the inverse of [`from_proto_comments`]; together they carry the app's
+/// live comment set into the versioned document and back without loss.
+#[must_use]
+pub fn to_proto_comments(comments: &[Comment]) -> Vec<v1::Comment> {
+    comments.iter().map(Comment::to_proto).collect()
+}
+
+/// Decodes a slice of proto comments (as read from a schema-V2 document's
+/// `comments` field) back into [`Comment`]s. The inverse of
+/// [`to_proto_comments`].
+#[must_use]
+pub fn from_proto_comments(protos: &[v1::Comment]) -> Vec<Comment> {
+    protos.iter().map(Comment::from_proto).collect()
+}
+
 /// A collection of comments grouped and ordered into a single display thread: the
 /// root followed by its replies in creation order.
 #[derive(Clone, Debug, Default)]
