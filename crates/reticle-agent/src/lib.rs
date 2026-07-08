@@ -22,6 +22,11 @@
 //!   [`Debug`](std::fmt::Debug) / [`Display`](std::fmt::Display) / serialize path, plus
 //!   a text scrubber.
 //! - [`run`]: the propose-verify-correct loop and the four-artifact writer.
+//! - [`vision_oracle`]: a second, multimodal oracle. It renders a task's layout through
+//!   the same `RenderPng` path the run writer uses and asks a local vision model (over
+//!   Ollama) a yes/no question about the render, reported *beside* the authoritative DRC /
+//!   checker oracle as an agreement rate. A missing model or a GPU-less host is an honest
+//!   not-run ([`VisionOutcome::Skipped`]), never an error and never a fabricated verdict.
 //! - [`claude_code`]: the `claude-code` backend, which drives Claude Code as an external
 //!   *agent system* (not a [`ModelClient`](reticle_bench::model::ModelClient)): per task it
 //!   generates an MCP config that launches `reticle-mcp` with server-side transcript
@@ -64,6 +69,7 @@ pub mod model;
 pub mod ollama;
 pub mod redact;
 pub mod run;
+pub mod vision_oracle;
 
 pub use claude_code::{
     ClaudeCodeConfig, ClaudeRunner, ClaudeTaskOutcome, NotRunRecord, SystemClaudeRunner,
@@ -82,4 +88,8 @@ pub use redact::{ApiKey, REDACTED};
 pub use run::{
     Artifacts, LoopOptions, NoRefinements, Provenance, RefinementFn, RefinementSource, RunOutcome,
     run_agent_task, run_agent_task_refined,
+};
+pub use vision_oracle::{
+    AgreementTally, DEFAULT_VISION_BASE_URL, DEFAULT_VISION_MODEL, VisionOracle, VisionOutcome,
+    VisionVerdict, caught_by_any_oracle, ollama_available, oracles_agree, vision_model_present,
 };
