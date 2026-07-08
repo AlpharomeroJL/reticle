@@ -51,7 +51,7 @@ members = [
 exclude = ["tools/reticle-dev-mcp", "tools/crate-docs-mcp", "fuzz", "crates/reticle-py"]
 
 [workspace.package]
-version = "8.0.0"
+version = "8.1.0"
 edition = "2024"
 rust-version = "1.94"
 authors = ["Josef Long <Josefdean@protonmail.com>"]

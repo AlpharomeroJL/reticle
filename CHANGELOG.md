@@ -3,6 +3,55 @@
 All notable changes to Reticle are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com), and the project uses
 [conventional commits](https://www.conventionalcommits.org).
+## [8.1.0] - 2026-07-08
+
+### Features
+
+- Add command registry, dispatch funnel, keymap by CommandId
+- Encode tokens as applied egui style and drain UI literals
+- Component library and hidden gallery (Wave 1, lane 1C)
+- Embed subset Inter, JetBrains Mono, and Lucide fonts (lane 1B)
+- Touch mode raises hit targets to 40px, add e2e-touch gate
+- Component states, functional motion, frame guard
+- Registry-driven palette, shortcuts overlay, context menus, focus, esc
+- Onboarding tour variants, hints, help, settings, and about
+- Registry-driven menu bar and thinned icon toolbar
+- Redesign Layers panel and dock the 3D + Cross-section as managed panels
+- Rebuild right Inspector on segmented + collapsible panel
+- Viewer chrome, presence/follow, start screen, presentation/embed
+- Canvas overlay manager, navigation, and the fluidity trio
+- Rfd picker, open/URL/convert/share dialogs, unified toasts
+- Client-side QR in Share dialog, paste-to-open URL
+
+### Bug fixes
+
+- Pass same-origin design fetches through so ?gds= deep-link opens (e2e-touch)
+- Resolve the three HIGH design-review blockers (H1/H2/H3)
+
+### Documentation and media
+
+- Add GitHub Sponsors button
+- Add IconButton spec for lane 1C (ADR 0097)
+- Add v8.1 catalog dispositions (100-item completeness gate)
+- Add skeptical v8.1.0 section and honest-limits ledger
+- Add design-system and redesign-gallery chapters
+- V8.1 after gallery captured from the live redesigned bundle
+
+### Testing
+
+- Egui_kittest 0.35 UI snapshot suite with GPU serialization (lane 1D)
+
+### Build, tooling, and CI
+
+- Wave 0 interface packet (design system foundation, contracts, tooling)
+- Recapture baselines on merged main; fix rustdoc links and typos allowlist
+- Bundle ledger row, RUN_STATE and TASKS Gate 1 record
+- Wave 2 lanes complete, starting Gate 2 merge
+- Fix cross-lane intra-doc links, untrack stray lane RESULT.md
+- Recapture ui baselines on merged main
+- Bundle ledger wave2 row and RUN_STATE gate-2 record
+- Complete and deployed; redesign live at the pages URL
+- Record adversarial review and HIGH-fix closure
 ## [8.0.0] - 2026-07-08
 
 ### Features
@@ -92,6 +141,9 @@ All notable changes to Reticle are documented here. The format follows
 
 ### Documentation and media
 
+- V7.0.0 shipped, final skeptical STATUS re-audit and tracker close-out
+- V8 run bootstrap, disk and frozen-surface ADRs, tracker section
+- Close v8 Wave 0 (gate green, hardened parsers deployed live)
 - Reconnect subsection and ADR 0062
 - Book chapter and ADRs for the two-relay conformance work
 - ADR 0062 and agent chapter for the live-room agent
@@ -178,6 +230,7 @@ All notable changes to Reticle are documented here. The format follows
 - Exclude a non-default PyO3 abi3 crate from the workspace
 - Allowlist IHP 'Activ' layer name and OASIS 'SSEE' notation
 - Fix em-dash in ADR 0062 title to satisfy the voice gate
+- V8.0.0
 ## [7.0.0] - 2026-07-07
 
 ### Bug fixes
@@ -300,6 +353,7 @@ All notable changes to Reticle are documented here. The format follows
 - @
 - @
 - @
+- V7.0.0
 ## [6.0.1] - 2026-07-04
 
 ### Editor and app
