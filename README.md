@@ -209,6 +209,15 @@ changed amber) with a show/hide toggle, fed by a snapshot/diff flow over two in-
 comparison-document file loader and a true `changed` classification are deferred; see
 [ADR 0079](docs/decisions/0079-layout-diff-overlay.md).
 
+**Comments and annotations.** Notes anchored to a shape or cell persist inside the layout
+document through a schema bump, V1 to V2. The new `comments` field is additive, so every pre-V2
+document still decodes, and `migrate_document` upgrades a V1 document to V2 losslessly. The migration
+is proven against a golden fixture captured and committed from the pre-V2 build *before* the schema
+was edited: a test decodes those real pre-V2 bytes with the V2 code and asserts the geometry is
+byte-for-byte identical across the migration. The app lists comments and paints a numbered pin at
+each anchor; wiring the in-app pins into document save/load (and the CRDT) is deferred. See
+[ADR 0080](docs/decisions/0080-comments-schema-v1-v2-migration.md).
+
 **Generators.** Each of the six generators is a pure function from a typed `ParamSchema` to
 geometry. One schema drives all three surfaces (the Generate panel, the MCP tools, the
 benchmark checker), and a property test runs every generator over 400 random valid parameter

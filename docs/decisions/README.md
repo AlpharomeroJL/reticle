@@ -85,3 +85,4 @@ superseded decision is marked and linked to its replacement.
 | [0077](0077-cpu-metrology-reports.md) | CPU metrology reports (exact per-layer area/perimeter, connectivity stats, a simplified antenna screen, byte-stable export); GPU density overlay deferred |
 | [0078](0078-installable-pwa-app-shell-offline.md) | Installable PWA: a relative manifest, a scope-derived service worker, and an offline app shell, subpath-correct under /reticle/ |
 | [0079](0079-layout-diff-overlay.md) | Layout diff: a pure `reticle-diff` crate keyed on exact geometry over the flattened top cell, an app overlay (added/removed/changed) fed by a two-snapshot flow; `changed` and a file loader deferred |
+| [0080](0080-comments-schema-v1-v2-migration.md) | Anchored comments and schema V1 to V2: a golden fixture committed from the pre-V2 build proves an additive `Document.comments` migration is lossless byte-for-byte; app comment pins; app save/load persistence deferred |
