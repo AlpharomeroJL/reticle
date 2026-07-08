@@ -301,13 +301,15 @@ pub fn window(
     tech: &Technology,
     layers: &LayerState,
 ) {
-    // Start collapsed and tucked below the 3D-stack window so the app opens on the
-    // canvas, not on a fully-expanded panel sitting over the ruler. The user expands
-    // and drags it from there; egui persists the choice per session.
+    // Start collapsed and tucked below the 3D-stack window, over the canvas and clear of
+    // the Layers panel and the toolbar, so the collapsed title bar does not occlude a
+    // control at the default window sizes (lane v8-ui). The app opens on the canvas, not
+    // on a fully-expanded panel over the ruler; the user expands and drags it from there,
+    // and egui persists the choice per session.
     egui::Window::new("Cross-section")
         .default_size([460.0, 250.0])
         .default_open(false)
-        .default_pos([200.0, 96.0])
+        .default_pos([260.0, 140.0])
         .resizable(true)
         .show(ctx, |ui| {
             let Some((a, b)) = cut else {
