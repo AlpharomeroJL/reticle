@@ -28,7 +28,7 @@
 //! non-streaming body `{ "model", "prompt", "images": [<base64 PNG>], "stream": false }`.
 //! The base64 image is the rendered PNG; the prompt states the intent and asks for a
 //! `YES`/`NO` first word. The response is a single JSON object whose `response` field
-//! holds the model's text, which [`parse_verdict`] reduces to a boolean plus the model's
+//! holds the model's text, which `parse_verdict` reduces to a boolean plus the model's
 //! own rationale. An error body (`{"error": ...}`), a transport failure, or an unparsable
 //! reply all become an honest [`VisionOutcome::Skipped`], not a panic and not an `Err`.
 //!
