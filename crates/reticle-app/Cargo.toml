@@ -111,3 +111,11 @@ web-sys = { version = "0.3", features = [
 # real archived bytes, exactly what a native/wasm source would serve. Same 0.8 as above.
 [dev-dependencies]
 rkyv = "0.8.16"
+
+# The visual-regression suite (`tests/ui_snapshots.rs`, native only) drives the
+# gallery and full-app UI through egui_kittest and diffs each frame against a
+# committed PNG baseline. The wgpu backend renders the canvas-bearing app states
+# on a real GPU; the harness skips honestly on adapterless hosts. Matches the
+# 0.35 egui/eframe already in the graph so the lockfile gains no new egui line.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+egui_kittest = { version = "0.35", features = ["wgpu", "snapshot", "eframe"] }
