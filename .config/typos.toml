@@ -19,7 +19,7 @@ extend-exclude = [
 # Git commit hashes (lowercase hex, 7 to 40 chars) are referenced throughout the
 # docs and status notes; ignore them so a hash that happens to spell a typo prefix
 # (for example ba73217, where "ba" reads as "by") does not trip the gate.
-extend-ignore-re = ['\b[0-9a-f]{7,40}\b']
+extend-ignore-re = ['\b[0-9a-f]{7,40}\b', '\\u\{[0-9a-fA-F]+\}']
 
 [default.extend-words]
 # EDA / graphics / domain vocabulary that is not a typo.

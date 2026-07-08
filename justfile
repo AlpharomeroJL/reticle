@@ -396,7 +396,7 @@ ui-check:
     cargo nextest run -p reticle-app --test ui_snapshots --no-tests=pass
 
 # `ui-baselines` recaptures ALL baselines (UPDATE_SNAPSHOTS=force) on the GPU, then
-# the changed PNGs are reviewed and committed. `force` recaptures every image (its
+# the changed baseline images are reviewed and committed. `force` recaptures every image (its
 # comparison threshold is 0, so any difference is rewritten); use it after an
 # intended visual change or at the Gate 1 recapture. Needs a GPU adapter.
 ui-baselines:

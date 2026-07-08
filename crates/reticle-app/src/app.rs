@@ -510,7 +510,7 @@ pub struct App {
     reduced_motion: bool,
     /// Set when the applied egui style needs a re-apply (density or reduced-motion
     /// change). Starts `true` so the theme is installed on the first frame instead
-    /// of per frame; see [`App::ui`].
+    /// of per frame; the boot styling hook reads it at the top of the frame body.
     theme_dirty: bool,
 
     // ---- Lane 4A: first-run tour --------------------------------------------
@@ -701,7 +701,7 @@ impl App {
     /// Creates the app in **gallery mode**: it renders the hidden component
     /// gallery full-window instead of the editor (`?gallery=1` web flag /
     /// `--gallery` native flag). The gallery is a pure, deterministic surface
-    /// over the [`theme::components`](crate::theme::components) library, used by
+    /// over the [`theme::components`] library, used by
     /// the visual-regression suite to snapshot every component state without
     /// booting the editor (lane 1C/1D).
     #[must_use]
