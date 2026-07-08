@@ -17,12 +17,13 @@ use reticle_model::{DrawShape, LayerInfo, ShapeKind, Technology};
 use reticle_render::{
     ExpandedScene, Palette, RetainedRenderer, RetainedScene, ViewUniform, WgpuRenderer,
 };
-use reticle_sync::SyncDocument;
+use reticle_sync::{Comment, SyncDocument};
 use std::sync::Arc;
 
 use crate::agent_panel::AgentPanelState;
 use crate::camera::{ScreenRect, ViewCamera};
 use crate::command::{self, Command};
+use crate::comment_pins;
 use crate::culling::{self, DetailLevel, SceneIndex};
 use crate::demo;
 use crate::drc_panel::{self, DrcResults};
@@ -284,6 +285,11 @@ pub struct App {
     /// against the current document, and whether it is painted (see
     /// [`crate::diff_overlay`]).
     diff_overlay: crate::diff_overlay::DiffOverlay,
+    /// Anchored comment pins: the layout's comments and the selected one, listed in
+    /// the side panel and painted on the canvas (see [`crate::comment_pins`]).
+    comment_pins: crate::comment_pins::CommentPins,
+    /// The in-progress comment body typed in the comment panel, before it is added.
+    comment_draft: String,
     /// DRC-as-you-type: the incremental checker re-run on every edit so violations are
     /// underlined the moment geometry is drawn (see [`crate::live_drc`]).
     live_drc: crate::live_drc::LiveDrc,
@@ -741,6 +747,8 @@ impl App {
             agent_history: crate::agent_history::HistoryBrowser::new(),
             drc: DrcResults::new(),
             diff_overlay: crate::diff_overlay::DiffOverlay::new(),
+            comment_pins: crate::comment_pins::CommentPins::new(),
+            comment_draft: String::new(),
             live_drc: crate::live_drc::LiveDrc::new(),
             live_drc_on: false,
             live_pending: crate::history::Dirty::None,
@@ -2605,6 +2613,8 @@ impl App {
                         ui.separator();
                         self.diff_panel(ui);
                         ui.separator();
+                        self.comment_panel(ui);
+                        ui.separator();
                         self.agent_section(ui);
                         ui.separator();
                         self.share_section(ui);
@@ -3971,6 +3981,69 @@ impl App {
             )),
             None => self.status.set("Diff: snapshot first"),
         }
+    }
+
+    /// Lists the layout's anchored comments and adds one on the current top cell.
+    ///
+    /// Each comment is a [`reticle_sync::Comment`] whose `anchor_ref` binds it to a
+    /// cell; the canvas paints a numbered pin at each anchor (see
+    /// [`draw_comment_pins`](Self::draw_comment_pins)). Comments persist through the
+    /// schema-V2 `Document.comments` field (ADR 0080). Clicking a row selects its
+    /// pin.
+    fn comment_panel(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Comments");
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.comment_draft)
+                    .desired_width(140.0)
+                    .hint_text("Comment on top cell"),
+            );
+            let can_add = !self.top_cell.is_empty();
+            if ui
+                .add_enabled(can_add, egui::Button::new("Add"))
+                .on_hover_text("Anchor a comment to the current top cell")
+                .clicked()
+            {
+                let now_ms = (ui.input(|i| i.time) * 1000.0) as i64;
+                self.add_comment_on_top_cell(now_ms);
+            }
+        });
+
+        if self.comment_pins.is_empty() {
+            ui.label("No comments");
+            return;
+        }
+
+        let selected = self.comment_pins.selected();
+        let mut clicked = None;
+        for (i, comment) in self.comment_pins.comments().iter().enumerate() {
+            let line = format!("{}. {}", i + 1, comment_pins::format_comment_line(comment));
+            if ui.selectable_label(selected == Some(i), line).clicked() {
+                clicked = Some(i);
+            }
+        }
+        if let Some(i) = clicked {
+            self.comment_pins.select(i);
+            self.status.set(format!("Comment {} selected", i + 1));
+        }
+    }
+
+    /// Anchors a new comment to the current top cell using the panel's draft body.
+    ///
+    /// An empty draft falls back to a placeholder so the affordance always produces
+    /// a visible pin; `now_ms` is the session clock (wasm-safe, from egui input) used
+    /// as the creation timestamp.
+    fn add_comment_on_top_cell(&mut self, now_ms: i64) {
+        let body = match self.comment_draft.trim() {
+            "" => "New comment".to_owned(),
+            text => text.to_owned(),
+        };
+        let id = format!("c{}", self.comment_pins.len() + 1);
+        let comment = Comment::root(id, self.top_cell.clone(), "you", body, now_ms);
+        let index = self.comment_pins.add(comment);
+        self.comment_pins.select(index);
+        self.comment_draft.clear();
+        self.status.set("Comment added");
     }
 
     /// Launches a scoped agent run seeded with the assembled violation `context`.
@@ -5356,6 +5429,7 @@ impl App {
             self.draw_drc_markers(&painter, &screen);
             self.draw_live_drc_underlines(&painter, &screen);
             self.draw_diff_overlay(&painter, &screen);
+            self.draw_comment_pins(&painter, &screen);
         }
 
         // User guides under the ruler bars, then the rulers cover their ends.
@@ -6441,6 +6515,44 @@ impl App {
                 painter.rect_filled(e, 0.0, fill);
                 painter.rect_stroke(e, 0.0, stroke, StrokeKind::Middle);
             }
+        }
+    }
+
+    /// Paints a numbered pin at each anchored comment.
+    ///
+    /// A pin lands at the centre of its comment's anchored cell geometry (world to
+    /// screen via the camera; see [`comment_pins::anchor_point`]). A comment whose
+    /// anchor resolves to no geometry is skipped rather than pinned at the origin.
+    /// The selected comment's pin is larger and drawn in the accent color.
+    fn draw_comment_pins(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        if self.comment_pins.is_empty() {
+            return;
+        }
+        let doc = self.history.document();
+        let base = Color32::from_rgb(90, 160, 255);
+        let accent = Color32::from_rgb(255, 210, 90);
+        let selected = self.comment_pins.selected();
+        for (i, comment) in self.comment_pins.comments().iter().enumerate() {
+            let Some(anchor) = comment_pins::anchor_point(doc, &comment.anchor_ref) else {
+                continue;
+            };
+            let center = self.world_pos_to_screen(screen, anchor);
+            let is_selected = selected == Some(i);
+            let radius = if is_selected { 12.0 } else { 9.0 };
+            let color = if is_selected { accent } else { base };
+            painter.circle_filled(center, radius, color);
+            painter.circle_stroke(
+                center,
+                radius,
+                Stroke::new(1.5, Color32::from_black_alpha(180)),
+            );
+            painter.text(
+                center,
+                egui::Align2::CENTER_CENTER,
+                format!("{}", i + 1),
+                egui::FontId::proportional(radius),
+                Color32::BLACK,
+            );
         }
     }
 
