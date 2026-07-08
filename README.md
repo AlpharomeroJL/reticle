@@ -261,6 +261,17 @@ component, and pin counts and the die area, a corrupted DEF diverges, and the ch
 honestly when Docker is absent. The live cross-check ran on the development host in about
 22 seconds.
 
+**In-browser conversion.** _(placeholder row, pending the Wave 6 merge.)_ The browser
+converts a GDS to a streamable `.rtla` archive itself, with no server and no upload: a Web
+Worker runs the frozen streaming GDS reader and an additive in-memory archive builder
+(`build_rtla_to_vec`, byte-identical to the native builder for browser-scale layouts),
+writes the archive into the Origin Private File System (OPFS), and reopens it through the
+existing `?archive=` streaming path via a service-worker Range bridge. It mirrors the
+native converter's v1 flatten and leveling scope (ADR 0072); very large dies stay a
+native-converter job. OPFS is used honestly (a secure context and a Worker), and the
+`browser-convert` e2e proves the full path headless. See
+[ADR 0090](docs/decisions/0090-in-browser-gds-to-rtla-conversion-opfs.md).
+
 ## What it does not do, and where it is thin
 
 Reticle is a portfolio-grade engineering project and a research vehicle for machine-driven
