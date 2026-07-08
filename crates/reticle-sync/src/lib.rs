@@ -59,11 +59,15 @@ pub use presence::{Awareness, Presence};
 
 use reticle_geometry::LayerId;
 use reticle_model::{ArrayInstance, Cell, Document, DrawShape, Instance};
+use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
+use yrs::sync::Clock;
+use yrs::undo::Options as UndoOptions;
 use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
-use yrs::{Doc, ReadTxn, StateVector, Transact, Update};
+use yrs::{Doc, ReadTxn, StateVector, Transact, UndoManager, Update};
 
 /// A collaboratively-edited document, backed by a [`yrs`] CRDT.
 ///
@@ -81,11 +85,33 @@ pub struct SyncDocument {
     cache: Document,
     /// In-memory presence map for remote collaborators.
     awareness: Awareness,
+    /// Selective undo/redo scoped to this peer's own edits (ADR 0081). It tracks
+    /// only transactions carrying this actor's [origin](yrs::undo) so
+    /// [`undo`](SyncDocument::undo) reverts this peer's last edit and leaves a
+    /// concurrent peer's edits untouched; both peers still converge afterwards.
+    undo: UndoManager,
 }
 
 impl Default for SyncDocument {
     fn default() -> Self {
         Self::new(String::new())
+    }
+}
+
+/// Undo-manager options with a zero capture timeout, so each local transaction
+/// (one `add_*`/`step` call) is its own undo step rather than time-grouped.
+///
+/// The default [`UndoOptions`] is unavailable on `wasm32` (it needs the OS clock),
+/// so this builds the options explicitly with a constant clock. With a zero
+/// capture timeout the clock value is never consulted for grouping, so a constant
+/// is correct on every target and keeps undo steps deterministic (no wall-clock
+/// dependence in tests).
+fn undo_options() -> UndoOptions {
+    UndoOptions {
+        capture_timeout_millis: 0,
+        tracked_origins: HashSet::new(),
+        capture_transaction: None,
+        timestamp: Arc::new(|| 0u64) as Arc<dyn Clock>,
     }
 }
 
@@ -97,13 +123,43 @@ impl SyncDocument {
     #[must_use]
     pub fn new(actor: impl Into<String>) -> Self {
         let actor = actor.into();
-        let doc = Doc::with_client_id(client_id_for(&actor));
+        // Disable garbage collection of deleted structs. The per-actor undo manager
+        // re-inserts previously-deleted items on redo (and keeps tombstones alive to
+        // do so); if a peer had GC'd that tombstone, a redo re-inserted on one peer
+        // and exchanged would diverge. Keeping tombstones makes undo/redo converge
+        // across peers, matching how `yrs`' own undo tests configure the document.
+        let mut options = yrs::Options::with_client_id(client_id_for(&actor));
+        options.skip_gc = true;
+        let doc = Doc::with_options(options);
+
+        // Eagerly create every root map so the per-actor undo manager can scope to
+        // all of them from the start. `yrs` dedups root types by name, so creating
+        // them here changes nothing about convergence (a peer that writes the same
+        // named roots merges into the identical logical objects).
+        let cells = doc.get_or_insert_map(mapping::CELLS);
+        let shapes = doc.get_or_insert_map(mapping::SHAPES);
+        let instances = doc.get_or_insert_map(mapping::INSTANCES);
+        let arrays = doc.get_or_insert_map(mapping::ARRAYS);
+        let top_cells = doc.get_or_insert_map(mapping::TOP_CELLS);
+
+        // The undo manager observes the doc from construction; it must exist before
+        // any edit. Scope it to every record map and track ONLY this actor's origin,
+        // so a remote peer's applied updates (which carry no local origin) are never
+        // captured onto this peer's undo stack.
+        let mut undo = UndoManager::with_scope_and_options(&doc, &cells, undo_options());
+        undo.expand_scope(&shapes);
+        undo.expand_scope(&instances);
+        undo.expand_scope(&arrays);
+        undo.expand_scope(&top_cells);
+        undo.include_origin(actor.as_str());
+
         let mut this = Self {
             doc,
             actor,
             counter: 0,
             cache: Document::new(),
             awareness: Awareness::new(),
+            undo,
         };
         this.refresh_cache();
         this
@@ -124,6 +180,9 @@ impl SyncDocument {
                 mapping::set_top_cell(txn, top, true, next_id);
             }
         });
+        // The initial seed is not a user action, so it must not be undoable: clear
+        // the stack the seeding edit just pushed. Later local edits remain undoable.
+        this.undo.clear();
         this
     }
 
@@ -393,6 +452,61 @@ impl SyncDocument {
     }
 
     // -------------------------------------------------------------------------
+    // Selective undo / redo (per-actor)
+    // -------------------------------------------------------------------------
+
+    /// Undoes this peer's most recent local edit, reverting **only** this actor's
+    /// own change and leaving every concurrent peer's edit intact (ADR 0081).
+    ///
+    /// The underlying [`yrs`](yrs::undo) undo manager tracks only transactions
+    /// carrying this actor's origin, so a remote peer's edits (applied through
+    /// [`apply_update`](SyncDocument::apply_update) with no local origin) are never
+    /// on this peer's undo stack. The undo is itself an ordinary CRDT change: after
+    /// exchanging updates the peers still converge. Returns `true` if there was a
+    /// local edit to undo.
+    pub fn undo(&mut self) -> bool {
+        let undone = self.undo.undo_blocking();
+        if undone {
+            self.refresh_cache();
+        }
+        undone
+    }
+
+    /// Redoes this peer's most recently undone local edit. Like
+    /// [`undo`](SyncDocument::undo), it affects only this actor's own edits and
+    /// converges after exchange. Returns `true` if there was one to redo.
+    pub fn redo(&mut self) -> bool {
+        let redone = self.undo.redo_blocking();
+        if redone {
+            self.refresh_cache();
+        }
+        redone
+    }
+
+    /// Whether this peer has a local edit available to [`undo`](SyncDocument::undo).
+    #[must_use]
+    pub fn can_undo(&self) -> bool {
+        self.undo.can_undo()
+    }
+
+    /// Whether this peer has an undone edit available to [`redo`](SyncDocument::redo).
+    #[must_use]
+    pub fn can_redo(&self) -> bool {
+        self.undo.can_redo()
+    }
+
+    /// Marks an undo-step boundary, so edits made before and after this call undo
+    /// separately even if they would otherwise be captured together.
+    ///
+    /// Each [`edit`](SyncDocument::add_shape)-style call is already its own
+    /// transaction and hence its own undo step; this is provided so a caller that
+    /// batches several edits into one [`step`](SyncDocument::step) can still force a
+    /// boundary between logical groups when needed.
+    pub fn seal_undo_step(&mut self) {
+        self.undo.reset();
+    }
+
+    // -------------------------------------------------------------------------
     // Internals
     // -------------------------------------------------------------------------
 
@@ -413,7 +527,10 @@ impl SyncDocument {
             counter.set(n + 1);
             format!("{actor}:{n}")
         };
-        let mut txn = self.doc.transact_mut();
+        // Tag the transaction with this actor's origin so the per-actor undo manager
+        // captures it (and a peer's undo manager, tracking a different origin, does
+        // not). One `edit` call is one transaction, hence one undo step.
+        let mut txn = self.doc.transact_mut_with(self.actor.as_str());
         let result = f(&mut txn, &mut make_id);
         drop(txn);
         self.counter = counter.get();
@@ -539,14 +656,78 @@ impl StepEdit<'_, '_> {
 }
 
 /// Derives a stable `yrs` client id from an actor id by hashing.
+///
+/// The result is masked into 32 bits. `yrs` (following Yjs) requires client ids to
+/// stay below `Number.MAX_SAFE_INTEGER` (2^53): its update wire format round-trips
+/// client ids through a representation that silently corrupts anything larger, so a
+/// full 64-bit hash makes two peers disagree on which client owns a struct. That
+/// disagreement is invisible to a materialized-document comparison (our records are
+/// keyed by stable `actor:counter` strings, not by client id) but it breaks the
+/// precise struct identity the per-actor undo manager needs for redo to converge.
+/// Masking to 32 bits keeps every id well under 2^53 while leaving ample space to
+/// avoid collisions between the handful of actors in a session.
 fn client_id_for(actor: &str) -> u64 {
     if actor.is_empty() {
         return 0;
     }
     let mut hasher = DefaultHasher::new();
     actor.hash(&mut hasher);
-    // `yrs` client ids are compared for seniority; any non-zero value works.
-    hasher.finish()
+    // Mask to 32 bits (< 2^53) and force non-zero so a non-empty actor never
+    // collides with the empty-actor default of 0.
+    let id = hasher.finish() & 0xFFFF_FFFF;
+    if id == 0 { 1 } else { id }
+}
+
+#[cfg(test)]
+mod client_id_tests {
+    use super::{SyncDocument, client_id_for};
+
+    /// A [`SyncDocument`] must stay `Send + Sync` so it can be driven from a `tokio`
+    /// task (the live-agent path spawns one across threads). The per-actor
+    /// [`UndoManager`](yrs::UndoManager) it owns is only `Send + Sync` with `yrs`'
+    /// `sync` feature enabled; this fails to compile if that feature is dropped.
+    #[test]
+    fn sync_document_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<SyncDocument>();
+    }
+
+    /// Every derived client id must stay below 2^53 (`Number.MAX_SAFE_INTEGER`), the
+    /// `yrs`/Yjs limit; a larger id is silently corrupted on the update wire format
+    /// and makes peers disagree on struct ownership (which broke selective-undo
+    /// redo before this was masked).
+    #[test]
+    fn client_ids_stay_within_the_js_safe_integer_range() {
+        const MAX_SAFE: u64 = 1 << 53;
+        for actor in [
+            "alice",
+            "bob",
+            "sharer",
+            "viewer",
+            "agent",
+            "human",
+            "a_very_long_actor_id_string",
+        ] {
+            let id = client_id_for(actor);
+            assert!(
+                id < MAX_SAFE,
+                "client id for {actor:?} is {id}, which exceeds 2^53"
+            );
+            assert_ne!(
+                id, 0,
+                "a non-empty actor must not collide with the empty default"
+            );
+        }
+        assert_eq!(client_id_for(""), 0, "the empty actor keeps client id 0");
+    }
+
+    /// A derived client id is stable across calls (so a peer's tie-breaking order is
+    /// reproducible across runs).
+    #[test]
+    fn client_id_is_stable_per_actor() {
+        assert_eq!(client_id_for("alice"), client_id_for("alice"));
+        assert_ne!(client_id_for("alice"), client_id_for("bob"));
+    }
 }
 
 #[cfg(test)]
