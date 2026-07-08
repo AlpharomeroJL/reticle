@@ -208,7 +208,7 @@ where
 ///
 /// It is a drop-in for [`build_rtla`]: for any input whose placements fit in a single
 /// sort chunk (`CHUNK_ENTRIES`), it produces **byte-identical** output. The collection
-/// order, the `sort_unstable_by_key(tile_index)`, the per-tile [`MAX_TILE_RECORDS`] cap,
+/// order, the `sort_unstable_by_key(tile_index)`, the per-tile `MAX_TILE_RECORDS` cap,
 /// and the framing (preamble, header, directory, aligned tiles) are all shared with the
 /// external builder, so the frozen reader parses either identically. A test in
 /// `tests/rtla_to_vec.rs` pins the byte equality.
