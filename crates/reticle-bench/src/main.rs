@@ -19,8 +19,8 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use reticle_bench::{
-    BenchTask, CheckerRegistry, ResultRecord, RunOptions, SuiteManifest, Tier, load_suite,
-    run_task, summarize, write_records,
+    BenchTask, CheckerRegistry, ResultRecord, RunOptions, SuiteManifest, Tier, load_records,
+    load_suite, render_leaderboard, run_task, summarize, validate_records, write_records,
 };
 
 mod scripts;
@@ -69,6 +69,27 @@ enum Command {
         #[arg(long)]
         candidates: Option<PathBuf>,
     },
+    /// Render the static leaderboard book page from the committed result records.
+    ///
+    /// This reads only committed records; it never runs the suite. The render is
+    /// deterministic (same records produce the same bytes), so regenerating after new
+    /// records are committed is the whole workflow for keeping the page current.
+    Leaderboard {
+        /// The directory tree of committed `*.result.json` records to aggregate.
+        #[arg(long, default_value = "benchmarks/results")]
+        results: PathBuf,
+        /// Where to write the generated Markdown page. Use `-` to print to stdout.
+        #[arg(long, default_value = "docs/src/leaderboard.md")]
+        out: PathBuf,
+    },
+    /// Validate a submitted result record file (or a directory of them) against the
+    /// schema the leaderboard relies on, rejecting a malformed record with a clear
+    /// message. This is the submission gate an external contributor runs before opening a
+    /// pull request.
+    ValidateRecords {
+        /// A `*.result.json` file, or a directory tree of them.
+        path: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -96,8 +117,13 @@ fn main() -> ExitCode {
 /// With the `promote` subcommand, promotes a candidate instead: `Ok(false)`
 /// (exit 1) is a gate refusal, `Err` (exit 2) a setup failure.
 fn run(cli: &Cli) -> Result<bool, String> {
-    if let Some(Command::Promote { id, candidates }) = &cli.command {
-        return run_promote(cli, id, candidates.clone());
+    match &cli.command {
+        Some(Command::Promote { id, candidates }) => {
+            return run_promote(cli, id, candidates.clone());
+        }
+        Some(Command::Leaderboard { results, out }) => return run_leaderboard(results, out),
+        Some(Command::ValidateRecords { path }) => return run_validate(path),
+        None => {}
     }
     if !cli.mock {
         return Err("only the mock model is available in this lane; pass --mock".into());
@@ -157,6 +183,54 @@ fn run_promote(cli: &Cli, id: &str, candidates: Option<PathBuf>) -> Result<bool,
             Ok(false)
         }
         Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Renders the static leaderboard from the committed records under `results` and writes
+/// it to `out` (or stdout when `out` is `-`). Returns `Ok(true)` on success; a read or
+/// write failure is `Err` (exit 2).
+fn run_leaderboard(results: &Path, out: &Path) -> Result<bool, String> {
+    let records = load_records(results).map_err(|e| e.to_string())?;
+    let page = render_leaderboard(&records);
+    if out == Path::new("-") {
+        print!("{page}");
+    } else {
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("creating {}: {e}", parent.display()))?;
+        }
+        std::fs::write(out, &page).map_err(|e| format!("writing {}: {e}", out.display()))?;
+        println!(
+            "wrote the leaderboard ({} record(s)) to {}",
+            records.len(),
+            out.display()
+        );
+    }
+    Ok(true)
+}
+
+/// Validates the submitted record file or directory at `path`. A valid set prints a
+/// count and returns `Ok(true)` (exit 0). A malformed submission (a bad record or a file
+/// that is not a record array) is a rejection: it prints the reason and returns
+/// `Ok(false)` (exit 1). A path that cannot be read at all is a setup failure, returned
+/// as `Err` (exit 2), so a submission gate can tell "your record is wrong" from "I could
+/// not read the file".
+fn run_validate(path: &Path) -> Result<bool, String> {
+    match validate_records(path) {
+        Ok(records) => {
+            println!(
+                "validated {} result record(s) under {}",
+                records.len(),
+                path.display()
+            );
+            Ok(true)
+        }
+        // An unreadable path is an environment problem, not a malformed submission.
+        Err(e @ reticle_bench::ValidateError::Io { .. }) => Err(e.to_string()),
+        Err(e) => {
+            eprintln!("validate-records: rejected: {e}");
+            Ok(false)
+        }
     }
 }
 

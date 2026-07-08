@@ -47,6 +47,8 @@
 - [Agent benchmark suite](benchmarks.md)
   - [Benchmark methodology](benchmark.md)
   - [Multimodal verification](multimodal-verification.md)
+  - [Leaderboard](leaderboard.md)
+  - [Submitting a run](submitting.md)
 
 # Tape-out
 
