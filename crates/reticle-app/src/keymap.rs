@@ -508,6 +508,11 @@ mod tests {
             ("view.split_single", "Ctrl+1"),
             ("view.split_h", "Ctrl+2"),
             ("view.split_v", "Ctrl+3"),
+            // Lane 3a's reserved defaults (ia-inventory section 4): Fit-selection and
+            // Duplicate. The chord-conflict note there confirms neither collides with the
+            // legacy regression list above.
+            ("view.zoom_selection", "Shift+F"),
+            ("edit.duplicate", "Ctrl+D"),
         ];
         for (command, text) in expect {
             assert_eq!(

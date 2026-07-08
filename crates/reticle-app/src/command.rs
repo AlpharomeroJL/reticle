@@ -24,6 +24,16 @@ pub enum Command {
     Redo,
     /// Fit the whole design to the viewport.
     ZoomToFit,
+    /// Frame the current selection's bounding box (Shift+F, `view.zoom_selection`).
+    ZoomSelection,
+    /// Reset the zoom to one screen pixel per DBU, keeping the center (`view.zoom_one_to_one`).
+    ZoomOneToOne,
+    /// Frame the union bounding box of every visible layer (`view.zoom_layer_extents`).
+    ZoomLayerExtents,
+    /// Save the current view as a numbered bookmark (`view.bookmark_save`).
+    BookmarkSave,
+    /// Recall the saved view bookmark at the given slot (palette-only, item 34).
+    RecallBookmark(usize),
     /// Toggle the background grid.
     ToggleGrid,
     /// Toggle cursor snapping to the grid.
@@ -32,6 +42,11 @@ pub enum Command {
     ClearSelection,
     /// Select every shape on the layer at the given technology-table index.
     SelectLayer(usize),
+    /// Duplicate the current selection at a small offset (Ctrl+D, `edit.duplicate`).
+    Duplicate,
+    /// Copy a permalink pinning the current view and layers to the clipboard
+    /// (`share.copy_permalink`, item 35).
+    CopyPermalink,
     /// Export the current view to a PNG file (native only; a no-op on web).
     ExportPng,
 }
@@ -83,9 +98,15 @@ pub fn catalog(layer_names: &[String]) -> Vec<CommandEntry> {
         CommandEntry::new("Tool: Edit vertices", Command::SetTool(Tool::EditVertex)),
         CommandEntry::new("Edit: Undo", Command::Undo),
         CommandEntry::new("Edit: Redo", Command::Redo),
+        CommandEntry::new("Edit: Duplicate", Command::Duplicate),
         CommandEntry::new("View: Zoom to fit", Command::ZoomToFit),
+        CommandEntry::new("View: Fit selection", Command::ZoomSelection),
+        CommandEntry::new("View: Zoom 1:1 DBU", Command::ZoomOneToOne),
+        CommandEntry::new("View: Zoom to layer extents", Command::ZoomLayerExtents),
+        CommandEntry::new("View: Save view bookmark", Command::BookmarkSave),
         CommandEntry::new("View: Toggle grid", Command::ToggleGrid),
         CommandEntry::new("View: Toggle snapping", Command::ToggleSnap),
+        CommandEntry::new("Share: Copy permalink at this view", Command::CopyPermalink),
         CommandEntry::new("Select: Clear selection", Command::ClearSelection),
     ];
     for (i, name) in layer_names.iter().enumerate() {

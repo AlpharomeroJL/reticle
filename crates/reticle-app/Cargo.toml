@@ -119,3 +119,15 @@ rkyv = "0.8.16"
 # 0.35 egui/eframe already in the graph so the lockfile gains no new egui line.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 egui_kittest = { version = "0.35", features = ["wgpu", "snapshot", "eframe"] }
+
+# The pointer-latency pan benchmark (`benches/pan_latency.rs`, lane 3a, catalog 44)
+# measures the per-frame pan-to-paint CPU work (camera pan, viewport recompute,
+# streamed record selection) against a 16 ms budget, with the estimate committed to
+# benches/history/baseline.json and enforced by `just perf-check`. Criterion is native
+# only (benches never run on wasm); pinned to the 0.8 already in the lockfile via
+# reticle-index, so no new dependency version is introduced.
+criterion = "0.8.2"
+
+[[bench]]
+name = "pan_latency"
+harness = false

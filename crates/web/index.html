@@ -177,6 +177,47 @@
         color: #f38ba8;
         max-width: 40rem;
       }
+      /* Boot splash progress + rotating tip (lane 3a, catalog 97): an honest
+         indeterminate activity bar and a cycling one-liner fill the ~0.6s wasm
+         streaming/compile window so first paint is never an unexplained blank.
+         The overlay itself is still hidden only by main.rs after the WebRunner
+         starts, so the boot contract is unchanged. */
+      #overlay .progress {
+        width: min(280px, 60vw);
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(205, 214, 244, 0.12);
+        overflow: hidden;
+      }
+      #overlay .progress .bar {
+        width: 40%;
+        height: 100%;
+        border-radius: 2px;
+        background: #6ea8fe;
+        animation: reticle-boot 1.1s ease-in-out infinite;
+      }
+      @keyframes reticle-boot {
+        0% {
+          transform: translateX(-110%);
+        }
+        100% {
+          transform: translateX(320%);
+        }
+      }
+      #overlay .tip {
+        font-size: 0.85rem;
+        opacity: 0.65;
+        max-width: 34rem;
+        min-height: 1.2em;
+      }
+      /* Respect reduced motion: hold a static bar rather than sweeping it. */
+      @media (prefers-reduced-motion: reduce) {
+        #overlay .progress .bar {
+          animation: none;
+          width: 100%;
+          opacity: 0.5;
+        }
+      }
       /* The theater/editor view switch and the in-browser convert action now live on
          the egui toolbar (lane v8-ui), where they participate in the layout instead of
          floating over the canvas and occluding controls. The HTML elements are kept in
@@ -219,7 +260,40 @@
     <div id="overlay">
       <div class="title">Reticle</div>
       <div class="status" id="status">Loading the replay theater&hellip;</div>
+      <div class="progress" id="boot-progress" aria-hidden="true">
+        <div class="bar"></div>
+      </div>
+      <div class="tip" id="boot-tip"></div>
     </div>
+    <script>
+      // Rotating boot tip (lane 3a, catalog 97). Cycles a short one-liner while the
+      // wasm streams and compiles, so the loading window teaches instead of sitting
+      // blank. Stops the moment the renderer boots (Trunk fires the event; main.rs
+      // then hides the whole overlay), so it never competes with the live app.
+      (function () {
+        var tips = [
+          "Scroll to zoom to the cursor, drag to pan.",
+          "Press F to fit the design; Shift+F fits the selection.",
+          "Press ? for the full list of keyboard shortcuts.",
+          "The minimap (N) shows where you are; click or drag it to jump.",
+          "Streamed dies load tile by tile, coarse detail first.",
+          "Ctrl+P opens the command palette for every action.",
+          "Double-click a shape to frame it; double-click empty space to fit all.",
+        ];
+        var el = document.getElementById("boot-tip");
+        if (!el) return;
+        var i = 0;
+        el.textContent = tips[0];
+        var timer = setInterval(function () {
+          i = (i + 1) % tips.length;
+          el.textContent = tips[i];
+        }, 2400);
+        function stop() {
+          clearInterval(timer);
+        }
+        window.addEventListener("TrunkApplicationStarted", stop);
+      })();
+    </script>
     <script>
       // Report the rendering backend to the user. wgpu performs the actual
       // WebGPU -> WebGL2 fallback at the graphics layer (ADR 0009); this only

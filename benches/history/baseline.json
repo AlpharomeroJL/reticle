@@ -8,6 +8,7 @@
     "rtree_bulk_load_1m":              { "value": 232.17, "unit": "ms", "criterion": "rtree_bulk_load_1m" },
     "rtree_nearest_point_query":       { "value": 888.02, "unit": "ns", "criterion": "rtree_nearest_point_query" },
     "boolean_self_union_256_squares":  { "value": 277.36, "unit": "us", "criterion": "boolean/self_union_256_squares" },
-    "boolean_self_union_1024_squares": { "value": 1493.2, "unit": "us", "criterion": "boolean/self_union_1024_squares" }
+    "boolean_self_union_1024_squares": { "value": 1493.2, "unit": "us", "criterion": "boolean/self_union_1024_squares" },
+    "canvas_pan_pointer_latency":      { "value": 868.38, "unit": "ns", "criterion": "canvas_pan_pointer_latency", "budget_ms": 16.0, "note": "lane 3a catalog 44: per-frame pan-to-paint CPU work (camera pan, viewport recompute, streamed record selection) over a fully-resident die; ~0.87us, ~18000x under the 16ms pointer-latency budget." }
   }
 }

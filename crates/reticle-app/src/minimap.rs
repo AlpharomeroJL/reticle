@@ -58,9 +58,27 @@ impl MinimapLayout {
         if left < canvas.left + MARGIN || canvas.height < PANEL_HEIGHT + 2.0 * MARGIN {
             return None;
         }
-        let panel = ScreenRect::new(left, top, PANEL_WIDTH, PANEL_HEIGHT);
-        let avail_w = f64::from(PANEL_WIDTH - 2.0 * PADDING);
-        let avail_h = f64::from(PANEL_HEIGHT - 2.0 * PADDING);
+        Self::within(ScreenRect::new(left, top, PANEL_WIDTH, PANEL_HEIGHT), world)
+    }
+
+    /// Builds the minimap transform for a `panel` rectangle already positioned by the
+    /// caller, fitting `world` inside it with equal scale on both axes, centered.
+    ///
+    /// This is the seam the canvas overlay layout manager ([`crate::overlay`]) drives:
+    /// the manager decides *where* the panel sits (past the rulers, clear of the HUD),
+    /// and this fills in the world transform for that exact rectangle, so what is drawn
+    /// and what a click hits agree by construction. Returns `None` for a degenerate world
+    /// or a panel too small to host any content.
+    #[must_use]
+    pub fn within(panel: ScreenRect, world: Rect) -> Option<Self> {
+        if world.width() <= 0 || world.height() <= 0 {
+            return None;
+        }
+        let avail_w = f64::from(panel.width - 2.0 * PADDING);
+        let avail_h = f64::from(panel.height - 2.0 * PADDING);
+        if avail_w <= 0.0 || avail_h <= 0.0 {
+            return None;
+        }
         let scale = (avail_w / world.width() as f64).min(avail_h / world.height() as f64);
         if !(scale.is_finite() && scale > 0.0) {
             return None;
