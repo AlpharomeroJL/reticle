@@ -159,8 +159,13 @@ impl View3d {
         top_cell: &str,
         layers: &LayerState,
     ) {
+        // Start collapsed and tucked below the toolbar (right of the Layers panel) so
+        // the app opens on the canvas, not on two fully-expanded tool windows. The user
+        // expands and drags it from there; egui persists the choice per session.
         egui::Window::new("3D stack")
             .default_size([440.0, 380.0])
+            .default_open(false)
+            .default_pos([200.0, 60.0])
             .resizable(true)
             .show(ctx, |ui| {
                 self.show_contents(ui, frame, doc, top_cell, layers);
