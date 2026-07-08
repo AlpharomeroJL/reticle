@@ -2410,6 +2410,19 @@ impl App {
             {
                 self.start_screen = true;
             }
+            // Web only: the in-browser GDS -> .rtla convert picker sits on the toolbar
+            // next to Open (lane v8-ui). It was formerly a floating top-left HTML label
+            // that overlapped the toolbar; the button delegates to the web shell's hidden
+            // file input, which runs the convert worker, so it never floats over the
+            // canvas or other controls.
+            #[cfg(target_arch = "wasm32")]
+            if ui
+                .button("Convert GDS \u{2192} archive")
+                .on_hover_text("Convert a GDS to a streamable .rtla archive, in your browser")
+                .clicked()
+            {
+                Self::call_window_fn("__reticleTriggerConvert");
+            }
             if ui.button("Fit").clicked() {
                 self.fit_requested = true;
             }
@@ -2452,7 +2465,44 @@ impl App {
                 self.keymap_open = !self.keymap_open;
             }
             self.help_menu(ui);
+            // Web only: switch between the public replay theater and the full editor.
+            // Formerly a floating top-right HTML link that overlapped the History /
+            // Properties / DRC panel; now a toolbar button so it never occludes those
+            // controls (lane v8-ui). The navigation itself stays in the web shell.
+            #[cfg(target_arch = "wasm32")]
+            {
+                ui.separator();
+                let switch_label = match self.start_view {
+                    StartView::ReplayTheater => "Open the full editor",
+                    StartView::Editor => "Open the replay theater",
+                };
+                if ui.button(switch_label).clicked() {
+                    Self::call_window_fn("__reticleSwitchView");
+                }
+            }
         });
+    }
+
+    /// Invokes a zero-argument function stored as a global `window[name]`, if the web
+    /// shell defined one.
+    ///
+    /// The convert picker and the theater/editor view switch are wired up in
+    /// `crates/web/index.html`; the toolbar buttons above delegate to them here so those
+    /// affordances sit in the toolbar instead of floating over the canvas (lane v8-ui). A
+    /// missing global or a call error is a no-op -- the toolbar button simply does
+    /// nothing rather than panicking.
+    #[cfg(target_arch = "wasm32")]
+    fn call_window_fn(name: &str) {
+        use wasm_bindgen::{JsCast, JsValue};
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let Ok(value) = js_sys::Reflect::get(&window, &JsValue::from_str(name)) else {
+            return;
+        };
+        if let Ok(func) = value.dyn_into::<js_sys::Function>() {
+            let _ = func.call0(&JsValue::NULL);
+        }
     }
 
     /// The Help menu: relaunches the first-run tour.
