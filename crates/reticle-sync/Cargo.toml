@@ -22,7 +22,10 @@ reticle-proto = { workspace = true }
 # `reticle-proto` already resolves, so no new copy is pulled into the lockfile;
 # it builds for wasm32 too, so the browser transport shares the codec.
 prost = "0.14.4"
-yrs = "0.23"
+# The `sync` feature makes `yrs` observers (and thus the per-actor `UndoManager`
+# a `SyncDocument` owns) `Send + Sync`, so `SyncDocument` stays `Send + Sync` and
+# can be driven from a `tokio` task (the live-agent path spawns one across threads).
+yrs = { version = "0.23", features = ["sync"] }
 
 [dev-dependencies]
 proptest = "1.11.0"
