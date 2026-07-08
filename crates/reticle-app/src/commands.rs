@@ -143,6 +143,13 @@ pub enum AppOp {
     ExportSvg,
     /// Export a metrology CSV of the current design.
     ExportMetrology,
+    // --- lane 2D: viewer / start / presentation ---
+    /// Toggle presentation mode: hide all chrome and show only the canvas
+    /// (catalog 93, lane 2D, id `view.presentation`).
+    TogglePresentation,
+    /// Close the current design and return to the Start screen (lane 2D, id
+    /// `file.close_design`).
+    CloseDesign,
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -751,6 +758,27 @@ static REGISTRY: &[CommandSpec] = &[
         default_chord: None,
         rebindable: false,
         run: RunAs::App(AppOp::CommentAdd),
+        scope: Scope::Global,
+    },
+    // --- lane 2d: viewer / start / presentation ---
+    CommandSpec {
+        id: CommandId("view.presentation"),
+        label: "Presentation mode",
+        category: "View",
+        menu_path: Some(&["View"]),
+        default_chord: Some("P"),
+        rebindable: true,
+        run: RunAs::App(AppOp::TogglePresentation),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("file.close_design"),
+        label: "Close design",
+        category: "File",
+        menu_path: Some(&["File"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::CloseDesign),
         scope: Scope::Global,
     },
 ];

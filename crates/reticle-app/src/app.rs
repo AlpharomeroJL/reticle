@@ -70,12 +70,22 @@ impl Status {
 ///
 /// Recording the intent rather than acting inline lets each Start-screen section be
 /// a plain closure over `ui` without also mutably borrowing `self`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 enum StartAction {
     /// Enter one of the worked scenarios.
     EnterUseCase(UseCase),
     /// Load a bundled example chip through the open seam.
     LoadExample(crate::startscreen::ExampleChip),
+    /// Open a served archive by URL (web streaming path); a status note on native.
+    OpenArchive(&'static str),
+    /// Request the native/file-open dialog (the reserved `file.open_dialog`, owned
+    /// by lane 3B; a status hint until that lane wires the effect).
+    OpenDialog,
+    /// Open the New Tiny Tapeout tile wizard (catalog 24).
+    OpenTileWizard,
+    /// Toggle the pin on a recent-files entry, keyed by its [`recent_key`]
+    /// (catalog 9).
+    PinRecent(String),
     /// Dismiss the Start screen and keep the demo document.
     SkipToEditor,
 }
@@ -447,6 +457,30 @@ pub struct App {
     /// The viewer transport pumps the sharer's frames into it; the App renders its
     /// mirrored document and the sharer's presence read-only.
     viewer_session: Option<crate::viewer::ViewerSession>,
+
+    // ---- Lane 2D: viewer chrome, presence, presentation --------------------
+    /// The local display name that rides on this session's published presence and
+    /// labels the local user (catalog 86). Editable from the viewer chrome; defaults
+    /// to a neutral label.
+    display_name: String,
+    /// Per-actor last cursor position and the egui-time it last moved, so a parked
+    /// remote cursor can fade (catalog 86 idle fade). Keyed by actor id.
+    presence_seen: std::collections::HashMap<String, (Point, f64)>,
+    /// Seconds remaining of the remote-edit attribution glow (catalog 90): a brief
+    /// canvas flash in the editor's color when a mirrored remote frame lands.
+    remote_edit_flash: f32,
+    /// Whether the shared session's sharer has dropped, so the viewer shows a
+    /// read-only freeze notice (catalog 91). Cleared if the socket reopens.
+    sharer_left: bool,
+    /// Tracks whether the live transport was last seen open, to detect the
+    /// open -> closed transition that raises [`sharer_left`](Self::sharer_left).
+    viewer_was_open: bool,
+    /// Lane 2D pinning for the Start-screen recent-files list (catalog 9): a sibling
+    /// to Lane 1B's frozen recent-files model that floats pinned entries to the top.
+    recent_pins: crate::startscreen::RecentPins,
+    /// Whether the New Tiny Tapeout tile wizard (catalog 24) is open over the Start
+    /// screen, showing the pin-map preview before creating the tile.
+    tt_wizard_open: bool,
     /// Whether the viewer has framed the sharer's design yet. The first mirrored frame
     /// fits the camera to the sharer's layout (so the viewer does not have to pan to
     /// find it); after that the viewer's camera is left alone for independent pan/zoom.
@@ -519,6 +553,16 @@ pub struct App {
     /// the replay-theater start view (that visitor lands straight in the theater).
     /// See [`crate::usecases`] and [`App::start_screen`].
     start_screen: bool,
+
+    /// Whether presentation mode is on (catalog 93, lane 2D): all chrome is hidden
+    /// and only the canvas is drawn full-window. Toggled by the `view.presentation`
+    /// command (default chord `P`) and left by pressing `P` again or `Escape`.
+    presentation: bool,
+    /// Whether embed mode is on (`?embed=1`, catalog 94, lane 2D): minimal chrome for
+    /// an iframe, only the canvas plus a small "open in Reticle" affordance. Set once
+    /// from the page URL (see [`App::set_embed`]); unlike presentation it does not
+    /// toggle, since an embedding page fixes it.
+    embed: bool,
 
     /// View and export polish: the egui theme, per-document camera bookmarks, the
     /// export scope/format, and the print-style monochrome toggle. The whole
@@ -706,6 +750,15 @@ const AGENT_SAMPLE_PROMPTS: &[&str] = &[
     "Fill empty tracks with metal",
     "Widen nets below the minimum width",
 ];
+
+/// How long, in seconds, the remote-edit attribution glow (catalog 90) lingers
+/// after a mirrored remote frame lands before it has fully faded.
+const REMOTE_EDIT_FLASH_SECS: f32 = 0.8;
+
+/// Follow-mode easing rate (catalog 87): the per-frame interpolation weight is
+/// `dt * this`, so the followed camera glides to the sharer's view over roughly an
+/// eighth of a second rather than snapping.
+const FOLLOW_EASE_RATE: f32 = 8.0;
 
 impl Default for App {
     fn default() -> Self {
@@ -971,6 +1024,13 @@ impl App {
             last_screen: None,
             viewer_target: None,
             viewer_session: None,
+            display_name: "Guest".to_owned(),
+            presence_seen: std::collections::HashMap::new(),
+            remote_edit_flash: 0.0,
+            sharer_left: false,
+            viewer_was_open: false,
+            recent_pins: crate::startscreen::RecentPins::new(),
+            tt_wizard_open: false,
             viewer_framed: false,
             viewer_transport: None,
             sharer_transport: None,
@@ -989,6 +1049,8 @@ impl App {
             // editor default; the replay-theater start view drops the visitor
             // straight into the theater and never shows it.
             start_screen: start_view == StartView::Editor,
+            presentation: false,
+            embed: false,
             view_export: crate::viewexport::ViewExport::new(),
             inspector: boot_inspector_state(),
             drc_ran_revision: None,
@@ -1298,6 +1360,19 @@ impl App {
     /// web entry at boot.
     pub fn set_e2e_edit(&mut self, on: bool) {
         self.e2e_edit = on;
+    }
+
+    /// Sets whether the bundle is embedded (`?embed=1`, catalog 94): minimal chrome
+    /// for an iframe. Threaded in by the web entry at boot from
+    /// [`crate::share::parse_embed`]; a no-op modifier on native.
+    pub fn set_embed(&mut self, on: bool) {
+        self.embed = on;
+    }
+
+    /// Whether the bundle is running in embed mode (`?embed=1`).
+    #[must_use]
+    pub fn is_embedded(&self) -> bool {
+        self.embed
     }
 
     /// Places one fixed scripted rectangle so lane v8-1e's browser test can observe an
@@ -1871,6 +1946,9 @@ impl App {
         // following, snap the local camera to the sharer's viewport.
         if geometry_changed {
             self.install_viewer_mirror();
+            // Catalog 90: flash the remote-edit attribution glow when a mirrored frame
+            // lands, so a viewer sees where the shared session just changed.
+            self.remote_edit_flash = REMOTE_EDIT_FLASH_SECS;
             // Expose the applied-frame/shape counters lane v8-1e's browser test reads.
             #[cfg(target_arch = "wasm32")]
             self.record_viewer_stats();
@@ -1918,6 +1996,22 @@ impl App {
                     // A (re)connected socket must resend the FULL state so a reconnecting
                     // viewer or a late joiner gets a complete snapshot, not just a delta.
                     self.publish_full_next = true;
+                }
+                // Catalog 91: in a viewer session, a live->closed transition means the
+                // sharer dropped; raise the read-only freeze notice (and clear it if the
+                // socket comes back).
+                if self.is_viewer() {
+                    let open = status.is_open();
+                    if self.viewer_was_open && !open {
+                        self.sharer_left = true;
+                        self.notifications.warning(
+                            "Sharer left",
+                            "You are viewing the last received state, read-only.",
+                        );
+                    } else if open {
+                        self.sharer_left = false;
+                    }
+                    self.viewer_was_open = open;
                 }
                 self.status.set(status.label());
                 self.live_status = status;
@@ -2032,7 +2126,13 @@ impl App {
     fn local_presence(&self) -> Option<reticle_sync::Presence> {
         let screen = self.last_screen?;
         let mut presence = reticle_sync::Presence::new("sharer");
-        presence.display_name.push_str("Sharer");
+        // The locally-stored display name (catalog 86) rides on the published presence
+        // so a viewer sees the sharer's chosen name on their cursor; empty falls back to
+        // a neutral label at the viewer.
+        let name = self.display_name.trim();
+        presence
+            .display_name
+            .push_str(if name.is_empty() { "Sharer" } else { name });
         presence.color_rgba = 0x2f_81_f7_ff; // a distinct sharer blue
         if let Some(cursor) = self.cursor_world {
             presence.cursor = cursor;
@@ -2834,6 +2934,19 @@ impl App {
                 self.run_export();
             }
             AppOp::ExportMetrology => self.export_metrology(),
+            // lane 2D: presentation mode and close-design.
+            AppOp::TogglePresentation => {
+                self.presentation = !self.presentation;
+                self.status
+                    .set(format!("Presentation mode {}", on_off(self.presentation)));
+            }
+            AppOp::CloseDesign => {
+                // Return to the Start screen (leaving presentation mode if on) so the
+                // open guidance, gallery, and recent files are one place again.
+                self.presentation = false;
+                self.start_screen = true;
+                self.status.set("Closed design");
+            }
         }
     }
 
@@ -4143,6 +4256,327 @@ impl App {
             .rect
     }
 
+    /// A [`components::Ctx`](crate::theme::components::Ctx) for this frame, carrying
+    /// the app's resolved density and reduced-motion so lane 2D chrome draws from the
+    /// same component library and tokens as every other panel.
+    fn theme_ctx(&self) -> theme::components::Ctx {
+        theme::components::Ctx::dark(self.ui_density).with_reduced_motion(self.reduced_motion)
+    }
+
+    /// The read-only viewer chrome (catalog 23, AUD-03): a slim top bar with the live
+    /// session chip, a follow toggle, and one "Open full editor" affordance; the
+    /// Layers panel reflecting the mirrored document; the status bar; and the canvas.
+    /// There is no inspector, no draw tools, and no menu bar except Help, so a
+    /// share-link viewer lands on a clean read-only surface, not the full editor.
+    fn viewer_panels(
+        &mut self,
+        ui: &mut egui::Ui,
+        gpu_format: Option<eframe::egui_wgpu::wgpu::TextureFormat>,
+    ) -> (Option<ScreenRect>, TourTargets) {
+        let top = egui::Panel::top("viewer_top")
+            .show(ui, |ui| self.viewer_top_bar(ui))
+            .response
+            .rect;
+        egui::Panel::bottom("status").show(ui, |ui| {
+            self.status_bar(ui);
+        });
+        let layers = egui::Panel::left("layers")
+            .resizable(true)
+            .default_size(210.0)
+            .show(ui, |ui| self.layer_panel(ui))
+            .response
+            .rect;
+        let mut canvas_screen: Option<ScreenRect> = None;
+        egui::CentralPanel::default().show(ui, |ui| {
+            canvas_screen = Some(self.canvas(ui, gpu_format));
+        });
+        self.last_screen = canvas_screen;
+        let targets = TourTargets {
+            canvas: canvas_screen.map(|s| egui_rect_of(&s)),
+            layers: Some(layers),
+            toolbar: Some(top),
+            right_column: None,
+            minimap: None,
+        };
+        (canvas_screen, targets)
+    }
+
+    /// The viewer chrome's top bar: a "view-only" tag, the live session chip
+    /// (catalog 75), the follow controls (catalog 87), and, right-aligned, the single
+    /// fixed "Open full editor" affordance plus Help and Shortcuts.
+    fn viewer_top_bar(&mut self, ui: &mut egui::Ui) {
+        let cx = self.theme_ctx();
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new("Reticle").strong());
+            ui.label(
+                egui::RichText::new("view-only")
+                    .color(cx.tokens.text_weak)
+                    .small(),
+            );
+            ui.separator();
+            self.session_chip(ui, cx);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if theme::components::Button::primary("Open full editor")
+                    .show(ui, cx)
+                    .on_hover_text("Switch to the full editor, keeping this camera")
+                    .clicked()
+                {
+                    self.open_full_editor();
+                }
+                // The viewer's only menu is Help (ia-inventory section 2). It renders
+                // from the reserved registry ids so it stays in step with the editor's
+                // Help menu (lane 2A replaced the old `help_menu` with the registry).
+                ui.menu_button("Help", |ui| {
+                    for id in [
+                        "help.tour",
+                        "help.shortcuts",
+                        "help.docs",
+                        "help.whats_new",
+                        "help.about",
+                    ] {
+                        let cid = CommandId(id);
+                        if let Some(spec) = commands::spec(cid)
+                            && ui.button(spec.label).clicked()
+                        {
+                            self.dispatch(cid);
+                            ui.close();
+                        }
+                    }
+                });
+                if ui.button("Shortcuts").clicked() {
+                    self.keymap_open = !self.keymap_open;
+                }
+            });
+        });
+        if self.sharer_left {
+            ui.label(
+                egui::RichText::new(
+                    "The sharer left. You are viewing the last received state, read-only.",
+                )
+                .color(cx.tokens.warning),
+            );
+        }
+    }
+
+    /// The live session chip (catalog 75): a connection-state dot and label, the
+    /// participant count, clickable presence avatars (click to follow, catalog 87), a
+    /// follow toggle, and a "Following ..." chip when follow-mode is on.
+    fn session_chip(&mut self, ui: &mut egui::Ui, cx: theme::components::Ctx) {
+        let t = cx.tokens;
+        let connected = self.live_status.is_open();
+        let (dot, label) = if self.sharer_left {
+            (t.warning, "Sharer left".to_owned())
+        } else if connected {
+            (t.success, "Live".to_owned())
+        } else {
+            (t.text_weak, self.live_status.label())
+        };
+        let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
+        ui.painter().circle_filled(rect.center(), 4.0, dot);
+        ui.label(label);
+
+        let participants =
+            crate::viewer::participants(self.document.awareness(), crate::viewer::VIEWER_ACTOR);
+        ui.label(
+            egui::RichText::new(format!("{} in session", participants.len() + 1))
+                .color(t.text_weak),
+        );
+        let mut follow_clicked = false;
+        for p in &participants {
+            if Self::avatar(ui, p).clicked() {
+                follow_clicked = true;
+            }
+        }
+        if follow_clicked && let Some(session) = self.viewer_session.as_mut() {
+            let now_following = session.toggle_follow();
+            self.status.set(if now_following {
+                "Following the sharer's view"
+            } else {
+                "Panning independently"
+            });
+        }
+
+        if let Some(session) = self.viewer_session.as_mut() {
+            let mut follow = session.is_following();
+            if ui.checkbox(&mut follow, "Follow").changed() {
+                session.set_follow(follow);
+            }
+        }
+        if self
+            .viewer_session
+            .as_ref()
+            .is_some_and(crate::viewer::ViewerSession::is_following)
+        {
+            let who = participants
+                .first()
+                .map_or_else(|| "the sharer".to_owned(), |p| p.name.clone());
+            ui.label(egui::RichText::new(format!("Following {who}")).color(t.accent));
+        }
+    }
+
+    /// Draws one clickable presence avatar: a colored disc with the participant's
+    /// initial, tooltip naming them, returning the [`Response`](egui::Response) so a
+    /// click can toggle follow-mode on that peer (catalog 87).
+    fn avatar(ui: &mut egui::Ui, p: &crate::viewer::Participant) -> egui::Response {
+        let (r, g, b, _) = layers::rgba_components(p.color_rgba);
+        let color = theme::tokens::layer_rgb(r, g, b);
+        let size = 18.0;
+        let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+        ui.painter().circle_filled(rect.center(), size / 2.0, color);
+        let initial = p
+            .name
+            .chars()
+            .next()
+            .map_or_else(|| "?".to_owned(), |ch| ch.to_uppercase().to_string());
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            initial,
+            egui::TextStyle::Small.resolve(ui.style()),
+            egui::Color32::WHITE,
+        );
+        resp.on_hover_text(format!("{} \u{2014} click to follow", p.name))
+    }
+
+    /// Leaves read-only viewer mode for the full editor, keeping the mirrored
+    /// document and the current camera (catalog 23: the editor is one click away and
+    /// the transition preserves the camera). Clearing the viewer target flips
+    /// [`is_viewer`](Self::is_viewer), so the next frame draws the full editor chrome
+    /// over the already-mirrored document at the same view.
+    fn open_full_editor(&mut self) {
+        self.viewer_target = None;
+        self.viewer_session = None;
+        self.sharer_left = false;
+        self.status.set("Opened the full editor");
+    }
+
+    /// Presentation mode (catalog 93): only the canvas, full-window, with a quiet
+    /// self-explaining exit hint. The caller suppresses all other chrome.
+    fn presentation_canvas(
+        &mut self,
+        ui: &mut egui::Ui,
+        gpu_format: Option<eframe::egui_wgpu::wgpu::TextureFormat>,
+        ctx: &egui::Context,
+    ) -> Option<ScreenRect> {
+        let mut canvas_screen: Option<ScreenRect> = None;
+        egui::CentralPanel::default().show(ui, |ui| {
+            canvas_screen = Some(self.canvas(ui, gpu_format));
+        });
+        self.last_screen = canvas_screen;
+        let weak = self.theme_ctx().tokens.text_weak;
+        egui::Area::new(egui::Id::new("presentation_hint"))
+            .anchor(egui::Align2::RIGHT_TOP, Vec2::new(-12.0, 12.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                ui.label(
+                    egui::RichText::new("Presentation \u{2014} press P or Esc to exit")
+                        .color(weak)
+                        .small(),
+                );
+            });
+        canvas_screen
+    }
+
+    /// Embed mode (catalog 94): minimal chrome for an iframe. Only the canvas, plus a
+    /// small "open in Reticle" link in the corner that opens the full, non-embedded app
+    /// in a new tab. The caller suppresses all other chrome.
+    fn embed_canvas(
+        &mut self,
+        ui: &mut egui::Ui,
+        gpu_format: Option<eframe::egui_wgpu::wgpu::TextureFormat>,
+        ctx: &egui::Context,
+    ) -> Option<ScreenRect> {
+        let mut canvas_screen: Option<ScreenRect> = None;
+        egui::CentralPanel::default().show(ui, |ui| {
+            canvas_screen = Some(self.canvas(ui, gpu_format));
+        });
+        self.last_screen = canvas_screen;
+        let accent = self.theme_ctx().tokens.accent;
+        let mut open_clicked = false;
+        egui::Area::new(egui::Id::new("embed_open"))
+            .anchor(egui::Align2::RIGHT_BOTTOM, Vec2::new(-8.0, -8.0))
+            .show(ctx, |ui| {
+                if ui
+                    .link(
+                        egui::RichText::new("Open in Reticle \u{2197}")
+                            .color(accent)
+                            .small(),
+                    )
+                    .clicked()
+                {
+                    open_clicked = true;
+                }
+            });
+        if open_clicked {
+            self.open_in_new_tab();
+        }
+        canvas_screen
+    }
+
+    /// Opens the full (non-embedded) app in a new tab from embed mode, by reopening
+    /// the current URL with the embed flag turned off. A status note on native.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(clippy::unused_self))]
+    fn open_in_new_tab(&mut self) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(window) = web_sys::window()
+                && let Ok(href) = window.location().href()
+            {
+                let target = href
+                    .replace("embed=1", "embed=0")
+                    .replace("embed=true", "embed=0");
+                let _ = window.open_with_url_and_target(&target, "_blank");
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.status.set("Open in Reticle (web only)");
+        }
+    }
+
+    /// Records the time each remote cursor last moved, so a parked cursor can fade
+    /// (catalog 86 idle fade). Actors no longer present are dropped.
+    fn track_presence_idle(&mut self, now: f64) {
+        let current: Vec<(String, Point)> = self
+            .document
+            .awareness()
+            .iter()
+            .map(|(a, p)| (a.clone(), p.cursor))
+            .collect();
+        let mut present = std::collections::HashSet::with_capacity(current.len());
+        for (actor, cursor) in current {
+            present.insert(actor.clone());
+            match self.presence_seen.get(&actor) {
+                // Unchanged cursor keeps its last-move time so the fade keeps counting.
+                Some(&(prev, _)) if prev == cursor => {}
+                _ => {
+                    self.presence_seen.insert(actor, (cursor, now));
+                }
+            }
+        }
+        self.presence_seen.retain(|a, _| present.contains(a));
+    }
+
+    /// Draws the remote-edit attribution glow (catalog 90): a brief inset border in
+    /// the sharer's color when a mirrored remote frame lands, fading out over
+    /// [`REMOTE_EDIT_FLASH_SECS`]. A no-op once the flash has elapsed.
+    fn draw_remote_edit_glow(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        if self.remote_edit_flash <= 0.0 {
+            return;
+        }
+        let frac = (self.remote_edit_flash / REMOTE_EDIT_FLASH_SECS).clamp(0.0, 1.0);
+        let color =
+            crate::viewer::participants(self.document.awareness(), crate::viewer::VIEWER_ACTOR)
+                .first()
+                .map_or(0x6e_a8_fe_ff, |p| p.color_rgba);
+        let (r, g, b, _) = layers::rgba_components(color);
+        // Fade the (premultiplied) sharer color by the remaining flash fraction; the
+        // 0.7 ceiling keeps the border a glow rather than a solid frame.
+        let glow = theme::tokens::layer_rgb(r, g, b).gamma_multiply(frac * 0.7);
+        let stroke = Stroke::new(3.0, glow);
+        painter.rect_stroke(egui_rect_of(screen), 0.0, stroke, StrokeKind::Inside);
+    }
+
     /// A click the Start screen recorded this frame, applied after the layout closure
     /// so the borrow of `self` inside the egui closure is released first.
     ///
@@ -4150,6 +4584,7 @@ impl App {
     /// overlay uses; it lets each Start-screen section be a plain closure over `ui`
     /// without also borrowing `self` mutably to run the action inline.
     fn start_screen_ui(&mut self, ui: &mut egui::Ui) {
+        let cx = self.theme_ctx();
         let mut action: Option<StartAction> = None;
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical()
@@ -4159,17 +4594,26 @@ impl App {
                     ui.vertical_centered(|ui| {
                         ui.heading("Welcome to Reticle");
                         ui.label(
-                            "Open your own design, load an example chip, or pick a \
-                             worked scenario. You can skip to a blank editor anytime.",
+                            "Open a design, load an example, or start a new Tiny Tapeout \
+                             tile. You can skip to a blank editor anytime.",
                         );
                     });
                     ui.add_space(12.0);
 
-                    Self::start_open_section(ui, &mut action);
+                    // Empty-canvas state with exactly three primary actions (catalog 16).
+                    Self::start_hero_section(ui, cx, &mut action);
                     ui.add_space(10.0);
-                    Self::start_recent_section(ui, self.recent_files.entries(), &mut action);
+                    Self::start_recent_section(
+                        ui,
+                        cx,
+                        self.recent_files.entries(),
+                        &self.recent_pins,
+                        &mut action,
+                    );
                     ui.add_space(10.0);
-                    Self::start_gallery_section(ui, &mut action);
+                    Self::start_gallery_section(ui, cx, &mut action);
+                    ui.add_space(10.0);
+                    Self::start_open_hint_section(ui);
                     ui.add_space(10.0);
                     Self::start_scenarios_section(ui, &mut action);
 
@@ -4183,57 +4627,78 @@ impl App {
                 });
         });
         self.apply_start_action(action);
+        // The New Tiny Tapeout tile wizard (catalog 24) draws over the Start screen.
+        self.tt_wizard(&ui.ctx().clone());
     }
 
-    /// Draws the "open a file" section: a prominent drag-and-drop target hint and the
-    /// supported formats. There is no synchronous file dialog on the web, so the
-    /// honest primary affordance is drag-and-drop, which
-    /// [`handle_dropped_files`](Self::handle_dropped_files) opens directly; this
-    /// section makes that target and the accepted formats visible.
-    fn start_open_section(ui: &mut egui::Ui, _action: &mut Option<StartAction>) {
+    /// The empty-canvas hero (catalog 16): exactly three primary actions, the three
+    /// ways to get a design onto the canvas.
+    fn start_hero_section(
+        ui: &mut egui::Ui,
+        cx: theme::components::Ctx,
+        action: &mut Option<StartAction>,
+    ) {
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.strong("Open a file");
-            ui.add_space(4.0);
-            // The drag-drop target hint: a dashed-feeling framed area with the call to
-            // action. Dropping anywhere on the window works; this names where and what.
-            egui::Frame::group(ui.style())
-                .fill(ui.visuals().faint_bg_color)
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(6.0);
-                        ui.label(
-                            egui::RichText::new("Drag a layout file here to open it").strong(),
-                        );
-                        ui.label(
-                            egui::RichText::new("or drop it anywhere on the window")
-                                .weak()
-                                .small(),
-                        );
-                        ui.add_space(6.0);
-                    });
+            ui.vertical_centered(|ui| {
+                ui.label(egui::RichText::new("Nothing open yet").strong());
+                ui.label(
+                    egui::RichText::new("Pick one of three ways to get a design on the canvas.")
+                        .color(cx.tokens.text_weak)
+                        .small(),
+                );
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if theme::components::Button::primary("Open a file")
+                        .min_width(150.0)
+                        .show(ui, cx)
+                        .clicked()
+                    {
+                        *action = Some(StartAction::OpenDialog);
+                    }
+                    if theme::components::Button::primary("Load an example")
+                        .min_width(150.0)
+                        .show(ui, cx)
+                        .clicked()
+                    {
+                        *action = Some(StartAction::LoadExample(
+                            crate::startscreen::ExampleChip::TinyTapeoutMin,
+                        ));
+                    }
+                    if theme::components::Button::primary("New TT tile")
+                        .min_width(150.0)
+                        .show(ui, cx)
+                        .clicked()
+                    {
+                        *action = Some(StartAction::OpenTileWizard);
+                    }
                 });
-            ui.add_space(2.0);
-            ui.label(
-                egui::RichText::new("Supported: GDSII (.gds) and OASIS (.oas)")
-                    .weak()
-                    .small(),
-            );
+            });
         });
     }
 
-    /// Draws the recent-files section from the app's `recent_files` list.
-    ///
-    /// This app only renders the list; a persistence backend feeds it (see
-    /// [`set_recent_files`](Self::set_recent_files)). When empty it shows a short
-    /// placeholder rather than an empty box, so the section still reads as intentional
-    /// on a first run.
+    /// Draws one small metadata badge (a filled pill with a short label), the
+    /// building block of the gallery card's technology/size/license/streaming row.
+    fn badge(ui: &mut egui::Ui, text: &str, fill: egui::Color32, fg: egui::Color32) {
+        let font = egui::TextStyle::Small.resolve(ui.style());
+        let galley = ui.painter().layout_no_wrap(text.to_owned(), font, fg);
+        let pad = Vec2::new(6.0, 2.0);
+        let (rect, _) = ui.allocate_exact_size(galley.size() + pad * 2.0, Sense::hover());
+        ui.painter().rect_filled(rect, 3.0, fill);
+        ui.painter().galley(rect.min + pad, galley, fg);
+    }
+
+    /// Draws the recent-files section (catalog 9): pinned entries first, each with a
+    /// render-thumbnail slot, size, and a pin/unpin toggle. The recent-file model and
+    /// its persistence are frozen Lane 1B code; pinning is a Lane 2D sibling.
     fn start_recent_section(
         ui: &mut egui::Ui,
+        cx: theme::components::Ctx,
         recent: &[crate::webopen::RecentFile],
-        _action: &mut Option<StartAction>,
+        pins: &crate::startscreen::RecentPins,
+        action: &mut Option<StartAction>,
     ) {
+        let t = cx.tokens;
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.strong("Recent files");
@@ -4245,7 +4710,9 @@ impl App {
                         .small(),
                 );
             } else {
-                for r in recent {
+                for r in pins.order(recent) {
+                    let key = crate::startscreen::recent_key(r);
+                    let pinned = pins.is_pinned(key);
                     // Integer-only size formatting keeps clippy's precision-loss lint
                     // quiet; a sub-KiB file simply reads as "0 KiB".
                     let size = if r.size >= 1024 * 1024 {
@@ -4254,9 +4721,26 @@ impl App {
                         format!("{} KiB", r.size / 1024)
                     };
                     ui.horizontal(|ui| {
-                        ui.monospace(&r.name);
+                        // The cached-render-thumbnail slot (rendering + IndexedDB cache
+                        // is ledgered; the slot keeps the layout honest today).
+                        let (rect, _) = ui.allocate_exact_size(Vec2::splat(28.0), Sense::hover());
+                        ui.painter().rect_filled(rect, 3.0, t.bg_input);
+                        ui.painter().text(
+                            rect.center(),
+                            Align2::CENTER_CENTER,
+                            "\u{25A6}",
+                            egui::TextStyle::Small.resolve(ui.style()),
+                            t.text_faint,
+                        );
+                        ui.vertical(|ui| {
+                            ui.monospace(&r.name);
+                            ui.label(egui::RichText::new(&size).weak().small());
+                        });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.weak(size);
+                            let label = if pinned { "Unpin" } else { "Pin" };
+                            if ui.small_button(label).clicked() {
+                                *action = Some(StartAction::PinRecent(key.to_owned()));
+                            }
                         });
                     });
                 }
@@ -4264,31 +4748,69 @@ impl App {
         });
     }
 
-    /// Draws the example-chip gallery: one card per bundled
-    /// [`ExampleChip`](crate::startscreen::ExampleChip), each with a Load button that
-    /// opens the compiled-in design through the seam.
-    fn start_gallery_section(ui: &mut egui::Ui, action: &mut Option<StartAction>) {
+    /// Draws the gallery (catalog 14/96): one differentiated card per real design,
+    /// carrying technology/size/license badges, a Streaming badge for served-archive
+    /// demos, a source line, and a "What am I looking at?" landmarks dropdown.
+    fn start_gallery_section(
+        ui: &mut egui::Ui,
+        cx: theme::components::Ctx,
+        action: &mut Option<StartAction>,
+    ) {
+        let t = cx.tokens;
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.strong("Load an example chip");
+            ui.strong("Gallery");
             ui.label(
-                egui::RichText::new("Redistribution-cleared real designs, built in.")
+                egui::RichText::new("Redistribution-cleared real designs, built in or streamed.")
                     .weak()
                     .small(),
             );
             ui.add_space(4.0);
-            for chip in crate::startscreen::ExampleChip::ALL {
+            for card in crate::startscreen::GALLERY {
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
-                            ui.strong(chip.title());
-                            ui.label(chip.description());
-                            ui.label(egui::RichText::new(chip.attribution()).weak().small());
+                            ui.strong(card.title);
+                            ui.label(card.description);
+                            ui.horizontal_wrapped(|ui| {
+                                Self::badge(ui, card.technology, t.accent_muted, t.text);
+                                Self::badge(ui, card.size, t.widget_bg, t.text_weak);
+                                Self::badge(ui, card.license, t.widget_bg, t.text_weak);
+                                if card.streaming {
+                                    Self::badge(ui, "Streaming", t.success, t.accent_text);
+                                }
+                            });
+                            ui.label(
+                                egui::RichText::new(format!("Source: {}", card.source))
+                                    .weak()
+                                    .small(),
+                            );
+                            // Landmarks dropdown (catalog 96). Scope the id by title so
+                            // the identically-labelled headers do not collide.
+                            ui.push_id(card.title, |ui| {
+                                ui.collapsing("What am I looking at?", |ui| {
+                                    for lm in card.landmarks {
+                                        ui.label(
+                                            egui::RichText::new(format!("\u{2022} {}", lm.name))
+                                                .strong()
+                                                .small(),
+                                        );
+                                        ui.label(egui::RichText::new(lm.detail).weak().small());
+                                    }
+                                });
+                            });
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Load").clicked() {
-                                *action = Some(StartAction::LoadExample(chip));
+                            if ui.button("Open").clicked() {
+                                *action = Some(match card.action {
+                                    crate::startscreen::GalleryAction::Example(chip) => {
+                                        StartAction::LoadExample(chip)
+                                    }
+                                    crate::startscreen::GalleryAction::Archive(url) => {
+                                        StartAction::OpenArchive(url)
+                                    }
+                                });
                             }
                         });
                     });
@@ -4296,6 +4818,28 @@ impl App {
                 ui.add_space(4.0);
             }
         });
+    }
+
+    /// The secondary drag-and-drop hint under the primary actions: dropping a file
+    /// anywhere on the window opens it (there is no synchronous web file dialog).
+    fn start_open_hint_section(ui: &mut egui::Ui) {
+        egui::Frame::group(ui.style())
+            .fill(ui.visuals().faint_bg_color)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.vertical_centered(|ui| {
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("Or drag a layout file anywhere on the window").weak(),
+                    );
+                    ui.label(
+                        egui::RichText::new("Supported: GDSII (.gds) and OASIS (.oas)")
+                            .weak()
+                            .small(),
+                    );
+                    ui.add_space(4.0);
+                });
+            });
     }
 
     /// Draws the worked-scenario cards (title, one-line description, Start
@@ -4341,12 +4885,150 @@ impl App {
             Some(StartAction::LoadExample(chip)) => {
                 self.open_example_chip(chip);
             }
+            Some(StartAction::OpenArchive(url)) => self.open_archive_demo(url),
+            Some(StartAction::OpenDialog) => self.request_open_dialog(),
+            Some(StartAction::OpenTileWizard) => {
+                self.tt_wizard_open = true;
+            }
+            Some(StartAction::PinRecent(key)) => {
+                let pinned = self.recent_pins.toggle(key);
+                self.status.set(if pinned { "Pinned" } else { "Unpinned" });
+            }
             Some(StartAction::SkipToEditor) => {
                 // Dismiss the chooser and keep the demo document already loaded.
                 self.start_screen = false;
                 self.status.set("Editor");
             }
             None => {}
+        }
+    }
+
+    /// Requests the file-open dialog by dispatching the reserved `file.open_dialog`
+    /// command (owned by lane 3B, catalog 1). Until that lane wires the effect into
+    /// this build's registry, it falls back to the honest drag-and-drop hint.
+    fn request_open_dialog(&mut self) {
+        let id = CommandId("file.open_dialog");
+        if commands::spec(id).is_some() {
+            self.dispatch(id);
+        } else {
+            self.status
+                .set("Drag a GDSII or OASIS file onto the window to open it");
+        }
+    }
+
+    /// Opens a served-archive gallery demo by URL through the streaming `?archive=`
+    /// path (catalog 14). On the web this navigates to the archive link; on native,
+    /// where there is no browser fetch, it reports that streaming demos are web-only.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(clippy::unused_self))]
+    fn open_archive_demo(&mut self, url: &str) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let link = crate::share::emit_archive_link("", url);
+            if let Some(window) = web_sys::window() {
+                let _ = window.location().set_href(&link);
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.status.set(format!(
+                "Streaming archive demos open in the web build: {url}"
+            ));
+        }
+    }
+
+    /// Draws the New Tiny Tapeout tile wizard (catalog 24) as a modal over the Start
+    /// screen: a pin-map preview of the tile frame with its Create/Cancel actions.
+    /// Creating enters the [`UseCase::NewTinyTapeoutTile`] scenario.
+    fn tt_wizard(&mut self, ctx: &egui::Context) {
+        if !self.tt_wizard_open {
+            return;
+        }
+        let cx = self.theme_ctx();
+        let mut create = false;
+        let mut cancel = false;
+        theme::components::Modal::new("New Tiny Tapeout tile").overlay(ctx, cx, |ui, cx| {
+            ui.label(
+                egui::RichText::new(
+                    "Start from a correctly shaped, pinned tile frame: the 1x2 die \
+                     boundary, the six ua[0..5] analog pins on met4, and the power \
+                     straps. Fill in your logic inside.",
+                )
+                .color(cx.tokens.text_weak),
+            );
+            ui.add_space(8.0);
+            Self::draw_pin_map(ui, cx);
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if theme::components::Button::primary("Create tile")
+                    .show(ui, cx)
+                    .clicked()
+                {
+                    create = true;
+                }
+                if theme::components::Button::secondary("Cancel")
+                    .show(ui, cx)
+                    .clicked()
+                {
+                    cancel = true;
+                }
+            });
+        });
+        if create {
+            self.tt_wizard_open = false;
+            self.enter_use_case(UseCase::NewTinyTapeoutTile);
+        } else if cancel {
+            self.tt_wizard_open = false;
+        }
+    }
+
+    /// Draws the schematic pin-map preview for the New TT tile wizard: the die
+    /// outline, the six analog pins along the bottom edge, and the three power straps.
+    /// It is illustrative (a qualitative map of where the fixed frame pins sit), not a
+    /// scaled render of the generated tile.
+    fn draw_pin_map(ui: &mut egui::Ui, cx: theme::components::Ctx) {
+        let t = cx.tokens;
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(260.0, 150.0), Sense::hover());
+        let painter = ui.painter();
+        // The die outline.
+        painter.rect_stroke(
+            rect,
+            2.0,
+            Stroke::new(1.5, t.border_strong),
+            StrokeKind::Inside,
+        );
+        // Six analog pins along the bottom edge (ua[0..5]).
+        let pin_color = theme::tokens::layer_rgb(0x8e, 0x4e, 0xc6);
+        for i in 0..6 {
+            #[allow(clippy::cast_precision_loss)]
+            let x = rect.left() + rect.width() * (0.12 + 0.152 * i as f32);
+            let pin =
+                EguiRect::from_min_size(Pos2::new(x, rect.bottom() - 16.0), Vec2::new(14.0, 12.0));
+            painter.rect_filled(pin, 1.0, pin_color);
+            painter.text(
+                Pos2::new(pin.center().x, pin.top() - 6.0),
+                Align2::CENTER_BOTTOM,
+                format!("ua{i}"),
+                egui::TextStyle::Small.resolve(ui.style()),
+                t.text_weak,
+            );
+        }
+        // Three vertical power straps.
+        let strap_color = theme::tokens::layer_rgb(0x46, 0xa7, 0x58);
+        for (i, name) in ["VDPWR", "VGND", "VAPWR"].into_iter().enumerate() {
+            #[allow(clippy::cast_precision_loss)]
+            let x = rect.left() + rect.width() * (0.30 + 0.20 * i as f32);
+            let strap = EguiRect::from_min_size(
+                Pos2::new(x, rect.top() + 8.0),
+                Vec2::new(6.0, rect.height() - 34.0),
+            );
+            painter.rect_filled(strap, 1.0, strap_color);
+            painter.text(
+                Pos2::new(strap.center().x, rect.top() + 2.0),
+                Align2::CENTER_TOP,
+                name,
+                egui::TextStyle::Small.resolve(ui.style()),
+                t.text_weak,
+            );
         }
     }
 
@@ -6856,6 +7538,12 @@ impl App {
             ui.label("Room:");
             ui.text_edit_singleline(&mut self.share_room);
         });
+        // The locally-stored display name that rides on your live presence, so viewers
+        // see your name on your cursor (catalog 86).
+        ui.horizontal(|ui| {
+            ui.label("Your name:");
+            ui.text_edit_singleline(&mut self.display_name);
+        });
 
         // A read-only viewer session mirrors a sharer's screen; its Share panel is the
         // connection status and the follow-mode toggle, not the sharing controls.
@@ -7911,9 +8599,15 @@ impl App {
         // the sharer's viewport (ADR 0038) before drawing, so the viewer rides along.
         // The ViewerSession owns its own camera; mirror it into the App camera the
         // canvas draws with, so follow reuses the whole render path.
+        let follow_t = if self.reduced_motion {
+            1.0
+        } else {
+            let dt = ui.input(|i| i.stable_dt);
+            (dt * FOLLOW_EASE_RATE).clamp(0.05, 1.0)
+        };
         if let Some(session) = self.viewer_session.as_mut()
             && session.is_following()
-            && session.sync_camera(&screen)
+            && session.follow_step(&screen, follow_t)
         {
             self.camera = session.camera();
         }
@@ -8001,8 +8695,10 @@ impl App {
             if self.minimap_visible {
                 self.draw_minimap(&painter, &screen);
             }
-            self.draw_presence(&painter, &screen);
+            let now = ui.input(|i| i.time);
+            self.draw_presence(&painter, &screen, now);
             self.draw_agent_cursor(&painter, &screen);
+            self.draw_remote_edit_glow(&painter, &screen);
         }
 
         // Mark the focused pane when split (drawn unclipped so the full border
@@ -9574,22 +10270,57 @@ impl App {
         );
     }
 
-    /// Draws remote collaborators' cursors from the sync presence map (stretch:
-    /// there are no live peers in this build, so this is normally empty).
-    fn draw_presence(&self, painter: &egui::Painter, screen: &ScreenRect) {
-        for (_, presence) in self.document.awareness().iter() {
-            let (r, g, b, _) = layers::rgba_components(presence.color_rgba);
-            let color = theme::tokens::layer_rgb(r, g, b);
+    /// Draws remote collaborators' named cursors from the sync presence map
+    /// (catalog 86): each cursor takes a stable palette color (its published color, or
+    /// one derived from the actor id), a name label on a legible pill, and an idle
+    /// fade that recedes a parked cursor toward a floor opacity. `now` is the current
+    /// egui time, against which [`presence_seen`](Self::presence_seen) measures idle.
+    #[allow(clippy::many_single_char_names)] // r, g, b, a color channels plus the point
+    fn draw_presence(&self, painter: &egui::Painter, screen: &ScreenRect, now: f64) {
+        for (actor, presence) in self.document.awareness().iter() {
+            let rgba = if presence.color_rgba == 0 {
+                crate::viewer::color_for_actor(actor)
+            } else {
+                presence.color_rgba
+            };
+            let (r, g, b, _) = layers::rgba_components(rgba);
+            // Idle fade: the longer a cursor has sat still, the more it recedes.
+            let idle = self
+                .presence_seen
+                .get(actor)
+                .map_or(0.0, |&(_, last_move)| (now - last_move).max(0.0));
+            #[allow(clippy::cast_possible_truncation)]
+            let alpha_f = crate::viewer::idle_alpha(idle as f32);
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let a = (alpha_f * 255.0) as u8;
+            // Fade the (premultiplied) palette color by the idle alpha through the
+            // theme's color helper, so no raw color literal lives outside `theme/`.
+            let color = theme::tokens::layer_rgb(r, g, b).gamma_multiply(alpha_f);
             let p = self.world_pos_to_screen(screen, presence.cursor);
             painter.circle_filled(p, 4.0, color);
-            if !presence.display_name.is_empty() {
-                painter.text(
-                    Pos2::new(p.x + 6.0, p.y),
-                    Align2::LEFT_CENTER,
-                    &presence.display_name,
-                    theme::apply::hud_body(self.ui_density),
-                    color,
+
+            let name = if presence.display_name.is_empty() {
+                crate::viewer::participants(self.document.awareness(), crate::viewer::VIEWER_ACTOR)
+                    .into_iter()
+                    .find(|part| &part.actor == actor)
+                    .map(|part| part.name)
+            } else {
+                Some(presence.display_name.clone())
+            };
+            if let Some(name) = name {
+                let font = theme::apply::hud_body(self.ui_density);
+                let galley = painter.layout_no_wrap(name, font, color);
+                let pos = Pos2::new(p.x + 8.0, p.y - galley.size().y / 2.0);
+                let pad = Vec2::new(4.0, 2.0);
+                // A translucent pill keeps the name legible over busy geometry,
+                // itself fading with the cursor (half the cursor's own alpha).
+                let bg = egui::Color32::from_black_alpha(a / 2);
+                painter.rect_filled(
+                    EguiRect::from_min_size(pos - pad, galley.size() + pad * 2.0),
+                    3.0,
+                    bg,
                 );
+                painter.galley(pos, galley, color);
             }
         }
     }
@@ -9667,6 +10398,7 @@ impl App {
 }
 
 impl eframe::App for App {
+    #[allow(clippy::too_many_lines)]
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         // Boot styling hook (ADR 0095, 0097): install the embedded subset faces
@@ -9742,7 +10474,9 @@ impl eframe::App for App {
         // returns, so the editor panels and canvas are not built underneath it. The
         // notification toasts are still drawn over it so a failed open (from a drop or
         // the gallery) is visible.
-        if self.start_screen {
+        // An embedded iframe (catalog 94) never shows the Start chooser: it opens
+        // straight onto the canvas of whatever it was pointed at.
+        if self.start_screen && !self.embed {
             self.start_screen_ui(ui);
             self.notifications_area(&ctx);
             ctx.request_repaint();
@@ -9755,6 +10489,17 @@ impl eframe::App for App {
         self.record_camera_stats();
 
         self.handle_shortcuts(&ctx);
+
+        // Lane 2D: leave presentation mode on Escape (the `P` chord toggles it through
+        // the registry; Escape is the intuitive way back out of a full-screen view).
+        if self.presentation && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.presentation = false;
+            self.status.set("Presentation mode off");
+        }
+        // Collaboration per-frame upkeep: stamp remote-cursor idle timing (catalog 86)
+        // and age out the remote-edit attribution glow (catalog 90).
+        self.track_presence_idle(ctx.input(|i| i.time));
+        self.remote_edit_flash = (self.remote_edit_flash - dt).max(0.0);
 
         self.frame_meter
             .record(std::time::Duration::from_secs_f32(dt));
@@ -9784,22 +10529,40 @@ impl eframe::App for App {
         let gpu_format = frame.wgpu_render_state().map(|state| state.target_format);
 
         // Draw the docked panels and the canvas, collecting the canvas rect (for the
-        // palette/export) and the tour highlight rectangles.
-        let (canvas_screen, tour_targets) = self.main_panels(ui, frame, gpu_format);
+        // palette/export) and the tour highlight rectangles. Lane 2D picks the chrome:
+        // presentation mode (catalog 93) shows only the canvas; a read-only viewer
+        // (catalog 23) gets the clean viewer chrome; otherwise the full editor.
+        let (canvas_screen, tour_targets) = if self.embed {
+            (
+                self.embed_canvas(ui, gpu_format, &ctx),
+                TourTargets::default(),
+            )
+        } else if self.presentation {
+            (
+                self.presentation_canvas(ui, gpu_format, &ctx),
+                TourTargets::default(),
+            )
+        } else if self.is_viewer() {
+            self.viewer_panels(ui, gpu_format)
+        } else {
+            self.main_panels(ui, frame, gpu_format)
+        };
         // Cache the canvas rect so next frame's view/export panel can frame the
         // current view (the panel draws before the canvas is measured).
         self.view_export.last_canvas = canvas_screen;
 
-        // The 3D stack and Cross-section are now managed panels docked inside
-        // `main_panels` (ADR 0096), opened from View > Panels; they no longer float
-        // over the canvas here.
-        self.palette_window(&ctx, canvas_screen);
-        // The 3D stack and Cross-section are managed bottom panels inside
-        // `main_panels` now (lane 2C, ADR 0096); only the shortcuts overlay draws here.
-        self.shortcuts_overlay(&ctx);
-        self.keymap_window(&ctx);
-        self.replay_window(&ctx);
-        self.open_warnings_window(&ctx);
+        // Minimal-chrome modes (presentation, embed) hide the palette, floating
+        // windows, and tour overlay, leaving only the canvas (and critical toasts).
+        // The 3D stack and Cross-section are managed panels inside `main_panels` now
+        // (lane 2C, ADR 0096), so they are not floated here.
+        let minimal_chrome = self.presentation || self.embed;
+        if !minimal_chrome {
+            self.palette_window(&ctx, canvas_screen);
+            self.shortcuts_overlay(&ctx);
+            self.keymap_window(&ctx);
+            self.replay_window(&ctx);
+            self.open_warnings_window(&ctx);
+        }
         // The app-wide notification toasts, over the panels and windows.
         self.notifications_area(&ctx);
 
@@ -9815,9 +10578,10 @@ impl eframe::App for App {
         self.whats_new_dialog(&ctx);
 
         // Draw the first-run tour overlay and the onboarding chrome last so their
-        // cards and highlight sit over everything else. Suppressed during a demo
-        // capture so onboarding chrome does not cover the feature under test.
-        if !self.in_demo_capture() {
+        // cards and highlight sit over everything else. Suppressed in minimal-chrome
+        // modes and during a demo capture so onboarding chrome does not cover the
+        // feature under test.
+        if !minimal_chrome && !self.in_demo_capture() {
             self.update_onboarding();
             self.onboarding_overlay(&ctx, frame);
             self.tour_overlay(&ctx, &tour_targets);
@@ -11455,6 +12219,120 @@ mod tests {
         let _ = ctx.end_pass();
         assert!(!app.share_server.is_empty());
         assert!(!app.share_room.is_empty());
+    }
+
+    #[test]
+    fn presentation_command_toggles_the_chrome_flag() {
+        let mut app = App::new();
+        assert!(!app.presentation);
+        app.dispatch(CommandId("view.presentation"));
+        assert!(app.presentation, "P enters presentation mode (catalog 93)");
+        app.dispatch(CommandId("view.presentation"));
+        assert!(!app.presentation, "P again leaves it");
+    }
+
+    #[test]
+    fn close_design_returns_to_the_start_screen() {
+        let mut app = App::new();
+        app.start_screen = false;
+        app.presentation = true;
+        app.dispatch(CommandId("file.close_design"));
+        assert!(app.start_screen, "close design goes back to Start");
+        assert!(!app.presentation, "and leaves presentation mode");
+    }
+
+    #[test]
+    fn reserved_2d_command_ids_are_registered_with_their_contract() {
+        let pres = commands::spec(CommandId("view.presentation")).expect("view.presentation");
+        assert_eq!(pres.menu_path, Some(&["View"][..]));
+        assert_eq!(pres.default_chord, Some("P"));
+        let close = commands::spec(CommandId("file.close_design")).expect("file.close_design");
+        assert_eq!(close.menu_path, Some(&["File"][..]));
+        // The default keymap resolves bare P to presentation mode.
+        let chord = keymap::Chord::parse("P").expect("P parses");
+        assert_eq!(
+            Keymap::defaults().command_for(&chord),
+            Some(CommandId("view.presentation"))
+        );
+    }
+
+    #[test]
+    fn open_full_editor_leaves_viewer_mode_and_keeps_the_camera() {
+        let target = crate::share::ViewerTarget {
+            room: "room".to_owned(),
+            relay: "127.0.0.1:3030".to_owned(),
+        };
+        let mut app = App::with_viewer(target);
+        assert!(app.is_viewer());
+        app.camera = ViewCamera::new(Point::new(999, -111), 2.0);
+        let cam = app.camera;
+        app.open_full_editor();
+        assert!(
+            !app.is_viewer(),
+            "the editor is one click away (catalog 23)"
+        );
+        assert_eq!(
+            app.camera, cam,
+            "the camera is preserved across the transition"
+        );
+    }
+
+    #[test]
+    fn embed_flag_round_trips() {
+        let mut app = App::new();
+        assert!(!app.is_embedded());
+        app.set_embed(true);
+        assert!(
+            app.is_embedded(),
+            "embed mode is set from the page URL (catalog 94)"
+        );
+    }
+
+    #[test]
+    fn viewer_session_chip_and_pin_map_render_without_panic() {
+        let target = crate::share::ViewerTarget {
+            room: "room".to_owned(),
+            relay: "127.0.0.1:3030".to_owned(),
+        };
+        let mut app = App::with_viewer(target);
+        // Seed a remote presence so the chip has an avatar to draw.
+        let mut presence = reticle_sync::Presence::new("sharer");
+        presence.display_name = "Ada".to_owned();
+        app.document.awareness_mut().set(presence);
+
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        let cx = app.theme_ctx();
+        egui::Window::new("viewer chrome test").show(&ctx, |ui| {
+            app.session_chip(ui, cx);
+            App::draw_pin_map(ui, cx);
+        });
+        let _ = ctx.end_pass();
+    }
+
+    #[test]
+    fn start_screen_sections_render_the_rebuilt_gallery_and_recent_pins() {
+        let mut app = App::new();
+        app.record_recent_file(crate::webopen::RecentFile::local("chip.gds", 4096));
+        app.recent_pins.toggle("chip.gds");
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        egui::Window::new("start test").show(&ctx, |ui| {
+            let cx = app.theme_ctx();
+            let mut action: Option<StartAction> = None;
+            App::start_hero_section(ui, cx, &mut action);
+            App::start_gallery_section(ui, cx, &mut action);
+            App::start_recent_section(
+                ui,
+                cx,
+                app.recent_files.entries(),
+                &app.recent_pins,
+                &mut action,
+            );
+            App::start_open_hint_section(ui);
+        });
+        let _ = ctx.end_pass();
+        assert!(app.recent_pins.is_pinned("chip.gds"), "the pin sticks");
     }
 
     /// A permalink emitted from a session restores the same cell, camera, and layer set

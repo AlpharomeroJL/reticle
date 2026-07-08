@@ -53,6 +53,9 @@ fn main() {
                         .and_then(|w| w.location().search().ok())
                         .unwrap_or_default();
                     app.set_pending_permalink(reticle_app::share::parse_permalink(&search));
+                    // `?embed=1` (lane 2D, catalog 94) hides all chrome for iframes; a
+                    // modifier that composes with whatever view above was chosen.
+                    app.set_embed(reticle_app::share::parse_embed(&search));
                     Ok(app)
                 }),
             )

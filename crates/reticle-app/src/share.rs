@@ -505,6 +505,35 @@ pub fn parse_e2e_edit(query: &str) -> bool {
     false
 }
 
+/// Whether the page URL requests embed mode (`?embed=1`, lane 2D, catalog 94):
+/// minimal chrome for an `<iframe>`, hiding every panel and menu and leaving only
+/// the canvas plus a small "open in Reticle" affordance.
+///
+/// Pure string logic mirroring [`parse_e2e_edit`], so it is unit-tested without a
+/// browser.
+///
+/// # Embedding notes (CORS/CSP)
+///
+/// An embedding page frames the deployed bundle with
+/// `<iframe src="https://<host>/?embed=1&archive=<url>">`. Two headers govern this:
+/// the Reticle host must not send `X-Frame-Options: DENY` (or a restrictive
+/// `Content-Security-Policy: frame-ancestors`) or the frame is blocked; and a design
+/// loaded over `?archive=`/`?gds=` from a *third* origin must itself answer with
+/// permissive `Access-Control-Allow-Origin` and allow `Range` requests, exactly as
+/// the non-embedded browse already requires (see [`archive_url_from_query`]). Embed
+/// mode adds no new cross-origin surface; it only changes the chrome.
+#[must_use]
+pub fn parse_embed(query: &str) -> bool {
+    let query = query.trim_start_matches('?');
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if key == "embed" {
+            return matches!(value, "1" | "true");
+        }
+    }
+    false
+}
+
 /// The query key that opens a served `.rtla` archive in the browser build.
 ///
 /// A page URL carrying `?archive=<url>` streams the archive at `<url>` over the
@@ -838,6 +867,18 @@ mod tests {
         assert!(!parse_e2e_edit(""));
         // Not a partial-key match.
         assert!(!parse_e2e_edit("e2eedit=1"));
+    }
+
+    #[test]
+    fn parse_embed_reads_the_flag() {
+        assert!(parse_embed("embed=1"));
+        assert!(parse_embed("?archive=https://host/c.rtla&embed=1"));
+        assert!(parse_embed("embed=true"));
+        assert!(!parse_embed("embed=0"));
+        assert!(!parse_embed("view=viewer"));
+        assert!(!parse_embed(""));
+        // Not a partial-key match.
+        assert!(!parse_embed("embedded=1"));
     }
 
     #[test]

@@ -679,6 +679,8 @@ mod tests {
             // and the chord-conflict note that blesses Tab as a new default that
             // does not collide with the shipped regression list.
             ("view.panels_toggle", "Tab"),
+            // Lane 2D adds Presentation mode as a new default (ia-inventory section 4).
+            ("view.presentation", "P"),
         ];
         for (command, text) in regression {
             assert_eq!(
