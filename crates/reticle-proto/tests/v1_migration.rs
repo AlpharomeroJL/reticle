@@ -30,6 +30,23 @@ fn geometry_bytes(doc: &Document) -> Vec<u8> {
 }
 
 #[test]
+fn the_golden_fixture_is_a_byte_exact_pin() {
+    // The strongest guard behind ADR 0080's "byte-for-byte" claim: decoding the
+    // frozen fixture and re-encoding the decoded struct must reproduce the committed
+    // bytes exactly. prost encodes in field-number order and an empty `comments`
+    // (field 5) adds nothing, so this pins every field NUMBER and scalar VALUE. A
+    // future proto edit that renumbers or reorders a field would misread GOLDEN_V1
+    // and re-encode to different bytes, failing HERE rather than silently loading a
+    // real V1 document with transposed coordinates.
+    let doc = decode_document(GOLDEN_V1).expect("V2 build must decode the frozen V1 bytes");
+    assert_eq!(
+        encode_document(&doc).as_slice(),
+        GOLDEN_V1,
+        "decode + re-encode of the frozen V1 fixture must be byte-identical"
+    );
+}
+
+#[test]
 fn v2_build_decodes_the_pre_v2_fixture_with_empty_comments() {
     let doc = decode_document(GOLDEN_V1).expect("V2 build must decode the frozen V1 bytes");
 
