@@ -342,6 +342,25 @@ pub struct App {
     palette_open: bool,
     /// The command-palette search query.
     palette_query: String,
+    /// The active inline argument prompt (goto coordinate / cell), if the palette
+    /// is in argument-entry mode rather than launching commands (lane 3C, item 79).
+    palette_arg: Option<crate::command::PaletteArg>,
+    /// Recently run palette rows, as their stable keys, most-recent first, surfaced
+    /// at the top of the palette (lane 3C, item 79). Bounded by [`PALETTE_RECENTS_MAX`].
+    palette_recents: Vec<String>,
+    /// Whether the generated keyboard-shortcuts overlay is open (lane 3C, item 18).
+    shortcuts_open: bool,
+    /// The export/import scratch buffer in the shortcuts editor: the current keymap
+    /// TOML on export, or pasted TOML to apply on import (lane 3C, item 82).
+    keymap_io_text: String,
+    /// The region keyboard focus currently rests in, walked by F6 (lane 3C, item 83).
+    focus_region: crate::focus::FocusRegion,
+    /// A pending chord-sequence prefix (for example `g` awaiting `l`), if the last
+    /// press started a multi-key sequence (lane 3C, item 81).
+    pending_chord: Option<keymap::Chord>,
+    /// Set when focus just moved (F6) so the render pass requests keyboard focus on
+    /// the new [`focus_region`](Self::focus_region)'s anchor once its widget exists.
+    focus_request: bool,
     /// The query-bar text for "select by layer".
     layer_query: String,
     /// The relay host in the Share section (see [`crate::share`]).
@@ -594,6 +613,9 @@ impl StartView {
 /// inside a bar lines up exactly with the painted ruler.
 const RULER_BAR: f32 = 18.0;
 
+/// How many recently-run palette rows are remembered for the recents group.
+const PALETTE_RECENTS_MAX: usize = 20;
+
 impl Default for App {
     fn default() -> Self {
         Self::new()
@@ -805,6 +827,13 @@ impl App {
             rebinding: None,
             palette_open: false,
             palette_query: String::new(),
+            palette_arg: None,
+            palette_recents: Vec::new(),
+            shortcuts_open: false,
+            keymap_io_text: String::new(),
+            focus_region: crate::focus::FocusRegion::Canvas,
+            pending_chord: None,
+            focus_request: false,
             layer_query: String::new(),
             share_server: crate::share::DEFAULT_SERVER.to_owned(),
             share_room: crate::share::room_id(demo::TOP_CELL),
@@ -2389,7 +2418,8 @@ impl App {
         if ctx.memory(|m| m.focused().is_some()) {
             // Still allow Escape to close the palette even while its field has focus.
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                self.palette_open = false;
+                self.close_palette();
+                self.pending_chord = None;
             }
             return;
         }
@@ -2419,13 +2449,82 @@ impl App {
             return;
         }
 
+        // Escape drives the documented cascade (item 84): cancel the tool, then
+        // clear the selection, then close a popover. It consumes the frame so a
+        // pending chord sequence is dropped rather than resolved.
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.palette_open = false;
+            self.pending_chord = None;
+            self.apply_esc();
+            return;
         }
+
+        // A pending sequence prefix (item 81): this press is the suffix.
+        if let Some(prefix) = self.pending_chord.take() {
+            if let Some(chord) = chords.into_iter().next() {
+                match keymap::sequence_command(&prefix.key, &chord.key) {
+                    Some(id) => self.dispatch(id),
+                    None => self.status.set("Unknown shortcut sequence"),
+                }
+            } else {
+                // No key this frame; keep waiting for the suffix.
+                self.pending_chord = Some(prefix);
+            }
+            return;
+        }
+
         for chord in chords {
+            // Shift+F6 cycles focus backward (plain F6 is a normal binding).
+            if chord.key == "F6" && chord.shift && !chord.ctrl && !chord.alt {
+                self.cycle_focus(false);
+                continue;
+            }
             if let Some(id) = self.keymap.command_for(&chord) {
                 self.dispatch(id);
+            } else if !chord.ctrl
+                && !chord.shift
+                && !chord.alt
+                && keymap::is_sequence_prefix(&chord.key)
+            {
+                self.status.set(format!("{chord} …"));
+                self.pending_chord = Some(chord);
             }
+        }
+    }
+
+    /// The state the Escape cascade inspects this frame (item 84).
+    fn esc_state(&self) -> crate::focus::EscState {
+        crate::focus::EscState {
+            tool_active: self.draw.in_progress() || self.tools.active() != Tool::Select,
+            has_selection: !self.selection.is_empty(),
+            popover_open: self.shortcuts_open || self.keymap_open,
+        }
+    }
+
+    /// Applies one Escape press per the cascade contract (item 84).
+    fn apply_esc(&mut self) {
+        match crate::focus::esc_action(self.esc_state()) {
+            crate::focus::EscAction::CancelTool => {
+                if self.draw.in_progress() {
+                    self.draw.reset();
+                    self.status.set("Draw canceled");
+                } else {
+                    self.select_tool(Tool::Select);
+                    self.status.set("Tool: Select");
+                }
+            }
+            crate::focus::EscAction::ClearSelection => {
+                self.selection.clear();
+                self.status.set("Selection cleared");
+            }
+            crate::focus::EscAction::ClosePopover => {
+                if self.shortcuts_open {
+                    self.shortcuts_open = false;
+                } else if self.keymap_open {
+                    self.keymap_open = false;
+                    self.rebinding = None;
+                }
+            }
+            crate::focus::EscAction::Nothing => {}
         }
     }
 
@@ -2466,7 +2565,64 @@ impl App {
             AppOp::SplitSingle => self.set_split(Split::Single),
             AppOp::SplitHorizontal => self.set_split(Split::Horizontal),
             AppOp::SplitVertical => self.set_split(Split::Vertical),
+            AppOp::PromptGotoCoordinate => {
+                self.open_palette_arg(command::PaletteArg::GotoCoordinate);
+            }
+            AppOp::PromptGotoCell => self.open_palette_arg(command::PaletteArg::GotoCell),
+            AppOp::CycleFocus => self.cycle_focus(true),
+            AppOp::ToggleShortcuts => {
+                self.shortcuts_open = !self.shortcuts_open;
+            }
         }
+    }
+
+    /// Opens the palette in an inline argument-prompt mode (goto coordinate/cell).
+    fn open_palette_arg(&mut self, arg: command::PaletteArg) {
+        self.palette_open = true;
+        self.palette_arg = Some(arg);
+        self.palette_query.clear();
+    }
+
+    /// Marks the start of a keyboard focus region (item 83): a zero-size focusable
+    /// anchor carrying the region's stable id, so F6 can land focus here and a focus
+    /// ring is painted around the whole region while it holds focus. Tab then moves
+    /// from the anchor into the region's controls, and tabbing onto an anchor keeps
+    /// [`focus_region`](Self::focus_region) in sync with where focus actually is.
+    fn focus_anchor(&mut self, ui: &mut egui::Ui, region: crate::focus::FocusRegion) {
+        let region_rect = ui.max_rect();
+        let anchor_rect = egui::Rect::from_min_size(region_rect.min, egui::Vec2::ZERO);
+        let resp = ui.interact(
+            anchor_rect,
+            region.anchor_id(),
+            egui::Sense::focusable_noninteractive(),
+        );
+        if self.focus_request && self.focus_region == region {
+            resp.request_focus();
+            self.focus_request = false;
+        }
+        if resp.has_focus() {
+            self.focus_region = region;
+            let focus = self.component_ctx().tokens.focus;
+            ui.painter().rect_stroke(
+                region_rect,
+                egui::CornerRadius::same(6),
+                egui::Stroke::new(2.0, focus),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+
+    /// Advances keyboard focus to the next (or previous) focus region and asks the
+    /// render pass to move focus there so a focus ring is visible (item 83).
+    fn cycle_focus(&mut self, forward: bool) {
+        self.focus_region = if forward {
+            self.focus_region.next()
+        } else {
+            self.focus_region.prev()
+        };
+        self.focus_request = true;
+        self.status
+            .set(format!("Focus: {}", self.focus_region.label()));
     }
 
     /// Applies a pane split and reports it in the status bar.
@@ -2476,7 +2632,9 @@ impl App {
     }
 
     /// Draws the top toolbar: tool buttons, view actions, and the palette hint.
+    #[allow(clippy::too_many_lines)] // one flat block per toolbar control group
     fn toolbar(&mut self, ui: &mut egui::Ui) {
+        self.focus_anchor(ui, crate::focus::FocusRegion::Toolbar);
         ui.horizontal_wrapped(|ui| {
             ui.label("Tool:");
             for tool in Tool::all() {
@@ -2572,8 +2730,12 @@ impl App {
                 self.palette_open = !self.palette_open;
                 self.palette_query.clear();
             }
-            if ui.button("Shortcuts").clicked() {
-                self.keymap_open = !self.keymap_open;
+            let shortcuts_label = self
+                .keymap
+                .chord_for(CommandId("help.shortcuts"))
+                .map_or_else(|| "Shortcuts".to_owned(), |c| format!("Shortcuts ({c})"));
+            if ui.button(shortcuts_label).clicked() {
+                self.shortcuts_open = !self.shortcuts_open;
             }
             self.help_menu(ui);
             // Web only: switch between the public replay theater and the full editor.
@@ -2766,6 +2928,7 @@ impl App {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
+                        self.focus_anchor(ui, crate::focus::FocusRegion::RightPanel);
                         self.history_panel(ui);
                         ui.separator();
                         self.inspector_panel(ui);
@@ -3045,7 +3208,9 @@ impl App {
 
     /// Draws the left layer-manager panel: filter, per-layer swatch + visibility.
     fn layer_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Layers");
+        self.focus_anchor(ui, crate::focus::FocusRegion::LeftPanel);
+        let header = ui.heading("Layers");
+        self.attach_context_menu(&header, commands::MenuContext::PanelHeader);
         ui.horizontal(|ui| {
             ui.label("Filter:");
             ui.text_edit_singleline(self.layer_state.filter_mut());
@@ -3061,6 +3226,11 @@ impl App {
         ui.separator();
 
         let indices = self.layer_state.filtered_indices();
+        // A cheap keymap snapshot so the per-row context menu (item 47) can render
+        // without re-borrowing `self` inside the row loop that holds the layer table
+        // mutably.
+        let keymap = self.keymap.clone();
+        let mut menu_action: Option<command::PaletteAction> = None;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -3073,10 +3243,23 @@ impl App {
                             ui.allocate_exact_size(Vec2::new(14.0, 14.0), Sense::hover());
                         ui.painter()
                             .rect_filled(rect, 2.0, theme::tokens::layer_rgb(r, g, b));
-                        ui.checkbox(&mut row.visible, &row.name);
+                        let resp = ui.checkbox(&mut row.visible, &row.name);
+                        resp.context_menu(|ui| {
+                            if let Some(action) = Self::context_menu_body(
+                                ui,
+                                &keymap,
+                                commands::MenuContext::LayerRow,
+                                Some((i, row.name.as_str())),
+                            ) {
+                                menu_action = Some(action);
+                            }
+                        });
                     });
                 }
             });
+        if let Some(action) = menu_action {
+            self.run_menu_action(action, None);
+        }
 
         ui.separator();
         ui.horizontal(|ui| {
@@ -5348,69 +5531,442 @@ impl App {
         });
     }
 
-    /// Draws the command-palette window and runs the chosen command.
-    fn palette_window(&mut self, ctx: &egui::Context, screen: Option<ScreenRect>) {
-        if !self.palette_open {
-            return;
-        }
-        let layer_names: Vec<String> = self
+    /// The component [`Ctx`](crate::theme::components::Ctx) for this frame: the dark
+    /// palette at the active density and reduced-motion preference. Lane 3C renders
+    /// the palette, shortcuts overlay, and context menus through it.
+    fn component_ctx(&self) -> crate::theme::components::Ctx {
+        crate::theme::components::Ctx::dark(self.ui_density)
+            .with_reduced_motion(self.reduced_motion)
+    }
+
+    /// The document targets the palette also searches (layers, cells, bookmarks;
+    /// item 80), returned as owned vectors the caller borrows into a
+    /// [`DocTargets`](crate::command::DocTargets) for the frame.
+    fn palette_doc_targets(&self) -> (Vec<String>, Vec<String>, Vec<String>) {
+        let layers = self
             .layer_state
             .rows()
             .iter()
             .map(|r| r.name.clone())
             .collect();
-        let entries = command::catalog(&layer_names);
+        let mut cells: Vec<String> = self
+            .history
+            .document()
+            .cells()
+            .map(|c| c.name.clone())
+            .collect();
+        cells.sort();
+        let bookmarks = self
+            .view_export
+            .bookmarks
+            .iter()
+            .map(|b| b.name.clone())
+            .collect();
+        (layers, cells, bookmarks)
+    }
+
+    /// Draws the command palette: a fuzzy launcher over the whole registry plus the
+    /// document targets, grouped with recents first and live chord hints (items 79,
+    /// 80), or an inline argument prompt for goto-coordinate / goto-cell.
+    fn palette_window(&mut self, ctx: &egui::Context, screen: Option<ScreenRect>) {
+        if !self.palette_open {
+            return;
+        }
+        let cctx = self.component_ctx();
+        let (layers, cells, bookmarks) = self.palette_doc_targets();
+        let targets = command::DocTargets {
+            layers: &layers,
+            cells: &cells,
+            bookmarks: &bookmarks,
+        };
+        let items = command::build_items(commands::registry(), &self.keymap, &targets);
 
         let mut open = self.palette_open;
-        let mut chosen: Option<Command> = None;
+        // The row the user activated this frame, as (action, recents key).
+        let mut chosen: Option<(command::PaletteAction, String)> = None;
+        let mut commit_arg = false;
+        let mut cancel = false;
         egui::Window::new("Command palette")
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
+            .default_width(420.0)
             .default_pos(Pos2::new(200.0, 120.0))
             .show(ctx, |ui| {
-                ui.label("Type to filter, click to run:");
-                let resp = ui.text_edit_singleline(&mut self.palette_query);
-                resp.request_focus();
-                ui.separator();
-                let matches = command::filter(&entries, &self.palette_query);
-                egui::ScrollArea::vertical()
-                    .max_height(300.0)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for entry in matches {
-                            if ui.selectable_label(false, &entry.label).clicked() {
-                                chosen = Some(entry.command);
-                            }
+                if let Some(arg) = self.palette_arg {
+                    ui.label(arg.prompt());
+                    let resp = crate::theme::components::TextField::new(&mut self.palette_query)
+                        .hint(arg.hint())
+                        .desired_width(f32::INFINITY)
+                        .show(ui, cctx);
+                    resp.request_focus();
+                    if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        commit_arg = true;
+                    }
+                    ui.horizontal(|ui| {
+                        if crate::theme::components::Button::primary("Go")
+                            .show(ui, cctx)
+                            .clicked()
+                        {
+                            commit_arg = true;
+                        }
+                        if crate::theme::components::Button::secondary("Cancel")
+                            .show(ui, cctx)
+                            .clicked()
+                        {
+                            cancel = true;
                         }
                     });
+                } else {
+                    let resp = crate::theme::components::TextField::new(&mut self.palette_query)
+                        .hint("Type a command, layer, cell, or bookmark...")
+                        .desired_width(f32::INFINITY)
+                        .show(ui, cctx);
+                    resp.request_focus();
+                    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let groups =
+                        command::results(&items, &self.palette_recents, &self.palette_query);
+                    // Enter runs the first row of the first group (the top hit).
+                    if enter && let Some(item) = groups.first().and_then(|g| g.items.first()) {
+                        chosen = Some((item.action.clone(), item.key.clone()));
+                    }
+                    ui.separator();
+                    egui::ScrollArea::vertical()
+                        .max_height(360.0)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            if groups.is_empty() {
+                                ui.label(
+                                    egui::RichText::new("No matching commands")
+                                        .color(cctx.tokens.text_weak),
+                                );
+                            }
+                            for group in &groups {
+                                crate::theme::components::SectionHeader::new(&group.heading)
+                                    .show(ui, cctx);
+                                for item in &group.items {
+                                    if Self::palette_row(ui, cctx, item) {
+                                        chosen = Some((item.action.clone(), item.key.clone()));
+                                    }
+                                }
+                            }
+                        });
+                }
             });
         self.palette_open = open;
-        if let Some(cmd) = chosen {
-            self.run_command(cmd, screen);
+        if !self.palette_open || cancel {
             self.palette_open = false;
+            self.palette_arg = None;
+            return;
+        }
+        if commit_arg {
+            self.commit_palette_arg(screen);
+            return;
+        }
+        if let Some((action, key)) = chosen {
+            self.run_palette_action(action, key, screen);
+        }
+    }
+
+    /// Draws one palette row (label plus a right-aligned chord chip) and returns
+    /// whether it was activated this frame.
+    fn palette_row(
+        ui: &mut egui::Ui,
+        cctx: crate::theme::components::Ctx,
+        item: &command::PaletteItem,
+    ) -> bool {
+        let mut clicked = false;
+        ui.horizontal(|ui| {
+            if ui.selectable_label(false, &item.label).clicked() {
+                clicked = true;
+            }
+            if let Some(hint) = &item.hint {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    crate::theme::components::KbdChip::new(hint.clone()).show(ui, cctx);
+                });
+            }
+        });
+        clicked
+    }
+
+    /// Runs a chosen palette row and records it in the recents list.
+    ///
+    /// Registry commands route through [`App::dispatch`] (the goto commands switch
+    /// the palette into argument mode and keep it open); the document rows drive the
+    /// layer manager, cell locator, and bookmark recall directly. The palette closes
+    /// afterward unless it entered an argument prompt.
+    fn run_palette_action(
+        &mut self,
+        action: command::PaletteAction,
+        key: String,
+        screen: Option<ScreenRect>,
+    ) {
+        self.record_recent(key);
+        self.run_menu_action(action, screen);
+        // Keep the palette open only if a goto command just armed an argument prompt.
+        if self.palette_arg.is_none() {
+            self.palette_open = false;
+        } else {
+            self.palette_query.clear();
+        }
+    }
+
+    /// Runs a [`PaletteAction`](crate::command::PaletteAction) without touching
+    /// palette state or recents, shared by the palette and the context menus.
+    fn run_menu_action(&mut self, action: command::PaletteAction, screen: Option<ScreenRect>) {
+        match action {
+            command::PaletteAction::Command(id) => self.dispatch(id),
+            command::PaletteAction::ToggleLayer(i) => {
+                self.run_command(Command::ToggleLayer(i), screen);
+            }
+            command::PaletteAction::SelectLayer(i) => {
+                self.run_command(Command::SelectLayer(i), screen);
+            }
+            command::PaletteAction::GotoCell(name) => self.goto_cell(&name),
+            command::PaletteAction::Bookmark(i) => self.recall_bookmark(i),
+        }
+    }
+
+    /// Renders a registry-driven context-menu body and returns the chosen action
+    /// (item 47). For a layer row, `layer` supplies the dynamic toggle/select rows
+    /// prepended before the registry commands. Call inside
+    /// [`egui::Response::context_menu`].
+    fn context_menu_body(
+        ui: &mut egui::Ui,
+        keymap: &Keymap,
+        context: commands::MenuContext,
+        layer: Option<(usize, &str)>,
+    ) -> Option<command::PaletteAction> {
+        let mut chosen = None;
+        if let Some((i, name)) = layer {
+            if ui.button(format!("Toggle layer {name}")).clicked() {
+                chosen = Some(command::PaletteAction::ToggleLayer(i));
+                ui.close();
+            }
+            if ui.button(format!("Select all on {name}")).clicked() {
+                chosen = Some(command::PaletteAction::SelectLayer(i));
+                ui.close();
+            }
+            ui.separator();
+        }
+        for id in context.command_ids() {
+            let cid = CommandId(id);
+            let Some(spec) = commands::spec(cid) else {
+                continue;
+            };
+            let label = match keymap.chord_for(cid) {
+                Some(c) => format!("{}  ({c})", spec.label),
+                None => spec.label.to_owned(),
+            };
+            if ui.button(label).clicked() {
+                chosen = Some(command::PaletteAction::Command(cid));
+                ui.close();
+            }
+        }
+        chosen
+    }
+
+    /// Attaches a registry-driven context menu to `response` and runs the chosen
+    /// action, the shared glue for the canvas and panel-header right-click surfaces
+    /// (item 47). Layer rows render [`App::context_menu_body`] directly so they can
+    /// supply their dynamic per-layer actions.
+    fn attach_context_menu(&mut self, response: &egui::Response, context: commands::MenuContext) {
+        let keymap = &self.keymap;
+        let mut chosen = None;
+        response.context_menu(|ui| {
+            chosen = Self::context_menu_body(ui, keymap, context, None);
+        });
+        if let Some(action) = chosen {
+            self.run_menu_action(action, None);
+        }
+    }
+
+    /// Commits the current argument prompt (goto coordinate / cell) and closes the
+    /// palette; a malformed coordinate leaves the prompt open with a status hint.
+    fn commit_palette_arg(&mut self, screen: Option<ScreenRect>) {
+        let _ = screen;
+        match self.palette_arg {
+            Some(command::PaletteArg::GotoCoordinate) => {
+                if let Some((x, y)) = command::parse_coordinate(&self.palette_query) {
+                    self.camera = ViewCamera::new(
+                        Point::new(x as i32, y as i32),
+                        self.camera.pixels_per_dbu(),
+                    );
+                    self.status.set(format!("Go to ({x}, {y})"));
+                    self.close_palette();
+                } else {
+                    self.status.set("Enter a coordinate as x, y (DBU)");
+                }
+            }
+            Some(command::PaletteArg::GotoCell) => {
+                let name = self.palette_query.trim().to_owned();
+                self.goto_cell(&name);
+                self.close_palette();
+            }
+            None => self.close_palette(),
+        }
+    }
+
+    /// Centers the view on `name`'s bounding box, or reports it is unknown.
+    fn goto_cell(&mut self, name: &str) {
+        if let Some(bbox) = self.history.document().cell_bbox(name) {
+            self.search.pending_locate = Some(bbox);
+            self.status.set(format!("Go to cell '{name}'"));
+        } else {
+            self.status.set(format!("No cell named '{name}'"));
+        }
+    }
+
+    /// Recalls the camera bookmark at slot `i`.
+    fn recall_bookmark(&mut self, i: usize) {
+        if let Some(bm) = self.view_export.bookmarks.get(i) {
+            let (center, ppd, name) = (bm.center(), bm.pixels_per_dbu(), bm.name.clone());
+            self.camera = ViewCamera::new(center, ppd);
+            self.status.set(format!("Jumped to '{name}'"));
+        }
+    }
+
+    /// Closes the palette and clears any argument prompt and query text.
+    fn close_palette(&mut self) {
+        self.palette_open = false;
+        self.palette_arg = None;
+        self.palette_query.clear();
+    }
+
+    /// Records `key` at the front of the recents list, de-duplicated and bounded.
+    fn record_recent(&mut self, key: String) {
+        self.palette_recents.retain(|k| k != &key);
+        self.palette_recents.insert(0, key);
+        self.palette_recents.truncate(PALETTE_RECENTS_MAX);
+    }
+
+    /// Draws the keyboard-shortcuts overlay (`?`, item 18): every command grouped
+    /// by category with its live chord, generated straight from the registry so it
+    /// can never drift from what the keyboard does, plus the chord-sequence list
+    /// (item 81) and a link into the editor.
+    fn shortcuts_overlay(&mut self, ctx: &egui::Context) {
+        if !self.shortcuts_open {
+            return;
+        }
+        let cctx = self.component_ctx();
+        // Group the registry by category in first-seen order (so a category split
+        // across lane sections still renders under one heading).
+        let mut cats: Vec<(&str, Vec<&crate::commands::CommandSpec>)> = Vec::new();
+        for spec in commands::registry() {
+            if let Some(entry) = cats.iter_mut().find(|(c, _)| *c == spec.category) {
+                entry.1.push(spec);
+            } else {
+                cats.push((spec.category, vec![spec]));
+            }
+        }
+        let mut open = self.shortcuts_open;
+        let mut customize = false;
+        egui::Window::new("Keyboard shortcuts")
+            .open(&mut open)
+            .resizable(true)
+            .default_width(360.0)
+            .default_pos(Pos2::new(320.0, 120.0))
+            .show(ctx, |ui| {
+                ui.label(
+                    egui::RichText::new("Generated from the command registry")
+                        .color(cctx.tokens.text_weak),
+                );
+                egui::ScrollArea::vertical()
+                    .max_height(440.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for (category, specs) in &cats {
+                            crate::theme::components::SectionHeader::new(*category).show(ui, cctx);
+                            for spec in specs {
+                                ui.horizontal(|ui| {
+                                    ui.label(spec.label);
+                                    if let Some(chord) = self.keymap.chord_for(spec.id) {
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                crate::theme::components::KbdChip::new(
+                                                    chord.to_string(),
+                                                )
+                                                .show(ui, cctx);
+                                            },
+                                        );
+                                    }
+                                });
+                            }
+                        }
+                        crate::theme::components::SectionHeader::new("Sequences").show(ui, cctx);
+                        for (prefix, suffix, target) in keymap::SEQUENCES {
+                            ui.horizontal(|ui| {
+                                ui.label(commands::label(CommandId(target)));
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        crate::theme::components::KbdChip::new(format!(
+                                            "{} then {}",
+                                            prefix.to_lowercase(),
+                                            suffix.to_lowercase()
+                                        ))
+                                        .show(ui, cctx);
+                                    },
+                                );
+                            });
+                        }
+                    });
+                ui.separator();
+                if crate::theme::components::Button::secondary("Customize…")
+                    .show(ui, cctx)
+                    .clicked()
+                {
+                    customize = true;
+                }
+            });
+        self.shortcuts_open = open;
+        if customize {
+            self.keymap_open = true;
         }
     }
 
     /// Draws the shortcuts editor window: every action with its current chord,
-    /// rebind and clear controls, plus reset and (native) save.
+    /// rebind and clear controls, a conflict check, keymap export/import, plus
+    /// reset and (native) save.
     ///
     /// The chord capture itself happens in [`App::handle_shortcuts`]; this window
     /// only arms it, so what the editor shows and what the keyboard does can
     /// never disagree. Takeovers (binding a chord another action holds) are
     /// reported through the status bar by the capture path.
+    #[allow(clippy::too_many_lines)] // grid rows plus the conflict/io controls read better flat
     fn keymap_window(&mut self, ctx: &egui::Context) {
         if !self.keymap_open {
             return;
         }
+        let cctx = self.component_ctx();
         let mut open = self.keymap_open;
-        egui::Window::new("Keyboard shortcuts")
+        egui::Window::new("Customize shortcuts")
             .open(&mut open)
             .resizable(true)
             .default_pos(Pos2::new(260.0, 140.0))
             .show(ctx, |ui| {
                 ui.label("Click Rebind, then press the new chord (Escape cancels).");
                 ui.label("Binding a chord another action holds unbinds that action.");
+                // Conflict detector: bind()/from_toml() keep the map conflict-free by
+                // construction, so this reassures and would surface any future lapse.
+                let conflicts = self.keymap.conflicts();
+                if conflicts.is_empty() {
+                    ui.label(
+                        egui::RichText::new("No shortcut conflicts").color(cctx.tokens.text_weak),
+                    );
+                } else {
+                    for (a, b) in &conflicts {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Conflict: {} and {} share a chord",
+                                commands::label(*a),
+                                commands::label(*b)
+                            ))
+                            .color(cctx.tokens.danger),
+                        );
+                    }
+                }
                 ui.separator();
                 egui::Grid::new("keymap_grid")
                     .num_columns(3)
@@ -5455,6 +6011,43 @@ impl App {
                         }
                     }
                 });
+                ui.separator();
+                // Export / import (item 82): TOML round-trips through a scratch buffer
+                // that works on every target, no file dialog needed.
+                egui::CollapsingHeader::new("Export / import")
+                    .id_salt("keymap_io")
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            if ui.button("Export to text").clicked() {
+                                self.keymap_io_text = self.keymap.to_toml();
+                                self.status.set("Keymap exported to the text box");
+                            }
+                            if ui.button("Copy").clicked() {
+                                ui.ctx().copy_text(self.keymap_io_text.clone());
+                                self.status.set("Keymap copied to clipboard");
+                            }
+                            if ui.button("Apply from text").clicked() {
+                                let (map, warnings) = Keymap::from_toml(&self.keymap_io_text);
+                                self.keymap = map;
+                                self.rebinding = None;
+                                if warnings.is_empty() {
+                                    self.status.set("Keymap imported");
+                                } else {
+                                    self.status.set(format!(
+                                        "Keymap imported ({} warnings)",
+                                        warnings.len()
+                                    ));
+                                }
+                            }
+                        });
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.keymap_io_text)
+                                .desired_rows(6)
+                                .desired_width(f32::INFINITY)
+                                .code_editor()
+                                .hint_text("Paste a keymap TOML here, then Apply from text"),
+                        );
+                    });
             });
         self.keymap_open = open;
         if !self.keymap_open {
@@ -5470,14 +6063,25 @@ impl App {
     /// When `gpu_format` is `Some`, the layout geometry is drawn on the GPU through a
     /// retained paint callback (eframe's shared device); egui overlays still paint on
     /// top. When it is `None`, the geometry falls back to egui painting.
+    #[allow(clippy::too_many_lines)] // the pane/interaction/overlay passes read better inline
     fn canvas(
         &mut self,
         ui: &mut egui::Ui,
         gpu_format: Option<eframe::egui_wgpu::wgpu::TextureFormat>,
     ) -> ScreenRect {
+        self.focus_anchor(ui, crate::focus::FocusRegion::Canvas);
         let size = ui.available_size();
         let (response, base_painter) = ui.allocate_painter(size, Sense::click_and_drag());
         let rect = response.rect;
+
+        // Right-click context menu (item 47): shape actions when a selection exists,
+        // otherwise canvas navigation. Registry-driven like every other surface.
+        let menu_ctx = if self.selection.is_empty() {
+            commands::MenuContext::Canvas
+        } else {
+            commands::MenuContext::Shape
+        };
+        self.attach_context_menu(&response, menu_ctx);
 
         // Background (covers every pane and the divider).
         base_painter.rect_filled(rect, 0.0, DARK.bg_canvas);
@@ -7393,6 +7997,7 @@ impl eframe::App for App {
                 &self.layer_state,
             );
         }
+        self.shortcuts_overlay(&ctx);
         self.keymap_window(&ctx);
         self.replay_window(&ctx);
         self.open_warnings_window(&ctx);
@@ -8478,6 +9083,109 @@ mod tests {
         // The old default no longer fires.
         let old = keymap::Chord::parse("Ctrl+Y").expect("valid chord");
         assert_eq!(app.keymap.command_for(&old), None);
+    }
+
+    #[test]
+    fn lane_3c_commands_dispatch_to_their_effects() {
+        let mut app = App::new();
+        app.dispatch(CommandId("help.shortcuts"));
+        assert!(app.shortcuts_open, "? toggles the overlay");
+        app.dispatch(CommandId("palette.goto_coordinate"));
+        assert!(app.palette_open, "goto opens the palette");
+        assert_eq!(app.palette_arg, Some(command::PaletteArg::GotoCoordinate));
+        let before = app.focus_region;
+        app.dispatch(CommandId("focus.cycle"));
+        assert_ne!(app.focus_region, before, "F6 advances the focus region");
+        assert!(
+            app.focus_request,
+            "focus move is queued for the render pass"
+        );
+    }
+
+    #[test]
+    fn recent_palette_rows_are_deduped_and_bounded() {
+        let mut app = App::new();
+        for _ in 0..3 {
+            app.record_recent("edit.undo".to_owned());
+        }
+        assert_eq!(
+            app.palette_recents
+                .iter()
+                .filter(|k| *k == "edit.undo")
+                .count(),
+            1,
+            "a repeat run does not duplicate the recent"
+        );
+        for n in 0..(PALETTE_RECENTS_MAX + 5) {
+            app.record_recent(format!("k{n}"));
+        }
+        assert!(app.palette_recents.len() <= PALETTE_RECENTS_MAX, "bounded");
+        assert_eq!(
+            app.palette_recents[0],
+            format!("k{}", PALETTE_RECENTS_MAX + 4),
+            "most recent first"
+        );
+    }
+
+    #[test]
+    fn esc_cascade_peels_tool_then_selection_then_popover() {
+        let mut app = App::new();
+        app.shortcuts_open = true;
+        app.select_tool(Tool::Measure);
+        app.selection.set([0]);
+        // 1: an active tool is canceled first.
+        app.apply_esc();
+        assert_eq!(app.tools.active(), Tool::Select);
+        assert!(
+            !app.selection.is_empty(),
+            "selection survives the first Esc"
+        );
+        assert!(app.shortcuts_open, "popover survives the first Esc");
+        // 2: the selection clears next.
+        app.apply_esc();
+        assert!(app.selection.is_empty());
+        assert!(app.shortcuts_open, "popover survives the second Esc");
+        // 3: the popover closes last.
+        app.apply_esc();
+        assert!(!app.shortcuts_open);
+    }
+
+    #[test]
+    fn committing_a_coordinate_prompt_centers_the_camera() {
+        let mut app = App::new();
+        app.open_palette_arg(command::PaletteArg::GotoCoordinate);
+        app.palette_query = "1200, -800".to_owned();
+        app.commit_palette_arg(None);
+        assert_eq!(app.camera.center(), Point::new(1200, -800));
+        assert!(!app.palette_open, "a good coordinate closes the palette");
+        assert_eq!(app.palette_arg, None);
+    }
+
+    #[test]
+    fn a_bad_coordinate_keeps_the_prompt_open() {
+        let mut app = App::new();
+        app.open_palette_arg(command::PaletteArg::GotoCoordinate);
+        app.palette_query = "not a point".to_owned();
+        app.commit_palette_arg(None);
+        assert!(app.palette_open, "a bad coordinate leaves the prompt up");
+        assert_eq!(app.palette_arg, Some(command::PaletteArg::GotoCoordinate));
+    }
+
+    #[test]
+    fn palette_and_shortcut_windows_lay_out_without_panicking() {
+        // egui runs a full frame's layout without a GPU, so this exercises the
+        // palette, the generated overlay, and the editor for id clashes, borrow
+        // panics, and the zero-size focus anchors.
+        let mut app = App::new();
+        app.set_palette_open(true);
+        app.shortcuts_open = true;
+        app.keymap_open = true;
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        app.palette_window(&ctx, None);
+        app.shortcuts_overlay(&ctx);
+        app.keymap_window(&ctx);
+        let _ = ctx.end_pass();
     }
 
     #[test]

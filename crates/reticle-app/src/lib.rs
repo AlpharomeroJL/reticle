@@ -99,6 +99,7 @@ pub mod diff_overlay;
 pub mod dochost;
 pub mod draw;
 pub mod drc_panel;
+pub mod focus;
 pub mod fps;
 pub mod generate_panel;
 pub mod grid;
