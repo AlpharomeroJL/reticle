@@ -68,8 +68,99 @@ function isSameOrigin(request) {
   return new URL(request.url).origin === self.location.origin;
 }
 
+// The virtual path prefix (relative to scope) under which converted `.rtla` archives in
+// OPFS are served over HTTP Range (lane v8-6c). `?archive=<scope>opfs-archive/<opfsPath>`
+// then streams straight through the existing HttpRangeTileSource path with no new reader:
+// the worker writes the archive to OPFS, and this handler reads it back and answers
+// ranged GETs from it. Same-origin, so no CORS/preflight is involved.
+const OPFS_ARCHIVE_PREFIX = new URL("./opfs-archive/", SCOPE).toString();
+
+// Reads the OPFS file at a "dir/dir/file" path, returning a File (Blob) or null if any
+// segment is missing or OPFS is unavailable in this worker.
+async function readOpfsFile(opfsPath) {
+  if (!(navigator.storage && navigator.storage.getDirectory)) return null;
+  let dir;
+  try {
+    dir = await navigator.storage.getDirectory();
+  } catch {
+    return null;
+  }
+  const parts = opfsPath.split("/").filter((p) => p.length > 0);
+  if (parts.length === 0) return null;
+  const fileName = parts.pop();
+  for (const part of parts) {
+    try {
+      dir = await dir.getDirectoryHandle(part);
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const handle = await dir.getFileHandle(fileName);
+    return await handle.getFile();
+  } catch {
+    return null;
+  }
+}
+
+// Serves an OPFS-backed archive, honoring a single `bytes=start-end` Range so the
+// streaming reader can fetch the preamble, header/directory, and each tile by offset.
+async function serveOpfsArchive(request, opfsPath) {
+  const file = await readOpfsFile(opfsPath);
+  if (!file) {
+    return new Response("archive not found in OPFS", { status: 404 });
+  }
+  const total = file.size;
+  const range = request.headers.get("Range");
+  if (!range) {
+    return new Response(file, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Accept-Ranges": "bytes",
+        "Content-Length": String(total),
+      },
+    });
+  }
+  // Parse "bytes=start-end" (end optional, inclusive), clamped to the file.
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+  if (!match) {
+    return new Response("malformed Range", {
+      status: 416,
+      headers: { "Content-Range": `bytes */${total}` },
+    });
+  }
+  let start = match[1] === "" ? 0 : Number(match[1]);
+  let end = match[2] === "" ? total - 1 : Number(match[2]);
+  if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= total) {
+    return new Response("range not satisfiable", {
+      status: 416,
+      headers: { "Content-Range": `bytes */${total}` },
+    });
+  }
+  end = Math.min(end, total - 1);
+  const slice = file.slice(start, end + 1);
+  return new Response(slice, {
+    status: 206,
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "Accept-Ranges": "bytes",
+      "Content-Range": `bytes ${start}-${end}/${total}`,
+      "Content-Length": String(end - start + 1),
+    },
+  });
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
+
+  // OPFS archive bridge (lane v8-6c): serve converted archives back over Range from OPFS,
+  // before the cache-first logic (these are never cached; they change on every convert).
+  if (request.method === "GET" && request.url.startsWith(OPFS_ARCHIVE_PREFIX)) {
+    const opfsPath = decodeURIComponent(request.url.slice(OPFS_ARCHIVE_PREFIX.length));
+    event.respondWith(serveOpfsArchive(request, opfsPath));
+    return;
+  }
 
   // Only GET is cacheable; let everything else hit the network untouched.
   if (request.method !== "GET" || !isSameOrigin(request)) return;

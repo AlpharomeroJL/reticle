@@ -73,12 +73,12 @@ export default defineConfig({
     {
       name: "webgl2",
       // The subpath and share-live specs run in their own projects.
-      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts/,
+      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts/,
       use: { launchOptions: { args: WEBGL2_ARGS } },
     },
     {
       name: "webgpu",
-      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts/,
+      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts/,
       use: { launchOptions: { args: WEBGPU_ARGS } },
     },
     {
@@ -105,6 +105,16 @@ export default defineConfig({
       // WebGPU adapter here.
       name: "served-archive",
       testMatch: /served-archive\.spec\.ts/,
+      use: { launchOptions: { args: WEBGL2_ARGS } },
+    },
+    {
+      // The in-browser convert e2e (lane v8-6c). Served at root by serve-dist.mjs
+      // (8080); converts a committed GDS to a `.rtla` in OPFS via the convert Web
+      // Worker, then reopens it through the `?archive=` streaming path (the SW OPFS
+      // bridge serves the ranges). WebGL2 fallback, since headless Chromium has no
+      // WebGPU adapter here. Skips honestly where OPFS is unavailable.
+      name: "browser-convert",
+      testMatch: /convert-opfs\.spec\.ts/,
       use: { launchOptions: { args: WEBGL2_ARGS } },
     },
     {

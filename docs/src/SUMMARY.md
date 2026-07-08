@@ -17,6 +17,7 @@
 - [Rendering and scale](rendering.md)
   - [GPU DRC heatmap](gpu-drc-heatmap.md)
 - [Streamed documents](streaming.md)
+  - [In-browser conversion](in-browser-conversion.md)
 - [View and export](view-export.md)
 - [Snapping and guides](snapping.md)
 - [Search and selection depth](search-selection.md)

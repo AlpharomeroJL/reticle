@@ -32,7 +32,7 @@ pub use archive::{
     LevelDims, RTLA_MAGIC, RTLA_VERSION, RtlaHeader, TileCoord, TileDirEntry, TilePayload,
     TileRecord, TileSource, TileSourceError,
 };
-pub use archive_build::{BuildError, build_rtla};
+pub use archive_build::{BuildError, build_rtla, build_rtla_to_vec};
 pub use grid::UniformGrid;
 pub use lod::{LodPyramid, TileId};
 pub use rtree::{Entry, RTreeIndex};

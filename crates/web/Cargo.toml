@@ -12,13 +12,32 @@ publish = false
 [lints]
 workspace = true
 
-# The harness is only meaningfully built for wasm (via Trunk). Its native build is
+# The GDS -> .rtla conversion core (the `convert` module) is compiled on every target
+# so it is unit-testable natively; the streaming reader and the in-memory builder are
+# both platform-independent, pure-Rust surface.
+[dependencies]
+reticle-geometry = { workspace = true }
+reticle-index = { workspace = true }
+reticle-io = { workspace = true }
+# For naming the streaming reader's error type (`reticle_model::ModelError`).
+reticle-model = { workspace = true }
+
+# The native round-trip test reads the converted archive back through the real
+# `MmapTileSource`, whose `TileSource` methods are async.
+[dev-dependencies]
+pollster = "0.4.0"
+# The round-trip test validates a tile's archived bytes in place, as the reader does.
+rkyv = "0.8.16"
+
+# The harness UI is only meaningfully built for wasm (via Trunk). Its native build is
 # a no-op `main`, so `cargo build --workspace` stays green on the host without
 # pulling any of the wasm-only dependencies.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 reticle-app = { workspace = true }
 eframe = "0.35.0"
+wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "Window",
     "Document",
@@ -26,5 +45,20 @@ web-sys = { version = "0.3", features = [
     "HtmlCanvasElement",
     "Location",
     "UrlSearchParams",
+    # The convert Web Worker (bin/convert_worker.rs): message plumbing to/from the
+    # main thread and the OPFS write of the finished .rtla, all in a worker scope.
+    "DedicatedWorkerGlobalScope",
+    "MessageEvent",
+    "WorkerNavigator",
+    "StorageManager",
+    "FileSystemDirectoryHandle",
+    "FileSystemFileHandle",
+    "FileSystemSyncAccessHandle",
+    "FileSystemGetFileOptions",
+    "FileSystemGetDirectoryOptions",
+    # The main-thread app spawns the worker and, on completion, opens the OPFS archive.
+    "Worker",
+    "WorkerOptions",
+    "WorkerType",
 ] }
 console_error_panic_hook = "0.1"
