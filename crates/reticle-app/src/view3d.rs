@@ -5,8 +5,10 @@
 //! deltas with pixel-to-radian and scroll-to-zoom mappings, and can be asked to
 //! re-frame. That part is unit-tested without any GPU or window.
 //!
-//! The glue part ([`View3d::show`]) draws a floating egui window containing the
-//! 3D viewport. Rendering goes through an `egui-wgpu` paint callback: `prepare`
+//! The glue part ([`View3d::show_in`]) draws the 3D viewport into a docked
+//! managed panel (ADR 0096; it was a floating `egui::Window` before lane 2c
+//! re-hosted it, callback unchanged). Rendering goes through an `egui-wgpu` paint
+//! callback: `prepare`
 //! renders the extruded scene into `reticle-render`'s [`StackView`] offscreen
 //! color+depth target (egui's own render pass has no depth attachment), and
 //! `paint` blits the finished frame into egui's pass. The scene mesh is rebuilt
@@ -149,32 +151,22 @@ impl egui_wgpu::CallbackTrait for StackCallback {
 }
 
 impl View3d {
-    /// Draws the floating "3D stack" window: viewport, orbit/zoom input, and
-    /// the reset button. Call once per frame from the app.
-    pub fn show(
+    /// Renders the "3D stack" viewport into `ui`: the managed panel body (ADR
+    /// 0096) with the reset control, orbit/zoom input, and the wgpu-painted
+    /// viewport. Call once per frame from the panel host. The egui-wgpu callback
+    /// is exactly the one the old floating window used; only the host changed.
+    pub fn show_in(
         &mut self,
-        ctx: &egui::Context,
+        ui: &mut egui::Ui,
         frame: &eframe::Frame,
         doc: &Document,
         top_cell: &str,
         layers: &LayerState,
     ) {
-        // Start collapsed and tucked over the canvas, clear of the Layers panel (~210px)
-        // and below even a wrapped toolbar, so the collapsed title bar does not occlude
-        // the toolbar or the left panel at the default window sizes (lane v8-ui). The app
-        // opens on the canvas, not on two fully-expanded tool windows; the user expands
-        // and drags it from there, and egui persists the choice per session.
-        egui::Window::new("3D stack")
-            .default_size([440.0, 380.0])
-            .default_open(false)
-            .default_pos([260.0, 104.0])
-            .resizable(true)
-            .show(ctx, |ui| {
-                self.show_contents(ui, frame, doc, top_cell, layers);
-            });
+        self.show_contents(ui, frame, doc, top_cell, layers);
     }
 
-    /// The window body: controls plus the wgpu-painted viewport.
+    /// The panel body: controls plus the wgpu-painted viewport.
     fn show_contents(
         &mut self,
         ui: &mut egui::Ui,

@@ -67,6 +67,14 @@ pub struct SessionState {
     /// Whether the first-run GPU capability card has been dismissed (lane 4C,
     /// catalog 22). Sticky so it shows at most once.
     pub gpu_card_dismissed: bool,
+    // ---- lane 2c: left panel + view panels ---------------------------------
+    /// The left Layers panel width, in points. Restored as the panel's starting
+    /// width so a resized panel survives a restart.
+    pub panel_left_w: f32,
+    /// Whether the managed 3D-stack panel is open (View > Panels, ADR 0096).
+    pub panel_3d_open: bool,
+    /// Whether the managed Cross-section panel is open (View > Panels, ADR 0096).
+    pub panel_xsection_open: bool,
 }
 
 impl Default for SessionState {
@@ -89,8 +97,24 @@ impl Default for SessionState {
             hints: Hints::default(),
             checklist: Checklist::default(),
             gpu_card_dismissed: false,
+            panel_left_w: 210.0,
+            panel_3d_open: false,
+            panel_xsection_open: false,
         }
     }
+}
+
+/// The lane-2c panel state captured with a session: left-panel width and which
+/// managed view panels are open. Bundled so [`SessionState::capture`] does not
+/// grow three more positional arguments.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct PanelLayout {
+    /// Left Layers panel width, in points.
+    pub left_w: f32,
+    /// Whether the 3D-stack panel is open.
+    pub panel_3d_open: bool,
+    /// Whether the Cross-section panel is open.
+    pub panel_xsection_open: bool,
 }
 
 impl SessionState {
@@ -112,6 +136,7 @@ impl SessionState {
         touch_mode: TouchMode,
         hidden: &[LayerId],
         tour_seen: bool,
+        panels: PanelLayout,
     ) -> Self {
         let center = camera.center();
         Self {
@@ -129,6 +154,11 @@ impl SessionState {
             wheel,
             touch_mode,
             tour_seen,
+            panel_left_w: panels.left_w,
+            panel_3d_open: panels.panel_3d_open,
+            panel_xsection_open: panels.panel_xsection_open,
+            // Onboarding bits are not view state; capture leaves them at defaults and
+            // the app grafts the live values on in `session_snapshot`.
             ..Self::default()
         }
     }
@@ -176,7 +206,7 @@ impl SessionState {
             .map(|(l, d)| format!("{l}/{d}"))
             .collect();
         format!(
-            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nui_density={}\nreduced_motion={}\nwheel={}\ntouch_mode={}\nhidden={}\ntour_seen={}\nhints={}\nchecklist={}\nchecklist_dismissed={}\ngpu_card_dismissed={}\n",
+            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nui_density={}\nreduced_motion={}\nwheel={}\ntouch_mode={}\nhidden={}\ntour_seen={}\nhints={}\nchecklist={}\nchecklist_dismissed={}\ngpu_card_dismissed={}\npanel_left_w={}\npanel_3d_open={}\npanel_xsection_open={}\n",
             self.center_x,
             self.center_y,
             self.pixels_per_dbu,
@@ -194,7 +224,10 @@ impl SessionState {
             self.hints.seen_tags().join(","),
             self.checklist.done_tags().join(","),
             self.checklist.is_dismissed(),
-            self.gpu_card_dismissed
+            self.gpu_card_dismissed,
+            self.panel_left_w,
+            self.panel_3d_open,
+            self.panel_xsection_open
         )
     }
 
@@ -258,6 +291,13 @@ impl SessionState {
                 }
                 "checklist_dismissed" => checklist_dismissed = value == "true",
                 "gpu_card_dismissed" => s.gpu_card_dismissed = value == "true",
+                "panel_left_w" => {
+                    if let Ok(v) = value.parse() {
+                        s.panel_left_w = v;
+                    }
+                }
+                "panel_3d_open" => s.panel_3d_open = value == "true",
+                "panel_xsection_open" => s.panel_xsection_open = value == "true",
                 _ => {}
             }
         }
@@ -433,6 +473,9 @@ mod tests {
             hints,
             checklist,
             gpu_card_dismissed: true,
+            panel_left_w: 244.0,
+            panel_3d_open: true,
+            panel_xsection_open: false,
         }
     }
 
@@ -458,6 +501,11 @@ mod tests {
             TouchMode::On,
             &[LayerId::new(3, 0)],
             true,
+            PanelLayout {
+                left_w: 260.0,
+                panel_3d_open: true,
+                panel_xsection_open: true,
+            },
         );
         let restored = s.camera();
         assert_eq!(restored.center(), Point::new(700, 900));
@@ -474,6 +522,9 @@ mod tests {
         // the app sets it on the snapshot after capture (see App::save).
         assert_eq!(s.hints, Hints::default());
         assert_eq!(s.checklist, Checklist::default());
+        // The panel layout passed to capture is carried through.
+        assert!((s.panel_left_w - 260.0).abs() < f32::EPSILON);
+        assert!(s.panel_3d_open && s.panel_xsection_open);
     }
 
     #[test]
@@ -499,6 +550,27 @@ mod tests {
         assert_eq!(older.hints, Hints::default());
         assert_eq!(older.checklist, Checklist::default());
         assert!(!older.gpu_card_dismissed);
+    }
+
+    #[test]
+    fn panel_layout_round_trips_and_defaults() {
+        // The lane-2c panel keys round-trip through the text format...
+        let s = SessionState {
+            panel_left_w: 275.5,
+            panel_3d_open: true,
+            panel_xsection_open: false,
+            ..SessionState::default()
+        };
+        let parsed = SessionState::from_text(&s.to_text()).expect("parses");
+        assert!((parsed.panel_left_w - 275.5).abs() < f32::EPSILON);
+        assert!(parsed.panel_3d_open);
+        assert!(!parsed.panel_xsection_open);
+        // ...and an older file without them keeps the closed panels and the default
+        // left width (unknown-key tolerance makes the addition non-breaking).
+        let older = SessionState::from_text("center_x=1\n").expect("parses");
+        assert!((older.panel_left_w - 210.0).abs() < f32::EPSILON);
+        assert!(!older.panel_3d_open);
+        assert!(!older.panel_xsection_open);
     }
 
     #[test]

@@ -43,7 +43,8 @@ impl FillStyle {
     }
 }
 
-/// One layer's display row: identity, name, color, fill style, and visibility.
+/// One layer's display row: identity, name, color, fill style, visibility, and
+/// lock state.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct LayerRow {
     /// The layer/datatype identifier.
@@ -56,6 +57,21 @@ pub struct LayerRow {
     pub visible: bool,
     /// How the layer's shapes are stylized in the manager preview and legend.
     pub fill: FillStyle,
+    /// When locked, the layer's shapes stay drawn but the canvas will not let the
+    /// pointer pick them (catalog 57: visible-but-unselectable). View-only state,
+    /// never mutating the document.
+    pub locked: bool,
+}
+
+/// A named snapshot of which layers are hidden, so a user can flip a whole view
+/// (catalog 62). Stored by hidden-layer id list so applying it sets every known
+/// row's visibility from the saved set; layers not in the table are ignored.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct VisibilityPreset {
+    /// The preset's display name (unique within a [`LayerState`]).
+    pub name: String,
+    /// The ids that were hidden when the preset was saved.
+    pub hidden: Vec<LayerId>,
 }
 
 /// The layer table plus a text filter, driving the layer-manager side panel.
@@ -66,6 +82,8 @@ pub struct LayerState {
     by_id: HashMap<LayerId, usize>,
     /// Case-insensitive substring filter over layer names (empty = show all).
     filter: String,
+    /// Saved visibility presets, newest additions at the end (catalog 62).
+    presets: Vec<VisibilityPreset>,
 }
 
 impl LayerState {
@@ -83,6 +101,7 @@ impl LayerState {
                 color_rgba: l.color_rgba,
                 visible: l.visible,
                 fill: FillStyle::default(),
+                locked: false,
             })
             .collect();
         let by_id = rows.iter().enumerate().map(|(i, r)| (r.id, i)).collect();
@@ -90,6 +109,7 @@ impl LayerState {
             rows,
             by_id,
             filter: String::new(),
+            presets: Vec::new(),
         }
     }
 
@@ -178,6 +198,84 @@ impl LayerState {
             r.visible = r.id == layer;
         }
         true
+    }
+
+    /// Whether `layer` is locked (drawn but not pointer-selectable).
+    ///
+    /// Unknown layers are treated as unlocked, so stray geometry stays selectable.
+    #[must_use]
+    pub fn is_locked(&self, layer: LayerId) -> bool {
+        self.by_id.get(&layer).is_some_and(|&i| self.rows[i].locked)
+    }
+
+    /// Sets the lock state of `layer`, returning `true` if the layer was found.
+    pub fn set_locked(&mut self, layer: LayerId, locked: bool) -> bool {
+        if let Some(&i) = self.by_id.get(&layer) {
+            self.rows[i].locked = locked;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Toggles the lock state of `layer`, returning the new state if found.
+    pub fn toggle_lock(&mut self, layer: LayerId) -> Option<bool> {
+        let &i = self.by_id.get(&layer)?;
+        self.rows[i].locked = !self.rows[i].locked;
+        Some(self.rows[i].locked)
+    }
+
+    /// The saved visibility presets, in creation order (catalog 62).
+    #[must_use]
+    pub fn presets(&self) -> &[VisibilityPreset] {
+        &self.presets
+    }
+
+    /// Saves the current visibility as a preset named `name`, capturing which
+    /// layers are hidden right now.
+    ///
+    /// A blank name is rejected (returns `false`); an existing name is overwritten
+    /// in place so re-saving updates rather than duplicates.
+    pub fn save_preset(&mut self, name: &str) -> bool {
+        let name = name.trim();
+        if name.is_empty() {
+            return false;
+        }
+        let hidden: Vec<LayerId> = self
+            .rows
+            .iter()
+            .filter(|r| !r.visible)
+            .map(|r| r.id)
+            .collect();
+        if let Some(existing) = self.presets.iter_mut().find(|p| p.name == name) {
+            existing.hidden = hidden;
+        } else {
+            self.presets.push(VisibilityPreset {
+                name: name.to_owned(),
+                hidden,
+            });
+        }
+        true
+    }
+
+    /// Applies the preset named `name`, setting every known layer visible unless
+    /// the preset recorded it hidden. Returns `true` if the preset existed.
+    pub fn apply_preset(&mut self, name: &str) -> bool {
+        let Some(preset) = self.presets.iter().find(|p| p.name == name) else {
+            return false;
+        };
+        let hidden = preset.hidden.clone();
+        for r in &mut self.rows {
+            r.visible = !hidden.contains(&r.id);
+        }
+        true
+    }
+
+    /// Deletes the preset named `name`, returning `true` if one was removed.
+    pub fn delete_preset(&mut self, name: &str) -> bool {
+        let before = self.presets.len();
+        self.presets.retain(|p| p.name != name);
+        self.presets.len() != before
     }
 
     /// Moves the row at `index` one position earlier (toward the front of the
@@ -269,6 +367,13 @@ pub fn rgba_components(color_rgba: u32) -> (u8, u8, u8, u8) {
     (r, g, b, a)
 }
 
+/// Packs `(r, g, b, a)` byte components into a `0xRRGGBBAA` color. Inverse of
+/// [`rgba_components`]; used when the color editor writes an edited swatch back.
+#[must_use]
+pub fn pack_rgba(r: u8, g: u8, b: u8, a: u8) -> u32 {
+    (u32::from(r) << 24) | (u32::from(g) << 16) | (u32::from(b) << 8) | u32::from(a)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -339,6 +444,94 @@ mod tests {
     fn rgba_components_unpack() {
         assert_eq!(rgba_components(0x11_22_33_44), (0x11, 0x22, 0x33, 0x44));
         assert_eq!(rgba_components(0xFF_00_80_FF), (0xFF, 0x00, 0x80, 0xFF));
+    }
+
+    #[test]
+    fn pack_rgba_round_trips_components() {
+        for c in [
+            0x11_22_33_44u32,
+            0xFF_00_80_FF,
+            0x00_00_00_00,
+            0xDE_AD_BE_EF,
+        ] {
+            let (r, g, b, a) = rgba_components(c);
+            assert_eq!(pack_rgba(r, g, b, a), c);
+        }
+    }
+
+    #[test]
+    fn rows_start_unlocked() {
+        let s = state();
+        assert!(s.rows().iter().all(|r| !r.locked));
+        assert!(!s.is_locked(s.rows()[0].id));
+    }
+
+    #[test]
+    fn lock_makes_layer_locked_and_reports_found() {
+        let mut s = state();
+        let id = s.rows()[0].id;
+        assert_eq!(s.toggle_lock(id), Some(true));
+        assert!(s.is_locked(id));
+        assert_eq!(s.toggle_lock(id), Some(false));
+        assert!(!s.is_locked(id));
+        assert!(s.set_locked(id, true));
+        assert!(s.is_locked(id));
+        // An unknown layer is unlocked and reports not-found.
+        assert!(!s.is_locked(LayerId::new(999, 7)));
+        assert!(!s.set_locked(LayerId::new(999, 7), true));
+        assert!(s.toggle_lock(LayerId::new(999, 7)).is_none());
+    }
+
+    #[test]
+    fn locking_does_not_change_visibility() {
+        let mut s = state();
+        let id = s.rows()[0].id;
+        assert!(s.set_locked(id, true));
+        assert!(s.is_visible(id), "a locked layer stays drawn");
+    }
+
+    #[test]
+    fn preset_saves_current_hidden_set_and_reapplies() {
+        let mut s = state();
+        let first = s.rows()[0].id;
+        let second = s.rows()[1].id;
+        // Hide the first layer, then snapshot that view.
+        s.set_visible(first, false);
+        assert!(s.save_preset("just-first-hidden"));
+        // Change the view: show all, hide the second instead.
+        s.show_all();
+        s.set_visible(second, false);
+        // Re-applying the preset restores exactly the saved hidden set.
+        assert!(s.apply_preset("just-first-hidden"));
+        assert!(!s.is_visible(first));
+        assert!(s.is_visible(second));
+    }
+
+    #[test]
+    fn save_preset_overwrites_same_name_and_rejects_blank() {
+        let mut s = state();
+        let first = s.rows()[0].id;
+        s.set_visible(first, false);
+        assert!(s.save_preset("view"));
+        assert_eq!(s.presets().len(), 1);
+        // Re-saving under the same name overwrites in place, not duplicates.
+        s.show_all();
+        assert!(s.save_preset("view"));
+        assert_eq!(s.presets().len(), 1);
+        assert!(s.presets()[0].hidden.is_empty());
+        // A blank name is rejected.
+        assert!(!s.save_preset("   "));
+        assert_eq!(s.presets().len(), 1);
+    }
+
+    #[test]
+    fn delete_and_apply_missing_preset() {
+        let mut s = state();
+        assert!(s.save_preset("a"));
+        assert!(!s.apply_preset("nope"));
+        assert!(s.delete_preset("a"));
+        assert!(!s.delete_preset("a"));
+        assert!(s.presets().is_empty());
     }
 
     #[test]
