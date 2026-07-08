@@ -39,6 +39,28 @@ tools; a full drawing and vertex-editing suite; boolean and transform operations
 design-rule checker; a router; connectivity extraction; GDSII and OASIS import and export;
 embedded scripting; and real-time multi-user collaboration.
 
+## What is new in v8
+
+v8 widens the surface on every side while keeping the same evidence discipline. The browser
+bundle is now an installable Progressive Web App whose shell loads offline
+([Install and offline](pwa.md)). A `reticle-diff` crate and a canvas overlay answer what
+changed between two versions ([Layout diff](layout-diff.md)). Notes anchor to a shape or cell
+and survive a lossless V1-to-V2 document migration ([Comments](comments.md)), and several
+editors' edits converge to a byte-identical document with per-editor selective undo and a
+view-only permission enforced in the relay ([Multi-writer](multi-writer.md)). On the formats
+side there is LEF/DEF import cross-checked against OpenROAD ([LEF/DEF](lef-def.md)), a
+documented subset of KLayout `.lydrc` DRC decks validated against KLayout headless
+([.lydrc compatibility](lydrc-compat.md)), a standards-conformant OASIS writer whose output
+KLayout reads ([GDS / OASIS interop](interop.md)), and a second PDK, IHP SG13G2, that every
+generator runs against DRC-clean ([A second PDK](second-pdk.md)). Extraction now recognizes
+SKY130 MOSFETs and runs a device-level LVS-lite cross-checked against Magic
+([Device recognition](device-extraction.md)). A second, best-effort vision oracle
+(`llava:7b`) corroborates the authoritative checker on a small sample
+([Multimodal verification](multimodal-verification.md)). The core read, generate, render, and
+save paths are exposed to Python as a stable-ABI wheel ([Python bindings](python.md)), and the
+browser can convert a GDS to a streamable archive in a Web Worker into the Origin Private File
+System with no server ([In-browser conversion](in-browser-conversion.md)).
+
 ## Why it exists
 
 Reticle works the exact problem a semiconductor tooling team solves: visualizing and editing
