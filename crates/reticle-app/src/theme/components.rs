@@ -771,17 +771,36 @@ impl Collapsible {
         let t = ctx.tokens;
         // U+25BE down-pointing / U+25B8 right-pointing small triangle.
         let caret = if *open { '\u{25BE}' } else { '\u{25B8}' };
-        let header = ui.add(
-            egui::Label::new(
-                RichText::new(format!("{caret}  {}", self.title))
-                    .strong()
-                    .color(t.text_weak),
-            )
-            .selectable(false)
-            .sense(Sense::click()),
+        // A full-width clickable row (the conventional collapsible affordance)
+        // drawn by hand so it carries the tokens.md interaction states a bare
+        // `Label` cannot: a hover fill and, above all, the always-visible 1.5px
+        // keyboard-focus ring that 3C's F6 traversal lands on. `Sense::click()`
+        // keeps it focusable, so Space/Enter toggles it like any button.
+        let font = egui::TextStyle::Body.resolve(ui.style());
+        let galley = ui.painter().layout_no_wrap(
+            format!("{caret}  {}", self.title),
+            font,
+            Color32::PLACEHOLDER,
         );
+        let pad = ctx.density.button_padding();
+        let desired = Vec2::new(
+            ui.available_width().max(galley.size().x + 2.0 * pad.x),
+            (galley.size().y + 2.0 * pad.y).max(ctx.density.interact_height()),
+        );
+        let (rect, header) = ui.allocate_exact_size(desired, Sense::click());
         if header.clicked() {
             *open = !*open;
+        }
+        if ui.is_rect_visible(rect) {
+            let cr = Ctx::radius(RADIUS_SM);
+            if header.hovered() {
+                ui.painter().rect_filled(rect, cr, t.widget_hover);
+            }
+            let text_pos = egui::pos2(rect.left() + pad.x, rect.center().y - galley.size().y / 2.0);
+            ui.painter().galley(text_pos, galley, t.text_weak);
+            if header.has_focus() {
+                focus_ring(ui.painter(), rect, cr, t.focus);
+            }
         }
         let time = ctx.density.animation_time(ctx.reduced_motion);
         let openness = ui.ctx().animate_bool_with_time(self.id, *open, time);
@@ -901,6 +920,7 @@ pub struct Toast {
     message: String,
     actions: Vec<Button>,
     closable: bool,
+    appear: f32,
 }
 
 impl Toast {
@@ -912,6 +932,7 @@ impl Toast {
             message: message.into(),
             actions: Vec::new(),
             closable: true,
+            appear: 1.0,
         }
     }
 
@@ -931,9 +952,26 @@ impl Toast {
         self
     }
 
+    /// Sets the enter/exit progress in `0.0..=1.0`: 1.0 is fully present (the
+    /// default), 0.0 fully faded out. The toast queue (lane 3B, `notify.rs`)
+    /// drives this from an eased value so a toast fades in on arrival and out on
+    /// dismissal; under reduced motion the queue animates it with zero time, so
+    /// the toast simply appears. This component owns the opacity fade; the queue
+    /// owns the timing and the toast's on-screen position.
+    #[must_use]
+    pub fn appear(mut self, progress: f32) -> Self {
+        self.appear = progress.clamp(0.0, 1.0);
+        self
+    }
+
     /// Paints the toast and returns its [`ToastResponse`].
     pub fn show(self, ui: &mut egui::Ui, ctx: Ctx) -> ToastResponse {
         let t = ctx.tokens;
+        // Fade the whole card (frame, shadow, and content) by the enter/exit
+        // progress; the 1.0 default is a no-op, so a static toast is unchanged.
+        if self.appear < 1.0 {
+            ui.multiply_opacity(self.appear);
+        }
         let mut out = ToastResponse::default();
         let frame = egui::Frame::new()
             .fill(t.bg_raised)
@@ -989,6 +1027,7 @@ pub struct ProgressRow {
     label: String,
     fraction: f32,
     cancelable: bool,
+    anim_id: Option<Id>,
 }
 
 impl ProgressRow {
@@ -999,6 +1038,7 @@ impl ProgressRow {
             label: label.into(),
             fraction: fraction.clamp(0.0, 1.0),
             cancelable: false,
+            anim_id: None,
         }
     }
 
@@ -1009,9 +1049,37 @@ impl ProgressRow {
         self
     }
 
+    /// Eases the fill toward each new fraction rather than jumping, keyed by
+    /// `id` (a streaming row whose fraction ticks up glides instead of
+    /// snapping). The ease length is [`Density::animation_time`], so it is
+    /// instant under reduced motion; without this the fill tracks the fraction
+    /// exactly, frame for frame.
+    ///
+    /// [`Density::animation_time`]: super::tokens::Density::animation_time
+    #[must_use]
+    pub fn animate(mut self, id: impl std::hash::Hash + std::fmt::Debug) -> Self {
+        self.anim_id = Some(Id::new(id));
+        self
+    }
+
+    /// The fill fraction to paint this frame: the eased value when
+    /// [`ProgressRow::animate`] is set (zero-time, hence instant, under reduced
+    /// motion), otherwise the exact target.
+    fn displayed_fraction(&self, egui_ctx: &egui::Context, ctx: Ctx) -> f32 {
+        match self.anim_id {
+            Some(id) => egui_ctx.animate_value_with_time(
+                id,
+                self.fraction,
+                ctx.density.animation_time(ctx.reduced_motion),
+            ),
+            None => self.fraction,
+        }
+    }
+
     /// Paints the row and returns its [`ProgressResponse`].
     pub fn show(self, ui: &mut egui::Ui, ctx: Ctx) -> ProgressResponse {
         let t = ctx.tokens;
+        let shown = self.displayed_fraction(ui.ctx(), ctx);
         let mut out = ProgressResponse::default();
         ui.horizontal(|ui| {
             ui.label(RichText::new(&self.label).color(t.text_weak));
@@ -1031,7 +1099,7 @@ impl ProgressRow {
             );
             let cr = Ctx::radius(RADIUS_SM);
             ui.painter().rect_filled(track, cr, t.widget_bg);
-            let fill_w = track.width() * self.fraction;
+            let fill_w = track.width() * shown;
             if fill_w > 0.0 {
                 let fill =
                     egui::Rect::from_min_size(track.min, Vec2::new(fill_w, PROGRESS_BAR_HEIGHT));
@@ -1136,5 +1204,33 @@ mod tests {
         let (hot, _, _) = button_colors(&t, ButtonVariant::Ghost, true, false, true);
         assert_eq!(rest, Color32::TRANSPARENT);
         assert_eq!(hot, t.widget_hover);
+    }
+
+    #[test]
+    fn toast_appear_clamps_to_unit_range() {
+        assert!((Toast::new(Severity::Info, "x").appear(1.5).appear - 1.0).abs() < f32::EPSILON);
+        assert!(Toast::new(Severity::Info, "x").appear(-0.5).appear.abs() < f32::EPSILON);
+        // The default is fully present, so a plain toast never fades.
+        assert!((Toast::new(Severity::Info, "x").appear - 1.0).abs() < f32::EPSILON);
+    }
+
+    /// Without `.animate` the fill equals the target exactly, and with `.animate`
+    /// under reduced motion (zero animation time) it is instant, equal to the
+    /// target on the frame it is set. Both are the "no visible motion" paths the
+    /// reduced-motion setting must guarantee.
+    #[test]
+    fn progress_fill_is_instant_without_animate_and_under_reduced_motion() {
+        let egui_ctx = egui::Context::default();
+        egui_ctx.begin_pass(egui::RawInput::default());
+
+        let ctx = Ctx::dark(Density::Comfortable);
+        let plain = ProgressRow::new("stream", 0.4);
+        assert!((plain.displayed_fraction(&egui_ctx, ctx) - 0.4).abs() < f32::EPSILON);
+
+        let ctx_reduced = ctx.with_reduced_motion(true);
+        let animated = ProgressRow::new("stream", 0.6).animate("progress_test");
+        assert!((animated.displayed_fraction(&egui_ctx, ctx_reduced) - 0.6).abs() < f32::EPSILON);
+
+        let _ = egui_ctx.end_pass();
     }
 }

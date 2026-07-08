@@ -414,3 +414,12 @@ ui-check:
 # intended visual change or at the Gate 1 recapture. Needs a GPU adapter.
 ui-baselines:
     $env:UPDATE_SNAPSHOTS = "force"; cargo nextest run -p reticle-app --test ui_snapshots --no-tests=pass; exit $LASTEXITCODE
+
+# `frame-guard` (lane 4A) times a warm editor frame on the GPU and asserts the
+# median step stays under the 60 Hz budget (16 ms), the standing proof that the
+# redesign's interaction states and motion did not make the editor miss frames.
+# It skips honestly on an adapterless host and is serialized onto the single GPU
+# by the .config/nextest.toml gpu-serial group. GPU-bound, so NOT part of
+# `just ci`; run by the frame-guard author and the orchestrator at the gates.
+frame-guard:
+    cargo nextest run -p reticle-app --test frame_guard --no-tests=pass
