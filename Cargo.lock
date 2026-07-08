@@ -5825,7 +5825,15 @@ version = "7.0.0"
 dependencies = [
  "console_error_panic_hook",
  "eframe",
+ "js-sys",
+ "pollster",
  "reticle-app",
+ "reticle-geometry",
+ "reticle-index",
+ "reticle-io",
+ "reticle-model",
+ "rkyv",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
 ]

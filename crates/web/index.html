@@ -106,6 +106,21 @@
     </script>
     <link data-trunk rel="rust" data-bin="web" data-wasm-opt="z" />
     <!--
+      The in-browser GDS -> .rtla convert Web Worker (lane v8-6c). Trunk builds
+      bin/convert_worker.rs as a `no-modules` wasm-bindgen bundle emitted at the stable
+      (unhashed) names convert_worker.js / convert_worker_bg.wasm. That bundle only
+      defines `wasm_bindgen`; it does not boot itself, so the app spawns the classic
+      worker `convert-worker-boot.js` below, which importScripts it and calls init.
+    -->
+    <link
+      data-trunk
+      rel="rust"
+      data-bin="convert_worker"
+      data-type="worker"
+      data-wasm-opt="z"
+    />
+    <link data-trunk rel="copy-file" href="convert-worker-boot.js" />
+    <!--
       Emit the PWA shell assets into dist. Trunk copies these verbatim into the
       dist root, so the wholesale `dist/*` copy in scripts/deploy-pages.ps1
       carries manifest.json, sw.js, and the icons to gh-pages under /reticle/.
