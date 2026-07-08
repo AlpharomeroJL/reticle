@@ -26,6 +26,7 @@
 - [Metrology](metrology.md)
 - [Layout diff](layout-diff.md)
 - [Collaboration](collaboration.md)
+  - [Multi-writer collaboration](multi-writer.md)
   - [The relay: two implementations, one protocol](relay.md)
   - [Comments and annotations](comments.md)
 - [Scripting](scripting.md)
