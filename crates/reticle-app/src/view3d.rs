@@ -159,13 +159,15 @@ impl View3d {
         top_cell: &str,
         layers: &LayerState,
     ) {
-        // Start collapsed and tucked below the toolbar (right of the Layers panel) so
-        // the app opens on the canvas, not on two fully-expanded tool windows. The user
-        // expands and drags it from there; egui persists the choice per session.
+        // Start collapsed and tucked over the canvas, clear of the Layers panel (~210px)
+        // and below even a wrapped toolbar, so the collapsed title bar does not occlude
+        // the toolbar or the left panel at the default window sizes (lane v8-ui). The app
+        // opens on the canvas, not on two fully-expanded tool windows; the user expands
+        // and drags it from there, and egui persists the choice per session.
         egui::Window::new("3D stack")
             .default_size([440.0, 380.0])
             .default_open(false)
-            .default_pos([200.0, 60.0])
+            .default_pos([260.0, 104.0])
             .resizable(true)
             .show(ctx, |ui| {
                 self.show_contents(ui, frame, doc, top_cell, layers);
