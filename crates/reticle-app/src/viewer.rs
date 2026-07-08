@@ -25,10 +25,135 @@
 //! into [`apply_frame`](ViewerSession::apply_frame)) is the Wave 1 end-to-end
 //! gate; this module is the logic that wiring drives.
 
-use reticle_geometry::Rect;
+use reticle_geometry::{Point, Rect};
 use reticle_sync::{Awareness, Presence, SyncDocument, SyncError};
 
 use crate::camera::{ScreenRect, ViewCamera};
+
+/// A palette of visually distinct collaborator colors (packed `0xRRGGBBAA`),
+/// assigned to remote actors so each named cursor and session-chip avatar reads as
+/// one consistent person (catalog 86). These are canvas *data* colors, not chrome
+/// tokens (tokens.md keeps presence-cursor colors with the overlay code), and they
+/// stay clear of the sharer's own blue (`0x2f_81_f7_ff`).
+pub const COLLAB_PALETTE: [u32; 8] = [
+    0xe5_48_4d_ff, // red
+    0xf7_6b_15_ff, // orange
+    0xff_b2_24_ff, // amber
+    0x46_a7_58_ff, // green
+    0x12_a5_94_ff, // teal
+    0x8e_4e_c6_ff, // purple
+    0xe9_3d_82_ff, // pink
+    0x5e_b0_ef_ff, // sky
+];
+
+/// Deterministically maps an actor id to a stable [`COLLAB_PALETTE`] color, so the
+/// same collaborator keeps the same color across frames and across peers without
+/// any coordination (an FNV-1a hash of the id, folded into the palette).
+#[must_use]
+pub fn color_for_actor(actor: &str) -> u32 {
+    let mut hash: u32 = 0x811c_9dc5;
+    for b in actor.bytes() {
+        hash ^= u32::from(b);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    COLLAB_PALETTE[(hash as usize) % COLLAB_PALETTE.len()]
+}
+
+/// Seconds a cursor may sit still before it begins to fade.
+pub const IDLE_FADE_START: f32 = 3.0;
+/// Seconds of stillness by which a cursor reaches its faded floor.
+pub const IDLE_FADE_END: f32 = 12.0;
+/// The floor opacity an idle cursor fades to (it recedes, never vanishes).
+pub const IDLE_MIN_ALPHA: f32 = 0.25;
+
+/// The opacity multiplier for a cursor that last moved `idle` seconds ago
+/// (catalog 86): full until [`IDLE_FADE_START`], easing linearly to
+/// [`IDLE_MIN_ALPHA`] by [`IDLE_FADE_END`], and never below that floor so a parked
+/// collaborator still reads on the canvas.
+#[must_use]
+pub fn idle_alpha(idle: f32) -> f32 {
+    if idle <= IDLE_FADE_START {
+        1.0
+    } else if idle >= IDLE_FADE_END {
+        IDLE_MIN_ALPHA
+    } else {
+        let f = (idle - IDLE_FADE_START) / (IDLE_FADE_END - IDLE_FADE_START);
+        1.0 - f * (1.0 - IDLE_MIN_ALPHA)
+    }
+}
+
+/// A remote participant in a shared session, for the viewer's session chip
+/// (catalog 75): the actor id, a display name (falling back to a short label), and
+/// the color its cursor and avatar are drawn with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Participant {
+    /// The actor id this participant is keyed by.
+    pub actor: String,
+    /// The display name shown on the avatar and cursor label.
+    pub name: String,
+    /// The packed `0xRRGGBBAA` color for the avatar and cursor.
+    pub color_rgba: u32,
+}
+
+/// Builds the session chip's participant list from an [`Awareness`] map, dropping
+/// `self_actor` (the local viewer never counts itself) and sorting by actor id so
+/// the avatar row is stable frame to frame.
+///
+/// Each participant takes its published `color_rgba` when set, else a stable
+/// palette color from [`color_for_actor`]; its name is the published
+/// `display_name` when non-empty, else a short label derived from the actor id.
+#[must_use]
+pub fn participants(awareness: &Awareness, self_actor: &str) -> Vec<Participant> {
+    let mut out: Vec<Participant> = awareness
+        .iter()
+        .filter(|(actor, _)| actor.as_str() != self_actor)
+        .map(|(actor, presence)| {
+            let color = if presence.color_rgba == 0 {
+                color_for_actor(actor)
+            } else {
+                presence.color_rgba
+            };
+            let name = if presence.display_name.is_empty() {
+                short_actor_label(actor)
+            } else {
+                presence.display_name.clone()
+            };
+            Participant {
+                actor: actor.clone(),
+                name,
+                color_rgba: color,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.actor.cmp(&b.actor));
+    out
+}
+
+/// A short human label for an actor with no published display name: the first
+/// segment before any separator, capped so a long id does not overrun the chip.
+fn short_actor_label(actor: &str) -> String {
+    let head = actor
+        .split(['-', ':', '_', '@'])
+        .next()
+        .unwrap_or(actor)
+        .trim();
+    let head = if head.is_empty() { actor } else { head };
+    head.chars().take(12).collect()
+}
+
+/// Eases `from` a fraction `t` (0..=1) toward `to`, interpolating the center and
+/// the zoom, for the smooth follow-camera transition (catalog 87). `t == 1.0`
+/// lands exactly on `to` (used under reduced motion and as the snap fallback).
+#[must_use]
+pub fn lerp_camera(from: ViewCamera, to: ViewCamera, t: f32) -> ViewCamera {
+    let t = f64::from(t.clamp(0.0, 1.0));
+    let (a, b) = (from.center(), to.center());
+    let cx = f64::from(a.x) + f64::from(b.x - a.x) * t;
+    let cy = f64::from(a.y) + f64::from(b.y - a.y) * t;
+    let ppd = from.pixels_per_dbu() + (to.pixels_per_dbu() - from.pixels_per_dbu()) * t;
+    #[allow(clippy::cast_possible_truncation)]
+    ViewCamera::new(Point::new(cx.round() as i32, cy.round() as i32), ppd)
+}
 
 /// The actor id the viewer's own (read-only) mirror uses.
 ///
@@ -182,6 +307,29 @@ impl ViewerSession {
         self.camera = follow_camera(viewport, screen);
         true
     }
+
+    /// Eases the local camera a fraction `t` toward the sharer's framed viewport,
+    /// for the smooth follow transition (catalog 87). Like
+    /// [`sync_camera`](Self::sync_camera) it is a no-op when follow-mode is off or
+    /// no sharer viewport is known, and returns whether the camera moved.
+    ///
+    /// Pass `t == 1.0` (reduced motion) to snap exactly as `sync_camera` does; a
+    /// smaller `t` per frame interpolates so a viewer that clicks an avatar glides
+    /// to the sharer's view instead of jumping.
+    pub fn follow_step(&mut self, screen: &ScreenRect, t: f32) -> bool {
+        if !self.follow {
+            return false;
+        }
+        let Some(viewport) = self.sharer().map(|p| p.viewport) else {
+            return false;
+        };
+        if viewport.is_empty() {
+            return false;
+        }
+        let target = follow_camera(viewport, screen);
+        self.camera = lerp_camera(self.camera, target, t);
+        true
+    }
 }
 
 /// The camera that frames the sharer's `viewport` (a world-space DBU rectangle)
@@ -208,7 +356,7 @@ pub fn follow_camera(viewport: Rect, screen: &ScreenRect) -> ViewCamera {
 #[cfg(test)]
 mod tests {
     use super::{ViewerSession, follow_camera};
-    use crate::camera::ScreenRect;
+    use crate::camera::{ScreenRect, ViewCamera};
     use reticle_geometry::{LayerId, Point, Rect};
     use reticle_model::{Cell, ShapeKind};
     use reticle_sync::{Presence, SyncDocument};
@@ -351,6 +499,117 @@ mod tests {
         viewer.apply_presence(p2);
         viewer.sync_camera(&screen());
         assert_eq!(viewer.camera().center(), Point::new(4500, 4500));
+    }
+
+    #[test]
+    fn color_for_actor_is_stable_and_within_the_palette() {
+        // The same id always yields the same color, and it is always a palette entry.
+        let a = super::color_for_actor("alice");
+        let b = super::color_for_actor("alice");
+        assert_eq!(a, b, "color is deterministic per actor");
+        assert!(
+            super::COLLAB_PALETTE.contains(&a),
+            "color is from the palette"
+        );
+        // Different ids generally land on distinct colors (these three are chosen to).
+        let names = ["alice", "bob", "carol"];
+        let colors: Vec<u32> = names.iter().map(|n| super::color_for_actor(n)).collect();
+        let mut uniq = colors.clone();
+        uniq.sort_unstable();
+        uniq.dedup();
+        assert_eq!(
+            uniq.len(),
+            names.len(),
+            "distinct actors get distinct colors"
+        );
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)] // exact comparison against the fade's constant endpoints
+    fn idle_alpha_fades_from_full_to_the_floor() {
+        assert_eq!(
+            super::idle_alpha(0.0),
+            1.0,
+            "a fresh cursor is fully opaque"
+        );
+        assert_eq!(
+            super::idle_alpha(super::IDLE_FADE_START),
+            1.0,
+            "still opaque at the fade start"
+        );
+        assert_eq!(
+            super::idle_alpha(super::IDLE_FADE_END),
+            super::IDLE_MIN_ALPHA,
+            "reaches the floor at the fade end"
+        );
+        assert_eq!(
+            super::idle_alpha(1_000.0),
+            super::IDLE_MIN_ALPHA,
+            "never fades below the floor"
+        );
+        // Monotonically non-increasing across the fade window.
+        let mid = super::idle_alpha(f32::midpoint(super::IDLE_FADE_START, super::IDLE_FADE_END));
+        assert!(mid < 1.0 && mid > super::IDLE_MIN_ALPHA, "eases in between");
+    }
+
+    #[test]
+    fn participants_excludes_self_and_sorts_stably() {
+        use reticle_sync::Awareness;
+        let mut aw = Awareness::new();
+        let mut sharer = Presence::new("sharer");
+        sharer.display_name = "Ada".to_owned();
+        sharer.color_rgba = 0x11_22_33_ff;
+        aw.set(sharer);
+        aw.set(Presence::new("zoe-42")); // no name, no color
+        aw.set(Presence::new("viewer")); // the local actor, excluded
+
+        let ps = super::participants(&aw, super::VIEWER_ACTOR);
+        assert_eq!(ps.len(), 2, "the local viewer is not counted");
+        // Sorted by actor id: "sharer" < "zoe-42".
+        assert_eq!(ps[0].actor, "sharer");
+        assert_eq!(ps[0].name, "Ada", "published name wins");
+        assert_eq!(ps[0].color_rgba, 0x11_22_33_ff, "published color wins");
+        assert_eq!(ps[1].actor, "zoe-42");
+        assert_eq!(ps[1].name, "zoe", "name falls back to a short actor label");
+        assert_eq!(
+            ps[1].color_rgba,
+            super::color_for_actor("zoe-42"),
+            "color falls back to the palette"
+        );
+    }
+
+    #[test]
+    fn lerp_camera_lands_on_the_target_at_t_one() {
+        let from = ViewCamera::new(Point::new(0, 0), 1.0);
+        let to = ViewCamera::new(Point::new(1000, 2000), 4.0);
+        let snapped = super::lerp_camera(from, to, 1.0);
+        assert_eq!(snapped.center(), to.center());
+        assert!((snapped.pixels_per_dbu() - to.pixels_per_dbu()).abs() < 1e-9);
+        // A partial step moves toward the target without overshooting.
+        let half = super::lerp_camera(from, to, 0.5);
+        assert_eq!(half.center(), Point::new(500, 1000));
+    }
+
+    #[test]
+    fn follow_step_eases_toward_the_sharer() {
+        let mut viewer = ViewerSession::new();
+        let viewport = Rect::new(Point::new(0, 0), Point::new(1000, 1000));
+        let mut p = Presence::new("sharer");
+        p.viewport = viewport;
+        viewer.apply_presence(p);
+        viewer.set_follow(true);
+
+        // A fractional step moves but does not yet arrive.
+        assert!(viewer.follow_step(&screen(), 0.25));
+        let snapped = follow_camera(viewport, &screen());
+        assert_ne!(
+            viewer.camera().center(),
+            snapped.center(),
+            "a partial step has not arrived"
+        );
+        // t == 1.0 snaps exactly, matching sync_camera.
+        assert!(viewer.follow_step(&screen(), 1.0));
+        assert_eq!(viewer.camera(), snapped);
     }
 
     #[test]

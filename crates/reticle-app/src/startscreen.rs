@@ -136,10 +136,189 @@ impl ExampleChip {
     }
 }
 
+/// One notable feature of a gallery design, listed in the card's landmarks
+/// dropdown so a first-time visitor knows what they are looking at (catalog 96).
+#[derive(Clone, Copy, Debug)]
+pub struct Landmark {
+    /// The landmark's short name (a cell, a region, a structure).
+    pub name: &'static str,
+    /// A one-line "what it is" for the dropdown row.
+    pub detail: &'static str,
+}
+
+/// How a [`GalleryCard`]'s primary action opens its design.
+#[derive(Clone, Copy, Debug)]
+pub enum GalleryAction {
+    /// Open a compiled-in [`ExampleChip`] through the document-open seam.
+    Example(ExampleChip),
+    /// Open a served `.rtla` archive by URL through the streaming `?archive=` path
+    /// (web only). The string is the archive URL.
+    Archive(&'static str),
+}
+
+/// A Start-screen gallery card (catalog 14/96): a real design with its name,
+/// technology, size, source, license, an optional streaming badge, and a landmarks
+/// dropdown, plus how its primary action opens it.
+#[derive(Clone, Copy, Debug)]
+pub struct GalleryCard {
+    /// The card title.
+    pub title: &'static str,
+    /// A one-line description under the title.
+    pub description: &'static str,
+    /// The process/technology badge (for example `SkyWater SKY130`).
+    pub technology: &'static str,
+    /// A human size label (cells or approximate byte size).
+    pub size: &'static str,
+    /// The design's source/provenance.
+    pub source: &'static str,
+    /// The redistribution license.
+    pub license: &'static str,
+    /// Whether this design streams from a served archive (shows a Streaming badge).
+    pub streaming: bool,
+    /// The notable landmarks listed in the card's dropdown.
+    pub landmarks: &'static [Landmark],
+    /// How the card's primary action opens the design.
+    pub action: GalleryAction,
+}
+
+const TT_LANDMARKS: &[Landmark] = &[
+    Landmark {
+        name: "TT_MIN_TOP",
+        detail: "the synthesized top cell tying the standard cells together",
+    },
+    Landmark {
+        name: "SkyWater standard cells",
+        detail: "a few real published SKY130 cells from a Tiny Tapeout 03 design",
+    },
+];
+
+const INV_LANDMARKS: &[Landmark] = &[
+    Landmark {
+        name: "sky130_fd_sc_hd__inv_1",
+        detail: "the single inverter standard cell, straight from its GDSII",
+    },
+    Landmark {
+        name: "diffusion, poly, and metal1",
+        detail: "the transistor layers you can toggle in the Layers panel",
+    },
+];
+
+const STREAMED_LANDMARKS: &[Landmark] = &[
+    Landmark {
+        name: "progressive residency",
+        detail: "coarse cell boxes fill in to full geometry as tiles stream over HTTP",
+    },
+    Landmark {
+        name: "streaming HUD",
+        detail: "the top-left overlay reports fetched tiles and residency live",
+    },
+];
+
+/// The URL of the served `.rtla` demo archive wired into the streaming gallery card
+/// (the same fixture the served-archive e2e streams).
+pub const DEMO_ARCHIVE_URL: &str =
+    "https://reticle-archive.josefdean.workers.dev/f04af90fbb06786c.rtla";
+
+/// The Start-screen gallery, in display order: the two compiled-in examples that
+/// open with one click on any build, then the streaming served-archive demo that
+/// shows the browser's `?archive=` residency path (catalog 14/96).
+pub const GALLERY: &[GalleryCard] = &[
+    GalleryCard {
+        title: "Tiny Tapeout sample",
+        description: "A real Tiny Tapeout 03 design: a few SkyWater standard cells under a small top.",
+        technology: "SkyWater SKY130",
+        size: "4 cells",
+        source: "Tiny Tapeout 03",
+        license: "Apache-2.0",
+        streaming: false,
+        landmarks: TT_LANDMARKS,
+        action: GalleryAction::Example(ExampleChip::TinyTapeoutMin),
+    },
+    GalleryCard {
+        title: "SKY130 inverter cell",
+        description: "A single real SkyWater SKY130 standard cell, the inv_1 inverter.",
+        technology: "SkyWater SKY130",
+        size: "1 cell",
+        source: "SkyWater SKY130 PDK",
+        license: "Apache-2.0",
+        streaming: false,
+        landmarks: INV_LANDMARKS,
+        action: GalleryAction::Example(ExampleChip::Sky130Inverter),
+    },
+    GalleryCard {
+        title: "Streamed die (served archive)",
+        description: "A larger die streamed tile by tile over HTTP Range, showing progressive residency.",
+        technology: "SkyWater SKY130",
+        size: "streamed",
+        source: "Reticle demo archive",
+        license: "Apache-2.0",
+        streaming: true,
+        landmarks: STREAMED_LANDMARKS,
+        action: GalleryAction::Archive(DEMO_ARCHIVE_URL),
+    },
+];
+
 // The recent-files list is displayed by the Start screen but its entry type and
 // persistence live in `crate::webopen` (Lane 1B): `webopen::RecentFile` carries the
 // name, byte size, and optional source URL, and `RecentFiles` owns dedup, cap, and
 // IndexedDB persistence. The Start screen renders `App::recent_files()` directly.
+
+/// The stable identity a [`RecentFile`](crate::webopen::RecentFile) is pinned by:
+/// its source URL when it has one, else its display name (matching the dedup
+/// identity Lane 1B's `RecentFiles` uses, so a pin follows the same entry).
+#[must_use]
+pub fn recent_key(recent: &crate::webopen::RecentFile) -> &str {
+    recent.url.as_deref().unwrap_or(&recent.name)
+}
+
+/// Lane 2D's pinning state for the Start-screen recent-files list (catalog 9).
+///
+/// The recent-file *model* (dedup, cap, persistence) is frozen Lane 1B code, so
+/// pinning is a sibling concern kept here: a set of pinned [`recent_key`]s and the
+/// pure ordering that floats pinned entries to the top of the list, each group
+/// keeping the recency order Lane 1B produced.
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+pub struct RecentPins {
+    pinned: std::collections::BTreeSet<String>,
+}
+
+impl RecentPins {
+    /// An empty pin set.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether `key` (from [`recent_key`]) is pinned.
+    #[must_use]
+    pub fn is_pinned(&self, key: &str) -> bool {
+        self.pinned.contains(key)
+    }
+
+    /// Toggles the pin for `key`, returning the new pinned state.
+    pub fn toggle(&mut self, key: impl Into<String>) -> bool {
+        let key = key.into();
+        if self.pinned.remove(&key) {
+            false
+        } else {
+            self.pinned.insert(key);
+            true
+        }
+    }
+
+    /// Orders `recent` for display: pinned entries first, then the rest, each group
+    /// preserving the input (most-recent-first) order.
+    #[must_use]
+    pub fn order<'a>(
+        &self,
+        recent: &'a [crate::webopen::RecentFile],
+    ) -> Vec<&'a crate::webopen::RecentFile> {
+        let (mut pinned, mut rest): (Vec<_>, Vec<_>) =
+            recent.iter().partition(|r| self.is_pinned(recent_key(r)));
+        pinned.append(&mut rest);
+        pinned
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -216,5 +395,93 @@ mod tests {
         for chip in ExampleChip::ALL {
             assert_eq!(chip.format(), DocFormat::Gds);
         }
+    }
+
+    #[test]
+    fn gallery_cards_carry_full_metadata_and_landmarks() {
+        assert!(
+            !GALLERY.is_empty(),
+            "the gallery offers at least one design"
+        );
+        for card in GALLERY {
+            for field in [
+                card.title,
+                card.description,
+                card.technology,
+                card.size,
+                card.source,
+                card.license,
+            ] {
+                assert!(!field.is_empty(), "{} has a blank field", card.title);
+                // Style gate: no em dash in any gallery copy.
+                assert!(!field.contains('\u{2014}'), "{} has an em dash", card.title);
+            }
+            assert!(
+                !card.landmarks.is_empty(),
+                "{} lists at least one landmark (catalog 96)",
+                card.title
+            );
+            for lm in card.landmarks {
+                assert!(!lm.name.is_empty() && !lm.detail.is_empty());
+                assert!(!lm.detail.contains('\u{2014}'));
+            }
+        }
+        // Exactly one streaming card, and it opens an archive URL, not an example.
+        let streaming: Vec<&GalleryCard> = GALLERY.iter().filter(|c| c.streaming).collect();
+        assert_eq!(streaming.len(), 1, "one streaming demo is offered");
+        assert!(
+            matches!(streaming[0].action, GalleryAction::Archive(_)),
+            "a streaming card opens an archive"
+        );
+    }
+
+    #[test]
+    fn every_embedded_gallery_card_opens_through_the_seam() {
+        // Each non-streaming card names an ExampleChip that opens cleanly.
+        for card in GALLERY.iter().filter(|c| !c.streaming) {
+            let GalleryAction::Example(chip) = card.action else {
+                panic!(
+                    "{} is not streaming, so it must be an embedded example",
+                    card.title
+                );
+            };
+            chip.open()
+                .unwrap_or_else(|e| panic!("{} must open: {e}", card.title));
+        }
+    }
+
+    #[test]
+    fn recent_pins_toggle_and_float_pinned_entries_first() {
+        use crate::webopen::RecentFile;
+        let recent = [
+            RecentFile::local("newest.gds", 2048),
+            RecentFile::remote("mid.gds", 1024, "https://example.test/mid.gds"),
+            RecentFile::local("oldest.gds", 512),
+        ];
+        let mut pins = RecentPins::new();
+        // Nothing pinned: order is unchanged (most-recent-first).
+        let order: Vec<&str> = pins
+            .order(&recent)
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect();
+        assert_eq!(order, ["newest.gds", "mid.gds", "oldest.gds"]);
+
+        // Pin the oldest (by key): it floats to the top; the rest keep their order.
+        assert!(pins.toggle(recent_key(&recent[2])), "toggling pins it");
+        assert!(pins.is_pinned("oldest.gds"));
+        let order: Vec<&str> = pins
+            .order(&recent)
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect();
+        assert_eq!(order, ["oldest.gds", "newest.gds", "mid.gds"]);
+
+        // The remote entry pins by its URL key, and toggling again unpins.
+        let mid_key = recent_key(&recent[1]).to_owned();
+        assert!(pins.toggle(&mid_key));
+        assert!(pins.is_pinned("https://example.test/mid.gds"));
+        assert!(!pins.toggle(&mid_key), "toggling again unpins");
+        assert!(!pins.is_pinned("https://example.test/mid.gds"));
     }
 }

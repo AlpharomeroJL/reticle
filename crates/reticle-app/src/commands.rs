@@ -71,6 +71,12 @@ pub enum AppOp {
     SplitHorizontal,
     /// Split the canvas into two stacked panes.
     SplitVertical,
+    /// Toggle presentation mode: hide all chrome and show only the canvas
+    /// (catalog 93, lane 2D, id `view.presentation`).
+    TogglePresentation,
+    /// Close the current design and return to the Start screen (lane 2D, id
+    /// `file.close_design`).
+    CloseDesign,
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -339,6 +345,27 @@ static REGISTRY: &[CommandSpec] = &[
         default_chord: Some("Ctrl+P"),
         rebindable: true,
         run: RunAs::App(AppOp::OpenPalette),
+        scope: Scope::Global,
+    },
+    // lane 2d
+    CommandSpec {
+        id: CommandId("view.presentation"),
+        label: "Presentation mode",
+        category: "View",
+        menu_path: Some(&["View"]),
+        default_chord: Some("P"),
+        rebindable: true,
+        run: RunAs::App(AppOp::TogglePresentation),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("file.close_design"),
+        label: "Close design",
+        category: "File",
+        menu_path: Some(&["File"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::CloseDesign),
         scope: Scope::Global,
     },
 ];

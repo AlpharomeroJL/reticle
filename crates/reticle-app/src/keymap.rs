@@ -508,6 +508,8 @@ mod tests {
             ("view.split_single", "Ctrl+1"),
             ("view.split_h", "Ctrl+2"),
             ("view.split_v", "Ctrl+3"),
+            // Lane 2D adds Presentation mode as a new default (ia-inventory section 4).
+            ("view.presentation", "P"),
         ];
         for (command, text) in expect {
             assert_eq!(
