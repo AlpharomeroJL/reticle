@@ -1002,19 +1002,24 @@ impl App {
     /// For [`StartView::ReplayTheater`] it opens the docked theater panel and loads
     /// the default transcript from the platform [`store`](crate::store) (the bundled
     /// transcript on wasm, the scripted run on native), so a public web visitor
-    /// lands directly on a playing replay (ADR 0026). If the store cannot produce a
-    /// transcript, the theater simply opens empty rather than failing.
+    /// lands on a loaded replay with the transport ready to play (ADR 0026). If the
+    /// store cannot produce a transcript, the theater simply opens empty rather than
+    /// failing.
+    ///
+    /// The landing does not auto-play: the theater is docked (H1) so it never
+    /// occludes the menu bar or canvas, and it waits at "press Play or Step" rather
+    /// than running the demo to its end. Auto-playing exposed a pre-existing
+    /// wasm-versus-native `document_hash` nondeterminism (the same recorded run
+    /// replays to a hash MATCH on native but a MISMATCH readout on wasm), so an
+    /// auto-played landing would greet a first visitor with a red MISMATCH. The
+    /// determinism gap is tracked separately; the inviting idle state is the right
+    /// public first frame regardless.
     fn apply_start_view(&mut self) {
         if self.start_view == StartView::ReplayTheater {
             if let Ok((records, hash)) = self.store.default_transcript() {
                 self.replay.load(records, hash);
             }
             self.replay_open = true;
-            // Play at once so the landing shows the agent drawing (ADR 0026's
-            // "motion" first impression) instead of an idle "Nothing drawn yet"
-            // panel; this closes H1's "never lands on an empty box" requirement. A
-            // no-op when the store gave no transcript (nothing to play).
-            self.replay.play();
         }
     }
 
