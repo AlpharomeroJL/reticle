@@ -33,6 +33,7 @@ use crate::inspector::{self, Inspection};
 use crate::keymap::{self, Keymap};
 use crate::labels;
 use crate::layers::{self, LayerState};
+use crate::menu;
 use crate::minimap::MinimapLayout;
 use crate::netlight::{Generation, Netlight};
 use crate::outline::{self, OutlineTree, SavedSets};
@@ -43,7 +44,7 @@ use crate::selection::{self, Selection};
 use crate::snap::{self, Guide, SnapHint, SnapState};
 use crate::tech_editor::TechEditorState;
 use crate::theme::{
-    self,
+    self, components, icons,
     tokens::{CANVAS, DARK},
 };
 use crate::tool::{Tool, ToolState};
@@ -2466,6 +2467,13 @@ impl App {
             AppOp::SplitSingle => self.set_split(Split::Single),
             AppOp::SplitHorizontal => self.set_split(Split::Horizontal),
             AppOp::SplitVertical => self.set_split(Split::Vertical),
+            // lane 2A: the developer actions relocated to Help > Developer.
+            AppOp::AddDemoRect => self.add_demo_rectangle(),
+            AppOp::ToggleReplayTheater => {
+                self.replay_open = !self.replay_open;
+                self.status
+                    .set(format!("Replay theater {}", on_off(self.replay_open)));
+            }
         }
     }
 
@@ -2475,123 +2483,219 @@ impl App {
         self.status.set(format!("View: {}", split.label()));
     }
 
-    /// Draws the top toolbar: tool buttons, view actions, and the palette hint.
+    /// Draws the thinned top toolbar: an Open affordance, grouped selection and
+    /// draw tools, view actions and toggles, and a segmented split control.
+    ///
+    /// Every control is a [`components`] widget dispatched through its registry id,
+    /// so the toolbar and the menu bar share one effect path and one keymap. Undo,
+    /// Redo, the palette, and Shortcuts moved into the Edit and Help menus; the web
+    /// Convert affordance moved into the File menu. Tooltips carry a name, the live
+    /// chord, and a one-line description (catalog 25). Nothing floats.
+    #[allow(clippy::too_many_lines)] // one flat row of button groups reads better than fragmenting
     fn toolbar(&mut self, ui: &mut egui::Ui) {
+        let ctx = components::Ctx::dark(self.ui_density).with_reduced_motion(self.reduced_motion);
         ui.horizontal_wrapped(|ui| {
-            ui.label("Tool:");
-            for tool in Tool::all() {
-                let selected = self.tools.active() == tool;
-                if ui.selectable_label(selected, tool.label()).clicked() {
-                    self.select_tool(tool);
-                }
-            }
-            // Path tool options: width and end cap, shown only while it is active.
-            if self.tools.active() == Tool::DrawPath {
-                ui.separator();
-                ui.label("Width:");
-                let mut w = self.draw.path.width();
-                if ui
-                    .add(egui::DragValue::new(&mut w).speed(5.0).range(1..=100_000))
-                    .changed()
-                {
-                    self.draw.path.set_width(w);
-                }
-                let cap = self.draw.path.endcap();
-                for (variant, name) in [
-                    (Endcap::Flat, "Flat"),
-                    (Endcap::Square, "Square"),
-                    (Endcap::Round, "Round"),
-                ] {
-                    if ui.selectable_label(cap == variant, name).clicked() {
-                        self.draw.path.set_endcap(variant);
-                    }
-                }
-            }
-            ui.separator();
             // The open affordance the first-run tour points at. It returns to the
             // Start screen, which holds the file-open guidance, the drag-and-drop
             // target, the example-chip gallery, and recent files, so opening a design
             // works the same on native and on the web (where there is no filesystem
             // dialog). Dragging a file onto the window opens it directly (see
             // `handle_dropped_files`).
-            if ui
-                .button("Open")
-                .on_hover_text("Open a design, or drag a GDSII/OASIS file onto the window")
+            if components::IconButton::new(icons::FOLDER_OPEN, "Open")
+                .hint("Open a design, or drag a GDSII or OASIS file onto the window")
+                .show(ui, ctx)
                 .clicked()
             {
                 self.start_screen = true;
             }
-            // Web only: the in-browser GDS -> .rtla convert picker sits on the toolbar
-            // next to Open (lane v8-ui). It was formerly a floating top-left HTML label
-            // that overlapped the toolbar; the button delegates to the web shell's hidden
-            // file input, which runs the convert worker, so it never floats over the
-            // canvas or other controls.
-            #[cfg(target_arch = "wasm32")]
-            if ui
-                .button("Convert GDS \u{2192} archive")
-                .on_hover_text("Convert a GDS to a streamable .rtla archive, in your browser")
-                .clicked()
-            {
-                Self::call_window_fn("__reticleTriggerConvert");
-            }
-            if ui.button("Fit").clicked() {
-                self.fit_requested = true;
-            }
-            let can_undo = self.history.can_undo();
-            let can_redo = self.history.can_redo();
-            if ui
-                .add_enabled(can_undo, egui::Button::new("Undo"))
-                .clicked()
-            {
-                self.run_command(Command::Undo, None);
-            }
-            if ui
-                .add_enabled(can_redo, egui::Button::new("Redo"))
-                .clicked()
-            {
-                self.run_command(Command::Redo, None);
+            ui.separator();
+
+            // Selection tools.
+            for (tool, icon) in [
+                (
+                    Tool::Select,
+                    IconLabel::new(
+                        icons::MOUSE_POINTER_2,
+                        "Select",
+                        "Select and rubber-band shapes",
+                    ),
+                ),
+                (
+                    Tool::Pan,
+                    IconLabel::new(icons::HAND, "Pan", "Drag to move the view"),
+                ),
+                (
+                    Tool::Measure,
+                    IconLabel::new(
+                        icons::RULER,
+                        "Measure",
+                        "Measure the distance between two points",
+                    ),
+                ),
+            ] {
+                self.tool_icon(ui, ctx, tool, icon);
             }
             ui.separator();
-            ui.checkbox(&mut self.grid.visible, "Grid");
-            ui.checkbox(&mut self.grid.snap_enabled, "Snap");
-            ui.checkbox(&mut self.labels_visible, "Labels");
-            ui.checkbox(&mut self.minimap_visible, "Minimap");
+
+            // Draw tools.
+            for (tool, icon) in [
+                (
+                    Tool::CutLine,
+                    IconLabel::new(icons::SCISSORS, "Cut line", "Cut a shape along a line"),
+                ),
+                (
+                    Tool::DrawRect,
+                    IconLabel::new(icons::SQUARE, "Rectangle", "Draw an axis-aligned rectangle"),
+                ),
+                (
+                    Tool::DrawPolygon,
+                    IconLabel::new(icons::PENTAGON, "Polygon", "Draw a polygon"),
+                ),
+                (
+                    Tool::DrawPath,
+                    IconLabel::new(icons::PEN_TOOL, "Path", "Draw a fixed-width path"),
+                ),
+                (
+                    Tool::EditVertex,
+                    IconLabel::new(
+                        icons::SQUARE_PEN,
+                        "Edit vertices",
+                        "Move the vertices of a shape",
+                    ),
+                ),
+            ] {
+                self.tool_icon(ui, ctx, tool, icon);
+            }
+            // Path width and end cap, shown only while the path tool is active.
+            if self.tools.active() == Tool::DrawPath {
+                self.path_options(ui, ctx);
+            }
             ui.separator();
-            for split in Split::all() {
-                let selected = self.viewports.split() == split;
-                if ui.selectable_label(selected, split.label()).clicked() {
-                    self.set_split(split);
+
+            // View action and toggles, all dispatched through the registry.
+            let fit = IconLabel::new(icons::MAXIMIZE, "Fit", "Frame the whole design");
+            if self.command_icon(ui, ctx, fit, "view.zoom_fit", false) {
+                self.dispatch(CommandId("view.zoom_fit"));
+            }
+            for (icon, id, on) in [
+                (
+                    IconLabel::new(icons::GRID_3X3, "Grid", "Toggle the reference grid"),
+                    "view.grid",
+                    self.grid.visible,
+                ),
+                (
+                    IconLabel::new(icons::MAGNET, "Snap", "Toggle snapping to the grid"),
+                    "view.snap",
+                    self.grid.snap_enabled,
+                ),
+                (
+                    IconLabel::new(icons::TAG, "Labels", "Toggle text labels"),
+                    "view.labels",
+                    self.labels_visible,
+                ),
+                (
+                    IconLabel::new(icons::MAP, "Minimap", "Toggle the overview minimap"),
+                    "view.minimap",
+                    self.minimap_visible,
+                ),
+            ] {
+                if self.command_icon(ui, ctx, icon, id, on) {
+                    self.dispatch(CommandId(id));
                 }
             }
             ui.separator();
-            let palette_label = self
-                .keymap
-                .chord_for(CommandId("palette.open"))
-                .map_or_else(|| "Palette".to_owned(), |c| format!("Palette ({c})"));
-            if ui.button(palette_label).clicked() {
-                self.palette_open = !self.palette_open;
-                self.palette_query.clear();
+
+            // Split mode as a single-select segmented control.
+            let mut idx = Split::all()
+                .iter()
+                .position(|s| *s == self.viewports.split())
+                .unwrap_or(0);
+            if components::Segmented::new(&["Single", "Split H", "Split V"])
+                .show(ui, ctx, &mut idx)
+                .changed()
+            {
+                self.set_split(Split::all()[idx]);
             }
-            if ui.button("Shortcuts").clicked() {
-                self.keymap_open = !self.keymap_open;
-            }
-            self.help_menu(ui);
+
             // Web only: switch between the public replay theater and the full editor.
-            // Formerly a floating top-right HTML link that overlapped the History /
-            // Properties / DRC panel; now a toolbar button so it never occludes those
-            // controls (lane v8-ui). The navigation itself stays in the web shell.
+            // Formerly a floating top-right HTML link that overlapped the right-hand
+            // column; kept in the toolbar row so it never occludes those controls
+            // (lane v8-ui). The navigation itself stays in the web shell.
             #[cfg(target_arch = "wasm32")]
             {
                 ui.separator();
-                let switch_label = match self.start_view {
-                    StartView::ReplayTheater => "Open the full editor",
-                    StartView::Editor => "Open the replay theater",
+                let (glyph, name) = match self.start_view {
+                    StartView::ReplayTheater => (icons::EXTERNAL_LINK, "Open the full editor"),
+                    StartView::Editor => (icons::CLAPPERBOARD, "Open the replay theater"),
                 };
-                if ui.button(switch_label).clicked() {
+                if components::IconButton::new(glyph, name)
+                    .show(ui, ctx)
+                    .clicked()
+                {
                     Self::call_window_fn("__reticleSwitchView");
                 }
             }
         });
+    }
+
+    /// A toolbar tool button: selected when `tool` is active and dispatched through
+    /// the registry id that selects it.
+    fn tool_icon(&mut self, ui: &mut egui::Ui, ctx: components::Ctx, tool: Tool, icon: IconLabel) {
+        let id = tool_command_id(tool);
+        let selected = self.tools.active() == tool;
+        if self.command_icon(ui, ctx, icon, id, selected) {
+            self.dispatch(CommandId(id));
+        }
+    }
+
+    /// Shows one toolbar [`IconButton`](components::IconButton) carrying the live
+    /// chord `keymap` binds to `id` and a one-line tooltip; returns whether it was
+    /// clicked. Reads `self` only, so the caller can dispatch after.
+    fn command_icon(
+        &self,
+        ui: &mut egui::Ui,
+        ctx: components::Ctx,
+        icon: IconLabel,
+        id: &'static str,
+        selected: bool,
+    ) -> bool {
+        let mut button = components::IconButton::new(icon.glyph, icon.name)
+            .hint(icon.hint)
+            .selected(selected);
+        if let Some(chord) = self.keymap.chord_for(CommandId(id)) {
+            button = button.kbd(chord.to_string());
+        }
+        button.show(ui, ctx).clicked()
+    }
+
+    /// Draws the path tool's inline width and end-cap controls. The width is a raw
+    /// numeric field (the 1C component library has no numeric input yet); the end
+    /// cap is a [`Segmented`](components::Segmented) control.
+    fn path_options(&mut self, ui: &mut egui::Ui, ctx: components::Ctx) {
+        ui.separator();
+        ui.label("Width:");
+        let mut width = self.draw.path.width();
+        if ui
+            .add(
+                egui::DragValue::new(&mut width)
+                    .speed(5.0)
+                    .range(1..=100_000),
+            )
+            .changed()
+        {
+            self.draw.path.set_width(width);
+        }
+        let caps = [Endcap::Flat, Endcap::Square, Endcap::Round];
+        let mut idx = caps
+            .iter()
+            .position(|c| *c == self.draw.path.endcap())
+            .unwrap_or(0);
+        if components::Segmented::new(&["Flat", "Square", "Round"])
+            .show(ui, ctx, &mut idx)
+            .changed()
+        {
+            self.draw.path.set_endcap(caps[idx]);
+        }
     }
 
     /// Invokes a zero-argument function stored as a global `window[name]`, if the web
@@ -2616,23 +2720,50 @@ impl App {
         }
     }
 
-    /// The Help menu: relaunches the first-run tour.
+    /// Draws the menu bar, rendered from the command registry (lane 2A).
     ///
-    /// "Take the tour" replays the core walkthrough plus the optional Wave 2
-    /// chapter; "Core tour only" replays just the core chapter. Either way the tour
-    /// restarts from the first step (see [`crate::tour::Tour::relaunch`]).
-    fn help_menu(&mut self, ui: &mut egui::Ui) {
-        // egui closes the menu automatically once a button inside it is clicked.
-        ui.menu_button("Help", |ui| {
-            if ui.button("Take the tour").clicked() {
+    /// Every registered command with a menu path appears under it with its live
+    /// chord; the tail folds into a `...` menu when the window is narrow. Clicks are
+    /// collected into a [`MenuChoice`](menu::MenuChoice) and applied after the bar
+    /// closes, so the menu closures borrow nothing but a local (see [`crate::menu`]).
+    fn menubar(&mut self, ui: &mut egui::Ui) {
+        let menus = menu::build_menus(&self.keymap);
+        let recent: Vec<String> = self
+            .recent_files
+            .entries()
+            .iter()
+            .map(|r| r.name.clone())
+            .collect();
+        let mut choice: Option<menu::MenuChoice> = None;
+        egui::MenuBar::new().ui(ui, |ui| {
+            menu::render_bar(ui, &menus, &recent, &mut choice);
+        });
+        self.apply_menu_choice(choice);
+    }
+
+    /// Applies the [`MenuChoice`](menu::MenuChoice) a menu click recorded this frame.
+    ///
+    /// Registry commands go through [`dispatch`](Self::dispatch) like every other
+    /// surface; the three dynamic items (Open Recent, the tour, the web convert
+    /// picker) route to their existing effects until the lanes that own them (2D,
+    /// 4C, 3B) register their ids.
+    fn apply_menu_choice(&mut self, choice: Option<menu::MenuChoice>) {
+        match choice {
+            Some(menu::MenuChoice::Command(id)) => self.dispatch(id),
+            Some(menu::MenuChoice::OpenRecent) => {
+                // The live reopen is lane 2D's work (catalog 9); route to the Start
+                // screen, where recent files live, so the item is never a dead end.
+                self.start_screen = true;
+                self.status.set("Recent files are on the Start screen");
+            }
+            Some(menu::MenuChoice::RelaunchTour) => {
                 self.tour.relaunch(true);
                 self.status.set("Tour started");
             }
-            if ui.button("Core tour only").clicked() {
-                self.tour.relaunch(false);
-                self.status.set("Core tour started");
-            }
-        });
+            #[cfg(target_arch = "wasm32")]
+            Some(menu::MenuChoice::ConvertGds) => Self::call_window_fn("__reticleTriggerConvert"),
+            None => {}
+        }
     }
 
     /// Whether the tour counts as seen for persistence.
@@ -2746,6 +2877,7 @@ impl App {
         ui: &mut egui::Ui,
         gpu_format: Option<eframe::egui_wgpu::wgpu::TextureFormat>,
     ) -> (Option<ScreenRect>, TourTargets) {
+        egui::Panel::top("menubar").show(ui, |ui| self.menubar(ui));
         let toolbar = egui::Panel::top("toolbar")
             .show(ui, |ui| self.toolbar(ui))
             .response
@@ -3325,9 +3457,8 @@ impl App {
         ui.separator();
         ui.label(format!("Selected shapes: {}", self.selection.len()));
         ui.label(format!("Scene shapes: {}", self.scene.len()));
-        if ui.button("Add demo rectangle").clicked() {
-            self.add_demo_rectangle();
-        }
+        // The debug "Add demo rectangle" affordance retired to Help > Developer
+        // (dev.add_demo_rect; catalog 70).
     }
 
     /// Appends a rectangle to the top cell through the undo history, then rebuilds
@@ -7454,6 +7585,41 @@ impl eframe::App for App {
     }
 }
 
+/// The visual identity of a toolbar [`IconButton`](components::IconButton): its
+/// glyph, the tooltip name, and the one-line description shown under the name
+/// (catalog 25). Bundled so the toolbar helpers stay under the argument limit.
+#[derive(Clone, Copy)]
+struct IconLabel {
+    /// The Lucide glyph drawn on the button.
+    glyph: char,
+    /// The tooltip title (the action name).
+    name: &'static str,
+    /// The one-line description shown under the name.
+    hint: &'static str,
+}
+
+impl IconLabel {
+    /// A label from its glyph, name, and one-line hint.
+    fn new(glyph: char, name: &'static str, hint: &'static str) -> Self {
+        Self { glyph, name, hint }
+    }
+}
+
+/// The registry id of the command that selects `tool`, so the toolbar tool
+/// buttons dispatch through the same funnel and keymap as the Draw menu.
+fn tool_command_id(tool: Tool) -> &'static str {
+    match tool {
+        Tool::Select => "tool.select",
+        Tool::Pan => "tool.pan",
+        Tool::Measure => "tool.measure",
+        Tool::CutLine => "tool.cutline",
+        Tool::DrawRect => "tool.rect",
+        Tool::DrawPolygon => "tool.polygon",
+        Tool::DrawPath => "tool.path",
+        Tool::EditVertex => "tool.vertices",
+    }
+}
+
 /// Formats a boolean as `on`/`off` for status messages.
 fn on_off(v: bool) -> &'static str {
     if v { "on" } else { "off" }
@@ -8463,6 +8629,22 @@ mod tests {
         assert!(app.palette_open);
         // An unknown id is a no-op, not a panic.
         app.dispatch(CommandId("not.a.command"));
+    }
+
+    #[test]
+    fn dispatch_runs_the_relocated_developer_actions() {
+        // The Help > Developer entries (lane 2A) run their effects through the same
+        // dispatch funnel as every other registry command (catalog 70).
+        let mut app = App::new();
+        let before = app.scene.len();
+        app.dispatch(CommandId("dev.add_demo_rect"));
+        assert!(app.scene.len() > before, "dev.add_demo_rect adds a shape");
+        let replay_before = app.replay_open;
+        app.dispatch(CommandId("dev.replay_theater"));
+        assert_ne!(
+            app.replay_open, replay_before,
+            "dev.replay_theater toggles the theater window"
+        );
     }
 
     #[test]
