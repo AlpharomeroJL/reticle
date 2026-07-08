@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Reticle .lydrc compatibility fixture: a KLayout DRC macro that uses ONLY the
+  supported subset (see docs/src/lydrc-compat.md and ADR 0063). It is run two ways
+  over crates/reticle-drc/tests/fixtures/subset.gds and the verdicts compared:
+
+    * reticle-drc, via reticle_drc::parse_lydrc + DrcEngine (tests/lydrc_engine.rs)
+    * KLayout headless, in the pinned container (scripts/lydrc-compare.ps1)
+
+  $input and $report are supplied by KLayout on the command line with -rd; the
+  reticle parser recognizes and ignores the source()/report() header directives.
+-->
+<klayout-macro>
+ <description>Reticle lydrc compatibility fixture (supported subset)</description>
+ <version>1.0</version>
+ <category>drc</category>
+ <interpreter>dsl</interpreter>
+ <dsl-interpreter-name>drc-dsl-xml</dsl-interpreter-name>
+ <text>
+# I/O header (ignored by the reticle parser; used by KLayout headless).
+source($input)
+report("reticle lydrc subset fixture", $report)
+
+# Layer inputs (GDS layer/datatype), sky130 digital metal stack.
+met1 = input(68, 20)
+met2 = input(69, 20)
+mcon = input(67, 44)
+li1  = input(67, 20)
+
+# Supported checks. Each fires exactly once on subset.gds except the last, which
+# is clean, so both tools agree on a per-rule fired/not-fired verdict.
+met1.width(0.14).output("m1.1", "met1 minimum width 0.14um")
+met1.space(0.14).output("m1.2", "met1 minimum spacing 0.14um")
+met1.enclosing(mcon, 0.03).output("m1.4", "met1 encloses mcon by 0.03um")
+li1.with_area(0.0, 0.0561).output("li.6", "li1 minimum area 0.0561um2")
+met2.width(0.14).output("m2.1", "met2 minimum width 0.14um (clean)")
+ </text>
+</klayout-macro>
