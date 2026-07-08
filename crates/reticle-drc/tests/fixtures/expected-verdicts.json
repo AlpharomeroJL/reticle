@@ -1,0 +1,11 @@
+{
+  "cell": "SUBSET",
+  "note": "Per-rule verdicts for subset.lydrc over subset.gds. `reticle_count` is the exact DrcEngine violation count (asserted by tests/lydrc_engine.rs). `fired` is the layout-level verdict (a rule reports >=1 violation) that both reticle-drc and KLayout must agree on; raw marker counts differ by tool because KLayout emits edge-pair markers while the engine emits one violation per offending shape or pair.",
+  "rules": [
+    { "name": "m1.1", "kind": "Width",     "reticle_count": 1, "fired": true  },
+    { "name": "m1.2", "kind": "Spacing",   "reticle_count": 1, "fired": true  },
+    { "name": "m1.4", "kind": "Enclosure", "reticle_count": 1, "fired": true  },
+    { "name": "li.6", "kind": "Area",      "reticle_count": 1, "fired": true  },
+    { "name": "m2.1", "kind": "Width",     "reticle_count": 0, "fired": false }
+  ]
+}
