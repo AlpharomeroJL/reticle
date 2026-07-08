@@ -41,6 +41,7 @@
 
 mod compare;
 mod connectivity;
+pub mod device;
 mod intent;
 mod intent_check;
 mod netlist;
@@ -49,6 +50,12 @@ mod union_find;
 
 pub use compare::{NetlistDiff, ShapePair, compare_netlists};
 pub use connectivity::{build_components, rects_touch, shape_covers_point, shapes_touch};
+// Device recognition (Wave 6): a new sibling layer over the frozen connectivity
+// types above. Additive re-exports only; nothing above is changed or shadowed.
+pub use device::{
+    Device, DeviceDiff, DeviceKind, DeviceNetlist, DeviceSummary, DeviceTech, compare_devices,
+    extract_devices, extract_devices_labeled,
+};
 pub use intent::{ForbiddenPair, IntentNet, IntentReport, IntentSpec, Open, Short, Terminal};
 pub use intent_check::{check_intent, sky130_connection_rules, terminal};
 pub use netlist::{Net, NetLabel, Netlist};

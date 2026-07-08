@@ -267,9 +267,12 @@ Reticle is a portfolio-grade engineering project and a research vehicle for mach
 layout, not a production EDA tool. It is honest about its edges, audited in
 [docs/STATUS.md](docs/STATUS.md):
 
-- No logic or physical synthesis, no timing (no STA, no parasitic extraction), no
-  device-level LVS, and no tape-out signoff. Extraction is geometric net connectivity, not
-  device recognition. The SKY130 DRC subset is a fast first filter, not tape-out clean.
+- No logic or physical synthesis, no timing (no STA, no parasitic extraction), and no
+  tape-out signoff. Extraction is geometric net connectivity plus SKY130 MOSFET
+  recognition (poly over diffusion) with a device-level LVS-lite that compares device
+  count and terminal nets, checked against Magic's own extraction of a production
+  inverter; it stops short of device-parameter and parasitic matching, so it is not a
+  full LVS. The SKY130 DRC subset is a fast first filter, not tape-out clean.
 - The benchmark is small quantized local models, a realistic floor rather than a ceiling.
   The Claude Code row is not run here (the CLI is unauthenticated) and is not head-to-head
   comparable with the bare-model rows in any case.

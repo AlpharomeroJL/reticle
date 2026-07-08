@@ -27,6 +27,7 @@
   - [A second PDK: IHP SG13G2](second-pdk.md)
 - [Routing](routing.md)
 - [Connectivity extraction](extraction.md)
+  - [Device recognition](device-extraction.md)
 - [Metrology](metrology.md)
 - [Layout diff](layout-diff.md)
 - [Collaboration](collaboration.md)

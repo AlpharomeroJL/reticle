@@ -94,3 +94,4 @@ superseded decision is marked and linked to its replacement.
 | [0086](0086-conformant-oasis-writer-scope-and-oasis-rename.md) | A conformant-OASIS writer subset (oasis_std), and renaming the in-house format honestly |
 | [0087](0087-python-bindings-abi3-nondefault.md) | Python bindings: PyO3 `abi3` (one wheel for 3.9+) in a workspace-excluded crate so `just ci` stays Python-free |
 | [0088](0088-lefdef-import-oracle.md) | LEF/DEF import oracle: cross-validate the `reticle-lefdef` import against OpenROAD in the pinned `iic-osic-tools` container (faithful matches, corrupt diverges), with an honest skip when Docker or the image is absent |
+| [0089](0089-device-recognition-scope.md) | Device recognition and device-level LVS-lite: a new sibling module, diff-split terminal binding, scope and Magic oracle |
