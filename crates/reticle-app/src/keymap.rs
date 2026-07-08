@@ -1,9 +1,10 @@
 //! Rebindable keyboard shortcuts: a TOML keymap with conflict detection.
 //!
-//! Every keyboard-driven action is an [`Action`]; the [`Keymap`] maps each one to
-//! at most one [`Chord`] (modifiers plus a key, like `Ctrl+Shift+Z`). The app
-//! resolves each key press through [`Keymap::action_for`] instead of hardcoded
-//! `if` chains, so a user can rebind everything from the shortcuts window.
+//! Every keyboard-driven command is identified by its registry [`CommandId`]
+//! (`"edit.undo"`); the [`Keymap`] maps each id to at most one [`Chord`]
+//! (modifiers plus a key, like `Ctrl+Shift+Z`). The app resolves each key press
+//! through [`Keymap::command_for`] and dispatches the id, so a user can rebind
+//! everything from the shortcuts window and menus/palette/shortcuts all agree.
 //!
 //! The map is saved as TOML under the OS config directory (next to the session
 //! file). Following this crate's no-serde rule, the writer emits plain TOML and
@@ -12,116 +13,54 @@
 //! canonical `Key::name()` strings (`A`..`Z`, `0`..`9`, `F1`.., `Escape`, ...) so
 //! the glue layer can match events with a string compare.
 //!
-//! Conflicts cannot persist: binding a chord that another action holds unbinds
-//! that action and reports it, and [`Keymap::from_toml`] applies the same rule to
+//! [`Keymap::to_toml`] writes the dotted registry ids. [`Keymap::from_toml`] also
+//! accepts the 14 short legacy tags that pre-registry `keymap.toml` files used
+//! (see [`LEGACY_ALIASES`]), so a saved keymap keeps loading after the migration.
+//!
+//! Conflicts cannot persist: binding a chord that another command holds unbinds
+//! that command and reports it, and [`Keymap::from_toml`] applies the same rule to
 //! hand-edited files, returning a warning per resolved conflict. The pure
 //! [`Keymap::conflicts`] validator backs the unit tests.
 
+use crate::commands::{self, CommandId};
 use std::collections::BTreeMap;
 use std::fmt;
 
-/// Every rebindable action in the app, in display (and serialization) order.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum Action {
-    /// Toggle the command palette.
-    OpenPalette,
-    /// Undo the last edit.
-    Undo,
-    /// Redo the last undone edit.
-    Redo,
-    /// Fit the whole design to the viewport.
-    ZoomToFit,
-    /// Toggle the background grid.
-    ToggleGrid,
-    /// Toggle cursor snapping to the grid.
-    ToggleSnap,
-    /// Switch to the Select tool.
-    ToolSelect,
-    /// Switch to the Pan tool.
-    ToolPan,
-    /// Switch to the Measure tool.
-    ToolMeasure,
-    /// Toggle the canvas text-label overlay.
-    ToggleLabels,
-    /// Toggle the minimap overview panel.
-    ToggleMinimap,
-    /// Collapse the canvas to a single pane.
-    SplitSingle,
-    /// Split the canvas into two side-by-side panes.
-    SplitHorizontal,
-    /// Split the canvas into two stacked panes.
-    SplitVertical,
-}
+/// Legacy TOML keys accepted for backward compatibility, each mapped to the
+/// dotted registry id that replaced it.
+///
+/// `keymap.toml` files written before the command registry used these 14 short
+/// tags; [`Keymap::from_toml`] resolves them through this table so those files
+/// keep loading. [`Keymap::to_toml`] always writes the new dotted ids, so a saved
+/// file migrates on the first save.
+pub const LEGACY_ALIASES: &[(&str, &str)] = &[
+    ("palette", "palette.open"),
+    ("undo", "edit.undo"),
+    ("redo", "edit.redo"),
+    ("zoom_to_fit", "view.zoom_fit"),
+    ("toggle_grid", "view.grid"),
+    ("toggle_snap", "view.snap"),
+    ("tool_select", "tool.select"),
+    ("tool_pan", "tool.pan"),
+    ("tool_measure", "tool.measure"),
+    ("toggle_labels", "view.labels"),
+    ("toggle_minimap", "view.minimap"),
+    ("split_single", "view.split_single"),
+    ("split_horizontal", "view.split_h"),
+    ("split_vertical", "view.split_v"),
+];
 
-impl Action {
-    /// Every action, in the order the editor lists and the file serializes them.
-    #[must_use]
-    pub fn all() -> [Action; 14] {
-        [
-            Action::OpenPalette,
-            Action::Undo,
-            Action::Redo,
-            Action::ZoomToFit,
-            Action::ToggleGrid,
-            Action::ToggleSnap,
-            Action::ToolSelect,
-            Action::ToolPan,
-            Action::ToolMeasure,
-            Action::ToggleLabels,
-            Action::ToggleMinimap,
-            Action::SplitSingle,
-            Action::SplitHorizontal,
-            Action::SplitVertical,
-        ]
-    }
-
-    /// The stable TOML key for this action.
-    #[must_use]
-    pub fn tag(self) -> &'static str {
-        match self {
-            Self::OpenPalette => "palette",
-            Self::Undo => "undo",
-            Self::Redo => "redo",
-            Self::ZoomToFit => "zoom_to_fit",
-            Self::ToggleGrid => "toggle_grid",
-            Self::ToggleSnap => "toggle_snap",
-            Self::ToolSelect => "tool_select",
-            Self::ToolPan => "tool_pan",
-            Self::ToolMeasure => "tool_measure",
-            Self::ToggleLabels => "toggle_labels",
-            Self::ToggleMinimap => "toggle_minimap",
-            Self::SplitSingle => "split_single",
-            Self::SplitHorizontal => "split_horizontal",
-            Self::SplitVertical => "split_vertical",
-        }
-    }
-
-    /// The human-readable label shown in the shortcuts editor.
-    #[must_use]
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::OpenPalette => "Command palette",
-            Self::Undo => "Undo",
-            Self::Redo => "Redo",
-            Self::ZoomToFit => "Zoom to fit",
-            Self::ToggleGrid => "Toggle grid",
-            Self::ToggleSnap => "Toggle snapping",
-            Self::ToolSelect => "Tool: Select",
-            Self::ToolPan => "Tool: Pan",
-            Self::ToolMeasure => "Tool: Measure",
-            Self::ToggleLabels => "Toggle labels",
-            Self::ToggleMinimap => "Toggle minimap",
-            Self::SplitSingle => "View: single pane",
-            Self::SplitHorizontal => "View: split horizontal",
-            Self::SplitVertical => "View: split vertical",
-        }
-    }
-
-    /// Parses a TOML key back to an action.
-    #[must_use]
-    pub fn from_tag(tag: &str) -> Option<Action> {
-        Action::all().into_iter().find(|a| a.tag() == tag)
-    }
+/// Resolves a TOML key (a legacy short tag or a dotted id) to the rebindable
+/// registry [`CommandId`] it names, or `None` if it names no rebindable command.
+///
+/// The returned id borrows the registry's `'static` string, never the caller's
+/// slice, so it can be stored in the map.
+fn resolve_key(key: &str) -> Option<CommandId> {
+    let dotted = LEGACY_ALIASES
+        .iter()
+        .find(|(tag, _)| *tag == key)
+        .map_or(key, |(_, id)| *id);
+    commands::rebindable_id(dotted)
 }
 
 /// Key names accepted beyond single letters and digits; these match egui's
@@ -257,12 +196,12 @@ impl fmt::Display for Chord {
     }
 }
 
-/// The action-to-chord map, with at most one chord per action and (by
-/// construction) at most one action per chord.
+/// The command-to-chord map, with at most one chord per command and (by
+/// construction) at most one command per chord.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Keymap {
-    /// The current bindings; an absent action is unbound.
-    bindings: BTreeMap<Action, Chord>,
+    /// The current bindings; an absent command id is unbound.
+    bindings: BTreeMap<CommandId, Chord>,
 }
 
 impl Default for Keymap {
@@ -277,78 +216,86 @@ fn chord(text: &str) -> Chord {
 }
 
 impl Keymap {
-    /// The built-in bindings, matching the app's historical shortcuts plus the
-    /// newer overlay and split actions. `toggle_snap` ships unbound.
+    /// The built-in bindings, taken straight from the registry: every rebindable
+    /// [`CommandSpec`](crate::commands::CommandSpec) with a `default_chord`. The
+    /// registry is the single source of truth, so `view.snap` (no default) ships
+    /// unbound.
     #[must_use]
     pub fn defaults() -> Self {
         let mut bindings = BTreeMap::new();
-        bindings.insert(Action::OpenPalette, chord("Ctrl+P"));
-        bindings.insert(Action::Undo, chord("Ctrl+Z"));
-        bindings.insert(Action::Redo, chord("Ctrl+Y"));
-        bindings.insert(Action::ZoomToFit, chord("F"));
-        bindings.insert(Action::ToggleGrid, chord("Ctrl+G"));
-        bindings.insert(Action::ToolSelect, chord("V"));
-        bindings.insert(Action::ToolPan, chord("S"));
-        bindings.insert(Action::ToolMeasure, chord("M"));
-        bindings.insert(Action::ToggleLabels, chord("L"));
-        bindings.insert(Action::ToggleMinimap, chord("N"));
-        bindings.insert(Action::SplitSingle, chord("Ctrl+1"));
-        bindings.insert(Action::SplitHorizontal, chord("Ctrl+2"));
-        bindings.insert(Action::SplitVertical, chord("Ctrl+3"));
+        for spec in commands::registry() {
+            if spec.rebindable
+                && let Some(text) = spec.default_chord
+            {
+                bindings.insert(spec.id, chord(text));
+            }
+        }
         Self { bindings }
     }
 
-    /// The chord bound to `action`, if any.
+    /// The chord bound to `id`, if any.
     #[must_use]
-    pub fn chord_for(&self, action: Action) -> Option<&Chord> {
-        self.bindings.get(&action)
+    pub fn chord_for(&self, id: CommandId) -> Option<&Chord> {
+        self.bindings.get(&id)
     }
 
-    /// The action bound to `chord`, if any.
+    /// The command bound to `chord`, if any.
     #[must_use]
-    pub fn action_for(&self, chord: &Chord) -> Option<Action> {
+    pub fn command_for(&self, chord: &Chord) -> Option<CommandId> {
         self.bindings
             .iter()
             .find(|(_, c)| *c == chord)
-            .map(|(a, _)| *a)
+            .map(|(id, _)| *id)
     }
 
-    /// Binds `action` to `chord` (or unbinds it with `None`).
+    /// The number of bound commands.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.bindings.len()
+    }
+
+    /// Whether no command is bound.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.bindings.is_empty()
+    }
+
+    /// Binds `id` to `chord` (or unbinds it with `None`).
     ///
-    /// Any *other* action holding the same chord is unbound first; the returned
-    /// list names those actions so the caller can report the takeover. The
-    /// invariant that a chord maps to at most one action therefore always holds.
-    pub fn bind(&mut self, action: Action, chord: Option<Chord>) -> Vec<Action> {
+    /// Any *other* command holding the same chord is unbound first; the returned
+    /// list names those commands so the caller can report the takeover. The
+    /// invariant that a chord maps to at most one command therefore always holds.
+    pub fn bind(&mut self, id: CommandId, chord: Option<Chord>) -> Vec<CommandId> {
         let mut stolen = Vec::new();
         if let Some(c) = &chord {
             stolen = self
                 .bindings
                 .iter()
-                .filter(|(a, b)| **a != action && *b == c)
-                .map(|(a, _)| *a)
+                .filter(|(other, b)| **other != id && *b == c)
+                .map(|(other, _)| *other)
                 .collect();
-            for a in &stolen {
-                self.bindings.remove(a);
+            for other in &stolen {
+                self.bindings.remove(other);
             }
         }
         match chord {
             Some(c) => {
-                self.bindings.insert(action, c);
+                self.bindings.insert(id, c);
             }
             None => {
-                self.bindings.remove(&action);
+                self.bindings.remove(&id);
             }
         }
         stolen
     }
 
-    /// Every pair of actions sharing a chord (empty when the invariant holds).
+    /// Every pair of commands sharing a chord (empty when the invariant holds).
     ///
     /// [`Keymap::bind`] and [`Keymap::from_toml`] never produce conflicts; this
     /// validator exists so that fact is testable rather than assumed.
     #[must_use]
-    pub fn conflicts(&self) -> Vec<(Action, Action)> {
-        let entries: Vec<(&Action, &Chord)> = self.bindings.iter().collect();
+    pub fn conflicts(&self) -> Vec<(CommandId, CommandId)> {
+        let entries: Vec<(&CommandId, &Chord)> = self.bindings.iter().collect();
         let mut out = Vec::new();
         for (i, (a, ca)) in entries.iter().enumerate() {
             for (b, cb) in entries.iter().skip(i + 1) {
@@ -360,21 +307,23 @@ impl Keymap {
         out
     }
 
-    /// Serializes the keymap as TOML, one line per action in [`Action::all`]
-    /// order; unbound actions serialize as an empty string.
+    /// Serializes the keymap as TOML, one line per rebindable registry command in
+    /// registry order; an unbound command serializes as an empty string. Ids are
+    /// the dotted registry ids, so a keymap loaded from legacy tags migrates on
+    /// the first save.
     #[must_use]
     pub fn to_toml(&self) -> String {
         use fmt::Write as _;
         let mut out = String::from(
-            "# Reticle keymap: actions bound to chords like \"Ctrl+Shift+Z\".\n\
-             # An empty string leaves the action unbound.\n\n[bindings]\n",
+            "# Reticle keymap: commands bound to chords like \"Ctrl+Shift+Z\".\n\
+             # An empty string leaves the command unbound.\n\n[bindings]\n",
         );
-        for action in Action::all() {
+        for spec in commands::registry().iter().filter(|s| s.rebindable) {
             let value = self
-                .chord_for(action)
+                .chord_for(spec.id)
                 .map(ToString::to_string)
                 .unwrap_or_default();
-            let _ = writeln!(out, "{} = \"{value}\"", action.tag());
+            let _ = writeln!(out, "{} = \"{value}\"", spec.id.0);
         }
         out
     }
@@ -382,13 +331,14 @@ impl Keymap {
     /// Parses a keymap from the TOML subset [`Keymap::to_toml`] writes, starting
     /// from the defaults and applying each entry over them.
     ///
-    /// The parser is deliberately tolerant so a hand-edited file degrades
-    /// gracefully: unknown actions, malformed lines, unquoted values, and
-    /// unparsable chords each produce a warning and leave that action's default
-    /// in place. An empty string unbinds. When two entries claim the same chord
-    /// the later one wins and the earlier action is unbound with a warning, so a
-    /// loaded map never carries a conflict. Keys before any `[section]` header
-    /// are treated as bindings; keys under a foreign section are ignored.
+    /// Keys may be dotted registry ids or the short [`LEGACY_ALIASES`] tags. The
+    /// parser is deliberately tolerant so a hand-edited file degrades gracefully:
+    /// unknown commands, malformed lines, unquoted values, and unparsable chords
+    /// each produce a warning and leave that command's default in place. An empty
+    /// string unbinds. When two entries claim the same chord the later one wins
+    /// and the earlier command is unbound with a warning, so a loaded map never
+    /// carries a conflict. Keys before any `[section]` header are treated as
+    /// bindings; keys under a foreign section are ignored.
     #[must_use]
     pub fn from_toml(text: &str) -> (Self, Vec<String>) {
         let mut map = Self::defaults();
@@ -411,8 +361,8 @@ impl Keymap {
                 continue;
             };
             let k = k.trim();
-            let Some(action) = Action::from_tag(k) else {
-                warnings.push(format!("unknown action `{k}`"));
+            let Some(id) = resolve_key(k) else {
+                warnings.push(format!("unknown command `{k}`"));
                 continue;
             };
             let Some(value) = quoted_value(v) else {
@@ -420,17 +370,15 @@ impl Keymap {
                 continue;
             };
             if value.is_empty() {
-                map.bind(action, None);
+                map.bind(id, None);
                 continue;
             }
             match Chord::parse(&value) {
                 Some(c) => {
-                    for loser in map.bind(action, Some(c)) {
+                    for loser in map.bind(id, Some(c)) {
                         warnings.push(format!(
                             "`{}` and `{}` shared a chord; `{}` is now unbound",
-                            loser.tag(),
-                            action.tag(),
-                            loser.tag()
+                            loser.0, id.0, loser.0
                         ));
                     }
                 }
@@ -495,6 +443,11 @@ pub fn load() -> Option<(Keymap, Vec<String>)> {
 mod tests {
     use super::*;
 
+    /// The dotted ids referenced throughout these tests, as `CommandId`s.
+    fn id(s: &'static str) -> CommandId {
+        CommandId(s)
+    }
+
     #[test]
     fn parse_full_chord_with_modifiers() {
         let c = Chord::parse("Ctrl+Shift+Z").expect("parses");
@@ -538,27 +491,44 @@ mod tests {
     }
 
     #[test]
-    fn defaults_cover_the_historical_shortcuts() {
+    fn defaults_match_the_shortcut_regression_list() {
+        // The exact defaults ia-inventory section 1 pins; the 1E regression test.
         let m = Keymap::defaults();
-        assert_eq!(m.chord_for(Action::Undo), Chord::parse("Ctrl+Z").as_ref());
-        assert_eq!(
-            m.chord_for(Action::OpenPalette),
-            Chord::parse("Ctrl+P").as_ref()
-        );
-        assert_eq!(m.chord_for(Action::ZoomToFit), Chord::parse("F").as_ref());
-        assert_eq!(m.chord_for(Action::ToolMeasure), Chord::parse("M").as_ref());
-        assert_eq!(m.chord_for(Action::ToggleSnap), None, "snap ships unbound");
+        let expect = [
+            ("palette.open", "Ctrl+P"),
+            ("edit.undo", "Ctrl+Z"),
+            ("edit.redo", "Ctrl+Y"),
+            ("view.zoom_fit", "F"),
+            ("view.grid", "Ctrl+G"),
+            ("tool.select", "V"),
+            ("tool.pan", "S"),
+            ("tool.measure", "M"),
+            ("view.labels", "L"),
+            ("view.minimap", "N"),
+            ("view.split_single", "Ctrl+1"),
+            ("view.split_h", "Ctrl+2"),
+            ("view.split_v", "Ctrl+3"),
+        ];
+        for (command, text) in expect {
+            assert_eq!(
+                m.chord_for(id(command)),
+                Chord::parse(text).as_ref(),
+                "{command} must default to {text}"
+            );
+        }
+        assert_eq!(m.chord_for(id("view.snap")), None, "snap ships unbound");
+        assert_eq!(m.len(), expect.len(), "no extra default bindings");
         assert!(m.conflicts().is_empty(), "defaults must not conflict");
     }
 
     #[test]
-    fn action_lookup_respects_modifiers_exactly() {
+    fn command_lookup_respects_modifiers_exactly() {
         let m = Keymap::defaults();
         let undo = Chord::parse("Ctrl+Z").expect("parses");
-        assert_eq!(m.action_for(&undo), Some(Action::Undo));
+        assert_eq!(m.command_for(&undo), Some(id("edit.undo")));
         let shifted = Chord::parse("Ctrl+Shift+Z").expect("parses");
         assert_eq!(
-            m.action_for(&shifted),
+            m.command_for(&shifted),
             None,
             "extra modifier must not match"
         );
@@ -567,13 +537,13 @@ mod tests {
     #[test]
     fn bind_steals_a_conflicting_chord_and_reports_it() {
         let mut m = Keymap::defaults();
-        // Give Redo the Undo chord: Undo must lose it and be reported.
-        let stolen = m.bind(Action::Redo, Chord::parse("Ctrl+Z"));
-        assert_eq!(stolen, vec![Action::Undo]);
-        assert_eq!(m.chord_for(Action::Undo), None);
+        // Give redo the undo chord: undo must lose it and be reported.
+        let stolen = m.bind(id("edit.redo"), Chord::parse("Ctrl+Z"));
+        assert_eq!(stolen, vec![id("edit.undo")]);
+        assert_eq!(m.chord_for(id("edit.undo")), None);
         assert_eq!(
-            m.action_for(&Chord::parse("Ctrl+Z").expect("parses")),
-            Some(Action::Redo)
+            m.command_for(&Chord::parse("Ctrl+Z").expect("parses")),
+            Some(id("edit.redo"))
         );
         assert!(m.conflicts().is_empty());
     }
@@ -581,25 +551,28 @@ mod tests {
     #[test]
     fn bind_none_unbinds() {
         let mut m = Keymap::defaults();
-        let stolen = m.bind(Action::Undo, None);
+        let stolen = m.bind(id("edit.undo"), None);
         assert!(stolen.is_empty());
-        assert_eq!(m.chord_for(Action::Undo), None);
-        assert_eq!(m.action_for(&Chord::parse("Ctrl+Z").expect("ok")), None);
+        assert_eq!(m.chord_for(id("edit.undo")), None);
+        assert_eq!(m.command_for(&Chord::parse("Ctrl+Z").expect("ok")), None);
     }
 
     #[test]
-    fn rebinding_the_same_action_is_not_a_conflict() {
+    fn rebinding_the_same_command_is_not_a_conflict() {
         let mut m = Keymap::defaults();
-        let stolen = m.bind(Action::Undo, Chord::parse("Ctrl+U"));
+        let stolen = m.bind(id("edit.undo"), Chord::parse("Ctrl+U"));
         assert!(stolen.is_empty());
-        assert_eq!(m.chord_for(Action::Undo), Chord::parse("Ctrl+U").as_ref());
+        assert_eq!(
+            m.chord_for(id("edit.undo")),
+            Chord::parse("Ctrl+U").as_ref()
+        );
     }
 
     #[test]
-    fn toml_round_trips_including_unbound_actions() {
+    fn toml_round_trips_including_unbound_commands() {
         let mut m = Keymap::defaults();
-        m.bind(Action::Undo, Chord::parse("Ctrl+Shift+U"));
-        m.bind(Action::ToolPan, None);
+        m.bind(id("edit.undo"), Chord::parse("Ctrl+Shift+U"));
+        m.bind(id("tool.pan"), None);
         let text = m.to_toml();
         let (parsed, warnings) = Keymap::from_toml(&text);
         assert_eq!(parsed, m);
@@ -610,34 +583,50 @@ mod tests {
     }
 
     #[test]
+    fn to_toml_writes_dotted_ids_not_legacy_tags() {
+        let saved = Keymap::defaults().to_toml();
+        assert!(saved.contains("edit.undo = \"Ctrl+Z\""));
+        for line in saved.lines().filter(|l| l.contains(" = ")) {
+            let key = line.split(" = ").next().expect("key");
+            assert!(key.contains('.'), "saved key `{key}` should be a dotted id");
+        }
+    }
+
+    #[test]
     fn from_toml_applies_over_defaults_and_warns_on_junk() {
-        let text = "# comment\n[bindings]\nundo = \"Ctrl+U\"\nwombat = \"Ctrl+W\"\nredo = \"NotAKey\"\ntool_pan = not quoted\n";
+        let text = "# comment\n[bindings]\nedit.undo = \"Ctrl+U\"\nwombat = \"Ctrl+W\"\nedit.redo = \"NotAKey\"\ntool.pan = not quoted\n";
         let (m, warnings) = Keymap::from_toml(text);
-        assert_eq!(m.chord_for(Action::Undo), Chord::parse("Ctrl+U").as_ref());
+        assert_eq!(
+            m.chord_for(id("edit.undo")),
+            Chord::parse("Ctrl+U").as_ref()
+        );
         // Bad entries keep their defaults.
-        assert_eq!(m.chord_for(Action::Redo), Chord::parse("Ctrl+Y").as_ref());
-        assert_eq!(m.chord_for(Action::ToolPan), Chord::parse("S").as_ref());
-        assert_eq!(warnings.len(), 3, "unknown action, bad chord, unquoted");
+        assert_eq!(
+            m.chord_for(id("edit.redo")),
+            Chord::parse("Ctrl+Y").as_ref()
+        );
+        assert_eq!(m.chord_for(id("tool.pan")), Chord::parse("S").as_ref());
+        assert_eq!(warnings.len(), 3, "unknown command, bad chord, unquoted");
     }
 
     #[test]
     fn from_toml_resolves_file_conflicts_with_a_warning() {
-        // Both actions claim Ctrl+Q; the later entry wins.
-        let text = "[bindings]\nundo = \"Ctrl+Q\"\nredo = \"Ctrl+Q\"\n";
+        // Both commands claim Ctrl+Q; the later entry wins.
+        let text = "[bindings]\nedit.undo = \"Ctrl+Q\"\nedit.redo = \"Ctrl+Q\"\n";
         let (m, warnings) = Keymap::from_toml(text);
         assert_eq!(
-            m.action_for(&Chord::parse("Ctrl+Q").expect("ok")),
-            Some(Action::Redo)
+            m.command_for(&Chord::parse("Ctrl+Q").expect("ok")),
+            Some(id("edit.redo"))
         );
-        assert_eq!(m.chord_for(Action::Undo), None);
-        assert!(warnings.iter().any(|w| w.contains("undo")));
+        assert_eq!(m.chord_for(id("edit.undo")), None);
+        assert!(warnings.iter().any(|w| w.contains("edit.undo")));
         assert!(m.conflicts().is_empty());
     }
 
     #[test]
     fn from_toml_unbinds_on_empty_string() {
-        let (m, warnings) = Keymap::from_toml("[bindings]\nzoom_to_fit = \"\"\n");
-        assert_eq!(m.chord_for(Action::ZoomToFit), None);
+        let (m, warnings) = Keymap::from_toml("[bindings]\nview.zoom_fit = \"\"\n");
+        assert_eq!(m.chord_for(id("view.zoom_fit")), None);
         assert!(warnings.is_empty());
     }
 
@@ -650,19 +639,61 @@ mod tests {
 
     #[test]
     fn foreign_sections_are_ignored() {
-        let text = "[bindings]\nundo = \"Ctrl+U\"\n[colors]\nundo = \"Ctrl+J\"\n";
+        let text = "[bindings]\nedit.undo = \"Ctrl+U\"\n[colors]\nedit.undo = \"Ctrl+J\"\n";
         let (m, _) = Keymap::from_toml(text);
-        assert_eq!(m.chord_for(Action::Undo), Chord::parse("Ctrl+U").as_ref());
+        assert_eq!(
+            m.chord_for(id("edit.undo")),
+            Chord::parse("Ctrl+U").as_ref()
+        );
     }
 
     #[test]
-    fn every_action_has_a_unique_tag_that_round_trips() {
-        let mut seen = std::collections::HashSet::new();
-        for action in Action::all() {
-            assert!(seen.insert(action.tag()), "duplicate tag {}", action.tag());
-            assert_eq!(Action::from_tag(action.tag()), Some(action));
-            assert!(!action.label().is_empty());
-        }
-        assert_eq!(Action::from_tag("nonsense"), None);
+    fn legacy_tags_load_via_aliases_and_save_as_dotted_ids() {
+        // A keymap.toml written before the registry, using the 14 short tags,
+        // with one command rebound and snap left unbound as it shipped.
+        let legacy = "\
+# Reticle keymap (pre-registry)
+[bindings]
+palette = \"Ctrl+P\"
+undo = \"Ctrl+Z\"
+redo = \"Ctrl+Y\"
+zoom_to_fit = \"F\"
+toggle_grid = \"Ctrl+G\"
+toggle_snap = \"\"
+tool_select = \"V\"
+tool_pan = \"Shift+P\"
+tool_measure = \"M\"
+toggle_labels = \"L\"
+toggle_minimap = \"N\"
+split_single = \"Ctrl+1\"
+split_horizontal = \"Ctrl+2\"
+split_vertical = \"Ctrl+3\"
+";
+        let (m, warnings) = Keymap::from_toml(legacy);
+        assert!(
+            warnings.is_empty(),
+            "legacy tags must load clean: {warnings:?}"
+        );
+        // Loaded under the new dotted ids, chords preserved (including the rebind).
+        assert_eq!(
+            m.chord_for(id("edit.undo")),
+            Chord::parse("Ctrl+Z").as_ref()
+        );
+        assert_eq!(
+            m.chord_for(id("tool.pan")),
+            Chord::parse("Shift+P").as_ref()
+        );
+        assert_eq!(
+            m.chord_for(id("view.split_h")),
+            Chord::parse("Ctrl+2").as_ref()
+        );
+        assert_eq!(m.chord_for(id("view.snap")), None, "snap stayed unbound");
+        // Saving migrates to dotted ids; reloading the saved text is identical.
+        let saved = m.to_toml();
+        assert!(saved.contains("edit.undo = \"Ctrl+Z\""));
+        assert!(!saved.contains("\nundo = "), "no legacy tag written back");
+        let (round, w2) = Keymap::from_toml(&saved);
+        assert!(w2.is_empty(), "migrated file parses clean: {w2:?}");
+        assert_eq!(round, m, "legacy load then save round-trips");
     }
 }

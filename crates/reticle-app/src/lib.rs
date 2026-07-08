@@ -90,6 +90,7 @@ pub mod app;
 pub mod archive;
 pub mod camera;
 pub mod command;
+pub mod commands;
 pub mod comment_pins;
 pub mod culling;
 pub mod demo;

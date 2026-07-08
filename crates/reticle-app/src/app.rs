@@ -23,6 +23,7 @@ use std::sync::Arc;
 use crate::agent_panel::AgentPanelState;
 use crate::camera::{ScreenRect, ViewCamera};
 use crate::command::{self, Command};
+use crate::commands::{self, AppOp, CommandId, RunAs};
 use crate::comment_pins;
 use crate::culling::{self, DetailLevel, SceneIndex};
 use crate::demo;
@@ -332,8 +333,8 @@ pub struct App {
     keymap: Keymap,
     /// Whether the shortcuts editor window is open.
     keymap_open: bool,
-    /// The action awaiting a new chord, when the editor is capturing one.
-    rebinding: Option<keymap::Action>,
+    /// The command awaiting a new chord, when the editor is capturing one.
+    rebinding: Option<CommandId>,
 
     /// Whether the command palette window is open.
     palette_open: bool,
@@ -2338,23 +2339,23 @@ impl App {
         let chords = pressed_chords(ctx);
 
         // Chord capture for the shortcuts editor: the next press rebinds.
-        if let Some(action) = self.rebinding {
+        if let Some(id) = self.rebinding {
             if let Some(new_chord) = chords.into_iter().next() {
                 self.rebinding = None;
                 if new_chord.key == "Escape" {
                     self.status.set("Rebind canceled");
                 } else {
                     let shown = new_chord.to_string();
-                    let stolen = self.keymap.bind(action, Some(new_chord));
+                    let stolen = self.keymap.bind(id, Some(new_chord));
                     match stolen.first() {
                         Some(loser) => self.status.set(format!(
                             "{} bound to {shown}; {} is now unbound",
-                            action.label(),
-                            loser.label()
+                            commands::label(id),
+                            commands::label(*loser)
                         )),
                         None => self
                             .status
-                            .set(format!("{} bound to {shown}", action.label())),
+                            .set(format!("{} bound to {shown}", commands::label(id))),
                     }
                 }
             }
@@ -2365,42 +2366,49 @@ impl App {
             self.palette_open = false;
         }
         for chord in chords {
-            if let Some(action) = self.keymap.action_for(&chord) {
-                self.run_action(action);
+            if let Some(id) = self.keymap.command_for(&chord) {
+                self.dispatch(id);
             }
         }
     }
 
-    /// Runs a rebindable [`keymap::Action`], funneling through
-    /// [`App::run_command`] wherever a palette command exists so shortcuts, the
-    /// toolbar, and the palette share one set of effects.
-    fn run_action(&mut self, action: keymap::Action) {
-        match action {
-            keymap::Action::OpenPalette => {
+    /// Runs a registry command by [`CommandId`], the single funnel every surface
+    /// (shortcuts, menus, palette, context menus, buttons) routes through.
+    ///
+    /// [`RunAs::Command`] entries go through [`App::run_command`] so they share the
+    /// palette and toolbar effect path; [`RunAs::App`] entries go through
+    /// [`App::run_app_op`]. An unknown id (nothing in the registry) is a no-op.
+    fn dispatch(&mut self, id: CommandId) {
+        let Some(spec) = commands::spec(id) else {
+            return;
+        };
+        match spec.run {
+            RunAs::Command(cmd) => self.run_command(cmd, None),
+            RunAs::App(op) => self.run_app_op(op),
+        }
+    }
+
+    /// Runs an [`AppOp`]: an app-level effect with no palette [`Command`]
+    /// equivalent (folded from the former `run_action`).
+    fn run_app_op(&mut self, op: AppOp) {
+        match op {
+            AppOp::OpenPalette => {
                 self.palette_open = !self.palette_open;
                 self.palette_query.clear();
             }
-            keymap::Action::Undo => self.run_command(Command::Undo, None),
-            keymap::Action::Redo => self.run_command(Command::Redo, None),
-            keymap::Action::ZoomToFit => self.run_command(Command::ZoomToFit, None),
-            keymap::Action::ToggleGrid => self.run_command(Command::ToggleGrid, None),
-            keymap::Action::ToggleSnap => self.run_command(Command::ToggleSnap, None),
-            keymap::Action::ToolSelect => self.run_command(Command::SetTool(Tool::Select), None),
-            keymap::Action::ToolPan => self.run_command(Command::SetTool(Tool::Pan), None),
-            keymap::Action::ToolMeasure => self.run_command(Command::SetTool(Tool::Measure), None),
-            keymap::Action::ToggleLabels => {
+            AppOp::ToggleLabels => {
                 self.labels_visible = !self.labels_visible;
                 self.status
                     .set(format!("Labels {}", on_off(self.labels_visible)));
             }
-            keymap::Action::ToggleMinimap => {
+            AppOp::ToggleMinimap => {
                 self.minimap_visible = !self.minimap_visible;
                 self.status
                     .set(format!("Minimap {}", on_off(self.minimap_visible)));
             }
-            keymap::Action::SplitSingle => self.set_split(Split::Single),
-            keymap::Action::SplitHorizontal => self.set_split(Split::Horizontal),
-            keymap::Action::SplitVertical => self.set_split(Split::Vertical),
+            AppOp::SplitSingle => self.set_split(Split::Single),
+            AppOp::SplitHorizontal => self.set_split(Split::Horizontal),
+            AppOp::SplitVertical => self.set_split(Split::Vertical),
         }
     }
 
@@ -2501,7 +2509,7 @@ impl App {
             ui.separator();
             let palette_label = self
                 .keymap
-                .chord_for(keymap::Action::OpenPalette)
+                .chord_for(CommandId("palette.open"))
                 .map_or_else(|| "Palette".to_owned(), |c| format!("Palette ({c})"));
             if ui.button(palette_label).clicked() {
                 self.palette_open = !self.palette_open;
@@ -5358,22 +5366,23 @@ impl App {
                     .num_columns(3)
                     .striped(true)
                     .show(ui, |ui| {
-                        for action in keymap::Action::all() {
-                            ui.label(action.label());
+                        for spec in commands::registry().iter().filter(|s| s.rebindable) {
+                            let cmd = spec.id;
+                            ui.label(spec.label);
                             let chord_text = self
                                 .keymap
-                                .chord_for(action)
+                                .chord_for(cmd)
                                 .map_or_else(|| "(unbound)".to_owned(), ToString::to_string);
                             ui.monospace(chord_text);
                             ui.horizontal(|ui| {
-                                if self.rebinding == Some(action) {
+                                if self.rebinding == Some(cmd) {
                                     ui.label("press keys...");
                                 } else if ui.small_button("Rebind").clicked() {
-                                    self.rebinding = Some(action);
+                                    self.rebinding = Some(cmd);
                                 }
                                 if ui.small_button("Clear").clicked() {
-                                    self.keymap.bind(action, None);
-                                    if self.rebinding == Some(action) {
+                                    self.keymap.bind(cmd, None);
+                                    if self.rebinding == Some(cmd) {
                                         self.rebinding = None;
                                     }
                                 }
@@ -8347,37 +8356,39 @@ mod tests {
     }
 
     #[test]
-    fn run_action_routes_keymap_actions_to_their_effects() {
+    fn dispatch_routes_commands_to_their_effects() {
         let mut app = App::new();
-        app.run_action(keymap::Action::ToolMeasure);
+        app.dispatch(CommandId("tool.measure"));
         assert_eq!(app.tools.active(), Tool::Measure);
         let labels_before = app.labels_visible;
-        app.run_action(keymap::Action::ToggleLabels);
+        app.dispatch(CommandId("view.labels"));
         assert_ne!(app.labels_visible, labels_before);
         let minimap_before = app.minimap_visible;
-        app.run_action(keymap::Action::ToggleMinimap);
+        app.dispatch(CommandId("view.minimap"));
         assert_ne!(app.minimap_visible, minimap_before);
-        app.run_action(keymap::Action::SplitHorizontal);
+        app.dispatch(CommandId("view.split_h"));
         assert_eq!(app.viewports.pane_count(), 2);
-        app.run_action(keymap::Action::SplitSingle);
+        app.dispatch(CommandId("view.split_single"));
         assert_eq!(app.viewports.pane_count(), 1);
-        app.run_action(keymap::Action::OpenPalette);
+        app.dispatch(CommandId("palette.open"));
         assert!(app.palette_open);
+        // An unknown id is a no-op, not a panic.
+        app.dispatch(CommandId("not.a.command"));
     }
 
     #[test]
-    fn rebinding_through_the_map_redirects_the_action() {
+    fn rebinding_through_the_map_redirects_the_command() {
         let mut app = App::new();
         // Force a known map so the test does not depend on any user keymap file.
         app.keymap = Keymap::defaults();
         let chord = keymap::Chord::parse("Ctrl+Shift+Q").expect("valid chord");
-        assert_eq!(app.keymap.action_for(&chord), None);
-        let stolen = app.keymap.bind(keymap::Action::Redo, Some(chord.clone()));
+        assert_eq!(app.keymap.command_for(&chord), None);
+        let stolen = app.keymap.bind(CommandId("edit.redo"), Some(chord.clone()));
         assert!(stolen.is_empty());
-        assert_eq!(app.keymap.action_for(&chord), Some(keymap::Action::Redo));
+        assert_eq!(app.keymap.command_for(&chord), Some(CommandId("edit.redo")));
         // The old default no longer fires.
         let old = keymap::Chord::parse("Ctrl+Y").expect("valid chord");
-        assert_eq!(app.keymap.action_for(&old), None);
+        assert_eq!(app.keymap.command_for(&old), None);
     }
 
     #[test]
