@@ -999,8 +999,8 @@ impl App {
 
     /// Applies the recorded [`StartView`] to the constructed app.
     ///
-    /// For [`StartView::ReplayTheater`] it opens the theater window and loads the
-    /// default transcript from the platform [`store`](crate::store) (the bundled
+    /// For [`StartView::ReplayTheater`] it opens the docked theater panel and loads
+    /// the default transcript from the platform [`store`](crate::store) (the bundled
     /// transcript on wasm, the scripted run on native), so a public web visitor
     /// lands directly on a playing replay (ADR 0026). If the store cannot produce a
     /// transcript, the theater simply opens empty rather than failing.
@@ -1010,6 +1010,11 @@ impl App {
                 self.replay.load(records, hash);
             }
             self.replay_open = true;
+            // Play at once so the landing shows the agent drawing (ADR 0026's
+            // "motion" first impression) instead of an idle "Nothing drawn yet"
+            // panel; this closes H1's "never lands on an empty box" requirement. A
+            // no-op when the store gave no transcript (nothing to play).
+            self.replay.play();
         }
     }
 
@@ -4575,6 +4580,14 @@ impl App {
         // minimap clear of the panels by construction (fixes AUD-01/AUD-02).
         self.show_xsection_panel(ui);
         self.show_view3d_panel(ui, frame);
+        // The Replay theater docks here too (H1): it was the lone holdout left as a
+        // floating window, and it opens on the public landing (?view=replay, ADR
+        // 0026), so its title bar sliced through the menu bar and its body covered
+        // the canvas on a first visit. As a managed bottom panel it sits above the
+        // status bar with the canvas shrinking to fit above it, so the menu bar and
+        // canvas are never occluded (the AUD-01/AUD-20 scenario the packet set out
+        // to kill).
+        self.show_replay_panel(ui);
         let mut canvas_screen: Option<ScreenRect> = None;
         egui::CentralPanel::default().show(ui, |ui| {
             canvas_screen = Some(self.canvas(ui, gpu_format));
@@ -4673,6 +4686,33 @@ impl App {
             });
     }
 
+    /// The Replay theater as a managed bottom panel (H1): the load row, transport,
+    /// readouts, and replay canvas, with a header carrying the close affordance.
+    /// Docked (never a floating window) so it cannot occlude the menu bar or the
+    /// main canvas, including on the public `?view=replay` landing (ADR 0026).
+    fn show_replay_panel(&mut self, ui: &mut egui::Ui) {
+        if !self.replay_open {
+            return;
+        }
+        let cctx = self.ui_ctx();
+        egui::Panel::bottom("replay_theater")
+            .resizable(true)
+            .default_size(300.0)
+            .show(ui, |ui| {
+                let close = view_panel_header(ui, cctx, "Replay theater");
+                self.replay_load_row(ui);
+                ui.separator();
+                self.replay_transport_row(ui);
+                ui.separator();
+                self.replay_readouts(ui);
+                ui.separator();
+                self.replay_canvas(ui);
+                if close {
+                    self.replay_open = false;
+                }
+            });
+    }
+
     /// The component-library context for this frame: the shipped dark palette at
     /// the active density, honoring the reduced-motion preference. Every Inspector
     /// widget composes from [`theme::components`] through this handle (lane 2B).
@@ -4730,18 +4770,24 @@ impl App {
     /// button, and the per-panel gear menu (catalog 59, 60).
     fn inspector_header(&mut self, ui: &mut egui::Ui, ctx: theme::components::Ctx) {
         use crate::inspector_layout::PanelGroup;
-        use theme::components::{IconButton, Segmented};
+        use theme::components::IconButton;
 
         ui.horizontal(|ui| {
-            let labels = [
-                PanelGroup::Inspect.label(),
-                PanelGroup::Review.label(),
-                PanelGroup::Automate.label(),
-                PanelGroup::Settings.label(),
-            ];
-            let mut index = self.inspector.group.index();
-            Segmented::new(&labels).show(ui, ctx, &mut index);
-            self.inspector.group = PanelGroup::from_index(index);
+            // Icon tabs, not a text segmented control: four full-text labels plus
+            // the collapse button and gear menu did not fit the fixed Inspector
+            // width and clipped "Settings" to "ngs" at every desktop size (H2). Each
+            // group carries an icon and its name as the tooltip (matching the
+            // collapsed icon rail), so the tab strip stays legible and compact.
+            for group in PanelGroup::ALL {
+                let selected = self.inspector.group == group;
+                if IconButton::new(group.icon(), group.label())
+                    .selected(selected)
+                    .show(ui, ctx)
+                    .clicked()
+                {
+                    self.inspector.group = group;
+                }
+            }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if IconButton::new(crate::theme::icons::PANEL_RIGHT, "Collapse panel")
@@ -8334,33 +8380,6 @@ impl App {
         }
     }
 
-    /// Draws the replay theater window: load row, transport, readouts, and the
-    /// replayed document painted through a [`crate::replay::FitView`].
-    ///
-    /// All playback logic lives in [`crate::replay`]; this is glue. The theater
-    /// re-executes the transcript against a live engine session, so the canvas
-    /// here shows real replayed geometry, and each `run_drc` record it crosses
-    /// pushes its recorded violation list into the shared DRC overlay.
-    fn replay_window(&mut self, ctx: &egui::Context) {
-        if !self.replay_open {
-            return;
-        }
-        let mut open = self.replay_open;
-        egui::Window::new("Replay theater")
-            .open(&mut open)
-            .default_size([480.0, 460.0])
-            .show(ctx, |ui| {
-                self.replay_load_row(ui);
-                ui.separator();
-                self.replay_transport_row(ui);
-                ui.separator();
-                self.replay_readouts(ui);
-                ui.separator();
-                self.replay_canvas(ui);
-            });
-        self.replay_open = open;
-    }
-
     /// The theater's load row: a JSONL path, or the built-in scripted demo run.
     fn replay_load_row(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
@@ -11490,6 +11509,12 @@ impl App {
         let font = theme::apply::hud_mono(self.ui_density);
         let label = CANVAS.hud_label;
 
+        // Ticks stay dense, but a label is drawn only when it clears the previous
+        // one's measured width (top ruler) or height (left ruler). Without this
+        // decimation the five-figure DBU labels overprint into an illegible band at
+        // low zoom, where the tick interval is finer than a label is wide (H3 /
+        // AUD-08). Labels are measured, not assumed, so the gap holds at any font.
+        let mut last_label_end = f32::NEG_INFINITY;
         for x in grid::grid_lines(world.min.x, world.max.x, step) {
             let (sx, _) = self.camera.world_to_screen(screen, Point::new(x, 0));
             if sx < screen.left + bar {
@@ -11499,14 +11524,14 @@ impl App {
                 [Pos2::new(sx, screen.top), Pos2::new(sx, screen.top + bar)],
                 tick,
             );
-            painter.text(
-                Pos2::new(sx + 2.0, screen.top + 1.0),
-                Align2::LEFT_TOP,
-                x.to_string(),
-                font.clone(),
-                label,
-            );
+            if sx + 2.0 >= last_label_end + 4.0 {
+                let galley = painter.layout_no_wrap(x.to_string(), font.clone(), label);
+                let width = galley.size().x;
+                painter.galley(Pos2::new(sx + 2.0, screen.top + 1.0), galley, label);
+                last_label_end = sx + 2.0 + width;
+            }
         }
+        let mut last_label_bottom = f32::NEG_INFINITY;
         for y in grid::grid_lines(world.min.y, world.max.y, step) {
             let (_, sy) = self.camera.world_to_screen(screen, Point::new(0, y));
             if sy < screen.top + bar {
@@ -11516,13 +11541,12 @@ impl App {
                 [Pos2::new(screen.left, sy), Pos2::new(screen.left + bar, sy)],
                 tick,
             );
-            painter.text(
-                Pos2::new(screen.left + 1.0, sy + 1.0),
-                Align2::LEFT_TOP,
-                y.to_string(),
-                font.clone(),
-                label,
-            );
+            if sy + 1.0 >= last_label_bottom + 2.0 {
+                let galley = painter.layout_no_wrap(y.to_string(), font.clone(), label);
+                let height = galley.size().y;
+                painter.galley(Pos2::new(screen.left + 1.0, sy + 1.0), galley, label);
+                last_label_bottom = sy + 1.0 + height;
+            }
         }
     }
 
@@ -12269,7 +12293,6 @@ impl eframe::App for App {
             self.transform_window(&ctx);
             self.shortcuts_overlay(&ctx);
             self.keymap_window(&ctx);
-            self.replay_window(&ctx);
             self.open_warnings_window(&ctx);
         }
         // Lane 3b dialogs: Open-from-URL, Convert, and Share (each a no-op unless open).

@@ -69,7 +69,10 @@ impl PanelGroup {
             PanelGroup::Inspect => icons::INSPECT,
             PanelGroup::Review => icons::SHIELD_CHECK,
             PanelGroup::Automate => icons::BOT,
-            PanelGroup::Settings => icons::SETTINGS,
+            // Sliders, not the gear: this group holds Operations, Productivity,
+            // Snap, Export, and the tech editor (adjustments), and the gear glyph
+            // is reserved for the per-panel options menu beside these tabs.
+            PanelGroup::Settings => icons::SLIDERS_HORIZONTAL,
         }
     }
 
