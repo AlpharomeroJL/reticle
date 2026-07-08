@@ -192,12 +192,12 @@ re-checks only the changed neighbourhood: 5 us at 100k shapes and 37 us at 1M, a
 subset of KLayout `.lydrc` DRC decks compiles down to the same engine, validated
 verdict-for-verdict against KLayout headless in the pinned container.
 
-**Metrology.** _(placeholder row, pending the Wave 3 merge.)_ A CPU metrology pass reports
+**Metrology.** A CPU metrology pass reports
 exact per-layer area and perimeter (union on the `i_overlay` integer engine, overlaps counted
 once), connectivity statistics (net count, shapes per net, max fanout), and a simplified
 per-net antenna ratio over a SKY130 layer subset, exported to byte-stable CSV and Markdown. A
 property test pins area and perimeter to a coordinate-compression oracle. The GPU density
-overlay is deferred; see [ADR 0074](docs/decisions/0074-cpu-metrology-reports.md).
+overlay is deferred; see [ADR 0077](docs/decisions/0077-cpu-metrology-reports.md).
 
 **Installable PWA.** The browser bundle is an installable Progressive Web App whose app shell
 loads offline: a relative web manifest, a service worker that caches the shell and the hashed
@@ -291,7 +291,7 @@ with no GPU returns no render rather than failing) and lives outside the Cargo w
 so the local gate stays Python-free. See
 [ADR 0087](docs/decisions/0087-python-bindings-abi3-nondefault.md).
 
-**In-browser conversion.** _(placeholder row, pending the Wave 6 merge.)_ The browser
+**In-browser conversion.** The browser
 converts a GDS to a streamable `.rtla` archive itself, with no server and no upload: a Web
 Worker runs the frozen streaming GDS reader and an additive in-memory archive builder
 (`build_rtla_to_vec`, byte-identical to the native builder for browser-scale layouts),
@@ -324,10 +324,11 @@ layout, not a production EDA tool. It is honest about its edges, audited in
   boolean robustness are covered instead by proptests in the gate. Run the fuzzers on Linux.
 - OASIS round-trips rectangles, polygons, paths, instances, and arrays; GDSII carries the
   full hierarchy.
-- A streamed-archive path (`.rtla`) is landing as infrastructure: a forward-only GDSII
+- A streamed-archive path (`.rtla`) underpins large-layout browsing: a forward-only GDSII
   record reader with no `gds21` dependency (wasm-clean) and an external, bounded-memory
   tiled-archive builder that turns a 30M-entry layout into an archive at 127 MiB peak RSS.
-  The in-browser residency and converter that consume it are separate Wave 2 lanes.
+  The in-browser converter that produces one in a Web Worker into OPFS now ships (above);
+  very large dies still stay a native-converter job.
 
 For where Reticle sits among layout tools and the full list of non-goals, see
 [Positioning](docs/src/positioning.md).
