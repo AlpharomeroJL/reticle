@@ -6,6 +6,8 @@
 # Design
 
 - [Architecture](architecture.md)
+- [The design system](design-system.md)
+  - [The redesign: before and after](redesign-gallery.md)
 - [Geometry](geometry.md)
 - [Spatial indexing](indexing.md)
 - [Document model](model.md)
