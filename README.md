@@ -245,6 +245,15 @@ a connectivity intent, feeds the violations back, and stops only when an objecti
 passes. For a local repair it can hand the model a region-scoped context pack instead of the
 whole layout, and a user can fold a new constraint into the running loop between iterations.
 
+**Multimodal verification.** A second, best-effort oracle renders a task's layout through
+the same headless `RenderPng` path and asks a local vision model (`llava:7b` over Ollama,
+about 4.7 GB resident) a yes/no question about the render, reported beside the authoritative
+DRC/checker oracle as an agreement rate (ADR 0090, placeholder number). The graded pass/fail
+stays the deterministic checker's; the vision verdict is corroboration, not the verdict of
+record. A missing model or a host with no GPU is an honest not-run, never an error and never
+a fabricated number. On the development host the live oracle ran (`llava:7b`) and agreed with
+the authoritative checker on both fixtures of a faithful-versus-empty pair.
+
 **CRDT sync.** The document mirrors onto a `yrs` CRDT with unique `actor:counter` keys, so
 concurrent edits converge regardless of delivery order, proven by order-independent
 convergence tests. A thin relay broadcasts updates and presence; edits made offline
