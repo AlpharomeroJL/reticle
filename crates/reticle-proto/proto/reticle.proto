@@ -19,6 +19,10 @@ package reticle.v1;
 enum SchemaVersion {
   SCHEMA_VERSION_UNSPECIFIED = 0;
   SCHEMA_VERSION_V1 = 1;
+  // V2 adds anchored annotations to the Document (the `comments` field). The
+  // change is additive: V1 bytes decode unchanged (comments default-empty) and a
+  // V1 document upgrades to V2 losslessly via `reticle_proto::migrate` (ADR 0080).
+  SCHEMA_VERSION_V2 = 2;
 }
 
 // -----------------------------------------------------------------------------
@@ -160,6 +164,10 @@ message Document {
   Technology technology = 2;
   repeated Cell cells = 3;
   repeated string top_cells = 4;
+  // Anchored annotations (schema V2+). Additive field: absent in V1 bytes, where
+  // it decodes as the empty list. Each Comment's `anchor_ref` binds it to a shape
+  // or cell in `cells`.
+  repeated Comment comments = 5;
 }
 
 // -----------------------------------------------------------------------------
