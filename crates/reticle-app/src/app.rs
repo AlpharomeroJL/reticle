@@ -6211,8 +6211,10 @@ impl App {
         let lines = browse.stats().hud_lines(self.frame_meter.fps());
         let pad = 8.0;
         let line_h = 16.0;
-        let x = screen.left + pad;
-        let top = screen.top + pad;
+        // Clear the left ruler (bar plus its coordinate labels) and the top ruler bar,
+        // so the HUD sits on the canvas rather than under the ruler numbers.
+        let x = screen.left + RULER_BAR + 40.0;
+        let top = screen.top + RULER_BAR + pad;
         let panel = EguiRect::from_min_size(
             Pos2::new(x - 6.0, top - 6.0),
             egui::vec2(210.0, pad * 2.0 + line_h * lines.len() as f32),
