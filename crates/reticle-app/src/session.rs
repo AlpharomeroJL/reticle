@@ -51,6 +51,14 @@ pub struct SessionState {
     /// the tour auto-starts once; set `true` after it finishes so it never shows
     /// again unprompted (the Help menu can still relaunch it). See [`crate::tour`].
     pub tour_seen: bool,
+    // ---- lane 2c: left panel + view panels ---------------------------------
+    /// The left Layers panel width, in points. Restored as the panel's starting
+    /// width so a resized panel survives a restart.
+    pub panel_left_w: f32,
+    /// Whether the managed 3D-stack panel is open (View > Panels, ADR 0096).
+    pub panel_3d_open: bool,
+    /// Whether the managed Cross-section panel is open (View > Panels, ADR 0096).
+    pub panel_xsection_open: bool,
 }
 
 impl Default for SessionState {
@@ -68,8 +76,24 @@ impl Default for SessionState {
             ui_density: Density::Comfortable,
             reduced_motion: false,
             tour_seen: false,
+            panel_left_w: 210.0,
+            panel_3d_open: false,
+            panel_xsection_open: false,
         }
     }
+}
+
+/// The lane-2c panel state captured with a session: left-panel width and which
+/// managed view panels are open. Bundled so [`SessionState::capture`] does not
+/// grow three more positional arguments.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct PanelLayout {
+    /// Left Layers panel width, in points.
+    pub left_w: f32,
+    /// Whether the 3D-stack panel is open.
+    pub panel_3d_open: bool,
+    /// Whether the Cross-section panel is open.
+    pub panel_xsection_open: bool,
 }
 
 impl SessionState {
@@ -88,6 +112,7 @@ impl SessionState {
         reduced_motion: bool,
         hidden: &[LayerId],
         tour_seen: bool,
+        panels: PanelLayout,
     ) -> Self {
         let center = camera.center();
         Self {
@@ -103,6 +128,9 @@ impl SessionState {
             ui_density,
             reduced_motion,
             tour_seen,
+            panel_left_w: panels.left_w,
+            panel_3d_open: panels.panel_3d_open,
+            panel_xsection_open: panels.panel_xsection_open,
         }
     }
 
@@ -149,7 +177,7 @@ impl SessionState {
             .map(|(l, d)| format!("{l}/{d}"))
             .collect();
         format!(
-            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nui_density={}\nreduced_motion={}\nhidden={}\ntour_seen={}\n",
+            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nui_density={}\nreduced_motion={}\nhidden={}\ntour_seen={}\npanel_left_w={}\npanel_3d_open={}\npanel_xsection_open={}\n",
             self.center_x,
             self.center_y,
             self.pixels_per_dbu,
@@ -161,7 +189,10 @@ impl SessionState {
             self.ui_density.tag(),
             self.reduced_motion,
             hidden.join(","),
-            self.tour_seen
+            self.tour_seen,
+            self.panel_left_w,
+            self.panel_3d_open,
+            self.panel_xsection_open
         )
     }
 
@@ -210,6 +241,13 @@ impl SessionState {
                 "reduced_motion" => s.reduced_motion = value == "true",
                 "hidden" => s.hidden_layers = parse_hidden(value),
                 "tour_seen" => s.tour_seen = value == "true",
+                "panel_left_w" => {
+                    if let Ok(v) = value.parse() {
+                        s.panel_left_w = v;
+                    }
+                }
+                "panel_3d_open" => s.panel_3d_open = value == "true",
+                "panel_xsection_open" => s.panel_xsection_open = value == "true",
                 _ => {}
             }
         }
@@ -330,6 +368,9 @@ mod tests {
             ui_density: Density::Compact,
             reduced_motion: true,
             tour_seen: true,
+            panel_left_w: 244.0,
+            panel_3d_open: true,
+            panel_xsection_open: false,
         }
     }
 
@@ -353,6 +394,11 @@ mod tests {
             true,
             &[LayerId::new(3, 0)],
             true,
+            PanelLayout {
+                left_w: 260.0,
+                panel_3d_open: true,
+                panel_xsection_open: true,
+            },
         );
         let restored = s.camera();
         assert_eq!(restored.center(), Point::new(700, 900));
@@ -363,6 +409,29 @@ mod tests {
         assert!(s.reduced_motion, "capture carries the reduced-motion flag");
         assert_eq!(s.hidden_layers(), vec![LayerId::new(3, 0)]);
         assert!(s.tour_seen, "capture carries the tour-seen flag through");
+        assert!((s.panel_left_w - 260.0).abs() < f32::EPSILON);
+        assert!(s.panel_3d_open && s.panel_xsection_open);
+    }
+
+    #[test]
+    fn panel_layout_round_trips_and_defaults() {
+        // The lane-2c panel keys round-trip through the text format...
+        let s = SessionState {
+            panel_left_w: 275.5,
+            panel_3d_open: true,
+            panel_xsection_open: false,
+            ..SessionState::default()
+        };
+        let parsed = SessionState::from_text(&s.to_text()).expect("parses");
+        assert!((parsed.panel_left_w - 275.5).abs() < f32::EPSILON);
+        assert!(parsed.panel_3d_open);
+        assert!(!parsed.panel_xsection_open);
+        // ...and an older file without them keeps the closed panels and the default
+        // left width (unknown-key tolerance makes the addition non-breaking).
+        let older = SessionState::from_text("center_x=1\n").expect("parses");
+        assert!((older.panel_left_w - 210.0).abs() < f32::EPSILON);
+        assert!(!older.panel_3d_open);
+        assert!(!older.panel_xsection_open);
     }
 
     #[test]

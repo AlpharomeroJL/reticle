@@ -71,6 +71,10 @@ pub enum AppOp {
     SplitHorizontal,
     /// Split the canvas into two stacked panes.
     SplitVertical,
+    /// Toggle the managed 3D-stack panel (lane 2c, ADR 0096).
+    TogglePanel3d,
+    /// Toggle the managed Cross-section panel (lane 2c, ADR 0096).
+    TogglePanelXsection,
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -341,6 +345,27 @@ static REGISTRY: &[CommandSpec] = &[
         run: RunAs::App(AppOp::OpenPalette),
         scope: Scope::Global,
     },
+    // --- 2c: view panels ---
+    CommandSpec {
+        id: CommandId("view.panel_3d"),
+        label: "3D stack panel",
+        category: "View",
+        menu_path: Some(&["View", "Panels"]),
+        default_chord: None,
+        rebindable: true,
+        run: RunAs::App(AppOp::TogglePanel3d),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("view.panel_xsection"),
+        label: "Cross-section panel",
+        category: "View",
+        menu_path: Some(&["View", "Panels"]),
+        default_chord: None,
+        rebindable: true,
+        run: RunAs::App(AppOp::TogglePanelXsection),
+        scope: Scope::Global,
+    },
 ];
 
 /// The full command registry.
@@ -449,6 +474,8 @@ mod tests {
         let cases = [
             ("edit.undo", &["Edit"][..]),
             ("view.split_h", &["View", "Split"][..]),
+            ("view.panel_3d", &["View", "Panels"][..]),
+            ("view.panel_xsection", &["View", "Panels"][..]),
             ("file.export_png", &["File", "Export"][..]),
             ("palette.open", &["Help"][..]),
         ];

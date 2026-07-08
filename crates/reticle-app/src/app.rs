@@ -43,7 +43,7 @@ use crate::selection::{self, Selection};
 use crate::snap::{self, Guide, SnapHint, SnapState};
 use crate::tech_editor::TechEditorState;
 use crate::theme::{
-    self,
+    self, components, icons,
     tokens::{CANVAS, DARK},
 };
 use crate::tool::{Tool, ToolState};
@@ -513,6 +513,24 @@ pub struct App {
     /// of per frame; the boot styling hook reads it at the top of the frame body.
     theme_dirty: bool,
 
+    // ---- Lane 2c: left panel + managed view panels --------------------------
+    /// Left Layers panel width, in points; restored from and saved to the session
+    /// so a resized panel survives a restart.
+    panel_left_w: f32,
+    /// Whether the managed 3D-stack panel is open (View > Panels, ADR 0096). Docked
+    /// to the canvas bottom, never floating over the rulers or minimap.
+    panel_3d_open: bool,
+    /// Whether the managed Cross-section panel is open (View > Panels, ADR 0096).
+    panel_xsection_open: bool,
+    /// The layer the pointer hovers in the Layers panel this frame, if any: the
+    /// canvas dims every other layer while it is set (catalog 39 hover peek). Reset
+    /// each frame from the panel; consumed by the retained-scene rebuild.
+    peek_layer: Option<LayerId>,
+    /// The layer whose color-editor popover is open, if any (catalog 62).
+    color_editor: Option<LayerId>,
+    /// The in-progress name for a new visibility preset (catalog 62).
+    preset_name: String,
+
     // ---- Lane 4A: first-run tour --------------------------------------------
     /// The first-run tour state machine (pure; see [`crate::tour`]). Auto-starts on
     /// a fresh install and is relaunchable from the Help menu. Its "seen" bit
@@ -538,12 +556,6 @@ pub struct App {
     /// on wasm.
     #[cfg(not(target_arch = "wasm32"))]
     demo: Option<crate::demoscript::DemoRun>,
-
-    /// Whether a demo capture wants the floating 3D-stack window shown. Off by
-    /// default so non-3D tours are not cluttered by it; a `view3d on` step turns it on
-    /// for the 3D tour. Ignored outside capture mode (the window shows normally).
-    #[cfg(not(target_arch = "wasm32"))]
-    demo_show_3d: bool,
 
     /// Whether a demo capture wants the right column scrolled to the search panel (the
     /// filter-query bar and outline tree), which otherwise sits below the fold. Set by
@@ -750,6 +762,7 @@ impl App {
         // session (defaults on a fresh install or the web); the boot styling hook
         // in `ui` applies them on the first frame.
         let (ui_density, reduced_motion) = boot_ui_prefs();
+        let panels = boot_panel_layout();
         Self {
             renderer: WgpuRenderer::new(),
             document,
@@ -847,14 +860,18 @@ impl App {
             ui_density,
             reduced_motion,
             theme_dirty: true,
+            panel_left_w: panels.left_w,
+            panel_3d_open: panels.panel_3d_open,
+            panel_xsection_open: panels.panel_xsection_open,
+            peek_layer: None,
+            color_editor: None,
+            preset_name: String::new(),
             tour: Tour::from_seen(tour_already_seen()),
             gallery: None,
             #[cfg(not(target_arch = "wasm32"))]
             capture: None,
             #[cfg(not(target_arch = "wasm32"))]
             demo: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            demo_show_3d: false,
             #[cfg(not(target_arch = "wasm32"))]
             demo_focus_search: false,
             #[cfg(not(target_arch = "wasm32"))]
@@ -1990,7 +2007,9 @@ impl App {
                 );
             }
             Step::View3d(open) => {
-                self.demo_show_3d = *open;
+                // Opening the 3D stack is now opening its managed panel (ADR 0096);
+                // a demo `view3d on` step drives the same flag View > Panels does.
+                self.panel_3d_open = *open;
                 if *open {
                     self.view3d.reset();
                 }
@@ -2225,6 +2244,13 @@ impl App {
                 | u64::from(row.visible);
             hash = (hash ^ bit).wrapping_mul(0x0000_0100_0000_01B3);
         }
+        // Fold in the hover-peek layer (catalog 39) so entering, leaving, or moving
+        // the peek retessellates the dimmed scene; no peek leaves the signature at
+        // its plain visibility value, so an idle frame is still a no-op rebuild.
+        if let Some(id) = self.peek_layer {
+            let peek = u64::from(u32::from(id.layer) << 8 | u32::from(id.datatype)) | (1u64 << 40);
+            hash = (hash ^ peek).wrapping_mul(0x0000_0100_0000_01B3);
+        }
         hash
     }
 
@@ -2248,7 +2274,7 @@ impl App {
         if revision == self.render_revision && self.retained.top_cell() == self.top_cell {
             return; // nothing the GPU cares about changed
         }
-        let palette = palette_from_layers(&self.layer_state);
+        let palette = palette_from_layers_peek(&self.layer_state, self.peek_layer);
         let names: Vec<String> = self
             .history
             .document()
@@ -2466,6 +2492,21 @@ impl App {
             AppOp::SplitSingle => self.set_split(Split::Single),
             AppOp::SplitHorizontal => self.set_split(Split::Horizontal),
             AppOp::SplitVertical => self.set_split(Split::Vertical),
+            AppOp::TogglePanel3d => {
+                self.panel_3d_open = !self.panel_3d_open;
+                if self.panel_3d_open {
+                    self.view3d.reset();
+                }
+                self.status
+                    .set(format!("3D stack {}", on_off(self.panel_3d_open)));
+            }
+            AppOp::TogglePanelXsection => {
+                self.panel_xsection_open = !self.panel_xsection_open;
+                self.status.set(format!(
+                    "Cross-section {}",
+                    on_off(self.panel_xsection_open)
+                ));
+            }
         }
     }
 
@@ -2744,6 +2785,7 @@ impl App {
     fn main_panels(
         &mut self,
         ui: &mut egui::Ui,
+        frame: &eframe::Frame,
         gpu_format: Option<eframe::egui_wgpu::wgpu::TextureFormat>,
     ) -> (Option<ScreenRect>, TourTargets) {
         let toolbar = egui::Panel::top("toolbar")
@@ -2755,10 +2797,12 @@ impl App {
         });
         let layers = egui::Panel::left("layers")
             .resizable(true)
-            .default_size(210.0)
+            .default_size(self.panel_left_w)
             .show(ui, |ui| self.layer_panel(ui))
             .response
             .rect;
+        // Remember the (possibly resized) width so the session persists it.
+        self.panel_left_w = layers.width();
         let right_column = egui::Panel::right("history")
             .resizable(true)
             .default_size(240.0)
@@ -2806,6 +2850,13 @@ impl App {
             })
             .response
             .rect;
+        // Managed view panels (ADR 0096): the 3D stack and Cross-section dock to the
+        // canvas bottom when opened from View > Panels. Registered after the side
+        // panels, so each spans only the central column and sits above the status bar;
+        // the canvas shrinks to fit above them, keeping the rulers and the top-right
+        // minimap clear of the panels by construction (fixes AUD-01/AUD-02).
+        self.show_xsection_panel(ui);
+        self.show_view3d_panel(ui, frame);
         let mut canvas_screen: Option<ScreenRect> = None;
         egui::CentralPanel::default().show(ui, |ui| {
             canvas_screen = Some(self.canvas(ui, gpu_format));
@@ -2836,6 +2887,74 @@ impl App {
         };
         (canvas_screen, targets)
     }
+
+    /// A [`components::Ctx`] for this frame: the dark palette, the active density,
+    /// and the reduced-motion preference. Chrome that composes the widget library
+    /// (the Layers panel, the managed view panels) threads this into each call.
+    fn ui_ctx(&self) -> components::Ctx {
+        components::Ctx {
+            tokens: DARK,
+            density: self.ui_density,
+            reduced_motion: self.reduced_motion,
+        }
+    }
+
+    /// Hosts the managed 3D-stack panel (ADR 0096) docked at the canvas bottom when
+    /// [`panel_3d_open`](Self::panel_3d_open) is set. A close affordance in the
+    /// header flips the flag; the wgpu callback is [`crate::view3d::View3d::show_in`],
+    /// unchanged from the floating window it replaced.
+    fn show_view3d_panel(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
+        if !self.panel_3d_open {
+            return;
+        }
+        let cctx = self.ui_ctx();
+        egui::Panel::bottom("view.panel_3d")
+            .resizable(true)
+            .default_size(300.0)
+            .show(ui, |ui| {
+                let close = view_panel_header(ui, cctx, "3D stack");
+                self.view3d.show_in(
+                    ui,
+                    frame,
+                    self.history.document(),
+                    &self.top_cell,
+                    &self.layer_state,
+                );
+                if close {
+                    self.panel_3d_open = false;
+                    self.status.set("3D stack off");
+                }
+            });
+    }
+
+    /// Hosts the managed Cross-section panel (ADR 0096) docked at the canvas bottom
+    /// when [`panel_xsection_open`](Self::panel_xsection_open) is set. A close
+    /// affordance in the header flips the flag; the elevation draw is
+    /// [`crate::xsection::panel`], unchanged from the floating window it replaced.
+    fn show_xsection_panel(&mut self, ui: &mut egui::Ui) {
+        if !self.panel_xsection_open {
+            return;
+        }
+        let cctx = self.ui_ctx();
+        egui::Panel::bottom("view.panel_xsection")
+            .resizable(true)
+            .default_size(220.0)
+            .show(ui, |ui| {
+                let close = view_panel_header(ui, cctx, "Cross-section");
+                crate::xsection::panel(
+                    ui,
+                    self.tools.cut_line(),
+                    self.scene.shapes(),
+                    self.history.document().technology(),
+                    &self.layer_state,
+                );
+                if close {
+                    self.panel_xsection_open = false;
+                    self.status.set("Cross-section off");
+                }
+            });
+    }
+
     /// A click the Start screen recorded this frame, applied after the layout closure
     /// so the borrow of `self` inside the egui closure is released first.
     ///
@@ -3043,49 +3162,304 @@ impl App {
         }
     }
 
-    /// Draws the left layer-manager panel: filter, per-layer swatch + visibility.
+    /// Draws the left Layers panel (lane 2c): a color swatch and editor, a
+    /// visibility eye with hover-peek and alt-click solo (catalog 39), a lock
+    /// toggle (catalog 57), a filter with a clear affordance, show/hide-all icons,
+    /// and savable visibility presets (catalog 62). Everything is composed from
+    /// [`components`], so a density or palette change lands in one place.
+    ///
+    /// In a streamed-archive session the panel shows an empty state instead of the
+    /// built-in demo's layers, since a `.rtla` archive carries no editable layer
+    /// table (AUD-04). The viewer and editor paths already rebuild the table from
+    /// the active document on install, so they need no special case here.
     fn layer_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Layers");
+        let cctx = self.ui_ctx();
+        components::SectionHeader::new("Layers").show(ui, cctx);
+
+        if self.archive.is_some() {
+            ui.separator();
+            components::EmptyState::new(
+                "No layer table",
+                "A streamed archive carries no editable layers.",
+            )
+            .show(ui, cctx);
+            ui.separator();
+            self.view_panel_launcher(ui, cctx);
+            return;
+        }
+
+        // Filter with a clear affordance, plus show/hide-all as icon buttons.
+        let filter_empty = self.layer_state.filter().is_empty();
         ui.horizontal(|ui| {
-            ui.label("Filter:");
-            ui.text_edit_singleline(self.layer_state.filter_mut());
-        });
-        ui.horizontal(|ui| {
-            if ui.small_button("Show all").clicked() {
+            components::TextField::new(self.layer_state.filter_mut())
+                .hint("Filter layers")
+                .desired_width(110.0)
+                .show(ui, cctx);
+            if components::IconButton::new(icons::X, "Clear filter")
+                .enabled(!filter_empty)
+                .show(ui, cctx)
+                .clicked()
+            {
+                self.layer_state.filter_mut().clear();
+            }
+            if components::IconButton::new(icons::EYE, "Show all layers")
+                .show(ui, cctx)
+                .clicked()
+            {
                 self.layer_state.show_all();
             }
-            if ui.small_button("Hide all").clicked() {
+            if components::IconButton::new(icons::EYE_OFF, "Hide all layers")
+                .show(ui, cctx)
+                .clicked()
+            {
                 self.layer_state.hide_all();
             }
         });
         ui.separator();
 
+        self.layer_rows(ui, cctx);
+        self.layer_color_popover(ui);
+        ui.separator();
+        self.layer_presets_section(ui, cctx);
+        ui.separator();
+        self.select_by_name_row(ui, cctx);
+        ui.separator();
+        self.view_panel_launcher(ui, cctx);
+    }
+
+    /// Draws the scrolling layer rows and applies the row interaction collected
+    /// this frame (visibility toggle, solo, lock, color-editor open, hover peek).
+    ///
+    /// Interactions are gathered into locals while an immutable borrow of the row
+    /// table is live, then applied afterwards, so the row loop never needs mutable
+    /// access to [`LayerState`] mid-render.
+    fn layer_rows(&mut self, ui: &mut egui::Ui, cctx: components::Ctx) {
         let indices = self.layer_state.filtered_indices();
+        let mut hover: Option<LayerId> = None;
+        let mut toggle_vis: Option<LayerId> = None;
+        let mut do_solo: Option<LayerId> = None;
+        let mut toggle_lock: Option<LayerId> = None;
+        let mut open_color: Option<LayerId> = None;
+
+        let rows = self.layer_state.rows();
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                let rows = self.layer_state.rows_mut();
                 for i in indices {
-                    let row = &mut rows[i];
-                    ui.horizontal(|ui| {
+                    let row = &rows[i];
+                    let line = ui.horizontal(|ui| {
+                        // Color swatch: click opens the color editor (catalog 62).
                         let (r, g, b, _) = layers::rgba_components(row.color_rgba);
-                        let (rect, _) =
-                            ui.allocate_exact_size(Vec2::new(14.0, 14.0), Sense::hover());
+                        let (rect, swatch) =
+                            ui.allocate_exact_size(Vec2::new(14.0, 14.0), Sense::click());
                         ui.painter()
                             .rect_filled(rect, 2.0, theme::tokens::layer_rgb(r, g, b));
-                        ui.checkbox(&mut row.visible, &row.name);
+                        if swatch.on_hover_text("Edit color").clicked() {
+                            open_color = Some(row.id);
+                        }
+                        // Visibility eye: click toggles, alt-click solos (catalog 39).
+                        let (eye, verb) = if row.visible {
+                            (icons::EYE, "Hide layer")
+                        } else {
+                            (icons::EYE_OFF, "Show layer")
+                        };
+                        if components::IconButton::new(eye, verb)
+                            .hint("Alt-click to show only this layer")
+                            .selected(row.visible)
+                            .show(ui, cctx)
+                            .clicked()
+                        {
+                            if ui.input(|i| i.modifiers.alt) {
+                                do_solo = Some(row.id);
+                            } else {
+                                toggle_vis = Some(row.id);
+                            }
+                        }
+                        // Lock: the layer stays drawn but the canvas will not pick
+                        // it (catalog 57).
+                        let lock_verb = if row.locked {
+                            "Unlock layer"
+                        } else {
+                            "Lock layer"
+                        };
+                        if components::IconButton::new(icons::LOCK, lock_verb)
+                            .hint("Locked layers stay drawn but cannot be selected")
+                            .selected(row.locked)
+                            .show(ui, cctx)
+                            .clicked()
+                        {
+                            toggle_lock = Some(row.id);
+                        }
+                        // Name, faint when the layer is hidden.
+                        let color = if row.visible {
+                            cctx.tokens.text
+                        } else {
+                            cctx.tokens.text_faint
+                        };
+                        ui.label(egui::RichText::new(&row.name).color(color));
                     });
+                    // Hovering the row dims the others on the canvas (catalog 39).
+                    if line.response.hovered() {
+                        hover = Some(row.id);
+                    }
                 }
             });
 
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.label("Select layer:");
-            ui.text_edit_singleline(&mut self.layer_query);
-        });
-        if ui.button("Select by layer name").clicked() {
-            self.select_by_layer_name();
+        // Apply the collected interaction now the row borrow has ended.
+        self.peek_layer = hover;
+        if let Some(id) = toggle_vis {
+            self.layer_state.toggle(id);
         }
+        if let Some(id) = do_solo {
+            self.layer_state.solo(id);
+            self.status
+                .set(format!("Solo {}", layer_name_of(&self.layer_state, id)));
+        }
+        if let Some(id) = toggle_lock
+            && let Some(now) = self.layer_state.toggle_lock(id)
+        {
+            let name = layer_name_of(&self.layer_state, id);
+            self.status.set(format!(
+                "{name} {}",
+                if now { "locked" } else { "unlocked" }
+            ));
+        }
+        if let Some(id) = open_color {
+            self.color_editor = Some(id);
+        }
+    }
+
+    /// The layer color-editor popover (catalog 62): a floating picker over the
+    /// swatch that was clicked, editing the active layer's display color live. A
+    /// popover, not a docked panel, so ADR 0096 does not apply.
+    fn layer_color_popover(&mut self, ui: &mut egui::Ui) {
+        let Some(id) = self.color_editor else {
+            return;
+        };
+        let Some(rgba) = self
+            .layer_state
+            .rows()
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| r.color_rgba)
+        else {
+            self.color_editor = None;
+            return;
+        };
+        let (r, g, b, a) = layers::rgba_components(rgba);
+        let mut color = theme::tokens::layer_rgba(r, g, b, a);
+        let mut open = true;
+        let mut new_rgba: Option<u32> = None;
+        egui::Window::new("Layer color")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ui.ctx(), |ui| {
+                if egui::color_picker::color_picker_color32(
+                    ui,
+                    &mut color,
+                    egui::color_picker::Alpha::Opaque,
+                ) {
+                    let [nr, ng, nb, na] = color.to_srgba_unmultiplied();
+                    new_rgba = Some(layers::pack_rgba(nr, ng, nb, na));
+                }
+            });
+        if let Some(c) = new_rgba {
+            self.layer_state.set_color(id, c);
+        }
+        if !open {
+            self.color_editor = None;
+        }
+    }
+
+    /// The visibility-presets section (catalog 62): a name field with a Save
+    /// button, then one row per saved preset with an apply button and a delete
+    /// affordance.
+    fn layer_presets_section(&mut self, ui: &mut egui::Ui, cctx: components::Ctx) {
+        components::SectionHeader::new("Visibility presets").show(ui, cctx);
+        ui.horizontal(|ui| {
+            components::TextField::new(&mut self.preset_name)
+                .hint("Preset name")
+                .desired_width(110.0)
+                .show(ui, cctx);
+            if components::Button::secondary("Save")
+                .show(ui, cctx)
+                .clicked()
+                && self.layer_state.save_preset(&self.preset_name)
+            {
+                self.status
+                    .set(format!("Saved preset {}", self.preset_name.trim()));
+                self.preset_name.clear();
+            }
+        });
+        let names: Vec<String> = self
+            .layer_state
+            .presets()
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        if names.is_empty() {
+            ui.label(egui::RichText::new("No saved presets yet.").color(cctx.tokens.text_weak));
+        }
+        for name in names {
+            ui.horizontal(|ui| {
+                if components::Button::ghost(&name).show(ui, cctx).clicked() {
+                    self.layer_state.apply_preset(&name);
+                    self.status.set(format!("Applied preset {name}"));
+                }
+                if components::IconButton::new(icons::TRASH_2, "Delete preset")
+                    .show(ui, cctx)
+                    .clicked()
+                {
+                    self.layer_state.delete_preset(&name);
+                }
+            });
+        }
+    }
+
+    /// The select-by-layer-name row: a name field and a Select button that
+    /// selects every shape whose layer name matches (see [`select_by_layer_name`]).
+    ///
+    /// [`select_by_layer_name`]: Self::select_by_layer_name
+    fn select_by_name_row(&mut self, ui: &mut egui::Ui, cctx: components::Ctx) {
+        ui.horizontal(|ui| {
+            components::TextField::new(&mut self.layer_query)
+                .hint("Layer name")
+                .desired_width(110.0)
+                .show(ui, cctx);
+            if components::Button::secondary("Select")
+                .show(ui, cctx)
+                .clicked()
+            {
+                self.select_by_layer_name();
+            }
+        });
+    }
+
+    /// The interim launcher for the managed view panels (ADR 0096): two toggle
+    /// icon buttons that dispatch the reserved `view.panel_3d` / `view.panel_xsection`
+    /// commands. Once lane 2a's menu bar lands they also open from View > Panels;
+    /// both surfaces dispatch the same registry ids, so the effect is identical.
+    fn view_panel_launcher(&mut self, ui: &mut egui::Ui, cctx: components::Ctx) {
+        components::SectionHeader::new("Panels").show(ui, cctx);
+        ui.horizontal(|ui| {
+            if components::IconButton::new(icons::BOXES, "3D stack")
+                .hint("Open the 3D layer stack (View > Panels)")
+                .selected(self.panel_3d_open)
+                .show(ui, cctx)
+                .clicked()
+            {
+                self.dispatch(CommandId("view.panel_3d"));
+            }
+            if components::IconButton::new(icons::SLICE, "Cross-section")
+                .hint("Open the cross-section (View > Panels)")
+                .selected(self.panel_xsection_open)
+                .show(ui, cctx)
+                .clicked()
+            {
+                self.dispatch(CommandId("view.panel_xsection"));
+            }
+        });
     }
 
     /// Selects every shape whose layer name matches the query bar (case-insensitive
@@ -6082,6 +6456,18 @@ impl App {
     }
 
     /// Select-tool input: click to pick the topmost shape, drag to rubber-band.
+    /// Whether the scene shape at `idx` may be picked by the pointer.
+    ///
+    /// A shape on a locked layer stays drawn but is not selectable (catalog 57);
+    /// an out-of-range index or an unknown layer is pickable so stray geometry is
+    /// never silently locked.
+    fn is_pickable(&self, idx: usize) -> bool {
+        self.scene
+            .shapes()
+            .get(idx)
+            .is_none_or(|s| !self.layer_state.is_locked(s.layer))
+    }
+
     fn handle_select_input(
         &mut self,
         ctx: &egui::Context,
@@ -6094,7 +6480,9 @@ impl App {
             && let Some(pos) = response.interact_pointer_pos()
         {
             let world = self.camera.screen_to_world(screen, pos.x, pos.y);
-            match self.scene.pick(world) {
+            // A locked layer is visible-but-unselectable (catalog 57): a click on it
+            // reads as empty space, so it can still clear or pass through.
+            match self.scene.pick(world).filter(|&idx| self.is_pickable(idx)) {
                 Some(idx) => {
                     if additive {
                         self.selection.toggle(idx);
@@ -6122,7 +6510,11 @@ impl App {
             let b = self.camera.screen_to_world(screen, current.x, current.y);
             let band = Rect::new(a, b);
             if band.width() > 0 && band.height() > 0 {
-                let hits = selection::shapes_in_rect(self.scene.shapes(), band);
+                // Marquee never grabs shapes on a locked layer (catalog 57).
+                let hits: Vec<usize> = selection::shapes_in_rect(self.scene.shapes(), band)
+                    .into_iter()
+                    .filter(|&i| self.is_pickable(i))
+                    .collect();
                 if additive {
                     self.selection.extend(hits);
                 } else {
@@ -7363,36 +7755,15 @@ impl eframe::App for App {
 
         // Draw the docked panels and the canvas, collecting the canvas rect (for the
         // palette/export) and the tour highlight rectangles.
-        let (canvas_screen, tour_targets) = self.main_panels(ui, gpu_format);
+        let (canvas_screen, tour_targets) = self.main_panels(ui, frame, gpu_format);
         // Cache the canvas rect so next frame's view/export panel can frame the
         // current view (the panel draws before the canvas is measured).
         self.view_export.last_canvas = canvas_screen;
 
+        // The 3D stack and Cross-section are now managed panels docked inside
+        // `main_panels` (ADR 0096), opened from View > Panels; they no longer float
+        // over the canvas here.
         self.palette_window(&ctx, canvas_screen);
-        // The floating 3D-stack window shows normally, but during a demo capture it is
-        // shown only when a `view3d on` step asked for it, so non-3D tours stay clean.
-        #[cfg(not(target_arch = "wasm32"))]
-        let show_view3d = !self.in_demo_capture() || self.demo_show_3d;
-        #[cfg(target_arch = "wasm32")]
-        let show_view3d = true;
-        if show_view3d {
-            self.view3d.show(
-                &ctx,
-                frame,
-                self.history.document(),
-                &self.top_cell,
-                &self.layer_state,
-            );
-        }
-        if !self.in_demo_capture() {
-            crate::xsection::window(
-                &ctx,
-                self.tools.cut_line(),
-                self.scene.shapes(),
-                self.history.document().technology(),
-                &self.layer_state,
-            );
-        }
         self.keymap_window(&ctx);
         self.replay_window(&ctx);
         self.open_warnings_window(&ctx);
@@ -7445,6 +7816,11 @@ impl eframe::App for App {
                 self.reduced_motion,
                 &hidden,
                 self.tour_seen(),
+                crate::session::PanelLayout {
+                    left_w: self.panel_left_w,
+                    panel_3d_open: self.panel_3d_open,
+                    panel_xsection_open: self.panel_xsection_open,
+                },
             );
             let _ = crate::session::save(&state);
             // The keymap persists alongside the session so rebinds survive exit
@@ -7476,6 +7852,48 @@ fn palette_from_layers(layers: &LayerState) -> Palette {
                 name: r.name.clone(),
                 color_rgba: r.color_rgba,
                 visible: r.visible,
+            })
+            .collect(),
+        rules: Vec::new(),
+        stack: Vec::new(),
+    };
+    Palette::from_technology(&tech)
+}
+
+/// The alpha, as a percentage of a layer's own, that non-peeked layers keep while
+/// a layer row is hovered (catalog 39 hover peek): low enough that the peeked
+/// layer reads clearly over the dimmed rest, high enough that context stays.
+const PEEK_DIM_PERCENT: u16 = 22;
+
+/// Like [`palette_from_layers`] but, when `peek` names a layer, dims every other
+/// visible layer to [`PEEK_DIM_PERCENT`] of its alpha so the peeked layer stands
+/// out (catalog 39 hover peek). With `peek` `None` it is exactly
+/// [`palette_from_layers`], so an idle canvas pays nothing for the feature.
+fn palette_from_layers_peek(layers: &LayerState, peek: Option<LayerId>) -> Palette {
+    let Some(peek) = peek else {
+        return palette_from_layers(layers);
+    };
+    let tech = Technology {
+        name: String::new(),
+        dbu_per_micron: 1,
+        layers: layers
+            .rows()
+            .iter()
+            .map(|r| {
+                let color_rgba = if r.id == peek {
+                    r.color_rgba
+                } else {
+                    let (red, green, blue, a) = layers::rgba_components(r.color_rgba);
+                    let dimmed =
+                        u8::try_from(u16::from(a) * PEEK_DIM_PERCENT / 100).unwrap_or(u8::MAX);
+                    layers::pack_rgba(red, green, blue, dimmed)
+                };
+                LayerInfo {
+                    id: r.id,
+                    name: r.name.clone(),
+                    color_rgba,
+                    visible: r.visible,
+                }
             })
             .collect(),
         rules: Vec::new(),
@@ -7627,6 +8045,45 @@ fn boot_ui_prefs() -> (crate::theme::tokens::Density, bool) {
     (crate::theme::tokens::Density::default(), false)
 }
 
+/// The saved left-panel width and which managed view panels were open, restored
+/// from the session on native. A missing session yields the [`SessionState`]
+/// defaults (210 pt, both panels closed). Web has no filesystem, so it always
+/// boots with the defaults.
+///
+/// [`SessionState`]: crate::session::SessionState
+fn boot_panel_layout() -> crate::session::PanelLayout {
+    #[cfg(not(target_arch = "wasm32"))]
+    let state = crate::session::load().unwrap_or_default();
+    #[cfg(target_arch = "wasm32")]
+    let state = crate::session::SessionState::default();
+    crate::session::PanelLayout {
+        left_w: state.panel_left_w,
+        panel_3d_open: state.panel_3d_open,
+        panel_xsection_open: state.panel_xsection_open,
+    }
+}
+
+/// Draws a managed view-panel header row: the panel title on the left and a close
+/// [`components::IconButton`] on the right. Returns whether the close affordance
+/// was clicked this frame. Shared by the 3D-stack and Cross-section hosts (ADR 0096).
+fn view_panel_header(ui: &mut egui::Ui, ctx: components::Ctx, title: &str) -> bool {
+    let mut close = false;
+    ui.horizontal(|ui| {
+        ui.strong(title);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if components::IconButton::new(icons::X, "Close panel")
+                .hint("Close this panel (View > Panels)")
+                .show(ui, ctx)
+                .clicked()
+            {
+                close = true;
+            }
+        });
+    });
+    ui.separator();
+    close
+}
+
 /// Converts a canvas [`ScreenRect`] to an egui rectangle.
 fn egui_rect_of(screen: &ScreenRect) -> EguiRect {
     EguiRect::from_min_size(
@@ -7653,6 +8110,16 @@ fn row_name(state: &LayerState, index: usize) -> String {
     state
         .rows()
         .get(index)
+        .map(|r| r.name.clone())
+        .unwrap_or_default()
+}
+
+/// The display name of the layer with id `id`, or an empty string if unknown.
+fn layer_name_of(state: &LayerState, id: LayerId) -> String {
+    state
+        .rows()
+        .iter()
+        .find(|r| r.id == id)
         .map(|r| r.name.clone())
         .unwrap_or_default()
 }

@@ -293,44 +293,33 @@ fn merge_intervals(intervals: &mut Vec<(f64, f64)>) {
     *intervals = merged;
 }
 
-/// Draws the floating "Cross-section" window.
+/// Renders the "Cross-section" elevation view into `ui`: the managed panel body
+/// (ADR 0096; a floating `egui::Window` before lane 2c re-hosted it).
 ///
 /// With no completed cut line it shows a hint; otherwise it computes the layer
 /// slabs and intervals for the current scene (cheap, per frame) and paints the
 /// elevation view. Layers hidden in the layer panel are omitted.
-pub fn window(
-    ctx: &egui::Context,
+pub fn panel(
+    ui: &mut egui::Ui,
     cut: Option<(Point, Point)>,
     shapes: &[DrawShape],
     tech: &Technology,
     layers: &LayerState,
 ) {
-    // Start collapsed and tucked below the 3D-stack window, over the canvas and clear of
-    // the Layers panel and the toolbar, so the collapsed title bar does not occlude a
-    // control at the default window sizes (lane v8-ui). The app opens on the canvas, not
-    // on a fully-expanded panel over the ruler; the user expands and drags it from there,
-    // and egui persists the choice per session.
-    egui::Window::new("Cross-section")
-        .default_size([460.0, 250.0])
-        .default_open(false)
-        .default_pos([260.0, 140.0])
-        .resizable(true)
-        .show(ctx, |ui| {
-            let Some((a, b)) = cut else {
-                ui.label("Pick two points with the Cut tool to slice the layout.");
-                return;
-            };
-            ui.label(format!("Cut ({}, {}) -> ({}, {}) DBU", a.x, a.y, b.x, b.y));
-            let spans = layer_spans(tech, shapes);
-            let mut intervals = cross_section(shapes, &spans, a, b);
-            intervals.retain(|i| layers.is_visible(i.layer));
-            if intervals.is_empty() {
-                ui.label("The cut line crosses no visible geometry.");
-                return;
-            }
-            let length = (a.distance_squared(b) as f64).sqrt() as f32;
-            draw_section(ui, &intervals, length, layers);
-        });
+    let Some((a, b)) = cut else {
+        ui.label("Pick two points with the Cut tool to slice the layout.");
+        return;
+    };
+    ui.label(format!("Cut ({}, {}) -> ({}, {}) DBU", a.x, a.y, b.x, b.y));
+    let spans = layer_spans(tech, shapes);
+    let mut intervals = cross_section(shapes, &spans, a, b);
+    intervals.retain(|i| layers.is_visible(i.layer));
+    if intervals.is_empty() {
+        ui.label("The cut line crosses no visible geometry.");
+        return;
+    }
+    let length = (a.distance_squared(b) as f64).sqrt() as f32;
+    draw_section(ui, &intervals, length, layers);
 }
 
 /// Paints the elevation view: one filled rectangle per interval, with distance
