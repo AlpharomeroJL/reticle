@@ -118,6 +118,7 @@ pub mod open;
 pub mod ops;
 pub mod outline;
 pub mod productivity;
+pub mod qr;
 pub mod query;
 pub mod replay;
 pub mod selection;

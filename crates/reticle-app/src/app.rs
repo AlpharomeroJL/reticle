@@ -1691,6 +1691,31 @@ impl App {
         true
     }
 
+    /// Opens a URL pasted onto the page with Ctrl+V (catalog item 3).
+    ///
+    /// Reads this frame's paste events and, when a text field does not own focus (so a
+    /// paste into the palette or the Open-from-URL field is left alone) and the pasted
+    /// text validates as a layout URL, starts the same fetch the Open-from-URL dialog
+    /// does. Pasting raw file bytes is not something the browser clipboard exposes to a
+    /// page, so the file half of paste-to-open is drag-and-drop; a pasted link works
+    /// here.
+    fn handle_paste_to_open(&mut self, ctx: &egui::Context) {
+        if ctx.memory(|m| m.focused().is_some()) {
+            return;
+        }
+        let pasted = ctx.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Paste(text) => Some(text.clone()),
+                _ => None,
+            })
+        });
+        if let Some(text) = pasted
+            && let Ok(url) = crate::dialogs::validate_open_url(&text)
+        {
+            self.start_url_open(url);
+        }
+    }
+
     /// The bytes of a dropped file: from egui's in-memory `bytes` (always the source
     /// on web), or by reading the file path on native where egui provides a path
     /// instead. `None` when neither is available or the path read fails.
@@ -5267,6 +5292,7 @@ impl App {
     /// [`viewer_link`](crate::share::viewer_link)) and [`go_live`](Self::go_live) are
     /// the same ones the Inspector's Share section uses, so this dialog is a second
     /// surface over the one share model, not a fork.
+    #[allow(clippy::too_many_lines)]
     fn share_dialog(&mut self, ctx: &egui::Context) {
         use crate::theme::components::{Button, Segmented};
         if !self.dialogs.share_shown {
@@ -5323,6 +5349,20 @@ impl App {
                     }
                 });
                 ui.add_space(cctx.density.item_spacing().y);
+                // A scannable QR of the selected link (item 92), or an honest note when
+                // the link is longer than the compact encoder handles.
+                match crate::qr::QrCode::encode(link.as_bytes()) {
+                    Some(code) => Self::draw_qr(ui, &code),
+                    None => {
+                        ui.label(
+                            egui::RichText::new(
+                                "QR code: the link is too long to encode; copy it instead.",
+                            )
+                            .color(DARK.text_weak),
+                        );
+                    }
+                }
+                ui.add_space(cctx.density.item_spacing().y);
                 ui.label(
                     egui::RichText::new("Expiry: this link works while your session stays live.")
                         .color(DARK.text_weak),
@@ -5377,6 +5417,34 @@ impl App {
     fn open_url_in_new_tab(url: &str) {
         if let Some(window) = web_sys::window() {
             let _ = window.open_with_url_and_target(url, "_blank");
+        }
+    }
+
+    /// Paints a [`QrCode`](crate::qr::QrCode) as black modules on a white card with a
+    /// four-module quiet zone (item 92).
+    ///
+    /// QR codes must read dark-on-light to scan, so this uses plain black and white
+    /// rather than theme chrome tokens; the surrounding dialog is themed.
+    fn draw_qr(ui: &mut egui::Ui, code: &crate::qr::QrCode) {
+        const MODULE_PX: f32 = 4.0;
+        const QUIET: usize = 4;
+        let modules = code.size();
+        let side = (modules + 2 * QUIET) as f32 * MODULE_PX;
+        let (rect, _) = ui.allocate_exact_size(Vec2::splat(side), egui::Sense::hover());
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0.0, egui::Color32::WHITE);
+        for y in 0..modules {
+            for x in 0..modules {
+                if code.module(x, y) {
+                    let min = rect.min
+                        + Vec2::new(
+                            (QUIET + x) as f32 * MODULE_PX,
+                            (QUIET + y) as f32 * MODULE_PX,
+                        );
+                    let cell = EguiRect::from_min_size(min, Vec2::splat(MODULE_PX));
+                    painter.rect_filled(cell, 0.0, egui::Color32::BLACK);
+                }
+            }
         }
     }
 
@@ -8063,6 +8131,8 @@ impl eframe::App for App {
         // cannot panic; an oversized or non-layout drop sets a clear status. While a
         // file is dragged over, draw a "drop to open" affordance.
         self.handle_dropped_files(&ctx);
+        // Open a URL pasted with Ctrl+V (item 3), unless a text field owns focus.
+        self.handle_paste_to_open(&ctx);
         if Self::is_file_hovering(&ctx) {
             Self::draw_drop_affordance(&ctx);
         }
