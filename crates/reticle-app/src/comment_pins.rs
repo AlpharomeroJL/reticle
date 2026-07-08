@@ -1,6 +1,6 @@
 //! Anchored comment pins: the panel state and its window-free logic.
 //!
-//! A [`CommentPins`] holds the layout's [`Comment`](reticle_sync::Comment)s so the
+//! A [`CommentPins`] holds the layout's [`Comment`]s so the
 //! side panel can list them and the canvas can drop a numbered pin at each one's
 //! anchor. As in [`crate::drc_panel`], everything interesting here, resolving an
 //! anchor to a world point and formatting a comment for the list, is a plain

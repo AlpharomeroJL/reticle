@@ -27,6 +27,7 @@
 - [Layout diff](layout-diff.md)
 - [Collaboration](collaboration.md)
   - [The relay: two implementations, one protocol](relay.md)
+  - [Comments and annotations](comments.md)
 - [Scripting](scripting.md)
 
 # Automation and agents
