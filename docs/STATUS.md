@@ -478,6 +478,144 @@ Playwright e2e); (4) the generators and DRC are the SKY130 subset, not the full 
 (5) fuzzing still does not link on this Windows/MSVC host (unchanged from v4). None of
 these is hidden behind a passing test; each is documented in its ADR, the book, and above.
 
+## v8.1.0 (The Interface Packet, audited 2026-07-08)
+
+v8.1.0 redesigns the interface around the v8.0.0 engine: one source of visual
+truth (semantic tokens with contrast proven by tests), a menu bar and grouped
+toolbar over a rebuilt Inspector, a distinct viewer chrome and Start screen, the
+open and share and feedback surfaces, and the keyboard, motion, touch, and
+onboarding polish. No engine or agent capability changed; the diff is chrome,
+tokens, fonts, and the app-layer IA. Audited with the same skepticism as the
+prior sections. Same host (RTX 4060 Ti, Windows 11). The Wave 2 fan-out is merged
+to main and deployed (the redesign is live at the Pages URL). Standard greps hold:
+zero `todo!`/`unimplemented!` in shipped code; one `unsafe` (the documented mmap
+in `reticle-index/streaming.rs`, unchanged since v4); a single author across all
+history; no AI-attribution string in any file or commit.
+
+Every claim below has a command. Run them from `D:\dev\reticle` (PowerShell).
+
+- **One source of visual truth, contrast proven (DONE).** All UI color and size
+  values live in `crates/reticle-app/src/theme/`; the check-style lint bans a raw
+  `Color32`/`FontId`/`RichText` size literal anywhere else, and lane 1A drained
+  the 89 grandfathered literals to zero so the ratchet baseline file was deleted
+  and the ban is now absolute (ADR 0095, ADR 0098). Contrast is not eyeballed: the
+  tokens.md pair table is re-proved in `theme/contrast.rs` by a WCAG
+  relative-luminance test computed in-crate. One dark theme this packet; the v8.0
+  stock Light toggle is removed and session files carrying `theme=light` still
+  parse and resolve to dark. *Verify:* `just check-style` (prints "UI style within
+  baseline" with no baseline file present); `cargo nextest run -p reticle-app -E
+  'test(contrast) or test(theme)'`.
+- **Component library, gallery, visual-regression suite, frame guard (DONE).**
+  `theme/components.rs` is the single widget source (buttons, IconButton, toggle
+  chip, segmented control, text field, section header, collapsible, toast,
+  progress row, empty state, kbd chip, modal); every interactive component carries
+  the token hover/active/focus/disabled states and an always-visible 1.5px focus
+  ring. The gallery renders every group at both densities (`--gallery` native,
+  `?gallery=1` web); `tests/ui_snapshots.rs` snapshots it and the full app on the
+  egui_kittest wgpu backend (14 committed baseline PNGs), and `tests/frame_guard.rs`
+  asserts the median frame-build step stays under the 16 ms budget. Both are
+  GPU-gated and skip honestly on an adapterless host. *Verify:* `just ui-check`;
+  `just frame-guard`; the chapter `docs/src/design-system.md`.
+- **Menu, IA, Inspector, viewer, Start redesign (DONE).** A registry-driven menu
+  bar (`menu.rs`) sits over a grouped toolbar with name-plus-chord tooltips; the
+  right panel is a segmented control over four groups of collapsible sections that
+  collapse to an icon rail and persist per device (`inspector_layout.rs`,
+  `session.rs`); the 3D stack and Cross-section are managed bottom panels, not
+  floating windows (ADR 0096); the viewer is a distinct chrome chosen by
+  `is_viewer()` with a session chip, named presence cursors, and follow mode; the
+  Start screen has a three-action hero and differentiated gallery cards. This
+  closes audit findings AUD-01 through AUD-06 and AUD-11. *Verify:* `cargo nextest
+  run -p reticle-app -E 'test(menu) or test(inspector) or test(viewer) or
+  test(startscreen)'`; the 68 registry command specs are listed by
+  `Select-String -Path crates/reticle-app/src/commands.rs -Pattern 'id: CommandId\('`.
+- **Workflow surfaces: open, palette, overlays, feedback (DONE).** The native and
+  browser file picker (`rfd`), open-from-URL with a CORS explainer, the staged
+  cancelable open progress, and the unified toast system with copyable diagnostics
+  all live pure in `dialogs.rs` and `notify.rs`; the command palette sources from
+  the registry with fuzzy, recents, groups, and argument prompts (`command.rs`);
+  the overlay layout manager (`overlay.rs`) makes chrome collisions impossible by
+  construction; the Share dialog carries a dependency-free QR (`qr.rs`); F6 focus
+  traversal and the Esc cascade are pure and tested (`focus.rs`). *Verify:* `cargo
+  nextest run -p reticle-app -E 'test(dialogs) or test(notify) or test(overlay) or
+  test(command) or test(focus) or test(qr)'`.
+- **Polish: states, motion, touch, onboarding (DONE).** Motion is functional and
+  reduced-motion aware through one `Style::animation_time` contract (0 when reduced
+  motion is on); touch mode raises `interact_size.y` to 40 over either density; the
+  tour has editor and viewer variants and a `?tour=1` deep link, once-only hints
+  and a checklist persist, and the Settings and About dialogs (density, motion,
+  wheel, touch, reset; version, GPU, hash, zero-telemetry statement) are wired.
+  *Verify:* `cargo nextest run -p reticle-app -E 'test(onboarding) or test(tour) or
+  test(settings) or test(session)'`; the zero-telemetry claim is the swept
+  constant `help::ZERO_TELEMETRY`.
+- **The fluidity trio (DONE).** The three authorized engine-adjacent items ship: a
+  LOD crossfade (`streamed::LevelFade`), velocity-aware tile prefetch
+  (`archive::VelocityTracker`, `prefetch_viewport`) with an additive
+  `archive_prefetched` stat, and a pointer-latency budget test. The pan bench
+  `canvas_pan_pointer_latency` measures 868.38 ns (about 18000x under the 16 ms
+  budget) and is enforced against the committed baseline. *Verify:* `just
+  perf-check`; the row in `benches/history/baseline.json`.
+- **Bundle delta measured (DONE).** The merged redesign adds **+307.61 KiB gz**
+  over the v8.0 baseline (`bundle-ledger.md`, row `v8.1-wave2`, commit a2493e3),
+  well inside the +450 KiB budget; the fonts and `rfd` picker are the bulk. *Verify:*
+  `just bundle-gate` (asserts the gz total against v8.0-baseline + 450 KiB);
+  `Get-Content docs/design/bundle-ledger.md`.
+- **Completeness sweep (DONE, 0 P1 holds).** All 100 Appendix A items carry a
+  disposition in `docs/design/catalog-dispositions.md`: **81 shipped, 19 ledgered,
+  0 rejected**, and **all 59 P1 items shipped** so there is no release-hold
+  condition. The 19 ledgers are the pre-authorized 3A P2/P3 tail plus cross-crate
+  seams frozen this packet, each with a concrete reason. *Verify:* read
+  `docs/design/catalog-dispositions.md` (the tally and the POTENTIAL HOLDS section
+  are at the top).
+- **Test attributes:** grep counts **1850** `#[test]`/`#[tokio::test]` attributes
+  across `crates/` (up from about 1350 at v7), 820 of them in `reticle-app`.
+  *Verify:* `cargo nextest run -p reticle-app`.
+
+### v8.1.0 honest limits
+
+Measured or honestly labeled; nothing here is hidden behind a passing test. The
+catalog dispositions file carries the per-item reasons; this is the consolidated
+list.
+
+1. **Light theme deferred by design (ADR 0095).** One dark theme this packet. The
+   v8.0 stock Light toggle was removed rather than shipped untokened beside the
+   tokened dark (a user-visible regression, AUD-23); the `Theme` enum stays so a
+   future light variant is a second token table, which the tokens make cheap. This
+   is a design choice, not a schedule slip.
+2. **Docking declined (ADR 0096).** egui_dock 0.20.1 was surveyed and declined for
+   persistence simplicity and dependency budget; managed panels ship instead. Users
+   cannot rearrange panels into custom layouts this release, the trade for the
+   zero-occlusion guarantee and a four-scalar session persistence.
+3. **Internationalization ledgered.** No i18n infrastructure this packet (brief.md,
+   considered-and-rejected set).
+4. **19 catalog items ledgered (0 of them P1).** The full list with reasons is in
+   `catalog-dispositions.md`. Four are partials where a tested model or persisted
+   field shipped but the surfaced capability did not: item 9 (recent-file thumbnail
+   cache, IndexedDB, and pin persistence deferred; in-session pinning ships), item
+   31 (ruler tick marks, unit toggle, origin badge deferred; hide option ships),
+   item 38 (the wheel-behavior Zoom/Pan toggle and its persistence ship in the
+   Settings dialog, but the canvas scroll handler always zooms and does not yet
+   branch on the setting, verified at `app.rs:10290`), and item 69 (the toast
+   retention model ships and is tested, but the dedicated notification-center panel
+   is not surfaced). Item 66 (agent transcript) ships its stop, status, sample
+   prompts, and replay scrubber; the per-command collapsible-step timeline with a
+   status icon per command is the ledgered refinement.
+5. **Media not yet refreshed for the redesign.** At the time of this audit the
+   README hero (`assets/hero.png`, captured 2026-07-03) and the tour GIFs
+   (`tour-drc`, `tour-edit`, `tour-agent`, `tour-3d`, `tour-generate`,
+   `tour-query`, 2026-07-03 to 2026-07-06) still show the pre-redesign v8.0 UI;
+   only `tour-share.gif` (2026-07-08) is current. The before/after gallery under
+   `docs/design/after/` and the README and book media are regenerated by the Wave 5
+   capture track (item 95, cinematic auto-pan, is part of that track and is not
+   built yet). Stated plainly rather than implied refreshed.
+6. **The visual suite and frame guard are GPU-gated.** `ui_snapshots` and
+   `frame_guard` need a wgpu adapter and are orchestrator-only at the gates (ADR
+   0094); they skip honestly on an adapterless host, so a headless CI without a GPU
+   does not exercise them. The committed baselines are the RTX 4060 Ti capture.
+7. **Carried-forward engine limits are unchanged.** Fuzzing still does not link on
+   this Windows/MSVC host (it runs under WSL, Wave 0 note above); the OASIS writer,
+   generator, and DRC scope are the SKY130 subset. None is a v8.1 interface concern;
+   see the v7.0.0 and earlier sections.
+
 ## Section 16 (definition of done), item by item
 
 | # | Item | Status | Evidence |
