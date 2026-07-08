@@ -45,6 +45,7 @@
 - [Python bindings](python.md)
 - [Agent benchmark suite](benchmarks.md)
   - [Benchmark methodology](benchmark.md)
+  - [Multimodal verification](multimodal-verification.md)
 
 # Tape-out
 

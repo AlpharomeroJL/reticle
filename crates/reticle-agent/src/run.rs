@@ -715,8 +715,10 @@ fn write_transcript_jsonl(
 /// command, framing the document's bounding box.
 ///
 /// Returns the note explaining why no PNG was produced (no cell, no GPU adapter) as an
-/// `Err`, so the caller can record it without failing the run.
-fn render_png_bytes(session: &Session) -> Result<Vec<u8>, String> {
+/// `Err`, so the caller can record it without failing the run. Exposed within the crate
+/// (not public) so the [`vision_oracle`](crate::vision_oracle) module renders through the
+/// same `RenderPng` path this writer uses, rather than duplicating the framing logic.
+pub(crate) fn render_png_bytes(session: &Session) -> Result<Vec<u8>, String> {
     use reticle_agent_api::args::{PointArg, RectArg};
     use reticle_geometry::Rect;
 
