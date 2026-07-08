@@ -525,6 +525,20 @@ pub struct App {
     /// struct persists with the session view state (see [`crate::viewexport`]).
     view_export: crate::viewexport::ViewExport,
 
+    /// The right Inspector's remembered layout (lane 2B): the selected group, the
+    /// dragged width, the icon-rail collapse flag, and every section's open flag.
+    /// Loaded from the session and re-saved on exit (catalog 59, 61).
+    inspector: crate::inspector_layout::InspectorState,
+
+    /// The document [`revision`](History::revision) DRC last ran at, so the DRC
+    /// section can flag a stale result after an edit (lane 2B, catalog 63).
+    drc_ran_revision: Option<u64>,
+    /// The selected row in the diff change list (lane 2B, catalog 64).
+    diff_selected: Option<usize>,
+    /// The per-layer filter applied to the diff change list; `None` shows every
+    /// layer (lane 2B, catalog 64).
+    diff_layer_filter: Option<LayerId>,
+
     /// The UI density feeding the theme (ADR 0095). Loaded from the session; no
     /// user-facing toggle this wave (lane 4C adds the Settings control in Wave 2).
     ui_density: crate::theme::tokens::Density,
@@ -659,6 +673,39 @@ const RULER_BAR: f32 = 18.0;
 
 /// How many recently-run palette rows are remembered for the recents group.
 const PALETTE_RECENTS_MAX: usize = 20;
+
+/// The kind of a row in the diff change list (catalog 64): an added, removed, or
+/// changed shape, keyed by the marker the legend and overlay use.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DiffKind {
+    /// A shape present only in the current layout (green, `+`).
+    Added,
+    /// A shape present only in the baseline (red, `-`).
+    Removed,
+    /// A shape whose extent changed in place (amber, `~`).
+    Changed,
+}
+
+impl DiffKind {
+    /// The single-character marker shown before a change-list row.
+    fn glyph(self) -> char {
+        match self {
+            DiffKind::Added => '+',
+            DiffKind::Removed => '-',
+            DiffKind::Changed => '~',
+        }
+    }
+}
+
+/// One-click starter prompts for the agent panel (catalog 21). Clicking one seeds
+/// the prompt box so a first-time user has a working example instead of a blank
+/// field.
+const AGENT_SAMPLE_PROMPTS: &[&str] = &[
+    "Fix all DRC violations",
+    "Add a guard ring around the selection",
+    "Fill empty tracks with metal",
+    "Widen nets below the minimum width",
+];
 
 impl Default for App {
     fn default() -> Self {
@@ -943,6 +990,10 @@ impl App {
             // straight into the theater and never shows it.
             start_screen: start_view == StartView::Editor,
             view_export: crate::viewexport::ViewExport::new(),
+            inspector: boot_inspector_state(),
+            drc_ran_revision: None,
+            diff_selected: None,
+            diff_layer_filter: None,
             ui_density,
             reduced_motion,
             theme_dirty: true,
@@ -2664,6 +2715,9 @@ impl App {
 
     /// Runs an [`AppOp`]: an app-level effect with no palette [`Command`]
     /// equivalent (folded from the former `run_action`).
+    // One flat match arm per app-op across the merged lanes; the length is the arm
+    // count, not branching logic, so the line-count lint does not apply.
+    #[allow(clippy::too_many_lines)]
     fn run_app_op(&mut self, op: AppOp) {
         match op {
             AppOp::OpenPalette => {
@@ -2725,6 +2779,61 @@ impl App {
                     on_off(self.panel_xsection_open)
                 ));
             }
+            // lane 2b: Inspector effects. Each routes to the method the section
+            // button already calls, so a menu, the palette, and a button share one
+            // effect path.
+            AppOp::PanelsToggle => {
+                self.inspector.collapsed = !self.inspector.collapsed;
+                self.status.set(format!(
+                    "Inspector {}",
+                    if self.inspector.collapsed {
+                        "collapsed"
+                    } else {
+                        "expanded"
+                    }
+                ));
+            }
+            AppOp::EditCut => self.productivity_cut(),
+            AppOp::EditPaste => self.productivity_paste(),
+            AppOp::EditMove => self.productivity_move_delta(),
+            AppOp::EditArray => self.productivity_array(),
+            AppOp::EditViaStack => self.productivity_via_stack(),
+            AppOp::BoolUnion => self.run_bool(crate::ops::BoolKind::Union),
+            AppOp::BoolIntersect => self.run_bool(crate::ops::BoolKind::Intersection),
+            AppOp::BoolSubtract => self.run_bool(crate::ops::BoolKind::Difference),
+            AppOp::SelectSameLayer => self.select_same_layer(),
+            AppOp::SelectByName => self.select_by_layer_name(),
+            AppOp::DrcRun => self.run_drc(),
+            AppOp::DrcLive => {
+                self.live_drc_on = !self.live_drc_on;
+                if !self.live_drc_on {
+                    self.live_drc.clear();
+                    self.live_pending = crate::history::Dirty::None;
+                    self.live_reprepare_accum = 0.0;
+                }
+                self.status
+                    .set(format!("Check as you type {}", on_off(self.live_drc_on)));
+            }
+            AppOp::DrcClear => {
+                self.drc.clear();
+                self.status.set("DRC cleared");
+            }
+            AppOp::DiffSnapshot => {
+                self.diff_overlay.snapshot(self.history.document());
+                self.status.set("Diff: snapshot captured");
+            }
+            AppOp::DiffRun => self.compute_diff(),
+            AppOp::DiffOverlay => {
+                let visible = !self.diff_overlay.visible();
+                self.diff_overlay.set_visible(visible);
+                self.status.set(format!("Diff overlay {}", on_off(visible)));
+            }
+            AppOp::CommentAdd => self.add_comment_on_top_cell(0),
+            AppOp::ExportSvg => {
+                self.view_export.format = crate::viewexport::ExportFormat::Svg;
+                self.run_export();
+            }
+            AppOp::ExportMetrology => self.export_metrology(),
         }
     }
 
@@ -2775,6 +2884,77 @@ impl App {
         self.focus_request = true;
         self.status
             .set(format!("Focus: {}", self.focus_region.label()));
+    }
+
+    /// Runs a boolean operation over the same-layer selection through the undo
+    /// history (the effect behind the `edit.bool_*` registry ids).
+    fn run_bool(&mut self, kind: crate::ops::BoolKind) {
+        use crate::ops::BoolKind;
+        let label = match kind {
+            BoolKind::Union => "Union",
+            BoolKind::Intersection => "Intersect",
+            BoolKind::Difference => "Subtract",
+            BoolKind::Xor => "XOR",
+        };
+        self.run_ops(label, |scene, sel, cell, editable| {
+            crate::ops::boolean_edits(kind, scene, sel, cell, editable)
+        });
+    }
+
+    /// Exports a per-layer metrology CSV (the `file.export_metrology` effect,
+    /// catalog 12).
+    ///
+    /// A dependency-free layer-area summary computed straight from the flattened
+    /// scene: one row per layer with its name and shape count. The full metrology
+    /// report (perimeter, connectivity, antenna) lives in `reticle-metrology`; it
+    /// is not wired here to keep it out of the app's wasm bundle budget.
+    fn export_metrology(&mut self) {
+        use std::collections::BTreeMap;
+        use std::fmt::Write as _;
+        let mut counts: BTreeMap<(u16, u16), usize> = BTreeMap::new();
+        for s in self.scene.shapes() {
+            *counts.entry((s.layer.layer, s.layer.datatype)).or_default() += 1;
+        }
+        let mut csv = String::from("layer,datatype,name,shape_count\n");
+        for ((layer, datatype), n) in counts {
+            let id = LayerId::new(layer, datatype);
+            let name = self
+                .layer_state
+                .rows()
+                .iter()
+                .find(|r| r.id == id)
+                .map_or_else(|| format!("{layer}/{datatype}"), |r| r.name.clone());
+            let _ = writeln!(csv, "{layer},{datatype},{name},{n}");
+        }
+        match self.write_export_text("reticle-metrology.csv", &csv) {
+            Ok(msg) => self.status.set(msg),
+            Err(e) => self.status.set(format!("Metrology CSV export failed: {e}")),
+        }
+    }
+
+    /// Grows the selection to every shape sharing a layer with the current
+    /// selection (catalog 56, the `select.same_layer` effect).
+    fn select_same_layer(&mut self) {
+        let shapes = self.scene.shapes();
+        let layers: std::collections::BTreeSet<LayerId> = self
+            .selection
+            .iter()
+            .filter_map(|i| shapes.get(i).map(|s| s.layer))
+            .collect();
+        if layers.is_empty() {
+            self.status.set("Select a shape first");
+            return;
+        }
+        let hits: Vec<usize> = shapes
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| layers.contains(&s.layer))
+            .map(|(i, _)| i)
+            .collect();
+        let n = hits.len();
+        self.selection.set(hits);
+        self.status
+            .set(format!("Selected {n} shape(s) on same layer"));
     }
 
     /// Applies a pane split and reports it in the status bar.
@@ -3110,6 +3290,11 @@ impl App {
         state.hints = self.hints;
         state.checklist = self.checklist;
         state.gpu_card_dismissed = self.gpu_card_dismissed;
+        // Fold in the right Inspector's remembered layout (lane 2B, catalog 61).
+        state.panel_right_w = self.inspector.width.0;
+        state.panel_group = self.inspector.group.index() as u8;
+        state.panels_collapsed = self.inspector.collapsed;
+        state.panel_open = self.inspector.open_tags();
         state
     }
 
@@ -3643,54 +3828,7 @@ impl App {
             .rect;
         // Remember the (possibly resized) width so the session persists it.
         self.panel_left_w = layers.width();
-        let right_column = egui::Panel::right("history")
-            .resizable(true)
-            .default_size(240.0)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        self.focus_anchor(ui, crate::focus::FocusRegion::RightPanel);
-                        self.history_panel(ui);
-                        ui.separator();
-                        self.inspector_panel(ui);
-                        ui.separator();
-                        self.drc_panel(ui);
-                        ui.separator();
-                        self.diff_panel(ui);
-                        ui.separator();
-                        self.comment_panel(ui);
-                        ui.separator();
-                        self.agent_section(ui);
-                        ui.separator();
-                        self.share_section(ui);
-                        ui.separator();
-                        self.ops_panel(ui);
-                        self.productivity_panel(ui);
-                        ui.separator();
-                        // During the generator tour, scroll the column so the Generate
-                        // panel (otherwise below the fold) is on screen.
-                        #[cfg(not(target_arch = "wasm32"))]
-                        if self.demo_focus_generate {
-                            ui.scroll_to_cursor(Some(egui::Align::TOP));
-                        }
-                        self.generate_section(ui);
-                        self.snap_panel(ui);
-                        ui.separator();
-                        self.view_export_panel(ui);
-                        // During the query tour, scroll the column so the filter bar
-                        // and outline tree (otherwise below the fold) are on screen.
-                        #[cfg(not(target_arch = "wasm32"))]
-                        if self.demo_focus_search {
-                            ui.scroll_to_cursor(Some(egui::Align::TOP));
-                        }
-                        self.search_panel(ui);
-                        ui.separator();
-                        self.tech_editor_panel(ui);
-                    });
-            })
-            .response
-            .rect;
+        let right_column = self.inspector_column(ui);
         // Managed view panels (ADR 0096): the 3D stack and Cross-section dock to the
         // canvas bottom when opened from View > Panels. Registered after the side
         // panels, so each spans only the central column and sits above the status bar;
@@ -3794,6 +3932,215 @@ impl App {
                     self.status.set("Cross-section off");
                 }
             });
+    }
+
+    /// The component-library context for this frame: the shipped dark palette at
+    /// the active density, honoring the reduced-motion preference. Every Inspector
+    /// widget composes from [`theme::components`] through this handle (lane 2B).
+    fn comp_ctx(&self) -> theme::components::Ctx {
+        theme::components::Ctx::dark(self.ui_density).with_reduced_motion(self.reduced_motion)
+    }
+
+    /// Draws the right Inspector: a segmented control over the four groups with
+    /// token-styled collapsible sections inside the selected one, or the collapsed
+    /// icon rail (ADR-2B; managed panel per ADR 0096). Returns the panel rect for
+    /// the tour overlay.
+    fn inspector_column(&mut self, ui: &mut egui::Ui) -> EguiRect {
+        use crate::inspector_layout::OrderedWidth;
+
+        // Demo-capture focus hooks: jump to the group holding the driven section so
+        // the README media harness frames it (was a scroll-to-cursor before the
+        // segmented rebuild).
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if self.demo_focus_search {
+                self.inspector.reveal("search");
+            }
+            if self.demo_focus_generate {
+                self.inspector.reveal("generate");
+            }
+        }
+
+        if self.inspector.collapsed {
+            return self.inspector_rail(ui);
+        }
+
+        let ctx = self.comp_ctx();
+        let rect = egui::Panel::right("inspector")
+            .resizable(true)
+            .default_size(self.inspector.width.clamped())
+            .show(ui, |ui| {
+                // Keyboard focus region for F6 traversal (lane 3C, item 83).
+                self.focus_anchor(ui, crate::focus::FocusRegion::RightPanel);
+                self.inspector_header(ui, ctx);
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.inspector_body(ui, ctx);
+                    });
+            })
+            .response
+            .rect;
+        // Track the actual (possibly dragged) width so the session persists it.
+        self.inspector.width = OrderedWidth(rect.width());
+        rect
+    }
+
+    /// The Inspector header: the four-group segmented control, a collapse-to-rail
+    /// button, and the per-panel gear menu (catalog 59, 60).
+    fn inspector_header(&mut self, ui: &mut egui::Ui, ctx: theme::components::Ctx) {
+        use crate::inspector_layout::PanelGroup;
+        use theme::components::{IconButton, Segmented};
+
+        ui.horizontal(|ui| {
+            let labels = [
+                PanelGroup::Inspect.label(),
+                PanelGroup::Review.label(),
+                PanelGroup::Automate.label(),
+                PanelGroup::Settings.label(),
+            ];
+            let mut index = self.inspector.group.index();
+            Segmented::new(&labels).show(ui, ctx, &mut index);
+            self.inspector.group = PanelGroup::from_index(index);
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if IconButton::new(crate::theme::icons::PANEL_RIGHT, "Collapse panel")
+                    .kbd("Tab")
+                    .hint("Collapse the Inspector to its icon rail")
+                    .show(ui, ctx)
+                    .clicked()
+                {
+                    self.inspector.collapsed = true;
+                }
+                self.inspector_gear_menu(ui, ctx);
+            });
+        });
+    }
+
+    /// The per-panel gear menu (catalog 60): expand/collapse every section in the
+    /// current group at once, or toggle a single section, from one place.
+    fn inspector_gear_menu(&mut self, ui: &mut egui::Ui, _ctx: theme::components::Ctx) {
+        use crate::inspector_layout::InspectorState;
+
+        let group = self.inspector.group;
+        let gear = crate::theme::icons::SETTINGS.to_string();
+        ui.menu_button(gear, |ui| {
+            if ui.button("Expand all").clicked() {
+                for spec in InspectorState::sections_in(group) {
+                    self.inspector.set_open(spec.key, true);
+                }
+                ui.close();
+            }
+            if ui.button("Collapse all").clicked() {
+                for spec in InspectorState::sections_in(group) {
+                    self.inspector.set_open(spec.key, false);
+                }
+                ui.close();
+            }
+            ui.separator();
+            for spec in InspectorState::sections_in(group) {
+                let mut open = self.inspector.is_open(spec.key);
+                if ui.checkbox(&mut open, spec.title).changed() {
+                    self.inspector.set_open(spec.key, open);
+                }
+            }
+        });
+    }
+
+    /// Draws the collapsible sections of the selected group in render order.
+    fn inspector_body(&mut self, ui: &mut egui::Ui, ctx: theme::components::Ctx) {
+        use crate::inspector_layout::PanelGroup;
+        match self.inspector.group {
+            PanelGroup::Inspect => {
+                self.inspector_section(ui, ctx, "properties", "Properties", Self::inspector_panel);
+                self.inspector_section(ui, ctx, "search", "Search and outline", Self::search_panel);
+                self.inspector_section(ui, ctx, "history", "History", Self::history_panel);
+            }
+            PanelGroup::Review => {
+                self.inspector_section(ui, ctx, "drc", "DRC", Self::drc_panel);
+                self.inspector_section(ui, ctx, "diff", "Layout diff", Self::diff_panel);
+                self.inspector_section(ui, ctx, "comments", "Comments", Self::comment_panel);
+            }
+            PanelGroup::Automate => {
+                self.inspector_section(ui, ctx, "agent", "Agent", Self::agent_section);
+                self.inspector_section(ui, ctx, "generate", "Generate", Self::generate_section);
+            }
+            PanelGroup::Settings => {
+                self.inspector_section(ui, ctx, "operations", "Operations", Self::ops_panel);
+                self.inspector_section(
+                    ui,
+                    ctx,
+                    "productivity",
+                    "Productivity",
+                    Self::productivity_panel,
+                );
+                self.inspector_section(ui, ctx, "snap", "Snap and guides", Self::snap_panel);
+                self.inspector_section(ui, ctx, "export", "Export", Self::view_export_panel);
+                self.inspector_section(
+                    ui,
+                    ctx,
+                    "tech",
+                    "Technology editor",
+                    Self::tech_editor_panel,
+                );
+            }
+        }
+    }
+
+    /// Draws one collapsible Inspector section: a token-styled header with a
+    /// remembered-open flag (persisted through the session), then `body` when open.
+    fn inspector_section(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: theme::components::Ctx,
+        key: &'static str,
+        title: &'static str,
+        body: impl FnOnce(&mut Self, &mut egui::Ui),
+    ) {
+        let mut open = self.inspector.is_open(key);
+        theme::components::Collapsible::new(key, title).show(ui, ctx, &mut open, |ui, _ctx| {
+            body(self, ui);
+        });
+        self.inspector.set_open(key, open);
+    }
+
+    /// Draws the collapsed Inspector as a narrow icon rail: an expand button and a
+    /// selectable glyph per group (catalog 59). Clicking a group expands the panel
+    /// on that group. Returns the rail rect for the tour overlay.
+    fn inspector_rail(&mut self, ui: &mut egui::Ui) -> EguiRect {
+        use crate::inspector_layout::{PanelGroup, RAIL_WIDTH};
+        use theme::components::IconButton;
+
+        let ctx = self.comp_ctx();
+        egui::Panel::right("inspector_rail")
+            .resizable(false)
+            .default_size(RAIL_WIDTH)
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    if IconButton::new(crate::theme::icons::PANEL_RIGHT, "Expand panel")
+                        .kbd("Tab")
+                        .show(ui, ctx)
+                        .clicked()
+                    {
+                        self.inspector.collapsed = false;
+                    }
+                    ui.separator();
+                    for group in PanelGroup::ALL {
+                        let selected = self.inspector.group == group;
+                        if IconButton::new(group.icon(), group.label())
+                            .selected(selected)
+                            .show(ui, ctx)
+                            .clicked()
+                        {
+                            self.inspector.group = group;
+                            self.inspector.collapsed = false;
+                        }
+                    }
+                });
+            })
+            .response
+            .rect
     }
 
     /// A click the Start screen recorded this frame, applied after the layout closure
@@ -4367,8 +4714,6 @@ impl App {
     /// only draws the widgets and forwards the results into the live selection and
     /// the deferred camera locate.
     fn search_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Search");
-
         // --- Filter query bar ------------------------------------------------
         ui.label("Filter (e.g. layer:METAL1 width<400 area>1000):");
         let query_response = ui.text_edit_singleline(&mut self.search.query_text);
@@ -4383,18 +4728,23 @@ impl App {
 
         ui.separator();
 
-        // --- Select similar --------------------------------------------------
+        // --- Select similar / same layer (catalog 56) ------------------------
         ui.horizontal(|ui| {
+            let has_sel = !self.selection.is_empty();
             if ui
-                .add_enabled(
-                    !self.selection.is_empty(),
-                    egui::Button::new("Select similar"),
-                )
+                .add_enabled(has_sel, egui::Button::new("Select similar"))
+                .on_hover_text("Same layer and a similar size")
                 .clicked()
             {
                 self.select_similar();
             }
-            ui.label("same layer + size");
+            if ui
+                .add_enabled(has_sel, egui::Button::new("Same layer"))
+                .on_hover_text("Every shape sharing a selected layer")
+                .clicked()
+            {
+                self.select_same_layer();
+            }
         });
 
         ui.separator();
@@ -4541,10 +4891,6 @@ impl App {
 
     /// Draws the right-hand undo-history panel: stack depths and step buttons.
     fn history_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("History");
-        ui.label(format!("Undo stack: {}", self.history.undo_depth()));
-        ui.label(format!("Redo stack: {}", self.history.redo_depth()));
-        ui.separator();
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(self.history.can_undo(), egui::Button::new("Step back"))
@@ -4559,11 +4905,92 @@ impl App {
                 self.run_command(Command::Redo, None);
             }
         });
+
+        // Undo timeline (catalog 54): a clickable list that jumps multiple steps at
+        // once. The document history stores depths, not per-edit labels, so rows are
+        // numbered by distance; clicking one undoes or redoes to that point.
+        let undo_depth = self.history.undo_depth();
+        let redo_depth = self.history.redo_depth();
+        ui.separator();
+        ui.label("Timeline (click to jump):");
+        let mut undo_to: Option<usize> = None;
+        let mut redo_to: Option<usize> = None;
+        egui::ScrollArea::vertical()
+            .max_height(140.0)
+            .auto_shrink([false, false])
+            .id_salt("undo_timeline")
+            .show(ui, |ui| {
+                for k in (1..=redo_depth).rev() {
+                    if ui
+                        .selectable_label(
+                            false,
+                            format!("{} redo +{k}", crate::theme::icons::REDO_2),
+                        )
+                        .clicked()
+                    {
+                        redo_to = Some(k);
+                    }
+                }
+                ui.label(
+                    egui::RichText::new(format!("now  (depth {undo_depth})")).color(DARK.accent),
+                );
+                for k in 1..=undo_depth {
+                    if ui
+                        .selectable_label(
+                            false,
+                            format!("{} undo -{k}", crate::theme::icons::UNDO_2),
+                        )
+                        .clicked()
+                    {
+                        undo_to = Some(k);
+                    }
+                }
+            });
+        if let Some(k) = undo_to {
+            self.undo_steps(k);
+        }
+        if let Some(k) = redo_to {
+            self.redo_steps(k);
+        }
+
         ui.separator();
         ui.label(format!("Selected shapes: {}", self.selection.len()));
         ui.label(format!("Scene shapes: {}", self.scene.len()));
         // The debug "Add demo rectangle" affordance retired to Help > Developer
         // (dev.add_demo_rect; catalog 70).
+    }
+
+    /// Undoes up to `n` history steps, rebuilding the scene once (the undo-timeline
+    /// jump, catalog 54).
+    fn undo_steps(&mut self, n: usize) {
+        let mut done = 0;
+        for _ in 0..n {
+            if self.history.undo() {
+                done += 1;
+            } else {
+                break;
+            }
+        }
+        if done > 0 {
+            self.rebuild_scene();
+            self.status.set(format!("Undid {done} step(s)"));
+        }
+    }
+
+    /// Redoes up to `n` history steps, rebuilding the scene once (catalog 54).
+    fn redo_steps(&mut self, n: usize) {
+        let mut done = 0;
+        for _ in 0..n {
+            if self.history.redo() {
+                done += 1;
+            } else {
+                break;
+            }
+        }
+        if done > 0 {
+            self.rebuild_scene();
+            self.status.set(format!("Redid {done} step(s)"));
+        }
     }
 
     /// Appends a rectangle to the top cell through the undo history, then rebuilds
@@ -4912,8 +5339,6 @@ impl App {
     /// mutation through the undo history. The live array preview is drawn on the
     /// canvas by [`array_preview_shapes`](Self::array_preview_shapes), not here.
     fn productivity_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Productivity");
-
         // Clipboard: copy / cut / paste / duplicate.
         ui.label(format!(
             "Selection: {} | Clipboard: {}",
@@ -5066,8 +5491,6 @@ impl App {
     /// the canvas by [`generate_preview_shapes`](Self::generate_preview_shapes), not
     /// here.
     fn generate_section(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Generate");
-
         // Pick the generator by title; the catalog comes straight from the registry.
         let selected_title = self.generate.selected_info().title;
         egui::ComboBox::from_id_salt("generate_pick")
@@ -5194,10 +5617,14 @@ impl App {
     /// Runs DRC over the flattened top cell and stores the violations.
     fn run_drc(&mut self) {
         let n = self.drc.run(self.history.document(), &self.top_cell);
+        self.drc_ran_revision = Some(self.history.revision());
         if n == 0 {
             self.status.set("DRC: no violations");
         } else {
             self.status.set(format!("DRC: {n} violation(s)"));
+            // Event-driven auto-expand: surface the DRC section on a fresh set of
+            // violations (catalog 67).
+            self.inspector.reveal("drc");
         }
     }
 
@@ -5249,13 +5676,14 @@ impl App {
     /// Clicking a violation records it as selected and zooms the camera to its
     /// location on the next frame (once the real canvas size is known).
     fn drc_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("DRC");
+        let ctx = self.comp_ctx();
         ui.horizontal(|ui| {
             if ui.button("Run DRC").clicked() {
                 self.run_drc();
             }
             if ui.button("Clear").clicked() {
                 self.drc.clear();
+                self.drc_ran_revision = None;
                 self.status.set("DRC cleared");
             }
         });
@@ -5270,10 +5698,76 @@ impl App {
             self.live_pending = crate::history::Dirty::None;
             self.live_reprepare_accum = 0.0;
         }
-        if self.drc.has_run() {
-            ui.label(format!("{} violation(s)", self.drc.len()));
-        } else {
-            ui.label("Not run");
+
+        // No results yet: an empty state that names the void and offers the next
+        // action (catalog AUD-19).
+        if !self.drc.has_run() {
+            if theme::components::EmptyState::new(
+                "No DRC results",
+                "Run DRC to check the layout against the technology rules.",
+            )
+            .action(theme::components::Button::primary("Run DRC"))
+            .show(ui, ctx)
+            .is_some()
+            {
+                self.run_drc();
+            }
+            return;
+        }
+
+        self.drc_result_list(ui, ctx);
+    }
+
+    /// Draws the DRC results below the actions: the count, the stale indicator, the
+    /// prev/next navigator, the violation list, and the "ask agent to fix" button
+    /// (catalog 63). Split from [`drc_panel`](Self::drc_panel) to keep each focused.
+    fn drc_result_list(&mut self, ui: &mut egui::Ui, ctx: theme::components::Ctx) {
+        let count = self.drc.len();
+        ui.horizontal(|ui| {
+            ui.label(format!("{count} violation(s)"));
+            // Stale indicator: the layout changed since DRC last ran (catalog 63).
+            if self.drc_ran_revision != Some(self.history.revision()) {
+                ui.colored_label(
+                    DARK.warning,
+                    format!("{} stale", crate::theme::icons::TRIANGLE_ALERT),
+                )
+                .on_hover_text("The layout changed since DRC last ran; rerun to refresh.");
+            }
+        });
+
+        // Navigable list: prev/next cycle the selection and zoom to it (catalog 63).
+        if count > 0 {
+            ui.horizontal(|ui| {
+                let sel = self.drc.selected();
+                let prev = theme::components::IconButton::new(
+                    crate::theme::icons::CHEVRON_UP,
+                    "Previous violation",
+                )
+                .show(ui, ctx)
+                .clicked();
+                let next = theme::components::IconButton::new(
+                    crate::theme::icons::CHEVRON_DOWN,
+                    "Next violation",
+                )
+                .show(ui, ctx)
+                .clicked();
+                let pos = sel.unwrap_or(0);
+                let target = if next {
+                    Some((pos + 1) % count)
+                } else if prev {
+                    Some((pos + count - 1) % count)
+                } else {
+                    None
+                };
+                if let Some(t) = target
+                    && self.drc.select(t).is_some()
+                {
+                    self.zoom_to_selected_violation = true;
+                }
+                if let Some(s) = self.drc.selected() {
+                    ui.label(format!("{}/{count}", s + 1));
+                }
+            });
         }
         ui.separator();
 
@@ -5325,7 +5819,7 @@ impl App {
     /// and after the user edits, "Diff vs snapshot" compares the baseline against
     /// the now-current document and paints the difference on the canvas.
     fn diff_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Layout diff");
+        let ctx = self.comp_ctx();
         ui.horizontal(|ui| {
             if ui
                 .button("Snapshot")
@@ -5345,6 +5839,7 @@ impl App {
             }
             if ui.button("Clear").clicked() {
                 self.diff_overlay.clear();
+                self.diff_selected = None;
                 self.status.set("Diff cleared");
             }
         });
@@ -5352,18 +5847,182 @@ impl App {
         if ui.checkbox(&mut visible, "Show diff overlay").changed() {
             self.diff_overlay.set_visible(visible);
         }
-        if self.diff_overlay.has_run() {
-            ui.label(format!(
-                "+{} added   -{} removed   ~{} changed",
-                self.diff_overlay.added_count(),
-                self.diff_overlay.removed_count(),
-                self.diff_overlay.changed_count(),
-            ));
-        } else if self.diff_overlay.has_baseline() {
-            ui.label("Snapshot captured; edit, then Diff");
-        } else {
-            ui.label("No snapshot");
+
+        // Not yet diffed: an empty state whose action is the missing step.
+        if !self.diff_overlay.has_run() {
+            let clicked = if self.diff_overlay.has_baseline() {
+                theme::components::EmptyState::new(
+                    "Snapshot captured",
+                    "Edit the layout, then diff to review the changes.",
+                )
+                .action(theme::components::Button::primary("Diff vs snapshot"))
+                .show(ui, ctx)
+            } else {
+                theme::components::EmptyState::new(
+                    "No snapshot",
+                    "Capture a snapshot, edit, then diff to review the changes.",
+                )
+                .action(theme::components::Button::primary("Snapshot"))
+                .show(ui, ctx)
+            };
+            if clicked.is_some() {
+                if self.diff_overlay.has_baseline() {
+                    self.compute_diff();
+                } else {
+                    self.diff_overlay.snapshot(self.history.document());
+                    self.status.set("Diff: snapshot captured");
+                }
+            }
+            return;
         }
+
+        ui.label(format!(
+            "+{} added   -{} removed   ~{} changed",
+            self.diff_overlay.added_count(),
+            self.diff_overlay.removed_count(),
+            self.diff_overlay.changed_count(),
+        ));
+        // Legend: the same green/red/amber the overlay paints (catalog 64).
+        ui.horizontal(|ui| {
+            ui.colored_label(DARK.success, "+ added");
+            ui.colored_label(DARK.danger, "- removed");
+            ui.colored_label(DARK.warning, "~ changed");
+        });
+
+        self.diff_change_list(ui, ctx);
+    }
+
+    /// Draws the navigable diff change list: the per-layer filter, the prev/next
+    /// navigator, and the clickable rows (catalog 64). Split from
+    /// [`diff_panel`](Self::diff_panel) to keep each focused.
+    fn diff_change_list(&mut self, ui: &mut egui::Ui, ctx: theme::components::Ctx) {
+        // Snapshot the change list into owned rows so the borrow of the overlay
+        // ends before navigation mutates the camera and the selection.
+        let mut rows: Vec<(DiffKind, LayerId, Rect, String)> = Vec::new();
+        for s in self.diff_overlay.added() {
+            rows.push((DiffKind::Added, s.layer, s.rect, s.label.clone()));
+        }
+        for s in self.diff_overlay.removed() {
+            rows.push((DiffKind::Removed, s.layer, s.rect, s.label.clone()));
+        }
+        for s in self.diff_overlay.changed() {
+            rows.push((DiffKind::Changed, s.layer, s.rect, s.label.clone()));
+        }
+        if rows.is_empty() {
+            ui.label("No differences.");
+            return;
+        }
+
+        // Per-layer filter over the layers that actually appear in the diff. The
+        // names are resolved up front so the combo closure does not borrow `self`
+        // both mutably (the filter) and immutably (the name lookup) at once.
+        let layers: std::collections::BTreeSet<LayerId> = rows.iter().map(|r| r.1).collect();
+        let layer_names: Vec<(LayerId, String)> = layers
+            .iter()
+            .map(|id| (*id, self.layer_name_of(*id)))
+            .collect();
+        let current = self
+            .diff_layer_filter
+            .map_or_else(|| "All".to_owned(), |id| self.layer_name_of(id));
+        ui.horizontal(|ui| {
+            ui.label("Layer:");
+            egui::ComboBox::from_id_salt("diff_layer_filter")
+                .selected_text(current)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.diff_layer_filter, None, "All");
+                    for (id, name) in &layer_names {
+                        ui.selectable_value(&mut self.diff_layer_filter, Some(*id), name);
+                    }
+                });
+        });
+
+        // The row indices passing the filter, the navigation domain.
+        let filtered: Vec<usize> = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| self.diff_layer_filter.is_none_or(|f| f == r.1))
+            .map(|(i, _)| i)
+            .collect();
+        if filtered.is_empty() {
+            ui.label("No changes on this layer.");
+            return;
+        }
+
+        // Prev/next cycle through the filtered rows, recentering on each.
+        ui.horizontal(|ui| {
+            let here = self
+                .diff_selected
+                .and_then(|sel| filtered.iter().position(|&i| i == sel))
+                .unwrap_or(0);
+            let prev = theme::components::IconButton::new(
+                crate::theme::icons::CHEVRON_UP,
+                "Previous change",
+            )
+            .show(ui, ctx)
+            .clicked();
+            let next = theme::components::IconButton::new(
+                crate::theme::icons::CHEVRON_DOWN,
+                "Next change",
+            )
+            .show(ui, ctx)
+            .clicked();
+            let step = if next {
+                Some((here + 1) % filtered.len())
+            } else if prev {
+                Some((here + filtered.len() - 1) % filtered.len())
+            } else {
+                None
+            };
+            if let Some(pos) = step {
+                let idx = filtered[pos];
+                self.diff_selected = Some(idx);
+                self.center_on_rect(rows[idx].2);
+            }
+            ui.label(format!("{}/{}", here + 1, filtered.len()));
+        });
+
+        // The change list: click a row to recenter on it.
+        let selected = self.diff_selected;
+        let mut clicked: Option<usize> = None;
+        egui::ScrollArea::vertical()
+            .max_height(160.0)
+            .auto_shrink([false, false])
+            .id_salt("diff_list")
+            .show(ui, |ui| {
+                for &idx in &filtered {
+                    let (kind, layer, _rect, label) = &rows[idx];
+                    let text = format!("{} {} {}", kind.glyph(), self.layer_name_of(*layer), label);
+                    if ui.selectable_label(selected == Some(idx), text).clicked() {
+                        clicked = Some(idx);
+                    }
+                }
+            });
+        if let Some(idx) = clicked {
+            self.diff_selected = Some(idx);
+            self.center_on_rect(rows[idx].2);
+        }
+    }
+
+    /// The display name of a layer id, falling back to its `layer/datatype`.
+    fn layer_name_of(&self, id: LayerId) -> String {
+        self.layer_state
+            .rows()
+            .iter()
+            .find(|r| r.id == id)
+            .map_or_else(
+                || format!("{}/{}", id.layer, id.datatype),
+                |r| r.name.clone(),
+            )
+    }
+
+    /// Recenters the camera on `rect`'s center, keeping the current zoom, so a
+    /// clicked diff change or violation is brought into view (catalog 64).
+    fn center_on_rect(&mut self, rect: Rect) {
+        let center = Point::new(
+            i32::midpoint(rect.min.x, rect.max.x),
+            i32::midpoint(rect.min.y, rect.max.y),
+        );
+        self.camera = ViewCamera::new(center, self.camera.pixels_per_dbu());
     }
 
     /// Diffs the captured baseline against the current document and reports the
@@ -5388,7 +6047,7 @@ impl App {
     /// schema-V2 `Document.comments` field (ADR 0080). Clicking a row selects its
     /// pin.
     fn comment_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Comments");
+        let ctx = self.comp_ctx();
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.comment_draft)
@@ -5407,21 +6066,58 @@ impl App {
         });
 
         if self.comment_pins.is_empty() {
-            ui.label("No comments");
+            theme::components::EmptyState::new(
+                "No comments",
+                "Type a note above and Add to pin it to the top cell.",
+            )
+            .show(ui, ctx);
             return;
         }
 
+        // Unresolved badge and the resolved filter (catalog 65).
+        let unresolved = self.comment_pins.unresolved_count();
+        ui.horizontal(|ui| {
+            ui.colored_label(
+                if unresolved > 0 {
+                    DARK.accent
+                } else {
+                    DARK.success
+                },
+                format!("{unresolved} unresolved"),
+            );
+            ui.checkbox(&mut self.comment_pins.show_resolved, "Show resolved");
+        });
+
         let selected = self.comment_pins.selected();
+        let show_resolved = self.comment_pins.show_resolved;
         let mut clicked = None;
+        let mut toggle_id: Option<String> = None;
         for (i, comment) in self.comment_pins.comments().iter().enumerate() {
-            let line = format!("{}. {}", i + 1, comment_pins::format_comment_line(comment));
-            if ui.selectable_label(selected == Some(i), line).clicked() {
-                clicked = Some(i);
+            let resolved = self.comment_pins.is_resolved(&comment.id);
+            if resolved && !show_resolved {
+                continue;
             }
+            ui.horizontal(|ui| {
+                let line = format!("{}. {}", i + 1, comment_pins::format_comment_line(comment));
+                let mut rich = egui::RichText::new(line);
+                if resolved {
+                    rich = rich.strikethrough().color(DARK.text_weak);
+                }
+                if ui.selectable_label(selected == Some(i), rich).clicked() {
+                    clicked = Some(i);
+                }
+                let label = if resolved { "Reopen" } else { "Resolve" };
+                if ui.small_button(label).clicked() {
+                    toggle_id = Some(comment.id.clone());
+                }
+            });
         }
         if let Some(i) = clicked {
             self.comment_pins.select(i);
             self.status.set(format!("Comment {} selected", i + 1));
+        }
+        if let Some(id) = toggle_id {
+            self.comment_pins.toggle_resolved(&id);
         }
     }
 
@@ -5440,6 +6136,9 @@ impl App {
         let index = self.comment_pins.add(comment);
         self.comment_pins.select(index);
         self.comment_draft.clear();
+        // Event-driven auto-expand: surface the Comments section on a new thread
+        // (catalog 67).
+        self.inspector.reveal("comments");
         self.status.set("Comment added");
     }
 
@@ -5474,11 +6173,25 @@ impl App {
     fn agent_section(&mut self, ui: &mut egui::Ui) {
         use crate::agent_panel::RunState;
 
-        ui.heading("Agent");
         ui.horizontal(|ui| {
             ui.label("Prompt:");
             ui.text_edit_singleline(&mut self.agent.prompt);
         });
+        // Sample prompts (catalog 21): a one-click starter while idle.
+        if !self.agent.is_running() {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Try:");
+                for &sample in AGENT_SAMPLE_PROMPTS {
+                    if ui
+                        .small_button(sample)
+                        .on_hover_text("Use this as the prompt")
+                        .clicked()
+                    {
+                        sample.clone_into(&mut self.agent.prompt);
+                    }
+                }
+            });
+        }
         ui.horizontal(|ui| {
             let running = self.agent.is_running();
             if ui.add_enabled(!running, egui::Button::new("Run")).clicked() {
@@ -5711,10 +6424,12 @@ impl App {
     fn apply_agent_drc_update(&mut self, violations: Vec<reticle_model::Violation>) {
         let n = violations.len();
         self.drc.set_violations(violations);
+        self.drc_ran_revision = Some(self.history.revision());
         if n == 0 {
             self.status.set("Agent verify: DRC clean");
         } else {
             self.status.set(format!("Agent verify: {n} violation(s)"));
+            self.inspector.reveal("drc");
         }
     }
 
@@ -6123,6 +6838,14 @@ impl App {
     /// edits but never sending any back, and can toggle follow-mode to ride along
     /// with this session's viewport. Room-creation on the demo server is
     /// rate-limited and the room expires (see `reticle-demo`).
+    ///
+    /// ADR-2B: Share left the right Inspector when it was rebuilt on the
+    /// segmented-group system (`ia-inventory.md` section 2 gives Share its own
+    /// top-level menu, owned by lanes 2A/2D). This method is retained until that
+    /// Share menu lands; the headless render test still exercises it, and lane
+    /// 2D re-homes its only editor call site. `allow(dead_code)` keeps the
+    /// interim state warning-clean.
+    #[allow(dead_code)]
     fn share_section(&mut self, ui: &mut egui::Ui) {
         ui.heading("Share");
         ui.horizontal(|ui| {
@@ -6258,8 +6981,6 @@ impl App {
     /// the current selection, optionally in the print-style monochrome mode (see
     /// [`crate::viewexport`] and [`App::run_export`]).
     fn view_export_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("View and export");
-
         // The stock-egui light toggle is retired: v8.1 ships one tokened dark
         // theme applied at boot from the theme module (ADR 0095). A future light
         // variant is a second token table, not a UI switch here.
@@ -6330,9 +7051,21 @@ impl App {
             );
         });
         ui.checkbox(&mut self.view_export.monochrome, "Monochrome (print) mode");
-        if ui.button("Export").clicked() {
-            self.run_export();
-        }
+        ui.horizontal(|ui| {
+            if ui.button("Export").clicked() {
+                self.run_export();
+            }
+            // Export-menu consolidation (catalog 12): the metrology CSV alongside
+            // the image formats. The same effect the `file.export_metrology`
+            // registry id runs.
+            if ui
+                .button("Metrology CSV")
+                .on_hover_text("Write a per-layer metrology summary as CSV")
+                .clicked()
+            {
+                self.export_metrology();
+            }
+        });
     }
 
     /// The shapes covered by the current export scope, cloned out of the scene.
@@ -6469,7 +7202,6 @@ impl App {
     /// actions. Grid facts live on [`crate::grid::GridSettings`] and the rest on
     /// [`crate::snap::SnapState`]; this panel edits both in place.
     fn snap_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Snap and guides");
         ui.checkbox(&mut self.grid.visible, "Show grid");
         ui.checkbox(&mut self.grid.snap_enabled, "Snap to grid");
         ui.checkbox(&mut self.snap.geometry_enabled, "Snap to geometry");
@@ -6530,12 +7262,21 @@ impl App {
 
     /// Draws the properties inspector section for the current selection.
     fn inspector_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Properties");
+        let ctx = self.comp_ctx();
         let indices: Vec<usize> = self.selection.iter().collect();
         let insp = inspector::inspect(self.scene.shapes(), &indices, &self.layer_state);
         match insp {
             Inspection::Empty => {
-                ui.label("No selection");
+                if theme::components::EmptyState::new(
+                    "No selection",
+                    "Click a shape or press V to pick the Select tool.",
+                )
+                .action(theme::components::Button::secondary("Select tool"))
+                .show(ui, ctx)
+                .is_some()
+                {
+                    self.select_tool(Tool::Select);
+                }
             }
             Inspection::Single(info) => {
                 ui.label(format!("Layer: {}", info.layer_label()));
@@ -9434,6 +10175,31 @@ fn view_panel_header(ui: &mut egui::Ui, ctx: components::Ctx, title: &str) -> bo
     close
 }
 
+/// The right Inspector's remembered layout to boot with (lane 2B).
+///
+/// On native it restores the group, width, collapse flag, and open sections from
+/// the saved session; a missing or unreadable session, and every web session,
+/// starts from the defaults.
+#[cfg(not(target_arch = "wasm32"))]
+fn boot_inspector_state() -> crate::inspector_layout::InspectorState {
+    use crate::inspector_layout::{InspectorState, OrderedWidth, PanelGroup};
+    let mut state = InspectorState::default();
+    if let Some(s) = crate::session::load() {
+        state.group = PanelGroup::from_index(s.panel_group as usize);
+        state.width = OrderedWidth(s.panel_right_w);
+        state.collapsed = s.panels_collapsed;
+        state.apply_open_tags(&s.panel_open);
+    }
+    state
+}
+
+/// The right Inspector's boot layout on the web: the defaults (no filesystem to
+/// restore from; see the native variant).
+#[cfg(target_arch = "wasm32")]
+fn boot_inspector_state() -> crate::inspector_layout::InspectorState {
+    crate::inspector_layout::InspectorState::default()
+}
+
 /// Converts a canvas [`ScreenRect`] to an egui rectangle.
 fn egui_rect_of(screen: &ScreenRect) -> EguiRect {
     EguiRect::from_min_size(
@@ -10321,6 +11087,51 @@ mod tests {
         assert_ne!(
             app.replay_open, replay_before,
             "dev.replay_theater toggles the theater window"
+        );
+    }
+
+    #[test]
+    fn panels_toggle_collapses_and_expands_the_inspector() {
+        let mut app = App::new();
+        assert!(!app.inspector.collapsed, "the inspector starts expanded");
+        app.dispatch(CommandId("view.panels_toggle"));
+        assert!(app.inspector.collapsed, "Tab collapses it to the icon rail");
+        app.dispatch(CommandId("view.panels_toggle"));
+        assert!(!app.inspector.collapsed, "Tab again expands it");
+    }
+
+    #[test]
+    fn running_drc_reveals_the_review_group_when_violations_exist() {
+        use crate::inspector_layout::PanelGroup;
+        let mut app = App::new();
+        // Start on a different group so a reveal is observable.
+        app.inspector.group = PanelGroup::Settings;
+        app.run_drc();
+        if app.drc.is_empty() {
+            return; // The demo happens to be clean on this build; nothing to reveal.
+        }
+        assert_eq!(
+            app.inspector.group,
+            PanelGroup::Review,
+            "a fresh violation set surfaces the Review group (catalog 67)"
+        );
+        assert!(app.inspector.is_open("drc"), "and opens the DRC section");
+    }
+
+    #[test]
+    fn select_same_layer_grows_to_the_whole_layer() {
+        let mut app = App::new();
+        select_first_direct(&mut app, 1);
+        if app.selection.is_empty() {
+            return;
+        }
+        let seed_layer = app.scene.shapes()[app.selection.iter().next().unwrap()].layer;
+        app.select_same_layer();
+        // Every selected shape now shares the seed layer.
+        let shapes = app.scene.shapes();
+        assert!(
+            app.selection.iter().all(|i| shapes[i].layer == seed_layer),
+            "select-same keeps only shapes on the seeded layer"
         );
     }
 

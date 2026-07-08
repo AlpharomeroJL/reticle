@@ -75,6 +75,18 @@ pub struct SessionState {
     pub panel_3d_open: bool,
     /// Whether the managed Cross-section panel is open (View > Panels, ADR 0096).
     pub panel_xsection_open: bool,
+    // ---- lane 2b: right Inspector panel ------------------------------------
+    /// The right Inspector panel width, in points (lane 2B, catalog 61). Seeds the
+    /// panel's default width and tracks user drags.
+    pub panel_right_w: f32,
+    /// The selected Inspector group, as its [`crate::inspector_layout::PanelGroup`]
+    /// index (lane 2B).
+    pub panel_group: u8,
+    /// Whether the Inspector is collapsed to its icon rail (lane 2B, catalog 59).
+    pub panels_collapsed: bool,
+    /// The open Inspector sections, as a comma-separated key list (lane 2B,
+    /// catalog 61). Empty means "no record": the default open set applies.
+    pub panel_open: String,
 }
 
 impl Default for SessionState {
@@ -100,6 +112,10 @@ impl Default for SessionState {
             panel_left_w: 210.0,
             panel_3d_open: false,
             panel_xsection_open: false,
+            panel_right_w: crate::inspector_layout::DEFAULT_WIDTH,
+            panel_group: 0,
+            panels_collapsed: false,
+            panel_open: String::new(),
         }
     }
 }
@@ -157,8 +173,9 @@ impl SessionState {
             panel_left_w: panels.left_w,
             panel_3d_open: panels.panel_3d_open,
             panel_xsection_open: panels.panel_xsection_open,
-            // Onboarding bits are not view state; capture leaves them at defaults and
-            // the app grafts the live values on in `session_snapshot`.
+            // Onboarding bits (lane 4C) and the Inspector panel keys (lane 2B) are not
+            // part of the view snapshot; capture leaves them at defaults and the app
+            // grafts the live values on in `session_snapshot` before saving.
             ..Self::default()
         }
     }
@@ -206,7 +223,7 @@ impl SessionState {
             .map(|(l, d)| format!("{l}/{d}"))
             .collect();
         format!(
-            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nui_density={}\nreduced_motion={}\nwheel={}\ntouch_mode={}\nhidden={}\ntour_seen={}\nhints={}\nchecklist={}\nchecklist_dismissed={}\ngpu_card_dismissed={}\npanel_left_w={}\npanel_3d_open={}\npanel_xsection_open={}\n",
+            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nui_density={}\nreduced_motion={}\nwheel={}\ntouch_mode={}\nhidden={}\ntour_seen={}\nhints={}\nchecklist={}\nchecklist_dismissed={}\ngpu_card_dismissed={}\npanel_left_w={}\npanel_3d_open={}\npanel_xsection_open={}\npanel_right_w={}\npanel_group={}\npanels_collapsed={}\npanel_open={}\n",
             self.center_x,
             self.center_y,
             self.pixels_per_dbu,
@@ -227,7 +244,11 @@ impl SessionState {
             self.gpu_card_dismissed,
             self.panel_left_w,
             self.panel_3d_open,
-            self.panel_xsection_open
+            self.panel_xsection_open,
+            self.panel_right_w,
+            self.panel_group,
+            self.panels_collapsed,
+            self.panel_open
         )
     }
 
@@ -298,6 +319,18 @@ impl SessionState {
                 }
                 "panel_3d_open" => s.panel_3d_open = value == "true",
                 "panel_xsection_open" => s.panel_xsection_open = value == "true",
+                "panel_right_w" => {
+                    if let Ok(v) = value.parse() {
+                        s.panel_right_w = v;
+                    }
+                }
+                "panel_group" => {
+                    if let Ok(v) = value.parse() {
+                        s.panel_group = v;
+                    }
+                }
+                "panels_collapsed" => s.panels_collapsed = value == "true",
+                "panel_open" => value.clone_into(&mut s.panel_open),
                 _ => {}
             }
         }
@@ -476,6 +509,10 @@ mod tests {
             panel_left_w: 244.0,
             panel_3d_open: true,
             panel_xsection_open: false,
+            panel_right_w: 300.0,
+            panel_group: 2,
+            panels_collapsed: true,
+            panel_open: "properties,drc,agent".to_owned(),
         }
     }
 
@@ -625,6 +662,32 @@ mod tests {
         // an upgrade shows the tour once rather than suppressing it.
         let older = SessionState::from_text("center_x=1\n").expect("parses");
         assert!(!older.tour_seen);
+    }
+
+    #[test]
+    fn panel_layout_keys_round_trip_and_default() {
+        // The lane-2B panel keys round-trip through the text format...
+        let s = SessionState {
+            panel_right_w: 320.0,
+            panel_group: 3,
+            panels_collapsed: true,
+            panel_open: "drc,diff".to_owned(),
+            ..SessionState::default()
+        };
+        let parsed = SessionState::from_text(&s.to_text()).expect("parses");
+        assert!((parsed.panel_right_w - 320.0).abs() < f32::EPSILON);
+        assert_eq!(parsed.panel_group, 3);
+        assert!(parsed.panels_collapsed);
+        assert_eq!(parsed.panel_open, "drc,diff");
+        // ...and an older file without them keeps the panel defaults (unknown-key
+        // tolerance makes the addition non-breaking).
+        let older = SessionState::from_text("center_x=1\n").expect("parses");
+        assert!(
+            (older.panel_right_w - crate::inspector_layout::DEFAULT_WIDTH).abs() < f32::EPSILON
+        );
+        assert_eq!(older.panel_group, 0);
+        assert!(!older.panels_collapsed);
+        assert!(older.panel_open.is_empty());
     }
 
     #[test]

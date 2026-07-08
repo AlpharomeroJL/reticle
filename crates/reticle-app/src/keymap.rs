@@ -675,6 +675,10 @@ mod tests {
             ("view.split_single", "Ctrl+1"),
             ("view.split_h", "Ctrl+2"),
             ("view.split_v", "Ctrl+3"),
+            // Added by lane 2B per ia-inventory section 4 (the reserved-id table)
+            // and the chord-conflict note that blesses Tab as a new default that
+            // does not collide with the shipped regression list.
+            ("view.panels_toggle", "Tab"),
         ];
         for (command, text) in regression {
             assert_eq!(

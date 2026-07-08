@@ -651,7 +651,6 @@ impl crate::app::App {
     /// edits, applies them as one undo step and rebuilds the scene. Buttons are
     /// disabled when the selection is too small for the operation.
     pub(crate) fn ops_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Operations");
         let selected = self.selection.len();
         ui.label(format!("Selected: {selected} shape(s)"));
         self.ops_boolean_section(ui, selected);
