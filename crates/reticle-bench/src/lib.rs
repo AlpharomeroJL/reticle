@@ -16,6 +16,8 @@
 //! - [`runner`]: [`run_task`], which drives a session through the loop and records a
 //!   [`ResultRecord`] with a deterministic (step-counted) wall time.
 //! - [`results`]: write records as JSON and render a Markdown [`Summary`].
+//! - [`leaderboard`]: aggregate committed [`ResultRecord`]s across every run into a
+//!   deterministic static leaderboard page, and validate a submitted record set.
 //!
 //! The end-to-end flow (load a suite, run each task against the mock, summarize) is
 //! exercised by the sample suite under `benchmarks/layout-tasks/` and the crate's
@@ -26,6 +28,7 @@ mod schema;
 
 pub mod checkers;
 pub mod geom_checkers;
+pub mod leaderboard;
 pub mod loader;
 pub mod mining;
 pub mod model;
@@ -37,6 +40,9 @@ pub use checker::{CheckFailure, CheckResult, Checker};
 pub use checkers::{CheckerRegistry, DrcClean, IntentCheck, RectPresent};
 pub use geom_checkers::{
     Comb, CompoundCell, ContactStack, GuardRing, LayerArea, ShapeCount, ViaChain,
+};
+pub use leaderboard::{
+    ValidateError, load_records, render_leaderboard, system_kind, tier_of, validate_records,
 };
 pub use loader::{LoadError, load_manifest, load_suite, load_task};
 pub use model::{Context, MockModel, ModelClient};

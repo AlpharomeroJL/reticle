@@ -1,0 +1,74 @@
+[
+  {
+    "task_id": "t1_place_met1_rect",
+    "model": "gpt-oss:16k",
+    "suite_version": "0.4.0",
+    "success": true,
+    "iterations": 1,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 11000,
+    "backend": "ollama",
+    "quantization": "MXFP4"
+  },
+  {
+    "task_id": "t1_min_area_met1",
+    "model": "gpt-oss:16k",
+    "suite_version": "0.4.0",
+    "success": false,
+    "iterations": 2,
+    "first_proposal_violations": 1,
+    "final_violations": 1,
+    "wall_ms": 12000,
+    "backend": "ollama",
+    "quantization": "MXFP4"
+  },
+  {
+    "task_id": "t2_contact_li1_met1",
+    "model": "gpt-oss:16k",
+    "suite_version": "0.4.0",
+    "success": true,
+    "iterations": 2,
+    "first_proposal_violations": 1,
+    "final_violations": 0,
+    "wall_ms": 13000,
+    "backend": "ollama",
+    "quantization": "MXFP4"
+  },
+  {
+    "task_id": "t3_guard_ring_met1",
+    "model": "gpt-oss:16k",
+    "suite_version": "0.4.0",
+    "success": false,
+    "iterations": 3,
+    "first_proposal_violations": 2,
+    "final_violations": 2,
+    "wall_ms": 21000,
+    "backend": "ollama",
+    "quantization": "MXFP4"
+  },
+  {
+    "task_id": "t4_compound_cell_a",
+    "model": "gpt-oss:16k",
+    "suite_version": "0.4.0",
+    "success": true,
+    "iterations": 2,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 24000,
+    "backend": "ollama",
+    "quantization": "MXFP4"
+  },
+  {
+    "task_id": "t5_tap_cell_core",
+    "model": "gpt-oss:16k",
+    "suite_version": "0.4.0",
+    "success": true,
+    "iterations": 1,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 30000,
+    "backend": "ollama",
+    "quantization": "MXFP4"
+  }
+]
