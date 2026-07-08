@@ -19,5 +19,6 @@
 //! * `icons` (lane 1B), generated Lucide glyph constants.
 //! * `components` (lane 1C), the widget library every panel builds from.
 
+pub mod components;
 pub mod gallery;
 pub mod tokens;
