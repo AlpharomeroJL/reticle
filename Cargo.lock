@@ -4193,6 +4193,7 @@ dependencies = [
 name = "reticle-app"
 version = "8.0.0"
 dependencies = [
+ "criterion",
  "eframe",
  "egui-wgpu",
  "egui_kittest",

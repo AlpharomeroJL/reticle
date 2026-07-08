@@ -19,7 +19,7 @@ use reticle_sync::{Comment, SyncDocument};
 use std::sync::Arc;
 
 use crate::agent_panel::AgentPanelState;
-use crate::camera::{ScreenRect, ViewCamera};
+use crate::camera::{CameraTween, ScreenRect, ViewCamera};
 use crate::command::{self, Command};
 use crate::commands::{self, AppOp, CommandId, RunAs};
 use crate::comment_pins;
@@ -34,14 +34,16 @@ use crate::keymap::{self, Keymap};
 use crate::labels;
 use crate::layers::{self, LayerState};
 use crate::menu;
-use crate::minimap::MinimapLayout;
+use crate::minimap::{self, MinimapLayout};
 use crate::netlight::{Generation, Netlight};
 use crate::outline::{self, OutlineTree, SavedSets};
+use crate::overlay::{Anchor, OverlayLayout};
 use crate::productivity::{self, ProductivityState};
 use crate::query::{LayerLookup, Query};
 use crate::replay::ReplayTheater;
 use crate::selection::{self, Selection};
 use crate::snap::{self, Guide, SnapHint, SnapState};
+use crate::streamed::LevelFade;
 use crate::tech_editor::TechEditorState;
 use crate::theme::{
     self, components, icons,
@@ -63,6 +65,35 @@ impl Status {
     fn set(&mut self, text: impl Into<String>) {
         self.text = text.into();
     }
+}
+
+/// A zoom preset that needs the real canvas size to resolve, so it is recorded when the
+/// command fires and applied in [`App::canvas`] once the pane rectangle is known (item
+/// 28). [`ViewPreset::Fit`] uses the existing `fit_requested` path; these are the three
+/// that frame a computed world rectangle.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ViewPreset {
+    /// Frame the selection's bounding box (Shift+F, `view.zoom_selection`).
+    Selection,
+    /// Reset the zoom to one screen pixel per DBU, keeping the center (`view.zoom_one_to_one`).
+    OneToOne,
+    /// Frame the union bounding box of every visible layer's geometry (`view.zoom_layer_extents`).
+    LayerExtents,
+}
+
+/// The numeric transform popover: the selection's `x, y, w, h` as editable text, plus
+/// whether the popover is open (item 51). Editing a field and committing moves or resizes
+/// the selection to the typed value; the buffers are refilled from the live selection each
+/// time the popover opens so they never show stale numbers.
+#[derive(Clone, Debug, Default)]
+struct TransformPopover {
+    /// Whether the popover is shown.
+    open: bool,
+    /// The edit buffers for the selection bounding box's min-x, min-y, width, height.
+    x: String,
+    y: String,
+    w: String,
+    h: String,
 }
 
 /// A Start-screen click, collected inside the layout closure and applied after it
@@ -249,6 +280,42 @@ pub struct App {
     labels_visible: bool,
     /// Whether the minimap overview panel is drawn (and steals clicks inside it).
     minimap_visible: bool,
+
+    // --- lane 3a: canvas navigation, overlays, and fluidity ---
+    /// Whether the top/left ruler bars are drawn (View > Rulers, item 31). On by
+    /// default; hiding them reclaims the canvas edges for a clean presentation view.
+    rulers_visible: bool,
+    /// Whether a full-canvas crosshair follows the cursor (status-bar toggle, item 32),
+    /// so the pointer's exact world position reads against distant geometry.
+    crosshair: bool,
+    /// Whether the streaming HUD is drawn in archive-browse mode (status-bar archive
+    /// label toggle, item 68).
+    archive_hud_visible: bool,
+    /// An in-flight animated camera move (Fit / Fit-selection / Go-to), advanced each
+    /// frame; `None` when the camera is at rest (item 29).
+    camera_tween: Option<CameraTween>,
+    /// A zoom preset requested this frame that needs the real canvas size to resolve
+    /// (fit-selection, 1:1, layer-extents); applied in [`App::canvas`] (item 28).
+    pending_view: Option<ViewPreset>,
+    /// The level-of-detail crossfade for the streamed archive: fades freshly-covered
+    /// detail in rather than popping it (item 42).
+    archive_fade: LevelFade,
+    /// The shape under the cursor for the Select tool's hover pre-highlight, recomputed
+    /// each hover so the click target is obvious before the click (item 46).
+    hover_pick: Option<usize>,
+    /// Whether the snap-bypass modifier (Ctrl / Cmd) is held this frame, so the cursor
+    /// lands on the exact world point rather than the nearest snap (item 53).
+    snap_bypass: bool,
+    /// The numeric transform popover (x, y, w, h of the selection) and its edit buffers
+    /// (item 51).
+    transform: TransformPopover,
+    /// Saved view bookmarks (camera snapshots), recalled from the palette (item 34).
+    /// Capped at nine slots so the palette list stays short.
+    bookmarks: Vec<ViewCamera>,
+    /// Text queued for the system clipboard (the copy-permalink action, item 35), flushed
+    /// through egui in [`App::ui`] where the `Context` is available.
+    pending_clipboard: Option<String>,
+
     /// The canvas pane layout: split mode, focused pane, and per-pane cameras.
     viewports: Viewports,
     /// The name of the top cell being viewed.
@@ -959,6 +1026,18 @@ impl App {
             dragging_guide: None,
             labels_visible: true,
             minimap_visible: true,
+            rulers_visible: true,
+            crosshair: false,
+            archive_hud_visible: true,
+            camera_tween: None,
+            pending_view: None,
+            // The packet's ~150 ms LOD crossfade (docs/design/tokens.md motion contract).
+            archive_fade: LevelFade::new(0.15),
+            hover_pick: None,
+            snap_bypass: false,
+            transform: TransformPopover::default(),
+            bookmarks: Vec::new(),
+            pending_clipboard: None,
             viewports: Viewports::new(),
             top_cell: demo::TOP_CELL.to_owned(),
             scene,
@@ -2604,6 +2683,34 @@ impl App {
                 self.fit_requested = true;
                 self.status.set("Zoom to fit");
             }
+            Command::ZoomSelection => {
+                if self.selection.is_empty() {
+                    self.status.set("Fit selection: nothing selected");
+                } else {
+                    self.pending_view = Some(ViewPreset::Selection);
+                    self.status.set("Fit selection");
+                }
+            }
+            Command::ZoomOneToOne => {
+                self.pending_view = Some(ViewPreset::OneToOne);
+                self.status.set("Zoom 1:1 DBU");
+            }
+            Command::ZoomLayerExtents => {
+                self.pending_view = Some(ViewPreset::LayerExtents);
+                self.status.set("Zoom to layer extents");
+            }
+            Command::BookmarkSave => {
+                // Nine slots, oldest dropped, so the palette recall list stays short.
+                const MAX_BOOKMARKS: usize = 9;
+                if self.bookmarks.len() == MAX_BOOKMARKS {
+                    self.bookmarks.remove(0);
+                }
+                self.bookmarks.push(self.camera);
+                self.status.set(format!(
+                    "Saved view bookmark {} (recall from the palette)",
+                    self.bookmarks.len()
+                ));
+            }
             Command::ToggleGrid => {
                 self.grid.visible = !self.grid.visible;
                 self.status
@@ -2627,6 +2734,8 @@ impl App {
                     self.status.set(format!("Selected {n} shape(s) on layer"));
                 }
             }
+            Command::Duplicate => self.productivity_duplicate(),
+            Command::CopyPermalink => self.copy_permalink_at_view(),
             Command::ExportPng => self.export_png(screen),
         }
     }
@@ -2672,6 +2781,63 @@ impl App {
     #[allow(clippy::unused_self)]
     fn export_png(&mut self, _screen: Option<ScreenRect>) {
         self.status.set("PNG export is native-only");
+    }
+
+    /// Builds a permalink pinning the current camera, layers, and cell, and queues it for
+    /// the clipboard (item 35). The link is emitted with the current page as its base and
+    /// carries the open document's `?gds=` source (on wasm) so it reopens the same design
+    /// at the same view; the pure serialization is [`crate::share::session_permalink`] +
+    /// [`crate::share::emit_permalink`].
+    fn copy_permalink_at_view(&mut self) {
+        let center = self.camera.center();
+        let camera = (
+            f64::from(center.x),
+            f64::from(center.y),
+            self.camera.pixels_per_dbu(),
+        );
+        let visible: Vec<(u16, u16)> = self
+            .layer_state
+            .rows()
+            .iter()
+            .filter(|r| r.visible)
+            .map(|r| (r.id.layer, r.id.datatype))
+            .collect();
+        let cell = self.top_cell.clone();
+        let permalink = crate::share::session_permalink(Some(&cell), camera, &visible);
+        let (base, gds) = self.permalink_context();
+        let link = crate::share::emit_permalink(&base, gds.as_deref(), &permalink);
+        self.pending_clipboard = Some(link);
+        self.status
+            .set("Copied a permalink to this view to the clipboard");
+    }
+
+    /// The page base URL and any `?gds=` source to fold into a copied permalink.
+    ///
+    /// On wasm this reads the live `window.location` so the link resolves against the
+    /// deployed bundle and reopens the same document; on native (no browser) it yields a
+    /// relative link with no source, which still round-trips the view state.
+    #[cfg(target_arch = "wasm32")]
+    fn permalink_context(&self) -> (String, Option<String>) {
+        let Some(window) = web_sys::window() else {
+            return (String::new(), None);
+        };
+        let location = window.location();
+        let origin = location.origin().unwrap_or_default();
+        let pathname = location.pathname().unwrap_or_default();
+        let base = format!("{origin}{pathname}");
+        let gds = location
+            .search()
+            .ok()
+            .and_then(|search| crate::webopen::gds_url_from_query(&search));
+        (base, gds)
+    }
+
+    /// Native builds have no page URL, so a copied permalink is a relative view-state
+    /// link with no document source.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[allow(clippy::unused_self)]
+    fn permalink_context(&self) -> (String, Option<String>) {
+        (String::new(), None)
     }
 
     /// Handles global keyboard shortcuts by resolving every key press through the
@@ -2765,7 +2931,12 @@ impl App {
         crate::focus::EscState {
             tool_active: self.draw.in_progress() || self.tools.active() != Tool::Select,
             has_selection: !self.selection.is_empty(),
-            popover_open: self.shortcuts_open || self.keymap_open,
+            // Lane 3A's transform popover and the palette join the cascade's popover
+            // arm alongside 3C's shortcuts/keymap windows.
+            popover_open: self.shortcuts_open
+                || self.keymap_open
+                || self.transform.open
+                || self.palette_open,
         }
     }
 
@@ -2773,8 +2944,9 @@ impl App {
     fn apply_esc(&mut self) {
         match crate::focus::esc_action(self.esc_state()) {
             crate::focus::EscAction::CancelTool => {
-                if self.draw.in_progress() {
-                    self.draw.reset();
+                // Lane 3A owns the canvas-draw cancel (item 52): drop a half-drawn
+                // shape first; otherwise fall back to the Select tool.
+                if self.cancel_in_progress_draw() {
                     self.status.set("Draw canceled");
                 } else {
                     self.select_tool(Tool::Select);
@@ -2791,9 +2963,30 @@ impl App {
                 } else if self.keymap_open {
                     self.keymap_open = false;
                     self.rebinding = None;
+                } else if self.transform.open {
+                    self.transform.open = false;
+                } else if self.palette_open {
+                    self.palette_open = false;
                 }
             }
             crate::focus::EscAction::Nothing => {}
+        }
+    }
+
+    /// Cancels a half-drawn shape (an in-progress polygon or path, item 52), returning
+    /// whether anything was actually cancelled.
+    fn cancel_in_progress_draw(&mut self) -> bool {
+        let drawing = matches!(
+            self.tools.active(),
+            Tool::DrawPolygon | Tool::DrawPath | Tool::EditVertex
+        );
+        let has_progress =
+            !self.draw.poly.vertices().is_empty() || !self.draw.path.points().is_empty();
+        if drawing && has_progress {
+            self.draw.reset();
+            true
+        } else {
+            false
         }
     }
 
@@ -2833,6 +3026,11 @@ impl App {
                 self.minimap_visible = !self.minimap_visible;
                 self.status
                     .set(format!("Minimap {}", on_off(self.minimap_visible)));
+            }
+            AppOp::ToggleRulers => {
+                self.rulers_visible = !self.rulers_visible;
+                self.status
+                    .set(format!("Rulers {}", on_off(self.rulers_visible)));
             }
             AppOp::SplitSingle => self.set_split(Split::Single),
             AppOp::SplitHorizontal => self.set_split(Split::Horizontal),
@@ -5995,6 +6193,101 @@ impl App {
         self.status.set(format!("Moved {} shape(s)", direct.len()));
     }
 
+    /// Translates the directly-selected top-cell shapes by `(dx, dy)` DBU as one undoable
+    /// step, then reselects them so successive moves accumulate on the same shapes.
+    ///
+    /// Shared by arrow-key nudge (item 48) and the numeric transform popover's move (item
+    /// 51). Returns the number of shapes moved (`0` when the selection holds no directly
+    /// editable top-cell shape, or the delta is zero).
+    fn translate_direct_selection(&mut self, dx: i32, dy: i32) -> usize {
+        let direct = self.selected_direct_shapes();
+        if direct.is_empty() || (dx == 0 && dy == 0) {
+            return 0;
+        }
+        let n = direct.len();
+        let cell = self.top_cell.clone();
+        // Remove originals in descending index order (so lower indices stay valid), then
+        // re-add the translated copies, as a single undo group.
+        let mut edits: Vec<reticle_model::Edit> = Vec::with_capacity(n * 2);
+        for (index, _) in direct.iter().rev() {
+            edits.push(reticle_model::Edit::RemoveShape {
+                cell: cell.clone(),
+                index: *index,
+            });
+        }
+        for (_, shape) in &direct {
+            edits.push(reticle_model::Edit::AddShape {
+                cell: cell.clone(),
+                shape: productivity::translate_shape(shape, dx, dy),
+            });
+        }
+        if self.history.apply_group(edits).is_err() {
+            return 0;
+        }
+        self.rebuild_scene();
+        // The moved shapes were appended, so they are the last `n` direct shapes.
+        let total = self.top_cell_direct_shape_count();
+        self.selection.set(total.saturating_sub(n)..total);
+        n
+    }
+
+    /// Nudges the selection by `(dx, dy)` DBU with a delta readout in the status bar
+    /// (item 48).
+    fn nudge_selection(&mut self, dx: i32, dy: i32) {
+        if self.selection.is_empty() {
+            self.status.set("Nudge: nothing selected");
+            return;
+        }
+        let n = self.translate_direct_selection(dx, dy);
+        if n > 0 {
+            self.status
+                .set(format!("Nudged dx {dx}, dy {dy} DBU ({n} shape(s))"));
+        } else {
+            self.status.set("Nudge: selection is not movable");
+        }
+    }
+
+    /// Handles arrow-key nudging of the selection (item 48): one grid step, ten steps
+    /// with Shift, or a fine single DBU with Alt/Ctrl. Suppressed while a text field is
+    /// focused (so typing in a panel does not move geometry) and in read-only browse.
+    fn handle_arrow_nudge(&mut self, ctx: &egui::Context) {
+        if self.archive.is_some() || self.selection.is_empty() {
+            return;
+        }
+        if ctx.memory(|m| m.focused().is_some()) {
+            return;
+        }
+        let base = self.grid.base_step_dbu.max(1);
+        let (dx, dy) = ctx.input(|i| {
+            let step = if i.modifiers.shift {
+                base.saturating_mul(10)
+            } else if i.modifiers.alt || i.modifiers.command || i.modifiers.ctrl {
+                1
+            } else {
+                base
+            };
+            let mut dx = 0;
+            let mut dy = 0;
+            if i.key_pressed(egui::Key::ArrowLeft) {
+                dx -= step;
+            }
+            if i.key_pressed(egui::Key::ArrowRight) {
+                dx += step;
+            }
+            // World +y is up, so Up increases y.
+            if i.key_pressed(egui::Key::ArrowUp) {
+                dy += step;
+            }
+            if i.key_pressed(egui::Key::ArrowDown) {
+                dy -= step;
+            }
+            (dx, dy)
+        });
+        if dx != 0 || dy != 0 {
+            self.nudge_selection(dx, dy);
+        }
+    }
+
     /// Builds and commits a via stack at the panel's center through the undo history.
     ///
     /// The cut and its two layer enclosures are sized from the technology enclosure
@@ -7982,35 +8275,282 @@ impl App {
         }
     }
 
-    /// Draws the bottom status bar: tool, cursor coordinates, zoom, and messages.
+    /// Draws the bottom status bar: tool, live coordinates and crosshair toggle, the
+    /// selection summary, and the actionable zoom / fps / archive readouts.
+    ///
+    /// The readouts are click affordances, not passive debug text (AUD-16, item 68): the
+    /// zoom opens the preset menu, the fps readout a small perf popover, and (in browse
+    /// mode) the archive label toggles the streaming HUD. Coordinates are monospace with
+    /// tabular figures so they do not jitter as the cursor moves (tokens.md type scale).
+    // One flat egui row of readouts; the length is widget count, not branching logic.
+    #[allow(clippy::too_many_lines)]
     fn status_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label(format!("Tool: {}", self.tools.active().label()));
-            ui.separator();
-            if let Some(p) = self.cursor_world {
-                ui.label(format!("Cursor: ({}, {}) DBU", p.x, p.y));
-            } else {
-                ui.label("Cursor: --");
-            }
-            ui.separator();
-            ui.label(format!("Zoom: {:.4} px/DBU", self.camera.pixels_per_dbu()));
-            ui.separator();
-            ui.label(self.frame_meter.label());
-            if let Some(m) = self.tools.measurement() {
+        // Precompute the readout strings so the menu closures below never borrow `self`.
+        let ppd = self.camera.pixels_per_dbu();
+        let zoom_label = format!("Zoom {ppd:.3} px/DBU");
+        let fps_label = format!("{:.0} fps", self.frame_meter.fps());
+        let frame_ms = self.frame_meter.frame_ms();
+        let selection_summary = self.selection_summary();
+        let in_archive = self.archive.is_some();
+
+        // Actions chosen inside menu closures, applied after the row so the closures
+        // capture only these locals, never `self` (the egui nested-borrow rule).
+        let action = ui
+            .horizontal(|ui| {
+                let mut action: Option<Command> = None;
+                ui.label(format!("Tool: {}", self.tools.active().label()));
                 ui.separator();
-                ui.label(format!(
-                    "Measure: {:.1} DBU = {:.3} um  (dx {}, dy {})",
-                    m.distance_dbu(),
-                    m.distance_microns(),
-                    m.dx(),
-                    m.dy()
-                ));
-            }
-            if !self.status.text.is_empty() {
+
+                // Coordinates (monospace, tabular) plus the crosshair toggle (item 32).
+                let coord = match self.cursor_world {
+                    Some(p) => format!("{}, {}", p.x, p.y),
+                    None => "--, --".to_owned(),
+                };
+                ui.label(egui::RichText::new(format!("{coord} DBU")).monospace());
+                if ui
+                    .selectable_label(self.crosshair, "+")
+                    .on_hover_text("Toggle cursor crosshair")
+                    .clicked()
+                {
+                    self.crosshair = !self.crosshair;
+                }
                 ui.separator();
-                ui.label(&self.status.text);
+
+                // Selection summary: count, bbox, area (item 55); click to open the
+                // numeric transform popover (item 51).
+                if ui
+                    .add(egui::Label::new(&selection_summary).sense(Sense::click()))
+                    .on_hover_text("Selection summary - click for numeric transform")
+                    .clicked()
+                    && !self.selection.is_empty()
+                {
+                    self.open_transform_popover();
+                }
+                ui.separator();
+
+                // Zoom readout: click for the preset menu (item 68).
+                ui.menu_button(zoom_label, |ui| {
+                    if ui.button("Fit  (F)").clicked() {
+                        action = Some(Command::ZoomToFit);
+                        ui.close();
+                    }
+                    if ui.button("Fit selection  (Shift+F)").clicked() {
+                        action = Some(Command::ZoomSelection);
+                        ui.close();
+                    }
+                    if ui.button("Zoom 1:1 DBU").clicked() {
+                        action = Some(Command::ZoomOneToOne);
+                        ui.close();
+                    }
+                    if ui.button("Zoom to layer extents").clicked() {
+                        action = Some(Command::ZoomLayerExtents);
+                        ui.close();
+                    }
+                });
+                ui.separator();
+
+                // FPS readout: click for the perf popover (item 68).
+                ui.menu_button(fps_label, |ui| {
+                    ui.label(egui::RichText::new(format!("{frame_ms:.2} ms / frame")).monospace());
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{:.1} fps averaged",
+                            1000.0 / frame_ms.max(0.001)
+                        ))
+                        .monospace(),
+                    );
+                });
+
+                // Archive label: click toggles the streaming HUD (item 68).
+                if in_archive {
+                    ui.separator();
+                    if ui
+                        .selectable_label(self.archive_hud_visible, "Archive HUD")
+                        .on_hover_text("Toggle the streaming HUD")
+                        .clicked()
+                    {
+                        self.archive_hud_visible = !self.archive_hud_visible;
+                    }
+                }
+
+                if let Some(m) = self.tools.measurement() {
+                    ui.separator();
+                    ui.label(format!(
+                        "Measure: {:.1} DBU = {:.3} um  (dx {}, dy {})",
+                        m.distance_dbu(),
+                        m.distance_microns(),
+                        m.dx(),
+                        m.dy()
+                    ));
+                }
+                if !self.status.text.is_empty() {
+                    ui.separator();
+                    ui.label(&self.status.text);
+                }
+                action
+            })
+            .inner;
+
+        if let Some(cmd) = action {
+            self.run_command(cmd, None);
+        }
+    }
+
+    /// The status-bar selection summary: count, bounding box, and area (item 55).
+    fn selection_summary(&self) -> String {
+        let n = self.selection.len();
+        if n == 0 {
+            return "No selection".to_owned();
+        }
+        match self.selection_bounds() {
+            Some(b) => {
+                let (w, h) = (b.width(), b.height());
+                format!("{n} selected · {w}x{h} DBU · {} DBU^2", w.saturating_mul(h))
             }
-        });
+            None => format!("{n} selected"),
+        }
+    }
+
+    /// Opens the numeric transform popover, filling its edit buffers from the current
+    /// selection's bounding box (item 51).
+    fn open_transform_popover(&mut self) {
+        if let Some(b) = self.selection_bounds() {
+            self.transform.x = b.min.x.to_string();
+            self.transform.y = b.min.y.to_string();
+            self.transform.w = b.width().to_string();
+            self.transform.h = b.height().to_string();
+            self.transform.open = true;
+        }
+    }
+
+    /// Draws the numeric transform popover and applies it on request (item 51).
+    ///
+    /// `x`/`y` move the selection so its bounding-box corner lands on the typed
+    /// coordinate; `w`/`h` resize a single selected rectangle (an arbitrary multi-shape
+    /// resize has no unambiguous meaning, so it is move-only). The commit routes through
+    /// the undo history like every other edit.
+    fn transform_window(&mut self, ctx: &egui::Context) {
+        if !self.transform.open {
+            return;
+        }
+        let mut open = self.transform.open;
+        let mut apply = false;
+        let single_rect = self.single_selected_direct_rect().is_some();
+        egui::Window::new("Transform")
+            .open(&mut open)
+            .resizable(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                egui::Grid::new("transform_grid").show(ui, |ui| {
+                    ui.label("X");
+                    ui.text_edit_singleline(&mut self.transform.x);
+                    ui.end_row();
+                    ui.label("Y");
+                    ui.text_edit_singleline(&mut self.transform.y);
+                    ui.end_row();
+                    ui.add_enabled_ui(single_rect, |ui| ui.label("W"));
+                    ui.add_enabled(
+                        single_rect,
+                        egui::TextEdit::singleline(&mut self.transform.w),
+                    );
+                    ui.end_row();
+                    ui.add_enabled_ui(single_rect, |ui| ui.label("H"));
+                    ui.add_enabled(
+                        single_rect,
+                        egui::TextEdit::singleline(&mut self.transform.h),
+                    );
+                    ui.end_row();
+                });
+                if !single_rect {
+                    ui.label(
+                        egui::RichText::new("W/H resize applies to a single rectangle.")
+                            .small()
+                            .color(DARK.text_weak),
+                    );
+                }
+                if ui.button("Apply").clicked() {
+                    apply = true;
+                }
+            });
+        self.transform.open = open;
+        if apply {
+            self.apply_transform();
+        }
+    }
+
+    /// The single directly-selected rectangle's `(index, layer)`, or `None` when the
+    /// selection is not exactly one top-cell rectangle (item 51 resize).
+    fn single_selected_direct_rect(&self) -> Option<(usize, LayerId)> {
+        let direct = self.selected_direct_shapes();
+        if direct.len() != 1 {
+            return None;
+        }
+        let (index, shape) = &direct[0];
+        if matches!(shape.kind, ShapeKind::Rect(_)) {
+            Some((*index, shape.layer))
+        } else {
+            None
+        }
+    }
+
+    /// Applies the numeric transform popover's values to the selection (item 51).
+    fn apply_transform(&mut self) {
+        let Some(bounds) = self.selection_bounds() else {
+            self.status.set("Transform: nothing selected");
+            return;
+        };
+        let (Ok(x), Ok(y)) = (
+            self.transform.x.trim().parse::<i32>(),
+            self.transform.y.trim().parse::<i32>(),
+        ) else {
+            self.status.set("Transform: x and y must be integers");
+            return;
+        };
+        // A single rectangle can be resized outright; otherwise the popover moves the
+        // selection so its bounding-box corner lands on (x, y).
+        if let Some((index, layer)) = self.single_selected_direct_rect()
+            && let (Ok(w), Ok(h)) = (
+                self.transform.w.trim().parse::<i32>(),
+                self.transform.h.trim().parse::<i32>(),
+            )
+            && w > 0
+            && h > 0
+        {
+            let rect = Rect::new(
+                Point::new(x, y),
+                Point::new(x.saturating_add(w), y.saturating_add(h)),
+            );
+            self.resize_direct_rect(index, layer, rect);
+            self.status.set(format!("Transformed to {x}, {y}, {w}x{h}"));
+            return;
+        }
+        let n = self.translate_direct_selection(x - bounds.min.x, y - bounds.min.y);
+        if n > 0 {
+            self.status.set(format!("Moved selection to {x}, {y}"));
+        } else {
+            self.status.set("Transform: selection is not movable");
+        }
+    }
+
+    /// Replaces the directly-owned rectangle at `index` with a new `rect` on `layer` as
+    /// one undoable step, reselecting the result (item 51 resize).
+    fn resize_direct_rect(&mut self, index: usize, layer: LayerId, rect: Rect) {
+        let cell = self.top_cell.clone();
+        let edits = vec![
+            reticle_model::Edit::RemoveShape {
+                cell: cell.clone(),
+                index,
+            },
+            reticle_model::Edit::AddShape {
+                cell,
+                shape: DrawShape::new(layer, ShapeKind::Rect(rect)),
+            },
+        ];
+        if self.history.apply_group(edits).is_ok() {
+            self.rebuild_scene();
+            let total = self.top_cell_direct_shape_count();
+            self.selection.set(total.saturating_sub(1)..total);
+        }
     }
 
     /// The component [`Ctx`](crate::theme::components::Ctx) for this frame: the dark
@@ -8038,12 +8578,9 @@ impl App {
             .map(|c| c.name.clone())
             .collect();
         cells.sort();
-        let bookmarks = self
-            .view_export
-            .bookmarks
-            .iter()
-            .map(|b| b.name.clone())
-            .collect();
+        // The palette recalls the View-menu camera bookmarks (lane 3A). Slots are
+        // unnamed, so label each by its 1-based position.
+        let bookmarks = (1..=self.bookmarks.len()).map(|n| n.to_string()).collect();
         (layers, cells, bookmarks)
     }
 
@@ -8299,12 +8836,12 @@ impl App {
         }
     }
 
-    /// Recalls the camera bookmark at slot `i`.
+    /// Recalls the View-menu camera bookmark at slot `i` (lane 3A), easing the camera
+    /// to it. The palette's dynamic bookmark rows dispatch this.
     fn recall_bookmark(&mut self, i: usize) {
-        if let Some(bm) = self.view_export.bookmarks.get(i) {
-            let (center, ppd, name) = (bm.center(), bm.pixels_per_dbu(), bm.name.clone());
-            self.camera = ViewCamera::new(center, ppd);
-            self.status.set(format!("Jumped to '{name}'"));
+        if let Some(&cam) = self.bookmarks.get(i) {
+            self.begin_view_move(cam);
+            self.status.set(format!("Recalled view bookmark {}", i + 1));
         }
     }
 
@@ -8537,6 +9074,84 @@ impl App {
         }
     }
 
+    /// Starts an animated camera move to `target` (item 29), or cuts to it instantly
+    /// under reduced motion. Replaces any move already in flight.
+    fn begin_view_move(&mut self, target: ViewCamera) {
+        let secs = if self.reduced_motion {
+            0.0
+        } else {
+            VIEW_MOVE_SECS
+        };
+        self.camera_tween = Some(CameraTween::new(self.camera, target, secs));
+    }
+
+    /// Advances an in-flight animated camera move by `dt`, clearing it when it settles.
+    /// The per-frame repaint at the end of [`App::ui`] keeps the animation running.
+    fn advance_camera_tween(&mut self, dt: f32) {
+        if let Some(tween) = self.camera_tween.as_mut() {
+            self.camera = tween.advance(dt);
+            if tween.done() {
+                self.camera_tween = None;
+            }
+        }
+    }
+
+    /// Cancels any in-flight animated camera move, so a manual pan/zoom/pinch takes the
+    /// camera over cleanly instead of fighting the tween.
+    fn cancel_view_move(&mut self) {
+        self.camera_tween = None;
+    }
+
+    /// The camera that fits `bounds` into `screen`, leaving the current camera untouched.
+    fn fitted_camera(&self, screen: &ScreenRect, bounds: Rect) -> ViewCamera {
+        let mut cam = self.camera;
+        cam.zoom_to_fit(screen, bounds);
+        cam
+    }
+
+    /// The target camera for a zoom preset (item 28), or `None` when there is nothing to
+    /// frame (an empty selection, or no visible geometry).
+    fn preset_camera(&self, preset: ViewPreset, screen: &ScreenRect) -> Option<ViewCamera> {
+        match preset {
+            ViewPreset::Selection => {
+                let bounds = self.selection_bounds()?;
+                let mut cam = self.camera;
+                // 10% border so the selection reads with a little breathing room.
+                cam.zoom_to_rect(screen, bounds, 0.1);
+                Some(cam)
+            }
+            // 1:1 DBU: exactly one screen pixel per database unit, keeping the center.
+            ViewPreset::OneToOne => Some(ViewCamera::new(self.camera.center(), 1.0)),
+            ViewPreset::LayerExtents => {
+                Some(self.fitted_camera(screen, self.visible_layer_bounds()?))
+            }
+        }
+    }
+
+    /// The bounding box of the current selection in world DBU, or `None` when nothing is
+    /// selected (item 28 fit-selection, item 55 status summary).
+    fn selection_bounds(&self) -> Option<Rect> {
+        let shapes = self.scene.shapes();
+        union_bounds(
+            self.selection
+                .iter()
+                .filter_map(|i| shapes.get(i))
+                .map(reticle_geometry::Shape::bounding_box),
+        )
+    }
+
+    /// The union bounding box of every shape on a visible layer, or `None` when no visible
+    /// layer carries geometry (item 28 zoom-to-layer-extents).
+    fn visible_layer_bounds(&self) -> Option<Rect> {
+        union_bounds(
+            self.scene
+                .shapes()
+                .iter()
+                .filter(|s| self.layer_state.is_visible(s.layer()))
+                .map(reticle_geometry::Shape::bounding_box),
+        )
+    }
+
     /// Draws the layout canvas and processes pointer interaction on it.
     ///
     /// Returns the canvas [`ScreenRect`] so the caller can hand it to actions (PNG
@@ -8545,7 +9160,9 @@ impl App {
     /// When `gpu_format` is `Some`, the layout geometry is drawn on the GPU through a
     /// retained paint callback (eframe's shared device); egui overlays still paint on
     /// top. When it is `None`, the geometry falls back to egui painting.
-    #[allow(clippy::too_many_lines)] // the pane/interaction/overlay passes read better inline
+    // The per-frame canvas: input routing, deferred camera moves, and the ordered draw
+    // of geometry then overlays. Its length is that sequence, not branching complexity.
+    #[allow(clippy::too_many_lines)]
     fn canvas(
         &mut self,
         ui: &mut egui::Ui,
@@ -8587,10 +9204,15 @@ impl App {
             base_painter.clone()
         };
 
-        // Deferred fit now that we know the canvas size.
+        // Deferred camera moves now that the canvas size is known. Each computes a target
+        // camera and hands it to `begin_view_move`, which animates the transition (item
+        // 29) unless reduced motion is on; the tween is then advanced for this frame.
+        let dt = ui.ctx().input(|i| i.stable_dt).max(0.0);
+
+        // Deferred fit-all.
         if self.fit_requested {
             if let Some(bounds) = self.scene.bounds() {
-                self.camera.zoom_to_fit(&screen, bounds);
+                self.begin_view_move(self.fitted_camera(&screen, bounds));
             }
             self.fit_requested = false;
         }
@@ -8612,6 +9234,16 @@ impl App {
             self.camera = session.camera();
         }
 
+        // Deferred zoom preset (fit-selection, 1:1 DBU, layer extents) that needed the
+        // real canvas size to resolve (item 28).
+        if let Some(preset) = self.pending_view.take() {
+            if let Some(target) = self.preset_camera(preset, &screen) {
+                self.begin_view_move(target);
+            } else {
+                self.status.set("Nothing to frame");
+            }
+        }
+
         // Deferred zoom to the violation the DRC list just selected.
         if self.zoom_to_selected_violation {
             if let Some(loc) = self
@@ -8620,7 +9252,9 @@ impl App {
                 .and_then(|i| self.drc.violations().get(i).map(|v| v.location))
             {
                 // 25% border so the violation reads clearly with surrounding context.
-                self.camera.zoom_to_rect(&screen, loc, 0.25);
+                let mut target = self.camera;
+                target.zoom_to_rect(&screen, loc, 0.25);
+                self.begin_view_move(target);
             }
             self.zoom_to_selected_violation = false;
         }
@@ -8628,7 +9262,25 @@ impl App {
         // Deferred locate to the outline row the search panel just clicked. Framed
         // with the same 25% border as the DRC locate so the target reads clearly.
         if let Some(target) = self.search.pending_locate.take() {
-            self.camera.zoom_to_rect(&screen, target, 0.25);
+            let mut cam = self.camera;
+            cam.zoom_to_rect(&screen, target, 0.25);
+            self.begin_view_move(cam);
+        }
+
+        // Advance any in-flight animated move, then let follow-mode override: a viewer
+        // riding the sharer's camera must win over a local tween.
+        self.advance_camera_tween(dt);
+
+        // In a read-only viewer session with follow-mode on, snap the local camera to
+        // the sharer's viewport (ADR 0038) before drawing, so the viewer rides along.
+        // The ViewerSession owns its own camera; mirror it into the App camera the
+        // canvas draws with, so follow reuses the whole render path.
+        if let Some(session) = self.viewer_session.as_mut()
+            && session.is_following()
+            && session.sync_camera(&screen)
+        {
+            self.camera = session.camera();
+            self.camera_tween = None;
         }
 
         // Input routes to the focused pane only; the click that switched focus is
@@ -8641,6 +9293,7 @@ impl App {
         } else {
             self.cursor_world = None;
             self.snap_hint = None;
+            self.hover_pick = None;
         }
 
         // Draw grid + rulers under the geometry.
@@ -8652,9 +9305,11 @@ impl App {
         let viewport = self.camera.visible_world_rect(&screen);
         if self.archive.is_some() {
             // Served-archive browse: paint the read-only streamed die with progressive
-            // residency (coarse-then-fine) and its HUD, skipping the document-specific
-            // overlays below (there is no editable document in browse mode).
-            self.draw_archive(&painter, &screen);
+            // residency (coarse-then-fine) and an eased LOD crossfade, skipping the
+            // document-specific overlays below (there is no editable document in browse
+            // mode). The HUD and residency minimap are placed after, via the overlay
+            // manager.
+            self.draw_archive(&painter, &screen, dt);
         } else {
             match culling::lod_for_zoom(self.camera.pixels_per_dbu()) {
                 DetailLevel::Shapes => match gpu_format {
@@ -8681,19 +9336,40 @@ impl App {
 
         // User guides under the ruler bars, then the rulers cover their ends.
         self.draw_guides(&painter, &screen);
-        self.draw_rulers(&painter, &screen);
+        if self.rulers_visible {
+            self.draw_rulers(&painter, &screen);
+        }
         self.draw_measure(&painter, &screen);
+        // An optional crosshair tracks the cursor across the whole pane (item 32).
+        if self.crosshair {
+            self.draw_crosshair(&painter, &screen);
+        }
         // The snap indicator rides on top so it is never hidden by geometry.
         self.draw_snap_indicator(&painter, &screen);
-        // Document- and collaboration-specific overlays are meaningless while browsing a
-        // read-only streamed archive, so they are drawn only in the editing session.
-        if self.archive.is_none() {
+
+        // Floating canvas overlays are placed through the collision-free layout manager,
+        // so the HUD (top-left), the minimap (top-right), and any legend can never
+        // overlap a ruler or each other (AUD-01/02/08, item 68). The ruler inset is zero
+        // when the rulers are hidden, reclaiming those edges.
+        let ruler_bar = if self.rulers_visible { RULER_BAR } else { 0.0 };
+        let mut overlays = OverlayLayout::new(&screen, ruler_bar);
+        if self.archive.is_some() {
+            // Streamed archive browse: the HUD and the residency minimap, both anchored
+            // through the manager. Document/collaboration overlays are meaningless here.
+            if self.archive_hud_visible {
+                self.draw_archive_hud(&painter, &mut overlays);
+            }
+            if self.minimap_visible {
+                self.draw_minimap(&painter, &screen, &mut overlays);
+            }
+        } else {
+            self.draw_hover_highlight(&painter, &screen);
             self.draw_draw_overlay(&painter, &screen, &response, ui.ctx());
             if self.labels_visible {
                 self.draw_labels(&painter, &screen);
             }
             if self.minimap_visible {
-                self.draw_minimap(&painter, &screen);
+                self.draw_minimap(&painter, &screen, &mut overlays);
             }
             let now = ui.input(|i| i.time);
             self.draw_presence(&painter, &screen, now);
@@ -8777,16 +9453,28 @@ impl App {
         response: &egui::Response,
         screen: &ScreenRect,
     ) {
+        // Whether the snap-bypass modifier is held (item 53): the cursor then lands on
+        // the exact world point, and no snap indicator is drawn.
+        self.snap_bypass = ctx.input(|i| i.modifiers.command || i.modifiers.ctrl);
+
         // Track the cursor world position (snapped) for the status bar, and stash
-        // the snap hint so the canvas can draw the snap indicator this frame.
+        // the snap hint so the canvas can draw the snap indicator this frame. For the
+        // Select tool also record the shape under the cursor for the hover
+        // pre-highlight (item 46).
         if let Some(pos) = response.hover_pos() {
             let raw = self.camera.screen_to_world(screen, pos.x, pos.y);
             let (snapped, hint) = self.snap_world(raw);
             self.cursor_world = Some(snapped);
             self.snap_hint = hint;
+            self.hover_pick = if self.tools.active() == Tool::Select {
+                self.scene.pick(raw)
+            } else {
+                None
+            };
         } else {
             self.cursor_world = None;
             self.snap_hint = None;
+            self.hover_pick = None;
         }
 
         // Guide drag: a drag that begins inside a ruler bar pulls out a guide line.
@@ -8797,16 +9485,19 @@ impl App {
             return;
         }
 
-        // Minimap navigation: a click or drag inside the panel recenters the view
-        // there and consumes the input so no tool acts on it.
+        // Minimap navigation: a click or drag inside the panel recenters the view there
+        // and consumes the input so no tool acts on it. A drag re-centers every frame, so
+        // the viewport rectangle follows the pointer - the draggable viewport handle
+        // (item 30). The layout is built the same way the draw path builds it, so what is
+        // clickable matches what is drawn.
         if self.minimap_visible
             && (response.clicked() || response.dragged())
-            && let (Some(bounds), Some(pos)) =
-                (self.scene.bounds(), response.interact_pointer_pos())
-            && let Some(layout) = MinimapLayout::compute(screen, bounds)
+            && let Some(pos) = response.interact_pointer_pos()
+            && let Some(layout) = self.minimap_layout(screen)
             && layout.contains(pos.x, pos.y)
         {
             let center = layout.panel_to_world(pos.x, pos.y);
+            self.cancel_view_move();
             self.camera = ViewCamera::new(center, self.camera.pixels_per_dbu());
             return;
         }
@@ -8817,7 +9508,11 @@ impl App {
             if scroll.abs() > 0.0
                 && let Some(pos) = response.hover_pos()
             {
-                let factor = (f64::from(scroll) * 0.0015).exp();
+                // A gentler multiplier than v8.0's so a single wheel notch is a small,
+                // predictable step and the world point under the cursor stays pinned
+                // (item 27, zoom-to-cursor tuning; the anchoring is `zoom_about`).
+                let factor = (f64::from(scroll) * 0.0012).exp();
+                self.cancel_view_move();
                 self.camera.zoom_about(screen, factor, pos.x, pos.y);
             }
         }
@@ -8829,6 +9524,7 @@ impl App {
         // the tool match so navigating a design by touch always wins the gesture, and the
         // pinch math (the anchoring invariant) lives in the pure `camera::apply_pinch`.
         if let Some(touch) = ctx.multi_touch() {
+            self.cancel_view_move();
             self.camera = crate::camera::apply_pinch(
                 self.camera,
                 screen,
@@ -8844,6 +9540,7 @@ impl App {
         match self.tools.active() {
             Tool::Pan => {
                 if response.dragged() {
+                    self.cancel_view_move();
                     let d = response.drag_delta();
                     self.camera.pan_pixels(d.x, d.y);
                 }
@@ -9196,6 +9893,28 @@ impl App {
     ) {
         let additive = ctx.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
 
+        // Double-click to fit: on a shape, frame that shape; on empty canvas, fit all
+        // (item 40). Handled before the single-click pick so the fit wins the gesture.
+        if response.double_clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            let world = self.camera.screen_to_world(screen, pos.x, pos.y);
+            if let Some(idx) = self.scene.pick(world) {
+                if let Some(shape) = self.scene.shapes().get(idx) {
+                    let bounds = shape.bounding_box();
+                    let mut cam = self.camera;
+                    // 20% border so the framed shape reads with context.
+                    cam.zoom_to_rect(screen, bounds, 0.2);
+                    self.begin_view_move(cam);
+                    self.status.set("Fit shape");
+                }
+            } else {
+                self.fit_requested = true;
+                self.status.set("Fit all");
+            }
+            return;
+        }
+
         if response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
         {
@@ -9221,7 +9940,9 @@ impl App {
             }
         }
 
-        // Rubber-band: on drag release, select shapes fully inside the drag box.
+        // Rubber-band: on drag release, select shapes fully inside the drag box. Shift
+        // adds, Alt subtracts, otherwise replace; a box begun over a shape is filtered to
+        // that shape's layer (item 45).
         if response.drag_stopped()
             && let (Some(origin), Some(current)) =
                 (Self::drag_origin(response), response.hover_pos())
@@ -9230,15 +9951,31 @@ impl App {
             let b = self.camera.screen_to_world(screen, current.x, current.y);
             let band = Rect::new(a, b);
             if band.width() > 0 && band.height() > 0 {
-                // Marquee never grabs shapes on a locked layer (catalog 57).
-                let hits: Vec<usize> = selection::shapes_in_rect(self.scene.shapes(), band)
-                    .into_iter()
-                    .filter(|&i| self.is_pickable(i))
-                    .collect();
-                if additive {
+                let (shift, alt) = ctx.input(|i| (i.modifiers.shift, i.modifiers.alt));
+                // Same-layer filter: the layer of the shape under the drag origin (item
+                // 45, lane 3A). Locked-layer shapes never join the marquee (catalog 57,
+                // lane 2C), so the pickability gate filters them out too.
+                let layer_filter = self
+                    .scene
+                    .pick(a)
+                    .and_then(|idx| self.scene.shapes().get(idx))
+                    .map(|s| s.layer);
+                let hits: Vec<usize> =
+                    selection::shapes_in_rect_on_layer(self.scene.shapes(), band, layer_filter)
+                        .into_iter()
+                        .filter(|&i| self.is_pickable(i))
+                        .collect();
+                let n = hits.len();
+                if alt {
+                    self.selection.subtract(hits);
+                    self.status
+                        .set(format!("Removed {n} shape(s) from selection"));
+                } else if shift {
                     self.selection.extend(hits);
+                    self.status.set(format!("Added {n} shape(s) to selection"));
                 } else {
                     self.selection.set(hits);
+                    self.status.set(format!("Selected {n} shape(s)"));
                 }
             }
         }
@@ -9389,7 +10126,7 @@ impl App {
     /// die refines coarse-then-fine rather than blanking while fine tiles stream. Finally
     /// it draws the on-canvas HUD and publishes the counters to `window.__reticle_stats`
     /// for the served-archive e2e.
-    fn draw_archive(&mut self, painter: &egui::Painter, screen: &ScreenRect) {
+    fn draw_archive(&mut self, painter: &egui::Painter, screen: &ScreenRect, dt: f32) {
         // Frame the whole die once the canvas size is known (deferred from the async
         // open, which has no screen), then read the fitted viewport.
         if !self.archive_framed {
@@ -9400,6 +10137,7 @@ impl App {
             self.archive_framed = true;
         }
         let viewport = self.camera.visible_world_rect(screen);
+        let center = self.camera.center();
 
         // 1. Adopt fetched tiles and choose the paint level for this viewport.
         let (target, paint) = {
@@ -9411,31 +10149,51 @@ impl App {
             (target, paint)
         };
 
-        // 2. Spawn fetches for the covering tiles not yet resident or in flight (wasm).
-        #[cfg(target_arch = "wasm32")]
+        // 2. Spawn fetches for the covering tiles not yet resident or in flight (wasm),
+        //    then speculatively prefetch tiles just ahead of the pan (item 43; native
+        //    only warms the velocity estimate).
         if let Some(browse) = self.archive.as_mut() {
+            #[cfg(target_arch = "wasm32")]
             browse.spawn_missing(viewport, target);
+            browse.prefetch(viewport, center, target);
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        let _ = target;
 
-        // 3. Paint the resident records at the chosen (coarse-then-fine) level.
-        let records = paint
-            .map(|level| {
-                self.archive
-                    .as_ref()
-                    .expect("archive browse is active")
-                    .scene()
-                    .painted_records(viewport, level)
-            })
-            .unwrap_or_default();
-        self.draw_streamed_records(painter, screen, &records);
+        // 3. Advance the LOD crossfade toward the newly-covered level and paint: the
+        //    settled level paints solid, and a level still fading in paints on top at the
+        //    crossfade alpha, so refinement eases in rather than popping (item 42). Under
+        //    reduced motion the fade is instant.
+        self.archive_fade.observe(paint, dt, self.reduced_motion);
+        let shown = self.archive_fade.shown();
+        let incoming = self.archive_fade.incoming();
+        let alpha = self.archive_fade.alpha();
+        let mut painted = 0;
+        if let Some(level) = shown {
+            let records = self
+                .archive
+                .as_ref()
+                .expect("archive browse is active")
+                .scene()
+                .painted_records(viewport, level);
+            painted = records.len();
+            self.draw_streamed_records(painter, screen, &records, 1.0);
+        }
+        if let Some(level) = incoming {
+            let records = self
+                .archive
+                .as_ref()
+                .expect("archive browse is active")
+                .scene()
+                .painted_records(viewport, level);
+            painted = painted.max(records.len());
+            self.draw_streamed_records(painter, screen, &records, alpha);
+        }
         if let Some(browse) = self.archive.as_mut() {
-            browse.set_records_painted(records.len());
+            browse.set_records_painted(painted);
         }
 
-        // 4. The on-canvas HUD, and the JS stats seam the e2e reads.
-        self.draw_archive_hud(painter, screen);
+        // The HUD and the residency minimap are placed later in `canvas` through the
+        // overlay layout manager, so they cannot collide; the JS stats seam the e2e reads
+        // is published here now that the counters for this frame are settled.
         #[cfg(target_arch = "wasm32")]
         self.publish_archive_stats();
     }
@@ -9449,6 +10207,7 @@ impl App {
         painter: &egui::Painter,
         screen: &ScreenRect,
         records: &[reticle_index::TileRecord],
+        fade: f32,
     ) {
         for record in records {
             let layer = LayerId::new(record.layer, record.datatype);
@@ -9456,13 +10215,16 @@ impl App {
                 continue;
             }
             let (red, green, blue, alpha) = self.layer_color(layer);
-            let fill = theme::tokens::layer_rgba(red, green, blue, alpha);
+            // `fade` is the LOD crossfade opacity (item 42): `1.0` for the settled level,
+            // ramping for a level fading in on top of it.
+            let base = theme::tokens::layer_rgba(red, green, blue, alpha);
+            let fill = base.gamma_multiply(fade);
             let dst = self.world_rect_to_screen(screen, record.rect.to_rect());
             painter.rect_filled(dst, 0.0, fill);
             painter.rect_stroke(
                 dst,
                 0.0,
-                Stroke::new(1.0, fill.gamma_multiply(1.4)),
+                Stroke::new(1.0, base.gamma_multiply(1.4 * fade)),
                 StrokeKind::Middle,
             );
         }
@@ -9471,23 +10233,27 @@ impl App {
     /// Draws the streaming HUD in the top-left of the canvas: bytes fetched vs archive
     /// size, tiles resident and records painted, the working-set estimate, and the frame
     /// rate (the counter arithmetic is [`ArchiveStats`](crate::archive::ArchiveStats), unit-tested).
-    fn draw_archive_hud(&self, painter: &egui::Painter, screen: &ScreenRect) {
+    fn draw_archive_hud(&self, painter: &egui::Painter, overlays: &mut OverlayLayout) {
         let Some(browse) = self.archive.as_ref() else {
             return;
         };
         let lines = browse.stats().hud_lines(self.frame_meter.fps());
         let pad = 8.0;
         let line_h = 16.0;
-        // Clear the left ruler (bar plus its coordinate labels) and the top ruler bar,
-        // so the HUD sits on the canvas rather than under the ruler numbers.
-        let x = screen.left + RULER_BAR + 40.0;
-        let top = screen.top + RULER_BAR + pad;
+        let width = 210.0;
+        let height = pad * 2.0 + line_h * lines.len() as f32;
+        // The manager anchors the HUD top-left, already clear of the rulers; if it cannot
+        // fit (a tiny canvas) it is simply not drawn (AUD-02, item 68).
+        let Some(rect) = overlays.place(Anchor::TopLeft, width, height) else {
+            return;
+        };
         let panel = EguiRect::from_min_size(
-            Pos2::new(x - 6.0, top - 6.0),
-            egui::vec2(210.0, pad * 2.0 + line_h * lines.len() as f32),
+            Pos2::new(rect.left, rect.top),
+            egui::vec2(rect.width, rect.height),
         );
         painter.rect_filled(panel, 5.0, CANVAS.hud_panel);
-        let mut y = top;
+        let x = rect.left + pad;
+        let mut y = rect.top + pad;
         for line in &lines {
             painter.text(
                 Pos2::new(x, y),
@@ -9498,6 +10264,53 @@ impl App {
             );
             y += line_h;
         }
+    }
+
+    /// Pre-highlights the shape under the cursor for the Select tool, so the click target
+    /// is obvious before the click (item 46). A faint outline of the shape's bounding box,
+    /// skipped when that shape is already selected (its selection outline already shows).
+    fn draw_hover_highlight(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        let Some(idx) = self.hover_pick else {
+            return;
+        };
+        if self.selection.contains(idx) {
+            return;
+        }
+        let Some(shape) = self.scene.shapes().get(idx) else {
+            return;
+        };
+        let rect = self.world_rect_to_screen(screen, shape.bounding_box());
+        painter.rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0, theme::tokens::with_alpha(CANVAS.selection, 120)),
+            StrokeKind::Middle,
+        );
+    }
+
+    /// Draws a full-pane crosshair through the cursor's snapped world position (item 32),
+    /// so the pointer's exact coordinate can be read against distant geometry. Drawn only
+    /// while the cursor is over the pane.
+    fn draw_crosshair(&self, painter: &egui::Painter, screen: &ScreenRect) {
+        let Some(world) = self.cursor_world else {
+            return;
+        };
+        let c = self.world_pos_to_screen(screen, world);
+        let stroke = Stroke::new(1.0, CANVAS.hud_text_dim);
+        painter.line_segment(
+            [
+                Pos2::new(screen.left, c.y),
+                Pos2::new(screen.left + screen.width, c.y),
+            ],
+            stroke,
+        );
+        painter.line_segment(
+            [
+                Pos2::new(c.x, screen.top),
+                Pos2::new(c.x, screen.top + screen.height),
+            ],
+            stroke,
+        );
     }
 
     /// Publishes the archive HUD counters to `window.__reticle_stats` (wasm only), the
@@ -9533,6 +10346,9 @@ impl App {
             set("archive_tiles_resident", s.tiles_resident as f64);
             set("archive_working_set_bytes", s.working_set_bytes() as f64);
             set("archive_records_painted", s.records_painted as f64);
+            // Additive prefetch counter (item 43); existing keys above are unchanged so
+            // the served-archive e2e that asserts them keeps passing.
+            set("archive_prefetched", s.prefetched as f64);
             // A convenience alias the spec reads directly.
             set("tiles_resident", s.tiles_resident as f64);
         }
@@ -10063,6 +10879,14 @@ impl App {
                     if !rect.is_empty() {
                         let e = self.world_rect_to_screen(screen, rect);
                         painter.rect_stroke(e, 0.0, stroke, StrokeKind::Middle);
+                        // Live dimensions on the ghost (item 52).
+                        painter.text(
+                            Pos2::new(e.min.x, e.min.y - 3.0),
+                            Align2::LEFT_BOTTOM,
+                            format!("{} x {} DBU", rect.width(), rect.height()),
+                            theme::apply::hud_mono(self.ui_density),
+                            accent,
+                        );
                     }
                 }
             }
@@ -10115,6 +10939,17 @@ impl App {
             let cursor = self.world_pos_to_screen(screen, pos);
             let last = *pts.last().expect("verts is non-empty");
             painter.line_segment([last, cursor], Stroke::new(1.0, color.gamma_multiply(0.6)));
+            // Live length of the segment being drawn, on the ghost (item 52).
+            if let Some(&last_world) = verts.last() {
+                let len = segment_length_dbu(last_world, pos);
+                painter.text(
+                    Pos2::new(cursor.x + 6.0, cursor.y - 6.0),
+                    Align2::LEFT_BOTTOM,
+                    format!("{len} DBU"),
+                    theme::apply::hud_mono(self.ui_density),
+                    color,
+                );
+            }
             // For a polygon, also hint the closing edge back to the first vertex.
             if close_hint && pts.len() >= 2 {
                 painter.line_segment(
@@ -10216,11 +11051,25 @@ impl App {
     /// rectangles it computes. The click/drag recentering lives at the top of
     /// [`App::process_canvas_input`] using the same layout, so what is drawn and
     /// what is clickable can never disagree.
-    fn draw_minimap(&self, painter: &egui::Painter, screen: &ScreenRect) {
-        let Some(bounds) = self.scene.bounds() else {
+    fn draw_minimap(
+        &self,
+        painter: &egui::Painter,
+        screen: &ScreenRect,
+        overlays: &mut OverlayLayout,
+    ) {
+        let Some(bounds) = self.minimap_bounds() else {
             return;
         };
-        let Some(layout) = MinimapLayout::compute(screen, bounds) else {
+        // The manager anchors the panel top-right, past the rulers (AUD-17); the world
+        // transform is then fitted into that exact rectangle.
+        let Some(panel_rect) = overlays.place(
+            Anchor::TopRight,
+            minimap::PANEL_WIDTH,
+            minimap::PANEL_HEIGHT,
+        ) else {
+            return;
+        };
+        let Some(layout) = MinimapLayout::within(panel_rect, bounds) else {
             return;
         };
         let panel = EguiRect::from_min_size(
@@ -10245,22 +11094,30 @@ impl App {
             StrokeKind::Middle,
         );
 
-        // Placement boxes give the overview its silhouette; cap the count so a
-        // huge document cannot make the minimap the most expensive draw call.
-        let fill = CANVAS.minimap_fill;
-        for cb in culling::visible_cell_boxes(self.history.document(), &self.top_cell, bounds)
-            .into_iter()
-            .take(256)
-        {
-            let (x, y, w, h) = layout.world_rect_to_panel(cb.bbox);
-            painter.rect_filled(
-                EguiRect::from_min_size(Pos2::new(x, y), Vec2::new(w, h)),
-                0.0,
-                fill,
-            );
+        let clip = painter.with_clip_rect(panel);
+        if let Some(browse) = self.archive.as_ref() {
+            // Streamed archive: shade the coarse tiles already fetched so the overview
+            // doubles as a residency heatmap of where the die has streamed in (item 30).
+            Self::draw_minimap_residency(&clip, &layout, browse.scene());
+        } else {
+            // Editing session: placement boxes give the overview its silhouette; cap the
+            // count so a huge document cannot make the minimap the most expensive draw.
+            let fill = CANVAS.minimap_fill;
+            for cb in culling::visible_cell_boxes(self.history.document(), &self.top_cell, bounds)
+                .into_iter()
+                .take(256)
+            {
+                let (x, y, w, h) = layout.world_rect_to_panel(cb.bbox);
+                clip.rect_filled(
+                    EguiRect::from_min_size(Pos2::new(x, y), Vec2::new(w, h)),
+                    0.0,
+                    fill,
+                );
+            }
         }
 
-        // The camera's visible world rectangle, clamped to the panel.
+        // The camera's visible world rectangle, clamped to the panel: the draggable
+        // viewport handle (item 30).
         let (vx, vy, vw, vh) = layout.world_rect_to_panel(self.camera.visible_world_rect(screen));
         painter.rect_stroke(
             EguiRect::from_min_size(Pos2::new(vx, vy), Vec2::new(vw, vh)),
@@ -10325,6 +11182,55 @@ impl App {
         }
     }
 
+    /// Shades the streamed archive's resident tiles inside the minimap panel, coarse
+    /// levels first, so the overview reads as a residency heatmap of the fetched die
+    /// (item 30). Read-only: it inspects
+    /// [`resident_tile_rects`](crate::streamed::StreamedScene::resident_tile_rects).
+    fn draw_minimap_residency(
+        painter: &egui::Painter,
+        layout: &MinimapLayout,
+        scene: &crate::streamed::StreamedScene,
+    ) {
+        // A couple of coarse levels are enough to read the explored region at minimap
+        // scale; finer resident tiles are sub-pixel here and would just darken uniformly.
+        let overview = scene.level_count().saturating_sub(1).min(2);
+        for level in 0..=overview {
+            for rect in scene.resident_tile_rects(level) {
+                let (x, y, w, h) = layout.world_rect_to_panel(rect);
+                painter.rect_filled(
+                    EguiRect::from_min_size(Pos2::new(x, y), Vec2::new(w, h)),
+                    0.0,
+                    CANVAS.minimap_fill,
+                );
+            }
+        }
+    }
+
+    /// The world bounds the minimap displays: the streamed die in archive-browse mode
+    /// (never the stale demo, AUD-04), otherwise the editable scene's bounds.
+    fn minimap_bounds(&self) -> Option<Rect> {
+        if let Some(browse) = self.archive.as_ref() {
+            Some(browse.scene().world())
+        } else {
+            self.scene.bounds()
+        }
+    }
+
+    /// The minimap layout for click/drag navigation, built the same way the draw path
+    /// builds it (through the overlay manager), so what is drawn and what is clickable
+    /// can never disagree.
+    fn minimap_layout(&self, screen: &ScreenRect) -> Option<MinimapLayout> {
+        let bounds = self.minimap_bounds()?;
+        let ruler_bar = if self.rulers_visible { RULER_BAR } else { 0.0 };
+        let mut overlays = OverlayLayout::new(screen, ruler_bar);
+        let panel = overlays.place(
+            Anchor::TopRight,
+            minimap::PANEL_WIDTH,
+            minimap::PANEL_HEIGHT,
+        )?;
+        MinimapLayout::within(panel, bounds)
+    }
+
     /// The `(r, g, b, a)` color for a layer, or a neutral gray if unknown.
     fn layer_color(&self, layer: LayerId) -> (u8, u8, u8, u8) {
         self.layer_state
@@ -10352,6 +11258,11 @@ impl App {
     /// integration they should place at the point this returns so drawn geometry
     /// snaps to existing geometry and guides too.
     fn snap_world(&self, raw: Point) -> (Point, Option<SnapHint>) {
+        // The bypass modifier drops snapping entirely for this frame, so the cursor lands
+        // on the exact world point the pointer is over (item 53).
+        if self.snap_bypass {
+            return (raw, None);
+        }
         let radius_dbu = self.snap.radius_dbu(self.camera.pixels_per_dbu());
         if self.snap.geometry_enabled || self.snap.guide_enabled {
             let candidates = self.snap_candidates_near(raw, radius_dbu);
@@ -10501,6 +11412,15 @@ impl eframe::App for App {
         self.track_presence_idle(ctx.input(|i| i.time));
         self.remote_edit_flash = (self.remote_edit_flash - dt).max(0.0);
 
+        // Flush any queued clipboard text (the copy-permalink action, item 35), now that
+        // the egui context is in hand.
+        if let Some(text) = self.pending_clipboard.take() {
+            ctx.copy_text(text);
+        }
+
+        // Arrow-key nudge of the selection with a delta readout (item 48).
+        self.handle_arrow_nudge(&ctx);
+
         self.frame_meter
             .record(std::time::Duration::from_secs_f32(dt));
 
@@ -10558,6 +11478,8 @@ impl eframe::App for App {
         let minimal_chrome = self.presentation || self.embed;
         if !minimal_chrome {
             self.palette_window(&ctx, canvas_screen);
+            // The numeric transform popover (item 51, lane 3A), over the canvas.
+            self.transform_window(&ctx);
             self.shortcuts_overlay(&ctx);
             self.keymap_window(&ctx);
             self.replay_window(&ctx);
@@ -10656,6 +11578,40 @@ fn tool_command_id(tool: Tool) -> &'static str {
 /// Formats a boolean as `on`/`off` for status messages.
 fn on_off(v: bool) -> &'static str {
     if v { "on" } else { "off" }
+}
+
+/// The duration of an animated camera move (Fit / Fit-selection / Go-to), the packet's
+/// ~150 ms functional transition (item 29); collapsed to an instant cut under reduced
+/// motion by [`App::begin_view_move`].
+const VIEW_MOVE_SECS: f32 = 0.15;
+
+/// The rounded straight-line distance in DBU between two world points (the draw-tool
+/// ghost's live segment readout, item 52). Uses `i64` differences so a segment across the
+/// full coordinate range cannot overflow.
+fn segment_length_dbu(a: Point, b: Point) -> i64 {
+    let dx = (i64::from(b.x) - i64::from(a.x)) as f64;
+    let dy = (i64::from(b.y) - i64::from(a.y)) as f64;
+    dx.hypot(dy).round() as i64
+}
+
+/// The union bounding box of a sequence of world rectangles, or `None` when the sequence
+/// is empty. The one place the app folds shape bounds for the zoom presets (item 28) and
+/// the status-bar selection summary (item 55).
+fn union_bounds(rects: impl Iterator<Item = Rect>) -> Option<Rect> {
+    let mut it = rects;
+    let first = it.next()?;
+    let (mut min_x, mut min_y) = (first.min.x, first.min.y);
+    let (mut max_x, mut max_y) = (first.max.x, first.max.y);
+    for r in it {
+        min_x = min_x.min(r.min.x);
+        min_y = min_y.min(r.min.y);
+        max_x = max_x.max(r.max.x);
+        max_y = max_y.max(r.max.y);
+    }
+    Some(Rect::new(
+        Point::new(min_x, min_y),
+        Point::new(max_x, max_y),
+    ))
 }
 
 /// Builds a render [`Palette`] that reflects the app's current layer visibility.

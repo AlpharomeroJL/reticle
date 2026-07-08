@@ -121,6 +121,7 @@ pub mod onboarding;
 pub mod open;
 pub mod ops;
 pub mod outline;
+pub mod overlay;
 pub mod productivity;
 pub mod query;
 pub mod replay;

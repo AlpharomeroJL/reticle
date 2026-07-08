@@ -26,6 +26,14 @@ pub enum Command {
     Redo,
     /// Fit the whole design to the viewport.
     ZoomToFit,
+    /// Frame the current selection's bounding box (Shift+F, `view.zoom_selection`).
+    ZoomSelection,
+    /// Reset the zoom to one screen pixel per DBU, keeping the center (`view.zoom_one_to_one`).
+    ZoomOneToOne,
+    /// Frame the union bounding box of every visible layer (`view.zoom_layer_extents`).
+    ZoomLayerExtents,
+    /// Save the current view as a numbered bookmark (`view.bookmark_save`).
+    BookmarkSave,
     /// Toggle the background grid.
     ToggleGrid,
     /// Toggle cursor snapping to the grid.
@@ -34,6 +42,11 @@ pub enum Command {
     ClearSelection,
     /// Select every shape on the layer at the given technology-table index.
     SelectLayer(usize),
+    /// Duplicate the current selection at a small offset (Ctrl+D, `edit.duplicate`).
+    Duplicate,
+    /// Copy a permalink pinning the current view and layers to the clipboard
+    /// (`share.copy_permalink`, item 35).
+    CopyPermalink,
     /// Export the current view to a PNG file (native only; a no-op on web).
     ExportPng,
 }

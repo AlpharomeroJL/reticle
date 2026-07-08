@@ -90,6 +90,13 @@ impl Selection {
     pub fn extend<I: IntoIterator<Item = usize>>(&mut self, indices: I) {
         self.indices.extend(indices);
     }
+
+    /// Removes `indices` from the selection (an alt-drag subtractive marquee, item 45).
+    pub fn subtract<I: IntoIterator<Item = usize>>(&mut self, indices: I) {
+        for index in indices {
+            self.indices.remove(&index);
+        }
+    }
 }
 
 /// Returns the indices of every shape whose bounding box is fully contained in
@@ -103,6 +110,27 @@ pub fn shapes_in_rect(shapes: &[DrawShape], rect: Rect) -> Vec<usize> {
         .iter()
         .enumerate()
         .filter(|(_, s)| contains_rect(&rect, &s.bounding_box()))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Like [`shapes_in_rect`], but when `layer` is `Some` only shapes on that layer are
+/// captured, the "same-layer filter" for a marquee begun over a shape (item 45).
+///
+/// A marquee started over empty canvas passes `None` and grabs every enclosed shape; one
+/// started over a shape passes that shape's layer, so the box selects only within that
+/// layer - the usual "rubber-band this one layer" gesture without a modifier key.
+#[must_use]
+pub fn shapes_in_rect_on_layer(
+    shapes: &[DrawShape],
+    rect: Rect,
+    layer: Option<LayerId>,
+) -> Vec<usize> {
+    shapes
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| contains_rect(&rect, &s.bounding_box()))
+        .filter(|(_, s)| layer.is_none_or(|l| s.layer() == l))
         .map(|(i, _)| i)
         .collect()
 }
@@ -187,6 +215,30 @@ mod tests {
         let band = Rect::new(Point::new(-10, -10), Point::new(300, 300));
         let hits = shapes_in_rect(&shapes, band);
         assert_eq!(hits, vec![0]);
+    }
+
+    #[test]
+    fn subtract_removes_indices() {
+        let mut sel = Selection::new();
+        sel.set([1, 2, 3, 4]);
+        sel.subtract([2, 4, 9]);
+        assert_eq!(sel.iter().collect::<Vec<_>>(), vec![1, 3]);
+    }
+
+    #[test]
+    fn same_layer_marquee_filters_to_one_layer() {
+        let m1 = LayerId::new(4, 0);
+        let m2 = LayerId::new(5, 0);
+        let shapes = vec![
+            rect_on(m1, 0, 0, 100, 100),
+            rect_on(m2, 120, 120, 200, 200),
+            rect_on(m1, 210, 210, 260, 260),
+        ];
+        let band = Rect::new(Point::new(-10, -10), Point::new(300, 300));
+        // No filter: every enclosed shape.
+        assert_eq!(shapes_in_rect_on_layer(&shapes, band, None), vec![0, 1, 2]);
+        // Filter to m1: only the two m1 shapes inside the band.
+        assert_eq!(shapes_in_rect_on_layer(&shapes, band, Some(m1)), vec![0, 2]);
     }
 
     #[test]

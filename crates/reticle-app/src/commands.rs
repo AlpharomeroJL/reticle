@@ -65,6 +65,8 @@ pub enum AppOp {
     ToggleLabels,
     /// Toggle the minimap overview panel.
     ToggleMinimap,
+    /// Toggle the top/left ruler bars (lane 3a, `view.rulers`).
+    ToggleRulers,
     /// Collapse the canvas to a single pane.
     SplitSingle,
     /// Split the canvas into two side-by-side panes.
@@ -779,6 +781,79 @@ static REGISTRY: &[CommandSpec] = &[
         default_chord: None,
         rebindable: false,
         run: RunAs::App(AppOp::CloseDesign),
+        scope: Scope::Global,
+    },
+    // --- 3A: canvas navigation, view presets, overlays ---
+    CommandSpec {
+        id: CommandId("view.zoom_selection"),
+        label: "Fit selection",
+        category: "View",
+        menu_path: Some(&["View"]),
+        default_chord: Some("Shift+F"),
+        rebindable: true,
+        run: RunAs::Command(Command::ZoomSelection),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("view.zoom_one_to_one"),
+        label: "Zoom 1:1 DBU",
+        category: "View",
+        menu_path: Some(&["View"]),
+        default_chord: None,
+        rebindable: true,
+        run: RunAs::Command(Command::ZoomOneToOne),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("view.zoom_layer_extents"),
+        label: "Zoom to layer extents",
+        category: "View",
+        menu_path: Some(&["View"]),
+        default_chord: None,
+        rebindable: true,
+        run: RunAs::Command(Command::ZoomLayerExtents),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("view.bookmark_save"),
+        label: "Save view bookmark",
+        category: "View",
+        menu_path: Some(&["View", "Bookmarks"]),
+        default_chord: None,
+        rebindable: true,
+        run: RunAs::Command(Command::BookmarkSave),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("view.rulers"),
+        label: "Rulers",
+        category: "View",
+        menu_path: Some(&["View"]),
+        default_chord: None,
+        rebindable: true,
+        run: RunAs::App(AppOp::ToggleRulers),
+        scope: Scope::Global,
+    },
+    // --- 3A: edit ---
+    CommandSpec {
+        id: CommandId("edit.duplicate"),
+        label: "Duplicate",
+        category: "Edit",
+        menu_path: Some(&["Edit"]),
+        default_chord: Some("Ctrl+D"),
+        rebindable: true,
+        run: RunAs::Command(Command::Duplicate),
+        scope: Scope::Global,
+    },
+    // --- 3A: share ---
+    CommandSpec {
+        id: CommandId("share.copy_permalink"),
+        label: "Copy permalink at this view",
+        category: "Share",
+        menu_path: Some(&["Share"]),
+        default_chord: None,
+        rebindable: true,
+        run: RunAs::Command(Command::CopyPermalink),
         scope: Scope::Global,
     },
 ];

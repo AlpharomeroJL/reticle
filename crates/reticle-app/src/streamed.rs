@@ -282,6 +282,27 @@ impl StreamedScene {
         out
     }
 
+    /// The world rectangles of the tiles resident at `level`, for the minimap's
+    /// residency shading (item 30): the broad areas of the die already fetched.
+    ///
+    /// Read-only - it inspects the residency set and the coordinate mapper without
+    /// touching either - so the "what has streamed in" overview is derived from the same
+    /// state the paint path uses, never a second bookkeeping copy that could drift.
+    #[must_use]
+    pub fn resident_tile_rects(&self, level: u32) -> Vec<Rect> {
+        self.resident
+            .keys()
+            .filter(|coord| coord.level == level)
+            .filter_map(|coord| {
+                self.mapper.tile_bounds(TileId {
+                    level: coord.level,
+                    x: coord.col,
+                    y: coord.row,
+                })
+            })
+            .collect()
+    }
+
     /// Marks the tile at `coord` resident with `payload`, refreshing its recency and
     /// evicting the least-recently-used tiles if the working set now exceeds the bound.
     pub fn insert_tile(&mut self, coord: TileCoord, payload: TilePayload) {
@@ -462,6 +483,120 @@ pub fn upload_tile_bytes(
     bytes: &[u8],
 ) -> Option<reticle_render::Allocation> {
     pages.upload(device, queue, bytes)
+}
+
+/// A level-of-detail crossfade for the streamed die: fades freshly-covered detail in
+/// over the level already on screen instead of swapping it in a single hard frame.
+///
+/// The residency pass reports a *paint level* each frame - the finest level fully
+/// covering the viewport ([`StreamedScene::paint_level`]). When that level jumps (a coarse
+/// tile lands, or a finer set finishes streaming) v8.0 replaced the geometry in one frame,
+/// a visible pop. This tracks the settled level ([`shown`](Self::shown)) painted at full
+/// opacity and, while a newly-reported level fades in, the [`incoming`](Self::incoming)
+/// level and its [`alpha`](Self::alpha), so the caller paints the old level solid and the
+/// new level ramping from transparent to opaque on top (item 42, canvas fluidity).
+///
+/// It is pure - it holds a level, a target, and a `0..=1` progress, advanced by a caller-
+/// supplied frame delta - so the crossfade curve is unit-tested without a GPU. Under
+/// reduced motion the fade duration collapses to zero and every level change is instant,
+/// exactly like [`crate::theme::tokens::Density::animation_time`] (the motion contract in
+/// docs/design/tokens.md).
+#[derive(Clone, Debug)]
+pub struct LevelFade {
+    /// The level currently painted at full opacity, or `None` before the first cover.
+    shown: Option<u32>,
+    /// A newly-reported level fading in over [`Self::shown`], or `None` when settled.
+    incoming: Option<u32>,
+    /// Progress of the incoming fade in `0.0..=1.0`.
+    t: f32,
+    /// The fade duration in seconds; a non-positive value makes every change instant.
+    duration: f32,
+}
+
+impl LevelFade {
+    /// A crossfade of `duration_secs` seconds (clamped to non-negative). Pass the
+    /// packet's `~150 ms` transition; a value of `0.0` disables fading outright.
+    #[must_use]
+    pub fn new(duration_secs: f32) -> Self {
+        Self {
+            shown: None,
+            incoming: None,
+            t: 0.0,
+            duration: duration_secs.max(0.0),
+        }
+    }
+
+    /// Advances the crossfade toward `target` (the level the residency pass wants painted
+    /// this frame) by `dt_secs`, collapsing to an instant change when `reduced_motion` is
+    /// set or the duration is zero.
+    ///
+    /// A `target` of `None` (nothing resident covers the viewport yet) clears the fade so
+    /// the caller paints nothing rather than a stale level.
+    pub fn observe(&mut self, target: Option<u32>, dt_secs: f32, reduced_motion: bool) {
+        // Already settled on the requested level: nothing to animate.
+        if self.incoming.is_none() && self.shown == target {
+            return;
+        }
+        let instant = reduced_motion || self.duration <= 0.0;
+        match target {
+            // Nothing covers the viewport: drop straight to blank (a fade-out to nothing
+            // would just hold stale detail over an empty region).
+            None => {
+                self.shown = None;
+                self.incoming = None;
+                self.t = 0.0;
+            }
+            Some(level) => {
+                if instant {
+                    self.shown = Some(level);
+                    self.incoming = None;
+                    self.t = 0.0;
+                    return;
+                }
+                // Restart the ramp when the incoming target changes; otherwise keep
+                // advancing the one in flight.
+                if self.incoming != Some(level) {
+                    self.incoming = Some(level);
+                    self.t = 0.0;
+                }
+                self.t += dt_secs.max(0.0) / self.duration;
+                if self.t >= 1.0 {
+                    self.shown = Some(level);
+                    self.incoming = None;
+                    self.t = 0.0;
+                }
+            }
+        }
+    }
+
+    /// The level to paint at full opacity, or `None` when nothing is resident yet.
+    #[must_use]
+    pub fn shown(&self) -> Option<u32> {
+        self.shown
+    }
+
+    /// The level fading in on top of [`Self::shown`], or `None` when the view is settled.
+    #[must_use]
+    pub fn incoming(&self) -> Option<u32> {
+        self.incoming
+    }
+
+    /// The opacity in `0.0..=1.0` to paint the [`incoming`](Self::incoming) level at;
+    /// `1.0` when there is no fade in flight.
+    #[must_use]
+    pub fn alpha(&self) -> f32 {
+        match self.incoming {
+            Some(_) => self.t.clamp(0.0, 1.0),
+            None => 1.0,
+        }
+    }
+
+    /// Whether a crossfade is in flight this frame (the caller should keep repainting so
+    /// the ramp advances).
+    #[must_use]
+    pub fn is_fading(&self) -> bool {
+        self.incoming.is_some()
+    }
 }
 
 #[cfg(test)]
@@ -659,5 +794,82 @@ mod tests {
         assert_eq!(inbox.drain_into(&mut scene), 1);
         assert!(inbox.is_empty());
         assert!(scene.is_resident(coord));
+    }
+
+    #[test]
+    fn level_fade_ramps_incoming_detail_to_full() {
+        let mut fade = LevelFade::new(0.15);
+        // First cover: level 0 fades in from nothing.
+        fade.observe(Some(0), 0.05, false);
+        assert_eq!(fade.incoming(), Some(0));
+        assert!(fade.alpha() > 0.0 && fade.alpha() < 1.0, "mid-fade alpha");
+        assert!(fade.is_fading());
+        // Enough time passes to finish the ramp: it settles as shown at full opacity.
+        fade.observe(Some(0), 0.15, false);
+        assert_eq!(fade.shown(), Some(0));
+        assert_eq!(fade.incoming(), None);
+        assert!((fade.alpha() - 1.0).abs() < f32::EPSILON);
+        assert!(!fade.is_fading());
+    }
+
+    #[test]
+    fn level_fade_crossfades_from_shown_to_a_finer_level() {
+        let mut fade = LevelFade::new(0.15);
+        fade.observe(Some(0), 1.0, false); // settle on coarse level 0
+        assert_eq!(fade.shown(), Some(0));
+        // A finer level arrives: level 0 stays painted while level 2 fades in on top.
+        fade.observe(Some(2), 0.05, false);
+        assert_eq!(fade.shown(), Some(0), "coarse level held under the fade");
+        assert_eq!(fade.incoming(), Some(2));
+        assert!(fade.alpha() < 1.0);
+    }
+
+    #[test]
+    fn reduced_motion_makes_every_level_change_instant() {
+        let mut fade = LevelFade::new(0.15);
+        fade.observe(Some(3), 0.001, true);
+        assert_eq!(fade.shown(), Some(3), "reduced motion snaps to the target");
+        assert_eq!(fade.incoming(), None);
+        assert!((fade.alpha() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn zero_duration_disables_the_fade() {
+        let mut fade = LevelFade::new(0.0);
+        fade.observe(Some(1), 0.05, false);
+        assert_eq!(fade.shown(), Some(1));
+        assert!(!fade.is_fading());
+    }
+
+    #[test]
+    fn resident_tile_rects_reports_fetched_areas_at_a_level() {
+        let mut scene = StreamedScene::new(header(world(), 3), 32).unwrap();
+        // Nothing resident: no shading.
+        assert!(scene.resident_tile_rects(1).is_empty());
+        // Make one level-1 tile resident; its world rect is a quadrant of the world.
+        let coord = TileCoord {
+            level: 1,
+            col: 0,
+            row: 0,
+        };
+        scene.insert_tile(coord, TilePayload::default());
+        let rects = scene.resident_tile_rects(1);
+        assert_eq!(rects.len(), 1, "one resident level-1 tile");
+        // The rect is inside the world and smaller than the whole world (a level-1 tile).
+        assert!(rects[0].width() <= world().width());
+        assert!(rects[0].width() > 0 && rects[0].height() > 0);
+        // A level with nothing resident stays empty.
+        assert!(scene.resident_tile_rects(2).is_empty());
+    }
+
+    #[test]
+    fn losing_coverage_drops_to_blank_without_a_lingering_level() {
+        let mut fade = LevelFade::new(0.15);
+        fade.observe(Some(2), 1.0, false);
+        assert_eq!(fade.shown(), Some(2));
+        // No level covers the viewport any more (e.g. everything evicted): paint nothing.
+        fade.observe(None, 0.05, false);
+        assert_eq!(fade.shown(), None);
+        assert_eq!(fade.incoming(), None);
     }
 }

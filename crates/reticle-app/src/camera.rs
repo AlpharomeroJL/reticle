@@ -207,6 +207,97 @@ impl ViewCamera {
     }
 }
 
+impl ViewCamera {
+    /// Interpolates between this camera and `other` at `t` in `0.0..=1.0`.
+    ///
+    /// The center moves linearly, but the zoom is interpolated *geometrically* (linearly
+    /// in log space): a fit that changes the zoom a hundred-fold should feel like a
+    /// constant-rate zoom, not a lurch that covers most of the distance in the first few
+    /// frames, which a linear zoom blend produces. `t <= 0` returns this camera, `t >= 1`
+    /// returns `other`.
+    #[must_use]
+    pub fn lerp(&self, other: &Self, t: f32) -> Self {
+        let t = f64::from(t.clamp(0.0, 1.0));
+        let cx = self.center_x + (other.center_x - self.center_x) * t;
+        let cy = self.center_y + (other.center_y - self.center_y) * t;
+        let ln = self.pixels_per_dbu.ln();
+        let z = (ln + (other.pixels_per_dbu.ln() - ln) * t).exp();
+        Self {
+            center_x: cx,
+            center_y: cy,
+            pixels_per_dbu: z.clamp(MIN_ZOOM, MAX_ZOOM),
+        }
+    }
+}
+
+/// A time-based camera transition: eased interpolation from one view to another for
+/// animated Fit / Fit-selection / Go-to moves (item 29, ~150 ms, reduced-motion aware).
+///
+/// v8.0 jumped the camera in a single frame on every Fit or violation-locate, a
+/// disorienting cut. This tweens from the current camera to a computed target over a short
+/// duration with an ease-out curve (fast start, gentle settle), so the eye can follow the
+/// move and keep its bearings. It is pure - a start camera, a target, and elapsed time -
+/// so the curve is unit-tested without a window; the app advances it by the frame delta
+/// and reads back the interpolated camera. A zero duration (what
+/// [`Density::animation_time`](crate::theme::tokens::Density::animation_time) returns under
+/// reduced motion) makes it finish on the first advance, i.e. an instant cut, honoring the
+/// motion contract.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct CameraTween {
+    /// The camera the move started from.
+    from: ViewCamera,
+    /// The camera the move settles on.
+    to: ViewCamera,
+    /// Seconds elapsed since the move began.
+    elapsed: f32,
+    /// Total move duration in seconds; `<= 0` is an instant cut.
+    duration: f32,
+}
+
+impl CameraTween {
+    /// A move from `from` to `to` over `duration_secs`. A non-positive duration is an
+    /// instant cut (the first [`advance`](Self::advance) reports the target and is done).
+    #[must_use]
+    pub fn new(from: ViewCamera, to: ViewCamera, duration_secs: f32) -> Self {
+        Self {
+            from,
+            to,
+            elapsed: 0.0,
+            duration: duration_secs,
+        }
+    }
+
+    /// Advances the move by `dt_secs` and returns the current interpolated camera.
+    pub fn advance(&mut self, dt_secs: f32) -> ViewCamera {
+        self.elapsed += dt_secs.max(0.0);
+        if self.duration <= 0.0 {
+            return self.to;
+        }
+        let raw = (self.elapsed / self.duration).clamp(0.0, 1.0);
+        self.from.lerp(&self.to, ease_out_cubic(raw))
+    }
+
+    /// Whether the move has reached its target (no more advancing needed).
+    #[must_use]
+    pub fn done(&self) -> bool {
+        self.duration <= 0.0 || self.elapsed >= self.duration
+    }
+
+    /// The camera this move settles on.
+    #[must_use]
+    pub fn target(&self) -> ViewCamera {
+        self.to
+    }
+}
+
+/// Ease-out cubic: `1 - (1 - t)^3`. Fast at the start, decelerating into the target, the
+/// standard functional-motion curve for a navigational move.
+#[must_use]
+fn ease_out_cubic(t: f32) -> f32 {
+    let inv = 1.0 - t.clamp(0.0, 1.0);
+    1.0 - inv * inv * inv
+}
+
 /// Applies a pinch-zoom gesture to `camera`, returning the updated camera.
 ///
 /// `centroid` is the two-finger gesture centroid in screen pixels and `zoom_delta` is
@@ -472,5 +563,48 @@ mod tests {
         let tight = ViewCamera::new(Point::ORIGIN, 10.0).visible_world_rect(&s);
         assert!(wide.width() > tight.width());
         assert!(wide.height() > tight.height());
+    }
+
+    #[test]
+    fn lerp_endpoints_are_the_two_cameras() {
+        let a = ViewCamera::new(Point::new(0, 0), 1.0);
+        let b = ViewCamera::new(Point::new(1000, -400), 16.0);
+        assert_eq!(a.lerp(&b, 0.0).center(), a.center());
+        assert!((a.lerp(&b, 0.0).pixels_per_dbu() - 1.0).abs() < 1e-9);
+        assert_eq!(a.lerp(&b, 1.0).center(), b.center());
+        assert!((a.lerp(&b, 1.0).pixels_per_dbu() - 16.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lerp_interpolates_zoom_geometrically() {
+        let a = ViewCamera::new(Point::ORIGIN, 1.0);
+        let b = ViewCamera::new(Point::ORIGIN, 16.0);
+        // Halfway in log space between 1 and 16 is 4 (the geometric mean), not 8.5.
+        assert!((a.lerp(&b, 0.5).pixels_per_dbu() - 4.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn tween_eases_out_and_finishes_on_the_target() {
+        let a = ViewCamera::new(Point::new(0, 0), 1.0);
+        let b = ViewCamera::new(Point::new(1000, 0), 4.0);
+        let mut tween = CameraTween::new(a, b, 0.15);
+        assert!(!tween.done());
+        // Ease-out covers more than half the distance by the time midpoint.
+        let mid = tween.advance(0.075);
+        assert!(mid.center().x > 500, "ease-out is past halfway at t=0.5");
+        // Advancing past the duration lands exactly on the target and reports done.
+        let end = tween.advance(0.2);
+        assert_eq!(end.center(), b.center());
+        assert!(tween.done());
+    }
+
+    #[test]
+    fn zero_duration_tween_is_an_instant_cut() {
+        let a = ViewCamera::new(Point::new(0, 0), 1.0);
+        let b = ViewCamera::new(Point::new(9_000, -3_000), 32.0);
+        let mut tween = CameraTween::new(a, b, 0.0);
+        let cam = tween.advance(0.016);
+        assert_eq!(cam.center(), b.center());
+        assert!(tween.done(), "reduced-motion cut finishes immediately");
     }
 }

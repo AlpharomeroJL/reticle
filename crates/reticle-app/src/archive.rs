@@ -33,7 +33,7 @@
 
 use std::collections::HashSet;
 
-use reticle_geometry::Rect;
+use reticle_geometry::{Point, Rect};
 use reticle_index::TileCoord;
 
 use crate::dochost::DocHost;
@@ -60,6 +60,25 @@ const MAX_RESIDENT_TILES: usize = 256;
 #[cfg(target_arch = "wasm32")]
 const MAX_FETCH_PER_PASS: usize = 32;
 
+/// The most tiles a single *prefetch* pass spawns, the packet's `~8 tiles/frame` budget
+/// (item 43). Kept well under the on-screen residency pass's per-pass cap so speculative
+/// reads for where the camera is *heading* never starve the fetches for what is on screen
+/// *now*.
+pub const PREFETCH_BUDGET: usize = 8;
+
+/// The exponential-moving-average smoothing factor for the pan-velocity estimate: how
+/// much each frame's instantaneous motion moves the running estimate. Low enough to ride
+/// through a single jittery frame, high enough to react within a few frames of a flick.
+const VELOCITY_EMA_ALPHA: f64 = 0.35;
+
+/// How many frames ahead the prefetch predicts the viewport will have travelled at the
+/// current smoothed velocity. A few frames is enough to hide fetch latency without
+/// speculatively reading tiles the camera will never reach. Only the wasm prefetch spawns
+/// fetches, so this is unused on native (the pure prediction is tested with an explicit
+/// lookahead).
+#[cfg(target_arch = "wasm32")]
+const PREFETCH_LOOKAHEAD_FRAMES: f64 = 6.0;
+
 /// The HUD / PERF counters for an archive browse: how much has been fetched, how many
 /// tiles are resident, and the derived working-set and mean-tile estimates.
 ///
@@ -83,6 +102,10 @@ pub struct ArchiveStats {
     /// The records painted on the most recent streamed frame (drives the HUD's
     /// "painting" readout and the e2e canvas-paint assertion).
     pub records_painted: usize,
+    /// Cumulative tiles speculatively fetched by the velocity-aware prefetch (item 43),
+    /// counted separately from [`Self::tiles_fetched`] so the HUD can report speculative
+    /// reads honestly rather than folding them into on-screen residency traffic.
+    pub prefetched: u64,
 }
 
 impl ArchiveStats {
@@ -129,7 +152,7 @@ impl ArchiveStats {
         } else {
             format!("fetched {}", fmt_bytes(self.bytes_fetched))
         };
-        vec![
+        let mut lines = vec![
             "streaming .rtla".to_owned(),
             fetched,
             format!(
@@ -137,8 +160,14 @@ impl ArchiveStats {
                 self.tiles_resident, self.records_painted
             ),
             format!("working set ~{}", fmt_bytes(self.working_set_bytes())),
-            format!("{fps:.0} fps"),
-        ]
+        ];
+        // Speculative prefetch is reported honestly and only once it has happened, so a
+        // still camera's HUD stays quiet (item 43, "honest HUD").
+        if self.prefetched > 0 {
+            lines.push(format!("{} prefetched", self.prefetched));
+        }
+        lines.push(format!("{fps:.0} fps"));
+        lines
     }
 }
 
@@ -195,6 +224,132 @@ pub fn wanted_tiles<S: std::hash::BuildHasher>(
     out
 }
 
+/// An exponential-moving-average estimate of the camera's pan velocity, in DBU per
+/// frame, from the successive viewport centers fed to it.
+///
+/// The prefetch (item 43) reads where the camera is *heading* to hide fetch latency; that
+/// needs a stable heading, not the raw frame-to-frame jump, which jitters with rounding
+/// and stutters. This smooths the per-frame center delta with an exponential moving average so a
+/// steady pan settles to a steady velocity and a single dropped frame does not throw the
+/// prediction off. Pure and window-free, so the smoothing is unit-tested without a clock.
+#[derive(Clone, Debug, Default)]
+pub struct VelocityTracker {
+    /// The previous viewport center, or `None` before the first observation.
+    last: Option<Point>,
+    /// The smoothed velocity in DBU per frame.
+    vx: f64,
+    vy: f64,
+}
+
+impl VelocityTracker {
+    /// A tracker with no history and zero velocity.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Feeds the current viewport `center`, updating and returning the smoothed velocity
+    /// in DBU per frame. The first call only seeds the history and reports zero.
+    pub fn observe(&mut self, center: Point) -> (f64, f64) {
+        if let Some(prev) = self.last {
+            // i64 differences so a wide pan across the coordinate range cannot overflow.
+            let dx = (i64::from(center.x) - i64::from(prev.x)) as f64;
+            let dy = (i64::from(center.y) - i64::from(prev.y)) as f64;
+            self.vx = VELOCITY_EMA_ALPHA * dx + (1.0 - VELOCITY_EMA_ALPHA) * self.vx;
+            self.vy = VELOCITY_EMA_ALPHA * dy + (1.0 - VELOCITY_EMA_ALPHA) * self.vy;
+        }
+        self.last = Some(center);
+        (self.vx, self.vy)
+    }
+
+    /// The current smoothed velocity in DBU per frame.
+    #[must_use]
+    pub fn velocity(&self) -> (f64, f64) {
+        (self.vx, self.vy)
+    }
+
+    /// Forgets the pan history (e.g. after a jump-cut like fit or goto, whose large center
+    /// delta is not a pan and must not seed a phantom velocity).
+    pub fn reset(&mut self) {
+        self.last = None;
+        self.vx = 0.0;
+        self.vy = 0.0;
+    }
+}
+
+/// The viewport shifted `lookahead_frames` ahead along `velocity` (DBU per frame): where
+/// the camera will be looking if the current pan holds.
+///
+/// A pure translation of the rectangle, so its size (and therefore the level it calls for)
+/// is unchanged - the prefetch reads the *same* detail one step ahead, never a different
+/// zoom.
+#[must_use]
+pub fn predicted_viewport(current: Rect, velocity: (f64, f64), lookahead_frames: f64) -> Rect {
+    let shift_x = round_i32(velocity.0 * lookahead_frames);
+    let shift_y = round_i32(velocity.1 * lookahead_frames);
+    Rect::new(
+        Point::new(
+            current.min.x.saturating_add(shift_x),
+            current.min.y.saturating_add(shift_y),
+        ),
+        Point::new(
+            current.max.x.saturating_add(shift_x),
+            current.max.y.saturating_add(shift_y),
+        ),
+    )
+}
+
+/// The tiles to speculatively prefetch this frame: tiles covering the `predicted`
+/// viewport, up to `target`, that the on-screen residency pass for `current` will *not*
+/// already request, are not resident, and are not in flight, coarse level first and
+/// capped at `budget`.
+///
+/// Excluding tiles that also cover `current` is what keeps the prefetch purely additive:
+/// it never double-requests a tile the normal pass ([`wanted_tiles`]) already wants, it
+/// only reaches for detail just beyond the current edge. When the camera is still (the
+/// predicted and current viewports coincide) the exclusion empties the list, so a
+/// stationary view issues no speculative traffic at all.
+#[must_use]
+pub fn prefetch_viewport<S: std::hash::BuildHasher>(
+    scene: &StreamedScene,
+    in_flight: &HashSet<TileCoord, S>,
+    current: Rect,
+    predicted: Rect,
+    target: u32,
+    budget: usize,
+) -> Vec<TileCoord> {
+    // The tiles the on-screen pass already covers, across every level up to target.
+    let mut on_screen = HashSet::new();
+    for level in 0..=target {
+        on_screen.extend(scene.tiles_at(current, level));
+    }
+    let mut out = Vec::new();
+    for level in 0..=target {
+        for coord in scene.missing_tiles(predicted, level) {
+            if !in_flight.contains(&coord) && !on_screen.contains(&coord) {
+                out.push(coord);
+                if out.len() == budget {
+                    return out;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Rounds an `f64` velocity offset to the nearest DBU, saturating into `i32` range so a
+/// runaway estimate can never overflow the shift.
+fn round_i32(v: f64) -> i32 {
+    let r = v.round();
+    if r >= f64::from(i32::MAX) {
+        i32::MAX
+    } else if r <= f64::from(i32::MIN) {
+        i32::MIN
+    } else {
+        r as i32
+    }
+}
+
 /// The app-side state of an open archive browse: the read-only streamed document host,
 /// the fetch inbox, the set of tiles whose fetch is in flight (so a tile is not
 /// re-requested every frame while its fetch is outstanding), and the HUD counters.
@@ -210,6 +365,8 @@ pub struct ArchiveBrowse {
     inbox: TileInbox,
     /// Tiles whose fetch is outstanding, to avoid re-requesting them every frame.
     in_flight: HashSet<TileCoord>,
+    /// The smoothed pan velocity driving the speculative prefetch (item 43).
+    velocity: VelocityTracker,
     /// The HUD / PERF counters.
     stats: ArchiveStats,
     /// The shared HTTP-range source every in-flight fetch reads from (wasm only).
@@ -232,6 +389,7 @@ impl ArchiveBrowse {
             host: DocHost::streamed(scene),
             inbox: TileInbox::new(),
             in_flight: HashSet::new(),
+            velocity: VelocityTracker::new(),
             stats: ArchiveStats {
                 file_size,
                 ..ArchiveStats::default()
@@ -249,6 +407,7 @@ impl ArchiveBrowse {
             host: DocHost::streamed(scene),
             inbox: TileInbox::new(),
             in_flight: HashSet::new(),
+            velocity: VelocityTracker::new(),
             stats: ArchiveStats {
                 file_size,
                 ..ArchiveStats::default()
@@ -325,6 +484,49 @@ impl ArchiveBrowse {
                 self.inbox.clone(),
             );
         }
+    }
+
+    /// Speculatively fetches tiles just ahead of a moving camera, hiding fetch latency so
+    /// panning stays sharp (item 43, wasm only).
+    ///
+    /// Updates the smoothed pan velocity from the viewport `center`, predicts the viewport
+    /// a few frames ahead, and spawns up to [`PREFETCH_BUDGET`] fetches for the tiles that
+    /// leading edge will need and the on-screen residency pass has not already claimed.
+    /// Purely additive: it shares the same inbox, in-flight set, and coarse-first ordering
+    /// as [`spawn_missing`](Self::spawn_missing), only reaching beyond the current edge, and
+    /// counts what it spawns into [`ArchiveStats::prefetched`] so the HUD stays honest.
+    #[cfg(target_arch = "wasm32")]
+    pub fn prefetch(&mut self, viewport: Rect, center: Point, target: u32) {
+        let velocity = self.velocity.observe(center);
+        let predicted = predicted_viewport(viewport, velocity, PREFETCH_LOOKAHEAD_FRAMES);
+        let tiles = {
+            let scene = self.scene();
+            prefetch_viewport(
+                scene,
+                &self.in_flight,
+                viewport,
+                predicted,
+                target,
+                PREFETCH_BUDGET,
+            )
+        };
+        for coord in tiles {
+            self.in_flight.insert(coord);
+            self.stats.prefetched += 1;
+            crate::streamed::spawn_fetch(
+                std::rc::Rc::clone(&self.source),
+                coord,
+                self.inbox.clone(),
+            );
+        }
+    }
+
+    /// Feeds the viewport `center` to the pan-velocity estimate without spawning any
+    /// fetch (native builds have no network source; the prefetch is wasm-only). Keeps the
+    /// velocity history warm so switching targets behaves identically across builds.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn prefetch(&mut self, _viewport: Rect, center: Point, _target: u32) {
+        let _ = self.velocity.observe(center);
     }
 }
 
@@ -523,6 +725,7 @@ mod tests {
             tiles_fetched: 4,
             tiles_resident: 3,
             records_painted: 12,
+            prefetched: 0,
         };
         // Mean tile = 400 / 4 = 100; working set estimate = 3 resident * 100.
         assert_eq!(stats.mean_tile_bytes(), 100);
@@ -661,5 +864,92 @@ mod tests {
 
         browse.set_records_painted(7);
         assert_eq!(browse.stats().records_painted, 7);
+    }
+
+    #[test]
+    fn velocity_tracker_smooths_a_steady_pan() {
+        let mut v = VelocityTracker::new();
+        // First observation only seeds history.
+        assert_eq!(v.observe(Point::new(0, 0)), (0.0, 0.0));
+        // A steady +100 DBU/frame pan: the EMA climbs toward 100 but lags on the first
+        // step (it is a smoothed estimate, not the raw delta).
+        let (vx1, _) = v.observe(Point::new(100, 0));
+        assert!(vx1 > 0.0 && vx1 < 100.0, "first smoothed step lags: {vx1}");
+        for i in 2..12 {
+            v.observe(Point::new(100 * i, 0));
+        }
+        let (vx, vy) = v.velocity();
+        assert!(
+            (vx - 100.0).abs() < 1.0,
+            "steady pan settles near 100: {vx}"
+        );
+        assert!(
+            vy.abs() < f64::from(f32::EPSILON),
+            "no vertical motion: {vy}"
+        );
+    }
+
+    #[test]
+    fn velocity_reset_forgets_a_jump_cut() {
+        let mut v = VelocityTracker::new();
+        v.observe(Point::new(0, 0));
+        v.observe(Point::new(500, 0));
+        assert!(v.velocity().0 > 0.0);
+        v.reset();
+        assert_eq!(v.velocity(), (0.0, 0.0));
+        // After a reset the next observation only reseeds, reporting no phantom velocity.
+        assert_eq!(v.observe(Point::new(9_000, 9_000)), (0.0, 0.0));
+    }
+
+    #[test]
+    fn predicted_viewport_translates_without_resizing() {
+        let current = Rect::new(Point::new(0, 0), Point::new(200, 100));
+        let ahead = predicted_viewport(current, (10.0, -5.0), 6.0);
+        // Shifted by velocity * lookahead = (60, -30), same size.
+        assert_eq!(ahead.min, Point::new(60, -30));
+        assert_eq!(ahead.max, Point::new(260, 70));
+        assert_eq!(ahead.width(), current.width());
+        assert_eq!(ahead.height(), current.height());
+    }
+
+    #[test]
+    fn prefetch_reaches_beyond_the_current_edge_only() {
+        // A 4-level pyramid; the fine level (3) is an 8x8 grid, so a small viewport near
+        // one edge and the same viewport shifted have mostly disjoint fine tiles.
+        let scene = scene(4);
+        let current = Rect::new(Point::new(0, 0), Point::new(120, 120));
+        let predicted = Rect::new(Point::new(760, 0), Point::new(880, 120));
+        let in_flight = HashSet::new();
+        let tiles = prefetch_viewport(&scene, &in_flight, current, predicted, 3, PREFETCH_BUDGET);
+        assert!(
+            !tiles.is_empty(),
+            "a real pan prefetches leading-edge tiles"
+        );
+        assert!(
+            tiles.len() <= PREFETCH_BUDGET,
+            "respects the per-frame budget"
+        );
+        // None of the prefetched tiles cover the current viewport (those are the on-screen
+        // pass's job); prefetch is purely additive.
+        let mut on_screen = HashSet::new();
+        for level in 0..=3 {
+            on_screen.extend(scene.tiles_at(current, level));
+        }
+        assert!(
+            tiles.iter().all(|c| !on_screen.contains(c)),
+            "prefetch must not re-request on-screen tiles"
+        );
+    }
+
+    #[test]
+    fn a_still_camera_prefetches_nothing() {
+        let scene = scene(4);
+        let view = Rect::new(Point::new(0, 0), Point::new(250, 250));
+        // Predicted == current: the exclusion of on-screen tiles empties the list.
+        let tiles = prefetch_viewport(&scene, &HashSet::new(), view, view, 3, PREFETCH_BUDGET);
+        assert!(
+            tiles.is_empty(),
+            "a stationary view issues no speculative reads"
+        );
     }
 }

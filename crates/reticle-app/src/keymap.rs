@@ -681,6 +681,11 @@ mod tests {
             ("view.panels_toggle", "Tab"),
             // Lane 2D adds Presentation mode as a new default (ia-inventory section 4).
             ("view.presentation", "P"),
+            // Lane 3a's reserved defaults (ia-inventory section 4): Fit-selection and
+            // Duplicate. The chord-conflict note there confirms neither collides with the
+            // legacy regression list above.
+            ("view.zoom_selection", "Shift+F"),
+            ("edit.duplicate", "Ctrl+D"),
         ];
         for (command, text) in regression {
             assert_eq!(
