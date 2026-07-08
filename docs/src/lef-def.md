@@ -108,3 +108,43 @@ token per step over a finite stream, so no parse loops forever, and no collectio
 ever pre-sized from a count read out of the input. A statement that cannot be parsed
 is a clean `LefDefError` naming its line; a recoverable problem is a `LefDefWarning`
 and the rest of the design still imports.
+
+## Validated against a tool
+
+A subset importer is only trustworthy if its reading of a file matches what a real EDA
+tool reads from the same file. The `reticle-cli` `lefdef_oracle` module cross-checks the
+import against OpenROAD, a real place-and-route tool, run over the exact same LEF and DEF
+inside a pinned Docker container. It follows the external-oracle pattern ADR 0054 set for
+the TinyTapeout precheck: pin the tool image by digest, run it non-interactively over a
+mounted work directory, parse its structured output, and skip honestly (never fail) when
+Docker or the image is absent. ADR 0083 records the choice.
+
+The oracle is OpenROAD, bundled in `hpretl/iic-osic-tools:2025.01` (the same image the
+precheck pins). A short Tcl script does `read_lef` then `read_def` and prints four
+structural facts as `ORACLE <key>=<value>` lines that the parser reads back into an
+`OracleCounts`:
+
+| fact | reticle-lefdef | OpenROAD |
+|------|----------------|----------|
+| macros | cells other than the top design cell | library masters |
+| components | top cell placed instances | block instances |
+| pins | `DesignPin` count | block terminals |
+| die area | `die_area` box in DBU | `getDieArea` box in DBU |
+
+The cross-check is proven both ways. A faithful import matches the oracle on all four
+facts; a deliberately corrupted DEF (one component deleted) reports one fewer component,
+so the counts disagree, which proves the oracle actually discriminates rather than always
+agreeing. Two layers of test carry this: a parser-level test that always runs in the
+ordinary gate (no Docker) against committed OpenROAD output captured from the pinned
+image, and a live container test that runs OpenROAD when Docker and the image are present
+and skips honestly otherwise.
+
+Net-level routing is not compared: it is the richest and least standardized part of DEF,
+and the four facts above already discriminate a faithful import from a corrupted one. The
+die area is compared with a documented per-coordinate tolerance for the case where a tool
+reports it on a different unit grid; here the tolerance is zero, because both sides read
+DEF database units directly. To stay inside what OpenROAD's strict reader accepts, the
+committed fixtures omit the optional `BUSBITCHARS`/`DIVIDERCHAR` header lines (OpenROAD
+rejects the non-standard plural `DIVIDERCHARS`) and keep their routing via-free (an
+undefined via is a hard OpenROAD error). `reticle-lefdef`, being lenient, imports those
+same files without complaint.

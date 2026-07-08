@@ -1,0 +1,33 @@
+VERSION 5.8 ;
+DESIGN tinycore ;
+UNITS DISTANCE MICRONS 1000 ;
+
+DIEAREA ( 0 0 ) ( 20000 20000 ) ;
+
+ROW ROW_0 unithd 0 0 N DO 40 BY 1 STEP 460 0 ;
+ROW ROW_1 unithd 0 2720 FS DO 40 BY 1 STEP 460 0 ;
+
+COMPONENTS 2 ;
+  - u1 INV + PLACED ( 1000 0 ) N ;
+  - u2 BUF + PLACED ( 3000 2720 ) FS ;
+END COMPONENTS
+
+PINS 2 ;
+  - in0 + NET n_in + DIRECTION INPUT + USE SIGNAL
+     + LAYER met1 ( -70 -70 ) ( 70 70 )
+     + PLACED ( 0 5000 ) N ;
+  - out0 + NET n_out + DIRECTION OUTPUT + USE SIGNAL
+     + LAYER met1 ( -70 -70 ) ( 70 70 )
+     + PLACED ( 20000 5000 ) N ;
+END PINS
+
+NETS 2 ;
+  - n_in ( PIN in0 ) ( u1 A )
+    + USE SIGNAL
+    + ROUTED met1 ( 0 5000 ) ( 1200 5000 ) ;
+  - n_out ( u1 Y ) ( PIN out0 )
+    + USE SIGNAL
+    + ROUTED met1 ( 1100 1100 ) ( 20000 1100 ) ( * 5000 ) ;
+END NETS
+
+END DESIGN
