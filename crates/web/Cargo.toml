@@ -35,7 +35,9 @@ rkyv = "0.8.16"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 reticle-app = { workspace = true }
 eframe = "0.35.0"
+wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "Window",
     "Document",
@@ -43,5 +45,20 @@ web-sys = { version = "0.3", features = [
     "HtmlCanvasElement",
     "Location",
     "UrlSearchParams",
+    # The convert Web Worker (bin/convert_worker.rs): message plumbing to/from the
+    # main thread and the OPFS write of the finished .rtla, all in a worker scope.
+    "DedicatedWorkerGlobalScope",
+    "MessageEvent",
+    "WorkerNavigator",
+    "StorageManager",
+    "FileSystemDirectoryHandle",
+    "FileSystemFileHandle",
+    "FileSystemSyncAccessHandle",
+    "FileSystemGetFileOptions",
+    "FileSystemGetDirectoryOptions",
+    # The main-thread app spawns the worker and, on completion, opens the OPFS archive.
+    "Worker",
+    "WorkerOptions",
+    "WorkerType",
 ] }
 console_error_panic_hook = "0.1"
