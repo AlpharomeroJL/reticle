@@ -341,7 +341,7 @@ fn layer_manager(layers: &mut LayerState, ui: &mut egui::Ui) {
 
                     // Recolor via a picker button seeded with the current color.
                     let (r, g, b, a) = layers::rgba_components(row.color_rgba);
-                    let mut color = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
+                    let mut color = crate::theme::tokens::layer_rgba(r, g, b, a);
                     if ui.color_edit_button_srgba(&mut color).changed() {
                         recolor = Some((id, pack_rgba(color.r(), color.g(), color.b(), color.a())));
                     }
@@ -433,7 +433,7 @@ fn technology_editor(state: &mut TechEditorState, history: &mut History, ui: &mu
 }
 
 /// The color validation errors and parse errors are drawn in.
-const ERROR_COLOR: egui::Color32 = egui::Color32::from_rgb(0xD0, 0x40, 0x40);
+const ERROR_COLOR: egui::Color32 = crate::theme::tokens::DARK.danger;
 
 /// Draws the editable layer table: per-layer color, layer/datatype, and name.
 fn tech_layer_table(draft: &mut Technology, ui: &mut egui::Ui) {
@@ -446,7 +446,7 @@ fn tech_layer_table(draft: &mut Technology, ui: &mut egui::Ui) {
             for layer in &mut draft.layers {
                 ui.horizontal(|ui| {
                     let (r, g, b, a) = layers::rgba_components(layer.color_rgba);
-                    let mut color = egui::Color32::from_rgba_unmultiplied(r, g, b, a);
+                    let mut color = crate::theme::tokens::layer_rgba(r, g, b, a);
                     if ui.color_edit_button_srgba(&mut color).changed() {
                         layer.color_rgba = pack_rgba(color.r(), color.g(), color.b(), color.a());
                     }

@@ -11,11 +11,15 @@
 
 use crate::camera::ViewCamera;
 use crate::grid::GridSettings;
+use crate::theme::tokens::Density;
 use crate::tool::Tool;
 use crate::viewexport::Theme;
 use reticle_geometry::{LayerId, Point};
 
 /// A serializable snapshot of the app's view and UI state.
+// A flat persisted record: each bool is an independent view toggle, not a state
+// machine, so the excessive-bools lint does not apply.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, PartialEq, Debug)]
 pub struct SessionState {
     /// Camera center x, in DBU.
@@ -36,6 +40,13 @@ pub struct SessionState {
     pub hidden_layers: Vec<(u16, u16)>,
     /// The active egui theme (dark by default).
     pub theme: Theme,
+    /// The UI density applied to the egui style (comfortable by default). No
+    /// user-facing toggle ships this wave; lane 4C adds the Settings control in
+    /// Wave 2, and this key persists its choice.
+    pub ui_density: Density,
+    /// Whether functional motion is suppressed (reduced-motion preference). Off
+    /// by default; the theme zeroes animation time when it is on.
+    pub reduced_motion: bool,
     /// Whether the first-run tour has been shown. `false` on a fresh install, so
     /// the tour auto-starts once; set `true` after it finishes so it never shows
     /// again unprompted (the Help menu can still relaunch it). See [`crate::tour`].
@@ -54,20 +65,27 @@ impl Default for SessionState {
             grid_step: 100,
             hidden_layers: Vec::new(),
             theme: Theme::Dark,
+            ui_density: Density::Comfortable,
+            reduced_motion: false,
             tour_seen: false,
         }
     }
 }
 
 impl SessionState {
-    /// Builds a snapshot from the live camera, tool, grid, theme, hidden layers, and
-    /// the tour-seen flag.
+    /// Builds a snapshot from the live camera, tool, grid, theme, UI density and
+    /// reduced-motion preferences, hidden layers, and the tour-seen flag.
+    // The arguments are the independent pieces of view state the app owns; a
+    // wrapper struct would just move the same fields around.
+    #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn capture(
         camera: &ViewCamera,
         tool: Tool,
         grid: GridSettings,
         theme: Theme,
+        ui_density: Density,
+        reduced_motion: bool,
         hidden: &[LayerId],
         tour_seen: bool,
     ) -> Self {
@@ -82,6 +100,8 @@ impl SessionState {
             grid_step: grid.base_step_dbu,
             hidden_layers: hidden.iter().map(|l| (l.layer, l.datatype)).collect(),
             theme,
+            ui_density,
+            reduced_motion,
             tour_seen,
         }
     }
@@ -129,7 +149,7 @@ impl SessionState {
             .map(|(l, d)| format!("{l}/{d}"))
             .collect();
         format!(
-            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nhidden={}\ntour_seen={}\n",
+            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nui_density={}\nreduced_motion={}\nhidden={}\ntour_seen={}\n",
             self.center_x,
             self.center_y,
             self.pixels_per_dbu,
@@ -138,6 +158,8 @@ impl SessionState {
             self.snap_enabled,
             self.grid_step,
             self.theme.tag(),
+            self.ui_density.tag(),
+            self.reduced_motion,
             hidden.join(","),
             self.tour_seen
         )
@@ -184,6 +206,8 @@ impl SessionState {
                     }
                 }
                 "theme" => s.theme = Theme::from_tag(value),
+                "ui_density" => s.ui_density = Density::from_tag(value),
+                "reduced_motion" => s.reduced_motion = value == "true",
                 "hidden" => s.hidden_layers = parse_hidden(value),
                 "tour_seen" => s.tour_seen = value == "true",
                 _ => {}
@@ -303,6 +327,8 @@ mod tests {
             grid_step: 250,
             hidden_layers: vec![(4, 0), (5, 0)],
             theme: Theme::Light,
+            ui_density: Density::Compact,
+            reduced_motion: true,
             tour_seen: true,
         }
     }
@@ -323,6 +349,8 @@ mod tests {
             Tool::Pan,
             grid,
             Theme::Light,
+            Density::Compact,
+            true,
             &[LayerId::new(3, 0)],
             true,
         );
@@ -331,8 +359,40 @@ mod tests {
         assert!((restored.pixels_per_dbu() - 4.0).abs() < 1e-9);
         assert_eq!(s.tool, Tool::Pan);
         assert_eq!(s.theme(), Theme::Light);
+        assert_eq!(s.ui_density, Density::Compact);
+        assert!(s.reduced_motion, "capture carries the reduced-motion flag");
         assert_eq!(s.hidden_layers(), vec![LayerId::new(3, 0)]);
         assert!(s.tour_seen, "capture carries the tour-seen flag through");
+    }
+
+    #[test]
+    fn ui_prefs_round_trip_and_default() {
+        // The new density and reduced-motion keys round-trip through the text
+        // format...
+        let s = SessionState {
+            ui_density: Density::Compact,
+            reduced_motion: true,
+            ..SessionState::default()
+        };
+        let parsed = SessionState::from_text(&s.to_text()).expect("parses");
+        assert_eq!(parsed.ui_density, Density::Compact);
+        assert!(parsed.reduced_motion);
+        // ...and an older file without them keeps the comfortable, motion-on
+        // defaults (unknown-key tolerance makes the addition non-breaking).
+        let older = SessionState::from_text("center_x=1\n").expect("parses");
+        assert_eq!(older.ui_density, Density::Comfortable);
+        assert!(!older.reduced_motion);
+    }
+
+    #[test]
+    fn retired_light_theme_tag_still_parses() {
+        // A v8.0 session file selecting the removed light theme must still load
+        // (ADR 0095: the tag is tolerated forever and resolves to dark visuals).
+        let s = SessionState::from_text("theme=light\n").expect("parses");
+        assert_eq!(s.theme, Theme::Light);
+        // And it survives a round-trip so re-saving does not drop the tag.
+        let again = SessionState::from_text(&s.to_text()).expect("parses");
+        assert_eq!(again.theme, Theme::Light);
     }
 
     #[test]

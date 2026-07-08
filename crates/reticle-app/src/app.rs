@@ -8,9 +8,7 @@
 //! code here is deliberately thin glue plus painting.
 
 use eframe::egui;
-use egui::{
-    Align2, Color32, FontId, Pos2, Rect as EguiRect, Sense, Shape, Stroke, StrokeKind, Vec2,
-};
+use egui::{Align2, Color32, Pos2, Rect as EguiRect, Sense, Shape, Stroke, StrokeKind, Vec2};
 
 use reticle_geometry::{Endcap, LayerId, Point, Rect, Shape as _};
 use reticle_model::{DrawShape, LayerInfo, ShapeKind, Technology};
@@ -43,6 +41,10 @@ use crate::replay::ReplayTheater;
 use crate::selection::{self, Selection};
 use crate::snap::{self, Guide, SnapHint, SnapState};
 use crate::tech_editor::TechEditorState;
+use crate::theme::{
+    self,
+    tokens::{CANVAS, DARK},
+};
 use crate::tool::{Tool, ToolState};
 use crate::tour::{Tour, TourTarget};
 use crate::usecases::{Scenario, UseCase};
@@ -495,10 +497,20 @@ pub struct App {
     start_screen: bool,
 
     /// View and export polish: the egui theme, per-document camera bookmarks, the
-    /// export scope/format, and the print-style monochrome toggle. The theme is
-    /// applied to the egui `Visuals` each frame and the whole struct persists with
-    /// the session view state (see [`crate::viewexport`]).
+    /// export scope/format, and the print-style monochrome toggle. The whole
+    /// struct persists with the session view state (see [`crate::viewexport`]).
     view_export: crate::viewexport::ViewExport,
+
+    /// The UI density feeding the theme (ADR 0095). Loaded from the session; no
+    /// user-facing toggle this wave (lane 4C adds the Settings control in Wave 2).
+    ui_density: crate::theme::tokens::Density,
+    /// Whether functional motion is suppressed. Loaded from the session; zeroes
+    /// the theme's animation time when set.
+    reduced_motion: bool,
+    /// Set when the applied egui style needs a re-apply (density or reduced-motion
+    /// change). Starts `true` so the theme is installed on the first frame instead
+    /// of per frame; see [`App::ui`].
+    theme_dirty: bool,
 
     // ---- Lane 4A: first-run tour --------------------------------------------
     /// The first-run tour state machine (pure; see [`crate::tour`]). Auto-starts on
@@ -713,6 +725,10 @@ impl App {
         let expanded = Arc::new(retained.expand());
         // Build the outline before `doc` is moved into the history below.
         let outline = OutlineTree::build(&doc);
+        // The theme's density and reduced-motion preference come from the saved
+        // session (defaults on a fresh install or the web); the boot styling hook
+        // in `ui` applies them on the first frame.
+        let (ui_density, reduced_motion) = boot_ui_prefs();
         Self {
             renderer: WgpuRenderer::new(),
             document,
@@ -807,6 +823,9 @@ impl App {
             // straight into the theater and never shows it.
             start_screen: start_view == StartView::Editor,
             view_export: crate::viewexport::ViewExport::new(),
+            ui_density,
+            reduced_motion,
+            theme_dirty: true,
             tour: Tour::from_seen(tour_already_seen()),
             #[cfg(not(target_arch = "wasm32"))]
             capture: None,
@@ -1393,20 +1412,20 @@ impl App {
             egui::Id::new("drop_affordance"),
         ));
         // Dim the page and draw an inset dashed frame to read as a drop zone.
-        painter.rect_filled(screen, 0.0, Color32::from_rgba_unmultiplied(8, 10, 16, 180));
+        painter.rect_filled(screen, 0.0, CANVAS.scrim);
         let inset = screen.shrink(24.0);
         painter.rect_stroke(
             inset,
             12.0,
-            Stroke::new(3.0, Color32::from_rgb(120, 170, 255)),
+            Stroke::new(3.0, CANVAS.drop_frame),
             StrokeKind::Inside,
         );
         painter.text(
             screen.center(),
             Align2::CENTER_CENTER,
             "Drop a .gds or .oas file to open it",
-            FontId::proportional(22.0),
-            Color32::from_rgb(220, 230, 245),
+            egui::TextStyle::Heading.resolve(&ctx.style_of(egui::Theme::Dark)),
+            CANVAS.hud_text,
         );
     }
 
@@ -1464,7 +1483,7 @@ impl App {
                     .open(&mut open)
                     .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
                     .show(ctx, |ui| {
-                        ui.colored_label(Color32::from_rgb(240, 150, 150), &message);
+                        ui.colored_label(DARK.danger, &message);
                         ui.separator();
                         if ui.button("Dismiss").clicked() {
                             self.load_progress = LoadProgress::Idle;
@@ -2610,7 +2629,7 @@ impl App {
             painter.rect_stroke(
                 rect,
                 4.0,
-                Stroke::new(3.0, Color32::from_rgb(255, 196, 0)),
+                Stroke::new(3.0, CANVAS.tour_highlight),
                 StrokeKind::Outside,
             );
         }
@@ -3007,7 +3026,7 @@ impl App {
                         let (rect, _) =
                             ui.allocate_exact_size(Vec2::new(14.0, 14.0), Sense::hover());
                         ui.painter()
-                            .rect_filled(rect, 2.0, Color32::from_rgb(r, g, b));
+                            .rect_filled(rect, 2.0, theme::tokens::layer_rgb(r, g, b));
                         ui.checkbox(&mut row.visible, &row.name);
                     });
                 }
@@ -3076,7 +3095,7 @@ impl App {
             self.run_filter_query();
         }
         if !self.search.error.is_empty() {
-            ui.colored_label(Color32::from_rgb(230, 120, 120), &self.search.error);
+            ui.colored_label(DARK.danger, &self.search.error);
         }
 
         ui.separator();
@@ -3804,7 +3823,7 @@ impl App {
                 }
             }
             Err(err) => {
-                ui.colored_label(egui::Color32::from_rgb(255, 140, 90), err);
+                ui.colored_label(DARK.danger, err);
                 ui.add_enabled(false, egui::Button::new("Generate"));
             }
         }
@@ -4367,7 +4386,7 @@ impl App {
             self.load_history_entry(&reference);
         }
         if !self.agent_history.error.is_empty() {
-            ui.colored_label(Color32::from_rgb(255, 120, 120), &self.agent_history.error);
+            ui.colored_label(DARK.danger, &self.agent_history.error);
         }
     }
 
@@ -4493,7 +4512,7 @@ impl App {
                 ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for w in &self.open_warnings {
-                        ui.colored_label(Color32::from_rgb(230, 190, 90), &w.summary)
+                        ui.colored_label(DARK.warning, &w.summary)
                             .on_hover_text(&w.detail);
                     }
                 });
@@ -4601,7 +4620,7 @@ impl App {
             }
         });
         if !self.replay_error.is_empty() {
-            ui.colored_label(Color32::from_rgb(255, 120, 120), &self.replay_error);
+            ui.colored_label(DARK.danger, &self.replay_error);
         }
     }
 
@@ -4706,15 +4725,15 @@ impl App {
         let size = Vec2::new(ui.available_width().max(160.0), 240.0);
         let (response, painter) = ui.allocate_painter(size, Sense::hover());
         let rect = response.rect;
-        painter.rect_filled(rect, 4.0, Color32::from_rgb(12, 14, 18));
+        painter.rect_filled(rect, 4.0, DARK.bg_input);
         let shapes = self.replay.flattened_shapes();
         let Some(bbox) = shapes_bbox(&shapes) else {
             painter.text(
                 rect.center(),
                 Align2::CENTER_CENTER,
                 "Nothing drawn yet",
-                FontId::proportional(12.0),
-                Color32::from_rgb(120, 126, 140),
+                theme::apply::hud_body(self.ui_density),
+                CANVAS.hud_text_dim,
             );
             return;
         };
@@ -4731,14 +4750,14 @@ impl App {
                 .layers
                 .iter()
                 .find(|l| l.id == layer)
-                .map_or(Color32::from_rgb(150, 150, 150), |l| {
+                .map_or(CANVAS.layer_fallback, |l| {
                     let (r, g, b, _) = layers::rgba_components(l.color_rgba);
-                    Color32::from_rgb(r, g, b)
+                    theme::tokens::layer_rgb(r, g, b)
                 })
         };
         for shape in &shapes {
             let base = color_of(shape.layer);
-            let fill = Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 170);
+            let fill = theme::tokens::with_alpha(base, 170);
             let stroke = Stroke::new(1.0, base);
             match &shape.kind {
                 ShapeKind::Rect(r) => {
@@ -4761,7 +4780,7 @@ impl App {
             }
         }
         // The last verify's markers, in the DRC overlay's alarm red.
-        let marker = Stroke::new(2.0, Color32::from_rgb(255, 90, 90));
+        let marker = Stroke::new(2.0, CANVAS.drc_violation);
         for v in self.replay.last_violations() {
             let e =
                 EguiRect::from_two_pos(to_pos(v.location.min), to_pos(v.location.max)).expand(2.0);
@@ -4772,8 +4791,8 @@ impl App {
                 Pos2::new(rect.left() + 8.0, rect.top() + 6.0),
                 Align2::LEFT_TOP,
                 cell,
-                FontId::monospace(10.0),
-                Color32::from_rgb(150, 156, 170),
+                theme::apply::hud_mono(self.ui_density),
+                CANVAS.hud_text_dim,
             );
         }
     }
@@ -4788,7 +4807,7 @@ impl App {
             return;
         };
         let p = self.world_pos_to_screen(screen, world);
-        let color = Color32::from_rgb(235, 80, 220);
+        let color = CANVAS.agent_cursor;
         let stroke = Stroke::new(2.0, color);
         painter.circle_stroke(p, 9.0, stroke);
         painter.circle_filled(p, 3.0, color);
@@ -4806,7 +4825,7 @@ impl App {
             Pos2::new(p.x + 15.0, p.y - 12.0),
             Align2::LEFT_CENTER,
             reticle_agent_api::AGENT_ACTOR,
-            FontId::proportional(11.0),
+            theme::apply::hud_body(self.ui_density),
             color,
         );
     }
@@ -4959,16 +4978,9 @@ impl App {
     fn view_export_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("View and export");
 
-        // Theme toggle.
-        ui.horizontal(|ui| {
-            ui.label(format!("Theme: {}", self.view_export.theme.label()));
-            if ui.button("Toggle theme").clicked() {
-                let now = self.view_export.toggle_theme();
-                self.status.set(format!("Theme: {}", now.label()));
-            }
-        });
-
-        ui.separator();
+        // The stock-egui light toggle is retired: v8.1 ships one tokened dark
+        // theme applied at boot from the theme module (ADR 0095). A future light
+        // variant is a second token table, not a UI switch here.
 
         // Camera bookmarks.
         ui.label("View bookmarks");
@@ -5421,7 +5433,7 @@ impl App {
         let rect = response.rect;
 
         // Background (covers every pane and the divider).
-        base_painter.rect_filled(rect, 0.0, Color32::from_rgb(16, 18, 22));
+        base_painter.rect_filled(rect, 0.0, DARK.bg_canvas);
 
         // Pane layout over the shared document. The rest of this method edits and
         // draws the *focused* pane, so `screen` is that pane's rectangle (the whole
@@ -5554,7 +5566,7 @@ impl App {
             base_painter.rect_stroke(
                 egui_rect_of(&screen),
                 0.0,
-                Stroke::new(1.5, Color32::from_rgb(110, 160, 255)),
+                Stroke::new(1.5, CANVAS.pane_focus),
                 StrokeKind::Middle,
             );
         }
@@ -5593,7 +5605,7 @@ impl App {
     /// deliberately stay on the CPU painter. Tools, overlays, and edits apply only
     /// to the focused pane; a click here focuses the pane first.
     fn draw_unfocused_panes(&mut self, painter: &egui::Painter, panes: &[ScreenRect]) {
-        let border = Stroke::new(1.0, Color32::from_rgb(70, 76, 90));
+        let border = Stroke::new(1.0, CANVAS.pane_border);
         for (i, pane) in panes.iter().enumerate() {
             if i == self.viewports.focused() {
                 continue;
@@ -6144,7 +6156,7 @@ impl App {
         let ppd = self.camera.pixels_per_dbu();
         let step = self.grid.display_step_dbu(ppd);
         let world = self.camera.visible_world_rect(screen);
-        let color = Color32::from_rgb(34, 38, 46);
+        let color = CANVAS.grid_line;
         let stroke = Stroke::new(1.0, color);
 
         for x in grid::grid_lines(world.min.x, world.max.x, step) {
@@ -6173,7 +6185,7 @@ impl App {
         }
 
         // Emphasize the world axes.
-        let axis = Stroke::new(1.5, Color32::from_rgb(60, 66, 78));
+        let axis = Stroke::new(1.5, CANVAS.grid_axis);
         let (ox, oy) = self.camera.world_to_screen(screen, Point::ORIGIN);
         painter.line_segment(
             [
@@ -6201,7 +6213,7 @@ impl App {
                 continue;
             }
             let (r, g, b, a) = self.layer_color(shape.layer);
-            let fill = Color32::from_rgba_unmultiplied(r, g, b, a);
+            let fill = theme::tokens::layer_rgba(r, g, b, a);
             let selected = self.selection.contains(idx);
             self.draw_one_shape(painter, screen, shape, fill, selected);
         }
@@ -6285,7 +6297,7 @@ impl App {
                 continue;
             }
             let (red, green, blue, alpha) = self.layer_color(layer);
-            let fill = Color32::from_rgba_unmultiplied(red, green, blue, alpha);
+            let fill = theme::tokens::layer_rgba(red, green, blue, alpha);
             let dst = self.world_rect_to_screen(screen, record.rect.to_rect());
             painter.rect_filled(dst, 0.0, fill);
             painter.rect_stroke(
@@ -6315,15 +6327,15 @@ impl App {
             Pos2::new(x - 6.0, top - 6.0),
             egui::vec2(210.0, pad * 2.0 + line_h * lines.len() as f32),
         );
-        painter.rect_filled(panel, 5.0, Color32::from_rgba_unmultiplied(10, 12, 16, 205));
+        painter.rect_filled(panel, 5.0, CANVAS.hud_panel);
         let mut y = top;
         for line in &lines {
             painter.text(
                 Pos2::new(x, y),
                 egui::Align2::LEFT_TOP,
                 line,
-                egui::FontId::monospace(12.0),
-                Color32::from_rgb(180, 220, 255),
+                theme::apply::hud_mono(self.ui_density),
+                CANVAS.hud_text,
             );
             y += line_h;
         }
@@ -6409,7 +6421,7 @@ impl App {
         selected: bool,
     ) {
         let outline = if selected {
-            Stroke::new(2.0, Color32::from_rgb(255, 240, 120))
+            Stroke::new(2.0, CANVAS.selection)
         } else {
             Stroke::new(1.0, fill.gamma_multiply(1.4))
         };
@@ -6440,7 +6452,7 @@ impl App {
                     let w =
                         (f64::from(path.width()) * self.camera.pixels_per_dbu()).max(1.0) as f32;
                     let stroke = if selected {
-                        Stroke::new(w.max(2.0), Color32::from_rgb(255, 240, 120))
+                        Stroke::new(w.max(2.0), CANVAS.selection)
                     } else {
                         Stroke::new(w, fill)
                     };
@@ -6452,8 +6464,8 @@ impl App {
 
     /// Draws cell bounding boxes for the low-zoom level of detail.
     fn draw_cell_boxes(&self, painter: &egui::Painter, screen: &ScreenRect, viewport: Rect) {
-        let stroke = Stroke::new(1.0, Color32::from_rgb(120, 140, 180));
-        let fill = Color32::from_rgba_unmultiplied(60, 80, 120, 40);
+        let stroke = Stroke::new(1.0, CANVAS.cell_box);
+        let fill = CANVAS.cell_box_fill;
         for cb in culling::visible_cell_boxes(self.history.document(), &self.top_cell, viewport) {
             let e = self.world_rect_to_screen(screen, cb.bbox);
             painter.rect_filled(e, 0.0, fill);
@@ -6471,9 +6483,9 @@ impl App {
             return;
         }
         let shapes = self.scene.shapes();
-        let color = Color32::from_rgb(120, 230, 255);
+        let color = CANVAS.net_highlight;
         let stroke = Stroke::new(2.5, color);
-        let fill = Color32::from_rgba_unmultiplied(120, 230, 255, 60);
+        let fill = theme::tokens::with_alpha(color, 60);
         for &idx in self.netlight.highlighted() {
             let Some(shape) = shapes.get(idx) else {
                 continue;
@@ -6497,9 +6509,9 @@ impl App {
         if preview.is_empty() {
             return;
         }
-        let color = Color32::from_rgb(180, 210, 120);
+        let color = CANVAS.array_preview;
         let stroke = Stroke::new(1.5, color);
-        let fill = Color32::from_rgba_unmultiplied(180, 210, 120, 40);
+        let fill = theme::tokens::with_alpha(color, 40);
         for shape in &preview {
             if !shape.bounding_box().intersects(&viewport) {
                 continue;
@@ -6521,9 +6533,9 @@ impl App {
         if preview.is_empty() {
             return;
         }
-        let color = Color32::from_rgb(120, 190, 235);
+        let color = CANVAS.generate_preview;
         let stroke = Stroke::new(1.5, color);
-        let fill = Color32::from_rgba_unmultiplied(120, 190, 235, 40);
+        let fill = theme::tokens::with_alpha(color, 40);
         for shape in &preview {
             if !shape.bounding_box().intersects(&viewport) {
                 continue;
@@ -6539,8 +6551,8 @@ impl App {
     /// a hotter color and slightly inflated so it stands out.
     fn draw_drc_markers(&self, painter: &egui::Painter, screen: &ScreenRect) {
         let selected = self.drc.selected();
-        let normal = Stroke::new(2.0, Color32::from_rgb(255, 90, 90));
-        let hot = Stroke::new(3.0, Color32::from_rgb(255, 200, 60));
+        let normal = Stroke::new(2.0, CANVAS.drc_violation);
+        let hot = Stroke::new(3.0, CANVAS.drc_selected);
         for (i, v) in self.drc.violations().iter().enumerate() {
             let is_sel = selected == Some(i);
             let e = self.world_rect_to_screen(screen, v.location);
@@ -6569,7 +6581,7 @@ impl App {
         if self.live_drc.is_empty() {
             return;
         }
-        let stroke = Stroke::new(1.5, Color32::from_rgb(255, 120, 90));
+        let stroke = Stroke::new(1.5, CANVAS.live_drc);
         for v in self.live_drc.violations() {
             let e = self.world_rect_to_screen(screen, v.location);
             // Ride just beneath the offending region's bottom edge.
@@ -6597,16 +6609,16 @@ impl App {
         if !self.diff_overlay.should_paint() {
             return;
         }
-        let added = Color32::from_rgb(90, 220, 120);
-        let removed = Color32::from_rgb(255, 90, 90);
-        let changed = Color32::from_rgb(255, 190, 60);
+        let added = CANVAS.diff_added;
+        let removed = CANVAS.diff_removed;
+        let changed = CANVAS.diff_changed;
         for (shapes, color) in [
             (self.diff_overlay.added(), added),
             (self.diff_overlay.removed(), removed),
             (self.diff_overlay.changed(), changed),
         ] {
             let stroke = Stroke::new(2.0, color);
-            let fill = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 40);
+            let fill = theme::tokens::with_alpha(color, 40);
             for shape in shapes {
                 // Inflate a touch so a zero-area shape still shows as a small box.
                 let e = self.world_rect_to_screen(screen, shape.rect).expand(1.0);
@@ -6627,8 +6639,8 @@ impl App {
             return;
         }
         let doc = self.history.document();
-        let base = Color32::from_rgb(90, 160, 255);
-        let accent = Color32::from_rgb(255, 210, 90);
+        let base = CANVAS.comment_pin;
+        let accent = CANVAS.comment_pin_selected;
         let selected = self.comment_pins.selected();
         for (i, comment) in self.comment_pins.comments().iter().enumerate() {
             let Some(anchor) = comment_pins::anchor_point(doc, &comment.anchor_ref) else {
@@ -6648,7 +6660,7 @@ impl App {
                 center,
                 egui::Align2::CENTER_CENTER,
                 format!("{}", i + 1),
-                egui::FontId::proportional(radius),
+                theme::apply::proportional_sized(radius),
                 Color32::BLACK,
             );
         }
@@ -6699,7 +6711,7 @@ impl App {
     /// Draws top/left rulers with tick marks and DBU labels.
     fn draw_rulers(&self, painter: &egui::Painter, screen: &ScreenRect) {
         let bar = RULER_BAR;
-        let bg = Color32::from_rgb(24, 27, 33);
+        let bg = CANVAS.ruler_bg;
         let top_bar = EguiRect::from_min_size(
             Pos2::new(screen.left, screen.top),
             Vec2::new(screen.width, bar),
@@ -6714,9 +6726,9 @@ impl App {
         let ppd = self.camera.pixels_per_dbu();
         let step = self.grid.display_step_dbu(ppd);
         let world = self.camera.visible_world_rect(screen);
-        let tick = Stroke::new(1.0, Color32::from_rgb(90, 96, 110));
-        let font = FontId::monospace(9.0);
-        let label = Color32::from_rgb(170, 176, 190);
+        let tick = Stroke::new(1.0, CANVAS.ruler_tick);
+        let font = theme::apply::hud_mono(self.ui_density);
+        let label = CANVAS.hud_label;
 
         for x in grid::grid_lines(world.min.x, world.max.x, step) {
             let (sx, _) = self.camera.world_to_screen(screen, Point::new(x, 0));
@@ -6761,7 +6773,7 @@ impl App {
     /// guide being actively dragged has no committed line yet, so nothing special is
     /// drawn for it here; it appears once released.
     fn draw_guides(&self, painter: &egui::Painter, screen: &ScreenRect) {
-        let stroke = Stroke::new(1.0, Color32::from_rgb(80, 200, 220));
+        let stroke = Stroke::new(1.0, CANVAS.guide);
         for g in &self.snap.guides {
             match g.axis {
                 snap::Axis::Horizontal => {
@@ -6802,11 +6814,11 @@ impl App {
             return;
         };
         let color = match hint.kind {
-            snap::SnapKind::Vertex => Color32::from_rgb(120, 230, 140),
-            snap::SnapKind::Midpoint => Color32::from_rgb(230, 200, 110),
-            snap::SnapKind::Center => Color32::from_rgb(220, 140, 220),
-            snap::SnapKind::Edge => Color32::from_rgb(120, 190, 240),
-            snap::SnapKind::Guide => Color32::from_rgb(80, 200, 220),
+            snap::SnapKind::Vertex => CANVAS.snap_vertex,
+            snap::SnapKind::Midpoint => CANVAS.snap_midpoint,
+            snap::SnapKind::Center => CANVAS.snap_center,
+            snap::SnapKind::Edge => CANVAS.snap_edge,
+            snap::SnapKind::Guide => CANVAS.guide,
         };
         let c = self.world_pos_to_screen(screen, hint.point);
         // A diamond (a rotated square) drawn as four segments around the point.
@@ -6825,14 +6837,14 @@ impl App {
             Pos2::new(c.x + r + 3.0, c.y - r - 2.0),
             Align2::LEFT_BOTTOM,
             hint.kind.label(),
-            FontId::monospace(10.0),
+            theme::apply::hud_mono(self.ui_density),
             color,
         );
     }
 
     /// Draws the in-progress or completed measurement overlay.
     fn draw_measure(&self, painter: &egui::Painter, screen: &ScreenRect) {
-        let color = Color32::from_rgb(255, 210, 90);
+        let color = CANVAS.measure;
         let stroke = Stroke::new(1.5, color);
         if let Some(m) = self.tools.measurement() {
             let a = self.world_pos_to_screen(screen, m.start);
@@ -6849,7 +6861,7 @@ impl App {
                     m.distance_dbu(),
                     m.distance_microns()
                 ),
-                FontId::monospace(11.0),
+                theme::apply::hud_mono(self.ui_density),
                 color,
             );
         } else if let Some(start) = self.tools.measure_start() {
@@ -6874,7 +6886,7 @@ impl App {
         response: &egui::Response,
         ctx: &egui::Context,
     ) {
-        let accent = Color32::from_rgb(120, 200, 255);
+        let accent = CANVAS.draw_preview;
         let stroke = Stroke::new(1.5, accent);
         match self.tools.active() {
             Tool::DrawRect => {
@@ -6962,7 +6974,7 @@ impl App {
     /// Every layout and formatting decision lives in [`crate::labels`]; this method
     /// only converts world rectangles to screen space and issues the text calls.
     fn draw_labels(&self, painter: &egui::Painter, screen: &ScreenRect) {
-        let font = FontId::monospace(labels::LABEL_FONT_PX);
+        let font = theme::apply::mono_sized(labels::LABEL_FONT_PX);
 
         // Cell names, centered in each placement outline, at the cell-box LOD.
         if culling::lod_for_zoom(self.camera.pixels_per_dbu()) == DetailLevel::CellBoxes {
@@ -6981,7 +6993,7 @@ impl App {
                         }
                     })
                     .collect();
-            let name_color = Color32::from_rgb(200, 210, 230);
+            let name_color = CANVAS.hud_text;
             for label in labels::place_box_labels(&boxes, labels::LABEL_FONT_PX) {
                 painter.text(
                     Pos2::new(label.x, label.y),
@@ -7020,7 +7032,7 @@ impl App {
                 Align2::CENTER_CENTER,
                 text,
                 font.clone(),
-                Color32::from_rgb(255, 240, 120),
+                CANVAS.selection,
             );
         }
 
@@ -7034,7 +7046,7 @@ impl App {
                 Align2::LEFT_BOTTOM,
                 text,
                 font,
-                Color32::from_rgb(255, 210, 90),
+                CANVAS.measure,
             );
         }
     }
@@ -7056,11 +7068,11 @@ impl App {
             Pos2::new(layout.panel.left, layout.panel.top),
             Vec2::new(layout.panel.width, layout.panel.height),
         );
-        painter.rect_filled(panel, 3.0, Color32::from_rgba_unmultiplied(20, 23, 28, 230));
+        painter.rect_filled(panel, 3.0, CANVAS.hud_panel);
         painter.rect_stroke(
             panel,
             3.0,
-            Stroke::new(1.0, Color32::from_rgb(70, 76, 90)),
+            Stroke::new(1.0, CANVAS.pane_border),
             StrokeKind::Middle,
         );
 
@@ -7070,13 +7082,13 @@ impl App {
         painter.rect_stroke(
             doc_rect,
             0.0,
-            Stroke::new(1.0, Color32::from_rgb(90, 100, 120)),
+            Stroke::new(1.0, CANVAS.minimap_doc),
             StrokeKind::Middle,
         );
 
         // Placement boxes give the overview its silhouette; cap the count so a
         // huge document cannot make the minimap the most expensive draw call.
-        let fill = Color32::from_rgba_unmultiplied(90, 120, 170, 90);
+        let fill = CANVAS.minimap_fill;
         for cb in culling::visible_cell_boxes(self.history.document(), &self.top_cell, bounds)
             .into_iter()
             .take(256)
@@ -7094,7 +7106,7 @@ impl App {
         painter.rect_stroke(
             EguiRect::from_min_size(Pos2::new(vx, vy), Vec2::new(vw, vh)),
             0.0,
-            Stroke::new(1.5, Color32::from_rgb(255, 210, 90)),
+            Stroke::new(1.5, CANVAS.minimap_viewport),
             StrokeKind::Middle,
         );
     }
@@ -7104,7 +7116,7 @@ impl App {
     fn draw_presence(&self, painter: &egui::Painter, screen: &ScreenRect) {
         for (_, presence) in self.document.awareness().iter() {
             let (r, g, b, _) = layers::rgba_components(presence.color_rgba);
-            let color = Color32::from_rgb(r, g, b);
+            let color = theme::tokens::layer_rgb(r, g, b);
             let p = self.world_pos_to_screen(screen, presence.cursor);
             painter.circle_filled(p, 4.0, color);
             if !presence.display_name.is_empty() {
@@ -7112,7 +7124,7 @@ impl App {
                     Pos2::new(p.x + 6.0, p.y),
                     Align2::LEFT_CENTER,
                     &presence.display_name,
-                    FontId::proportional(11.0),
+                    theme::apply::hud_body(self.ui_density),
                     color,
                 );
             }
@@ -7194,13 +7206,16 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        // Apply the chosen theme to the egui visuals for this frame (dark by
-        // default; the view/export panel toggles it). Setting it every frame keeps
-        // the visuals in sync after a toggle or a restored session.
-        ctx.set_visuals(match self.view_export.theme {
-            crate::viewexport::Theme::Dark => egui::Visuals::dark(),
-            crate::viewexport::Theme::Light => egui::Visuals::light(),
-        });
+        // Boot styling hook (ADR 0095): install the tokened dark style once, not
+        // per frame. `theme_dirty` starts true so the first frame applies it, and
+        // a future density or reduced-motion change re-applies by setting the flag
+        // again (lane 4C's Settings dialog in Wave 2). The theme module pins both
+        // egui theme slots to the dark style, so an OS light preference cannot
+        // resurrect the retired stock-light look.
+        if self.theme_dirty {
+            crate::theme::apply::apply(&ctx, self.ui_density, self.reduced_motion);
+            self.theme_dirty = false;
+        }
 
         // Sample this frame's duration up front: both the Start screen and the editor
         // age notification toasts by it, so it is computed before either branch.
@@ -7365,6 +7380,8 @@ impl eframe::App for App {
                 self.tools.active(),
                 self.grid,
                 self.view_export.theme,
+                self.ui_density,
+                self.reduced_motion,
                 &hidden,
                 self.tour_seen(),
             );
@@ -7529,6 +7546,26 @@ fn tour_already_seen() -> bool {
     true
 }
 
+/// The UI density and reduced-motion preference to boot the theme with.
+///
+/// On native these come from the saved session; a missing or unreadable session
+/// falls back to the comfortable, motion-on defaults. There is no filesystem on
+/// `wasm32`, so the web bundle always boots with the defaults.
+#[cfg(not(target_arch = "wasm32"))]
+fn boot_ui_prefs() -> (crate::theme::tokens::Density, bool) {
+    crate::session::load().map_or_else(
+        || (crate::theme::tokens::Density::default(), false),
+        |s| (s.ui_density, s.reduced_motion),
+    )
+}
+
+/// The UI density and reduced-motion preference to boot the theme with, on the
+/// web (always the defaults; see the native variant).
+#[cfg(target_arch = "wasm32")]
+fn boot_ui_prefs() -> (crate::theme::tokens::Density, bool) {
+    (crate::theme::tokens::Density::default(), false)
+}
+
 /// Converts a canvas [`ScreenRect`] to an egui rectangle.
 fn egui_rect_of(screen: &ScreenRect) -> EguiRect {
     EguiRect::from_min_size(
@@ -7544,9 +7581,9 @@ fn egui_rect_of(screen: &ScreenRect) -> EguiRect {
 /// glue rather than in the pure [`crate::notify`] model.
 fn severity_color(severity: crate::notify::Severity) -> Color32 {
     match severity {
-        crate::notify::Severity::Info => Color32::from_rgb(120, 170, 235),
-        crate::notify::Severity::Warning => Color32::from_rgb(230, 190, 90),
-        crate::notify::Severity::Error => Color32::from_rgb(235, 110, 100),
+        crate::notify::Severity::Info => DARK.accent,
+        crate::notify::Severity::Warning => DARK.warning,
+        crate::notify::Severity::Error => DARK.danger,
     }
 }
 

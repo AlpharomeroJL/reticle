@@ -14,7 +14,7 @@
 //! merged, so abutting shapes read as one solid bar.
 
 use eframe::egui;
-use egui::{Align2, Color32, FontId, Pos2, Sense, Stroke, StrokeKind, Vec2};
+use egui::{Align2, Color32, Pos2, Sense, Stroke, StrokeKind, Vec2};
 
 use reticle_geometry::{Endcap, LayerId, Point, Rect};
 use reticle_model::{DrawShape, ShapeKind, Technology};
@@ -22,6 +22,10 @@ use reticle_render::{LayerSpan, layer_spans};
 use std::collections::HashMap;
 
 use crate::layers::{self, LayerState};
+use crate::theme::{
+    self,
+    tokens::{CANVAS, DARK},
+};
 
 /// One covered stretch of the cut line on one layer, in elevation coordinates.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -340,7 +344,7 @@ fn draw_section(
     let size = ui.available_size().max(Vec2::new(240.0, 140.0));
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, Color32::from_rgb(16, 18, 22));
+    painter.rect_filled(rect, 0.0, DARK.bg_canvas);
 
     // Elevation extents, padded so slabs never touch the frame.
     let z_min = intervals
@@ -382,8 +386,8 @@ fn draw_section(
     }
 
     // Axis labels: distance along the cut and the z range.
-    let label = Color32::from_rgb(170, 176, 190);
-    let font = FontId::monospace(9.0);
+    let label = CANVAS.hud_label;
+    let font = egui::TextStyle::Monospace.resolve(ui.style());
     painter.text(
         Pos2::new(left, rect.max.y - 2.0),
         Align2::LEFT_BOTTOM,
@@ -417,10 +421,10 @@ fn draw_section(
 /// The fill color for a layer's section bar, from the layer table (or gray).
 fn layer_color(layers: &LayerState, id: LayerId) -> Color32 {
     layers.rows().iter().find(|r| r.id == id).map_or(
-        Color32::from_rgba_unmultiplied(160, 160, 160, 220),
+        theme::tokens::with_alpha(CANVAS.layer_fallback, 220),
         |r| {
             let (red, green, blue, _) = layers::rgba_components(r.color_rgba);
-            Color32::from_rgba_unmultiplied(red, green, blue, 220)
+            theme::tokens::layer_rgba(red, green, blue, 220)
         },
     )
 }

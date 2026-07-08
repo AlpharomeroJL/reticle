@@ -78,27 +78,164 @@ pub const DARK: Tokens = Tokens {
 };
 
 /// Named canvas-overlay colors (not chrome; the technology table still owns
-/// layer colors). Lane 1A moves the remaining canvas literals here as it
-/// drains `app.rs`; the initial set covers the overlays the audit names.
+/// per-layer data colors). These are the colors the canvas overlays, HUDs, and
+/// annotations paint with. They are a distinct namespace from [`Tokens`] so
+/// data color never masquerades as chrome color, but they live here so the
+/// check-style lint has one legal home for every color literal and a palette
+/// change is still a one-file edit. Values are the shipped v8.0 overlay colors,
+/// preserved as lane 1A drained the literals (a handful of near-duplicate grays
+/// were unified to a single token). Semi-transparent members carry their alpha;
+/// only the [`Tokens`] chrome pairs are contrast-tested, so overlay alpha is
+/// allowed here.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CanvasTokens {
-    /// Selection outlines and handles on the canvas.
-    pub selection: Color32,
+    /// Background grid lines.
+    pub grid_line: Color32,
+    /// The emphasized world x/y axes.
+    pub grid_axis: Color32,
+    /// The border around an unfocused split pane and the minimap panel.
+    pub pane_border: Color32,
     /// The focused-pane border in split view.
     pub pane_focus: Color32,
-    /// Draggable ruler guides.
+    /// The top/left ruler bar fill.
+    pub ruler_bg: Color32,
+    /// Ruler tick marks.
+    pub ruler_tick: Color32,
+    /// Ruler and section-plot numeric labels.
+    pub hud_label: Color32,
+    /// Primary text on a canvas HUD/readout panel.
+    pub hud_text: Color32,
+    /// Secondary/dim text on a canvas HUD panel.
+    pub hud_text_dim: Color32,
+    /// Translucent backdrop behind a canvas HUD/readout panel.
+    pub hud_panel: Color32,
+    /// The full-window dim veil behind the file-drop affordance.
+    pub scrim: Color32,
+    /// The dashed frame of the file-drop affordance.
+    pub drop_frame: Color32,
+    /// The document-bounds outline in the minimap.
+    pub minimap_doc: Color32,
+    /// The translucent placement boxes in the minimap.
+    pub minimap_fill: Color32,
+    /// The camera-viewport rectangle in the minimap.
+    pub minimap_viewport: Color32,
+    /// The outline of selected geometry.
+    pub selection: Color32,
+    /// Cell-bounding-box outline at the low-zoom level of detail.
+    pub cell_box: Color32,
+    /// Translucent cell-bounding-box fill.
+    pub cell_box_fill: Color32,
+    /// The highlighted-net outline.
+    pub net_highlight: Color32,
+    /// The array-tool live preview.
+    pub array_preview: Color32,
+    /// The generate-tool live preview.
+    pub generate_preview: Color32,
+    /// The active drawing tool's rubber-band preview.
+    pub draw_preview: Color32,
+    /// A DRC violation marker (also the diff overlay's removed color).
+    pub drc_violation: Color32,
+    /// The selected DRC violation marker (hotter than the rest).
+    pub drc_selected: Color32,
+    /// The DRC-as-you-type underline squiggle.
+    pub live_drc: Color32,
+    /// Diff overlay: an added shape.
+    pub diff_added: Color32,
+    /// Diff overlay: a removed shape.
+    pub diff_removed: Color32,
+    /// Diff overlay: a changed shape.
+    pub diff_changed: Color32,
+    /// An anchored comment pin at rest.
+    pub comment_pin: Color32,
+    /// The selected comment pin.
+    pub comment_pin_selected: Color32,
+    /// The measurement overlay (line, handles, readout).
+    pub measure: Color32,
+    /// Draggable ruler guides and the snap "guide" indicator.
     pub guide: Color32,
+    /// Snap indicator: a vertex hit.
+    pub snap_vertex: Color32,
+    /// Snap indicator: an edge midpoint.
+    pub snap_midpoint: Color32,
+    /// Snap indicator: a bounding-box center.
+    pub snap_center: Color32,
+    /// Snap indicator: an edge hit.
+    pub snap_edge: Color32,
+    /// The agent's cursor crosshair.
+    pub agent_cursor: Color32,
     /// The first-run tour's highlight box.
     pub tour_highlight: Color32,
+    /// The neutral fallback fill for a layer with no table entry.
+    pub layer_fallback: Color32,
 }
 
 /// The shipped canvas-overlay palette.
 pub const CANVAS: CanvasTokens = CanvasTokens {
-    selection: Color32::from_rgb(110, 168, 254),
+    grid_line: Color32::from_rgb(34, 38, 46),
+    grid_axis: Color32::from_rgb(60, 66, 78),
+    pane_border: Color32::from_rgb(70, 76, 90),
     pane_focus: Color32::from_rgb(110, 160, 255),
-    guide: Color32::from_rgb(229, 192, 123),
+    ruler_bg: Color32::from_rgb(24, 27, 33),
+    ruler_tick: Color32::from_rgb(90, 96, 110),
+    hud_label: Color32::from_rgb(170, 176, 190),
+    hud_text: Color32::from_rgb(210, 224, 240),
+    hud_text_dim: Color32::from_rgb(150, 156, 170),
+    hud_panel: Color32::from_rgba_unmultiplied_const(16, 18, 22, 220),
+    scrim: Color32::from_rgba_unmultiplied_const(8, 10, 16, 180),
+    drop_frame: Color32::from_rgb(120, 170, 255),
+    minimap_doc: Color32::from_rgb(90, 100, 120),
+    minimap_fill: Color32::from_rgba_unmultiplied_const(90, 120, 170, 90),
+    minimap_viewport: Color32::from_rgb(255, 210, 90),
+    selection: Color32::from_rgb(255, 240, 120),
+    cell_box: Color32::from_rgb(120, 140, 180),
+    cell_box_fill: Color32::from_rgba_unmultiplied_const(60, 80, 120, 40),
+    net_highlight: Color32::from_rgb(120, 230, 255),
+    array_preview: Color32::from_rgb(180, 210, 120),
+    generate_preview: Color32::from_rgb(120, 190, 235),
+    draw_preview: Color32::from_rgb(120, 200, 255),
+    drc_violation: Color32::from_rgb(255, 90, 90),
+    drc_selected: Color32::from_rgb(255, 200, 60),
+    live_drc: Color32::from_rgb(255, 120, 90),
+    diff_added: Color32::from_rgb(90, 220, 120),
+    diff_removed: Color32::from_rgb(255, 90, 90),
+    diff_changed: Color32::from_rgb(255, 190, 60),
+    comment_pin: Color32::from_rgb(90, 160, 255),
+    comment_pin_selected: Color32::from_rgb(255, 210, 90),
+    measure: Color32::from_rgb(255, 210, 90),
+    guide: Color32::from_rgb(80, 200, 220),
+    snap_vertex: Color32::from_rgb(120, 230, 140),
+    snap_midpoint: Color32::from_rgb(230, 200, 110),
+    snap_center: Color32::from_rgb(220, 140, 220),
+    snap_edge: Color32::from_rgb(120, 190, 240),
+    agent_cursor: Color32::from_rgb(235, 80, 220),
     tour_highlight: Color32::from_rgb(255, 196, 0),
+    layer_fallback: Color32::from_rgb(150, 150, 150),
 };
+
+/// Builds an opaque canvas color from a layer's raw `(r, g, b)` channels.
+///
+/// Canvas geometry is colored by the technology table, where color IS the data;
+/// this is the one legal constructor for that, keeping the raw `Color32` call
+/// inside the theme module so the check-style lint stays absolute everywhere
+/// else.
+#[must_use]
+pub fn layer_rgb(r: u8, g: u8, b: u8) -> Color32 {
+    Color32::from_rgb(r, g, b)
+}
+
+/// Builds a canvas color from a layer's raw `(r, g, b, a)` channels (the fill
+/// alpha is the layer's own translucency).
+#[must_use]
+pub fn layer_rgba(r: u8, g: u8, b: u8, a: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(r, g, b, a)
+}
+
+/// Returns `color` at overlay alpha `a`, for a translucent fill derived from an
+/// opaque overlay or layer color.
+#[must_use]
+pub fn with_alpha(color: Color32, a: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), a)
+}
 
 /// Density modes: the same tokens at two spatial rhythms (4 px grid).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -164,6 +301,60 @@ impl Density {
         match self {
             Self::Comfortable => 16.0,
             Self::Compact => 12.0,
+        }
+    }
+
+    /// `Spacing::icon_width` (checkbox/radio/collapsing marker box).
+    #[must_use]
+    pub fn icon_width(self) -> f32 {
+        match self {
+            Self::Comfortable => 16.0,
+            Self::Compact => 14.0,
+        }
+    }
+
+    /// `Spacing::icon_width_inner` (the drawn glyph inside the marker box).
+    #[must_use]
+    pub fn icon_width_inner(self) -> f32 {
+        match self {
+            Self::Comfortable => 10.0,
+            Self::Compact => 8.0,
+        }
+    }
+
+    /// `Spacing::icon_spacing` (gap between a marker and its label).
+    #[must_use]
+    pub fn icon_spacing(self) -> f32 {
+        match self {
+            Self::Comfortable => 6.0,
+            Self::Compact => 4.0,
+        }
+    }
+
+    /// `Spacing::combo_height` (max height of an open combo-box popup).
+    #[must_use]
+    pub fn combo_height(self) -> f32 {
+        match self {
+            Self::Comfortable => 240.0,
+            Self::Compact => 200.0,
+        }
+    }
+
+    /// The stable text tag used when persisting the density.
+    #[must_use]
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Comfortable => "comfortable",
+            Self::Compact => "compact",
+        }
+    }
+
+    /// Parses a persisted density tag, defaulting to [`Density::Comfortable`].
+    #[must_use]
+    pub fn from_tag(tag: &str) -> Self {
+        match tag.trim().to_ascii_lowercase().as_str() {
+            "compact" => Self::Compact,
+            _ => Self::Comfortable,
         }
     }
 
