@@ -256,7 +256,7 @@ plus the run metadata a viewer overlays (die area, rows, sites, nets with per-ne
 and pins). It parses a defined subset (ADR 0082), skips the rest with a warning instead of
 failing, and never panics or hangs on malformed input. It carries no external dependency, so
 it builds for the browser alongside the rest. The import is cross-checked against OpenROAD
-running in a pinned container (ADR 0083): a faithful import matches the tool on macro,
+running in a pinned container (ADR 0088): a faithful import matches the tool on macro,
 component, and pin counts and the die area, a corrupted DEF diverges, and the check skips
 honestly when Docker is absent. The live cross-check ran on the development host in about
 22 seconds.
