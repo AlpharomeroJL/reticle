@@ -190,8 +190,26 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Static assets (js/wasm/json/png/...): cache-first. On a miss, fetch and
-  // populate the cache so the hashed bundle is available offline next time.
+  // Only the app SHELL's own static assets are cache-first: the hashed
+  // `web-<hash>.js` / `_bg.wasm` bundle, the convert worker, styles, the
+  // manifest, icons, and fonts. That is the whole offline contract.
+  //
+  // Every OTHER same-origin GET is passed straight through to the network,
+  // untouched. The one that matters is a user's `?gds=`/`?oas=` design fetched
+  // by the open path (webopen.rs `fetch_gds_bytes`): a loaded design is mutable
+  // user data, not part of the shell, so caching it cache-first would hand back
+  // a STALE design on the next open. Passing it through also leaves the request
+  // in the page context, so the open path (and the phone-touch e2e's route
+  // interception of the fixture) sees the real network response instead of a
+  // worker-synthesized one. Without this, once the worker controls the page the
+  // design fetch never reaches the page network, and a `?gds=` deep link that
+  // resolves to the SPA fallback loads the shell HTML as if it were a design.
+  const path = new URL(request.url).pathname;
+  const isShellAsset = /\.(?:js|mjs|wasm|css|json|png|svg|ico|woff2)$/.test(path);
+  if (!isShellAsset) return;
+
+  // On a miss, fetch and populate the cache so the hashed bundle is available
+  // offline next time.
   event.respondWith(
     (async () => {
       const cache = await caches.open(CACHE_VERSION);
