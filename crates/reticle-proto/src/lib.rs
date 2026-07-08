@@ -27,7 +27,10 @@ pub mod v1 {
 
 /// The current schema version. Bump on any breaking change to
 /// `proto/reticle.proto` and add a migration keyed on the previous value.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// V2 (ADR 0080) adds the additive `Document.comments` field. V1 documents
+/// remain readable and upgrade losslessly through [`migrate::migrate_document`].
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Encodes a [`v1::Document`] into a freshly allocated Protobuf byte buffer.
 ///

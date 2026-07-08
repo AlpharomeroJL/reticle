@@ -17,20 +17,24 @@ use reticle_proto::v1::{
     Rect, Rule, RuleKind, SchemaVersion, Shape, Technology, Transform,
 };
 
-/// Builds the representative V1 document captured by the golden fixture: a
-/// technology with two layers and a rule, a leaf cell carrying a rect, a polygon
-/// and a path across both layers, and a top cell with an instance and an array.
-fn golden_v1_document() -> Document {
-    let metal1 = LayerId {
-        layer: 10,
-        datatype: 0,
-    };
-    let metal2 = LayerId {
-        layer: 20,
-        datatype: 0,
-    };
+/// The two layer ids used across the golden document.
+fn golden_layers() -> (LayerId, LayerId) {
+    (
+        LayerId {
+            layer: 10,
+            datatype: 0,
+        },
+        LayerId {
+            layer: 20,
+            datatype: 0,
+        },
+    )
+}
 
-    let technology = Technology {
+/// The golden technology: two layers and a single width rule on metal1.
+fn golden_technology() -> Technology {
+    let (metal1, metal2) = golden_layers();
+    Technology {
         name: "golden-tech".to_owned(),
         dbu_per_micron: 1_000,
         layers: vec![
@@ -56,7 +60,14 @@ fn golden_v1_document() -> Document {
             other_layer: None,
             value: 50,
         }],
-    };
+    }
+}
+
+/// Builds the representative V1 document captured by the golden fixture: a
+/// technology with two layers and a rule, a leaf cell carrying a rect, a polygon
+/// and a path across both layers, and a top cell with an instance and an array.
+fn golden_v1_document() -> Document {
+    let (metal1, metal2) = golden_layers();
 
     let rect_shape = Shape {
         layer: Some(metal1),
@@ -125,9 +136,12 @@ fn golden_v1_document() -> Document {
 
     Document {
         schema_version: SchemaVersion::V1 as i32,
-        technology: Some(technology),
+        technology: Some(golden_technology()),
         cells: vec![leaf_cell, top_cell],
         top_cells: vec!["TOP".to_owned()],
+        // Empty under V1: this additive V2 field emits no bytes, so regenerating
+        // with the V2 build reproduces the frozen fixture byte-for-byte.
+        comments: vec![],
     }
 }
 
