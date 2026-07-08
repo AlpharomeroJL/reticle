@@ -326,9 +326,10 @@ layout, not a production EDA tool. It is honest about its edges, audited in
 - A streamed-archive path (`.rtla`) underpins large-layout browsing: a forward-only GDSII
   record reader with no `gds21` dependency (wasm-clean) and an external, bounded-memory
   tiled-archive builder that turns a 30M-entry layout into an archive at 127 MiB peak RSS.
-  On the read side the browser opens a 3.01 GiB archive by fetching about 5.3 MiB up front
-  (the preamble, the header, and a 5.33 MiB tile directory, 0.17% of the file) and then
-  streams only the tiles a viewport needs over HTTP Range; a live 3.01 GiB archive
+  On the read side the browser streams a 3.01 GiB archive over HTTP Range, reading only
+  the header plus the directory entries and tiles a viewport needs: the initial view of
+  the live 3.01 GiB archive fetched 188 KiB, 0.006% of the file, reported live in the
+  streaming HUD. A 3.01 GiB archive
   [streams in the browser](https://alpharomerojl.github.io/reticle/?archive=https://reticle-archive.josefdean.workers.dev/f04af90fbb06786c.rtla).
   The in-browser converter that produces one in a Web Worker into OPFS now ships (above);
   very large dies still stay a native-converter job.
