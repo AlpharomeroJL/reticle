@@ -1,0 +1,86 @@
+# IHP SG13G2 technology file for Reticle.
+#
+# SG13G2 is IHP's open 130 nm SiGe BiCMOS process. This file is transcribed from the
+# open IHP-Open-PDK (github.com/IHP-GmbH/IHP-Open-PDK, branch main), License Apache-2.0
+# (repo LICENSE). Attribution: IHP - Leibniz-Institut fuer innovative Mikroelektronik.
+#
+# Sources:
+#   Layers (GDS layer:datatype, drawing purpose = datatype 0):
+#     ihp-sg13g2/libs.tech/klayout/tech/drc/rule_decks/layers_def.drc
+#   dbu (1 dbu = 1 nm, i.e. 0.001 um):
+#     ihp-sg13g2/libs.tech/klayout/tech/sg13g2.lyt  (<dbu>0.001</dbu>)
+#   Process stack (z_bottom, thickness in nm), approximate/for-visualization:
+#     ihp-sg13g2/libs.tech/klayout/tech/d25/sg13g2_beol.lyd25
+#   DRC subset rules (see tech/sg13g2-drc-subset.toml for the cited rule ids):
+#     ihp-sg13g2/libs.tech/klayout/tech/drc/rule_decks/{beol,feol}/*.drc
+#
+# This is a SUBSET sufficient for the digital routing stack (Activ/GatPoly and the
+# Cont/Metal1..Metal4 + Via1..Via3 the Reticle generators draw against) plus the upper
+# metal layers for the layer table. It is not a complete SG13G2 layer map, and the DRC
+# rules carried here are the subset in tech/sg13g2-drc-subset.toml, not tape-out clean.
+
+technology sg13g2
+dbu_per_micron 1000
+
+# --- Drawing layers (layer datatype name RRGGBBAA) ---
+layer 1 0 Activ 2E8B5790
+layer 5 0 GatPoly D22020A0
+layer 6 0 Cont 60606080
+layer 8 0 Metal1 3A6FD490
+layer 19 0 Via1 24478A80
+layer 10 0 Metal2 C23A9E90
+layer 29 0 Via2 7A1E6480
+layer 30 0 Metal3 3AB0A090
+layer 49 0 Via3 1E6E6480
+layer 50 0 Metal4 C2903A90
+layer 66 0 Via4 8A5E1E80
+layer 67 0 Metal5 6A6AAD90
+layer 125 0 TopVia1 8A6A1080
+layer 126 0 TopMetal1 D4A02790
+layer 133 0 TopVia2 8A181880
+layer 134 0 TopMetal2 E8A03090
+
+# --- Physical stack (nanometers: z_bottom thickness), from the 2.5-D BEOL file ---
+# Activ/GatPoly are approximate substrate features (silicon surface at z = 0).
+stack 1 0 0 400
+stack 5 0 400 140
+stack 6 0 400 640
+stack 8 0 1040 420
+stack 19 0 1460 540
+stack 10 0 2000 490
+stack 29 0 2490 540
+stack 30 0 3030 490
+stack 49 0 3520 540
+stack 50 0 4060 490
+stack 66 0 4550 540
+stack 67 0 5090 490
+stack 125 0 5580 850
+stack 126 0 6430 2000
+stack 133 0 8430 2800
+stack 134 0 11230 3000
+
+# --- DRC subset rules (kind layer datatype [olayer odatatype] value_dbu) ---
+# Metal1..Metal4 width/spacing (M1.a..M4.b).
+rule width   8  0 160
+rule spacing 8  0 180
+rule width   10 0 200
+rule spacing 10 0 210
+rule width   30 0 200
+rule spacing 30 0 210
+rule width   50 0 200
+rule spacing 50 0 210
+# Cont width/spacing (Cnt.a, Cnt.b).
+rule width   6  0 160
+rule spacing 6  0 180
+# Via1 width/spacing and Metal1 enclosure (V1.a, V1.b, V1.c).
+rule width   19 0 190
+rule spacing 19 0 220
+rule enclosure 19 0 8  0 10
+# Via2 width/spacing and Metal3 enclosure (Via2.a, Via2.b, Via2.c).
+rule width   29 0 190
+rule spacing 29 0 220
+rule enclosure 29 0 30 0 5
+# Via3 width/spacing and Metal4 enclosure (Via3.a, Via3.b, Via3.c).
+rule width   49 0 190
+rule spacing 49 0 220
+rule enclosure 49 0 50 0 5

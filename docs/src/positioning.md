@@ -76,10 +76,12 @@ These are real capabilities of KLayout, Magic, or the commercial and open signof
 flows that Reticle does not have. This list is deliberately blunt.
 
 - **Full-fidelity format coverage.** Reticle reads and writes GDSII with full
-  hierarchy (via `gds21`), but its OASIS support is a **subset**: rectangles,
-  polygons, paths, instances, and arrays round-trip, and anything outside that subset
-  is rejected with an explicit `Unsupported` error rather than silently dropped.
-  KLayout's format coverage is far broader.
+  hierarchy (via `gds21`). Its `Oasis` type is **not** interoperable OASIS: it is an
+  in-house, OASIS-inspired *container* (ADR 0004) that no other tool reads, used only
+  to round-trip Reticle's own geometry. A separate conformant-OASIS **writer**
+  (`oasis_std`) emits a practical SEMI P39 subset that KLayout does read - export only,
+  verified against KLayout in-container (see the [GDS / OASIS interop](interop.md)
+  chapter). Even so, KLayout's format coverage is far broader.
 - **A production DRC rule language.** Reticle's DRC is a fixed set of eight rule
   kinds (width, spacing, enclosure, extension, notch, area, density, angle) evaluated
   over indexed geometry. It is not a general rule-scripting language, and its SKY130
