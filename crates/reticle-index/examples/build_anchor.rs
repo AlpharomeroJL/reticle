@@ -16,6 +16,11 @@ use reticle_index::archive::{LevelDims, RTLA_MAGIC, RTLA_VERSION, RtlaHeader, Ti
 use reticle_index::build_rtla;
 use reticle_index::streaming::ArchivableRect;
 
+/// Target finest-tile size in DBU (mirrors `reticle convert`'s `plan_levels`).
+const TARGET_FINEST_TILE_DBU: i64 = 1024;
+/// Maximum pyramid depth (mirrors `reticle convert`'s `plan_levels`).
+const MAX_LEVELS: u32 = 12;
+
 /// The `i`th deterministic small record spread across `world` (mirrors the crate's
 /// `rtla_build` test generator; `i64` arithmetic is safe past 30M records).
 fn record_at(i: u32, world: Rect) -> TileRecord {
@@ -45,15 +50,21 @@ fn main() {
             .unwrap_or_else(|| "scratch/flagship/anchor.rtla".to_owned()),
     );
     let world = Rect::new(Point::new(0, 0), Point::new(1_000_000, 1_000_000));
-    // A shallow pyramid (finest 64x64 = 4096 tiles) so the directory stays tiny and the
-    // per-tile record count is convert-scale, matching the archives the browser already
-    // streams. The builder decimates coarse levels to constant density, so it paints at
-    // fit-to-world zoom.
-    let levels = vec![
-        LevelDims { cols: 1, rows: 1 },
-        LevelDims { cols: 8, rows: 8 },
-        LevelDims { cols: 64, rows: 64 },
-    ];
+    // Replicate `reticle convert`'s plan_levels EXACTLY: consecutive `2^i x 2^i` grids,
+    // depth chosen so a finest tile is ~1024 DBU across, clamped to [1, 12]. The browser
+    // maps a viewport to tiles assuming this canonical power-of-two pyramid, so an archive
+    // with non-consecutive levels (e.g. 1,8,64) parses but never fetches a tile.
+    let span = i64::from(world.max.x - world.min.x)
+        .max(i64::from(world.max.y - world.min.y))
+        .max(1);
+    let ideal = (span / TARGET_FINEST_TILE_DBU).max(1) as u64;
+    let count = (64 - ideal.leading_zeros()).clamp(1, MAX_LEVELS);
+    let levels: Vec<LevelDims> = (0..count)
+        .map(|i| {
+            let n = 1u32 << i;
+            LevelDims { cols: n, rows: n }
+        })
+        .collect();
     let header = RtlaHeader {
         magic: RTLA_MAGIC,
         version: RTLA_VERSION,
