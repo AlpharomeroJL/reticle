@@ -92,3 +92,4 @@ superseded decision is marked and linked to its replacement.
 | [0084](0084-gentech-data-driven-generator-numbers.md) | GenTech: the generator process numbers become data, threaded through the tech argument |
 | [0085](0085-second-pdk-ihp-sg13g2.md) | A second PDK (IHP SG13G2) as data, proven by the both-PDK cleanliness proptests |
 | [0086](0086-conformant-oasis-writer-scope-and-oasis-rename.md) | A conformant-OASIS writer subset (oasis_std), and renaming the in-house format honestly |
+| [0087](0087-python-bindings-abi3-nondefault.md) | Python bindings: PyO3 `abi3` (one wheel for 3.9+) in a workspace-excluded crate so `just ci` stays Python-free |

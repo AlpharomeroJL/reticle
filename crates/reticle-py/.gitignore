@@ -1,0 +1,8 @@
+# Python build and cache artifacts. The compiled wheel is written to the shared
+# CARGO_TARGET_DIR (outside the repo), so nothing here is tracked.
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+dist/
+wheels/

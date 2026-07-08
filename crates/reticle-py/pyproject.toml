@@ -1,0 +1,31 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "reticle-py"
+version = "7.0.0"
+description = "Python bindings for the Reticle document and layout-generator APIs."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT OR Apache-2.0" }
+authors = [{ name = "Josef Long" }]
+keywords = ["eda", "gdsii", "layout", "ic", "generators"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+
+[project.optional-dependencies]
+# Extras for the inline Jupyter viewer and the notebook smoke test. The core
+# bindings import with no Python dependencies at all.
+notebook = ["ipython", "jupyter", "nbconvert", "nbformat"]
+
+[tool.maturin]
+# Mixed Rust + Python layout: the compiled extension is imported as
+# `reticle_py._core`; the pure-Python package in `python/reticle_py` re-exports
+# it and adds the Jupyter widget. `abi3` (set on the pyo3 dependency) means one
+# wheel covers every CPython 3.9+.
+module-name = "reticle_py._core"
+python-source = "python"

@@ -1,0 +1,35 @@
+# reticle-py: PyO3 (abi3) bindings for the Reticle document and generator APIs.
+#
+# This crate is a native-only Python extension module. It is intentionally NOT a
+# member of the root workspace (it is in the root `exclude` list) so the default
+# `just ci` gate, which runs clippy/test/doc with `--workspace`, never needs the
+# Python toolchain. See docs/decisions/0068. Because it is excluded it cannot use
+# `.workspace = true` inheritance, so package fields and lints are set here and
+# the internal crates are referenced by relative path.
+
+[package]
+name = "reticle-py"
+version = "7.0.0"
+edition = "2024"
+rust-version = "1.94"
+authors = ["Josef Long <Josefdean@protonmail.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AlpharomeroJL/reticle"
+description = "Python (PyO3 abi3) bindings for the Reticle document and layout-generator APIs."
+publish = false
+
+[lib]
+# The compiled module is imported as `reticle_py._core`; the pure-Python package
+# in `python/reticle_py` re-exports it and adds the Jupyter widget.
+name = "_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+reticle-geometry = { path = "../reticle-geometry" }
+reticle-model = { path = "../reticle-model" }
+reticle-gen = { path = "../reticle-gen" }
+reticle-render = { path = "../reticle-render" }
+reticle-cli = { path = "../reticle-cli" }
+serde_json = "1.0.150"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+pyo3 = { version = "0.25", features = ["extension-module", "abi3-py39"] }
