@@ -11,6 +11,8 @@
 
 use crate::camera::ViewCamera;
 use crate::grid::GridSettings;
+use crate::onboarding::{Checklist, Hints};
+use crate::settings::{TouchMode, WheelBehavior};
 use crate::theme::tokens::Density;
 use crate::tool::Tool;
 use crate::viewexport::Theme;
@@ -47,10 +49,24 @@ pub struct SessionState {
     /// Whether functional motion is suppressed (reduced-motion preference). Off
     /// by default; the theme zeroes animation time when it is on.
     pub reduced_motion: bool,
+    /// What a bare mouse-wheel scroll does over the canvas (lane 4C Settings; lane
+    /// 3A's canvas reads it). Zoom by default.
+    pub wheel: WheelBehavior,
+    /// Whether the enlarged touch targets are forced on/off or auto-detected (lane
+    /// 4C Settings; lane 4B reads it). Auto by default.
+    pub touch_mode: TouchMode,
     /// Whether the first-run tour has been shown. `false` on a fresh install, so
     /// the tour auto-starts once; set `true` after it finishes so it never shows
     /// again unprompted (the Help menu can still relaunch it). See [`crate::tour`].
     pub tour_seen: bool,
+    /// Which once-only contextual hints have already fired (lane 4C, catalog 17).
+    pub hints: Hints,
+    /// The onboarding checklist state: completed tasks and the sticky dismiss (lane
+    /// 4C, catalog 19).
+    pub checklist: Checklist,
+    /// Whether the first-run GPU capability card has been dismissed (lane 4C,
+    /// catalog 22). Sticky so it shows at most once.
+    pub gpu_card_dismissed: bool,
 }
 
 impl Default for SessionState {
@@ -67,7 +83,12 @@ impl Default for SessionState {
             theme: Theme::Dark,
             ui_density: Density::Comfortable,
             reduced_motion: false,
+            wheel: WheelBehavior::default(),
+            touch_mode: TouchMode::default(),
             tour_seen: false,
+            hints: Hints::default(),
+            checklist: Checklist::default(),
+            gpu_card_dismissed: false,
         }
     }
 }
@@ -86,6 +107,8 @@ impl SessionState {
         theme: Theme,
         ui_density: Density,
         reduced_motion: bool,
+        wheel: WheelBehavior,
+        touch_mode: TouchMode,
         hidden: &[LayerId],
         tour_seen: bool,
     ) -> Self {
@@ -102,7 +125,10 @@ impl SessionState {
             theme,
             ui_density,
             reduced_motion,
+            wheel,
+            touch_mode,
             tour_seen,
+            ..Self::default()
         }
     }
 
@@ -149,7 +175,7 @@ impl SessionState {
             .map(|(l, d)| format!("{l}/{d}"))
             .collect();
         format!(
-            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nui_density={}\nreduced_motion={}\nhidden={}\ntour_seen={}\n",
+            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nui_density={}\nreduced_motion={}\nwheel={}\ntouch_mode={}\nhidden={}\ntour_seen={}\nhints={}\nchecklist={}\nchecklist_dismissed={}\ngpu_card_dismissed={}\n",
             self.center_x,
             self.center_y,
             self.pixels_per_dbu,
@@ -160,8 +186,14 @@ impl SessionState {
             self.theme.tag(),
             self.ui_density.tag(),
             self.reduced_motion,
+            self.wheel.tag(),
+            self.touch_mode.tag(),
             hidden.join(","),
-            self.tour_seen
+            self.tour_seen,
+            self.hints.seen_tags().join(","),
+            self.checklist.done_tags().join(","),
+            self.checklist.is_dismissed(),
+            self.gpu_card_dismissed
         )
     }
 
@@ -176,6 +208,10 @@ impl SessionState {
             return None;
         }
         let mut s = Self::default();
+        // The checklist is two persisted keys (its done tags and its dismissed
+        // bit), so collect both before assembling it after the loop.
+        let mut checklist_tags: Vec<String> = Vec::new();
+        let mut checklist_dismissed = false;
         for line in text.lines() {
             let Some((key, value)) = line.split_once('=') else {
                 continue;
@@ -208,13 +244,35 @@ impl SessionState {
                 "theme" => s.theme = Theme::from_tag(value),
                 "ui_density" => s.ui_density = Density::from_tag(value),
                 "reduced_motion" => s.reduced_motion = value == "true",
+                "wheel" => s.wheel = WheelBehavior::from_tag(value),
+                "touch_mode" => s.touch_mode = TouchMode::from_tag(value),
                 "hidden" => s.hidden_layers = parse_hidden(value),
                 "tour_seen" => s.tour_seen = value == "true",
+                "hints" => {
+                    let tags: Vec<&str> = split_tags(value);
+                    s.hints = Hints::from_tags(&tags);
+                }
+                "checklist" => {
+                    checklist_tags = split_tags(value).into_iter().map(str::to_owned).collect();
+                }
+                "checklist_dismissed" => checklist_dismissed = value == "true",
+                "gpu_card_dismissed" => s.gpu_card_dismissed = value == "true",
                 _ => {}
             }
         }
+        let checklist_refs: Vec<&str> = checklist_tags.iter().map(String::as_str).collect();
+        s.checklist = Checklist::restore(&checklist_refs, checklist_dismissed);
         Some(s)
     }
+}
+
+/// Splits a comma-separated tag list, dropping empty entries.
+fn split_tags(value: &str) -> Vec<&str> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// The stable text tag for a tool.
@@ -312,11 +370,50 @@ pub fn load() -> Option<SessionState> {
     SessionState::from_text(&text)
 }
 
+/// The `localStorage` key the web build mirrors the session under.
+#[cfg(target_arch = "wasm32")]
+const WEB_STORAGE_KEY: &str = "reticle.session";
+
+/// The browser `localStorage`, or `None` when it is unavailable (no window, or a
+/// privacy mode that blocks it).
+#[cfg(target_arch = "wasm32")]
+fn web_local_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok()?
+}
+
+/// Saves `state` to the browser's `localStorage` (the web mirror of the native
+/// session file). Best-effort: a storage error (privacy mode, quota) is ignored, so
+/// a failed write simply does not persist rather than breaking the app.
+#[cfg(target_arch = "wasm32")]
+pub fn web_save(state: &SessionState) {
+    if let Some(storage) = web_local_storage() {
+        let _ = storage.set_item(WEB_STORAGE_KEY, &state.to_text());
+    }
+}
+
+/// Loads the session from the browser's `localStorage`, or `None` if it is absent
+/// or unreadable. The unknown-key tolerance of [`SessionState::from_text`] means a
+/// mirror written by an older or newer build still restores what it can.
+#[cfg(target_arch = "wasm32")]
+#[must_use]
+pub fn web_load() -> Option<SessionState> {
+    let text = web_local_storage()?.get_item(WEB_STORAGE_KEY).ok()??;
+    SessionState::from_text(&text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn sample() -> SessionState {
+        use crate::onboarding::{Hint, Task};
+        let mut hints = Hints::default();
+        hints.mark_seen(Hint::Layers);
+        hints.mark_seen(Hint::Share);
+        let mut checklist = Checklist::default();
+        checklist.complete(Task::OpenFile);
+        checklist.complete(Task::TryAgent);
+        checklist.dismiss();
         SessionState {
             center_x: 1234,
             center_y: -5678,
@@ -329,7 +426,12 @@ mod tests {
             theme: Theme::Light,
             ui_density: Density::Compact,
             reduced_motion: true,
+            wheel: WheelBehavior::Pan,
+            touch_mode: TouchMode::On,
             tour_seen: true,
+            hints,
+            checklist,
+            gpu_card_dismissed: true,
         }
     }
 
@@ -351,6 +453,8 @@ mod tests {
             Theme::Light,
             Density::Compact,
             true,
+            WheelBehavior::Pan,
+            TouchMode::On,
             &[LayerId::new(3, 0)],
             true,
         );
@@ -361,8 +465,39 @@ mod tests {
         assert_eq!(s.theme(), Theme::Light);
         assert_eq!(s.ui_density, Density::Compact);
         assert!(s.reduced_motion, "capture carries the reduced-motion flag");
+        assert_eq!(s.wheel, WheelBehavior::Pan);
+        assert_eq!(s.touch_mode, TouchMode::On);
         assert_eq!(s.hidden_layers(), vec![LayerId::new(3, 0)]);
         assert!(s.tour_seen, "capture carries the tour-seen flag through");
+        // Onboarding state is not view state, so capture leaves it at defaults;
+        // the app sets it on the snapshot after capture (see App::save).
+        assert_eq!(s.hints, Hints::default());
+        assert_eq!(s.checklist, Checklist::default());
+    }
+
+    #[test]
+    fn settings_and_onboarding_keys_round_trip_and_default() {
+        use crate::onboarding::{Hint, Task};
+        let s = sample();
+        let parsed = SessionState::from_text(&s.to_text()).expect("parses");
+        assert_eq!(parsed.wheel, WheelBehavior::Pan);
+        assert_eq!(parsed.touch_mode, TouchMode::On);
+        assert!(parsed.hints.is_seen(Hint::Layers));
+        assert!(parsed.hints.is_seen(Hint::Share));
+        assert!(!parsed.hints.is_seen(Hint::Drc));
+        assert!(parsed.checklist.is_done(Task::OpenFile));
+        assert!(parsed.checklist.is_done(Task::TryAgent));
+        assert!(parsed.checklist.is_dismissed());
+        assert!(parsed.gpu_card_dismissed);
+
+        // An older file without any of the new keys keeps the defaults, so the
+        // addition is non-breaking (unknown-key tolerance).
+        let older = SessionState::from_text("center_x=1\n").expect("parses");
+        assert_eq!(older.wheel, WheelBehavior::default());
+        assert_eq!(older.touch_mode, TouchMode::default());
+        assert_eq!(older.hints, Hints::default());
+        assert_eq!(older.checklist, Checklist::default());
+        assert!(!older.gpu_card_dismissed);
     }
 
     #[test]

@@ -21,6 +21,9 @@ fn main() -> eframe::Result {
     // --gallery renders the hidden component gallery full-window (lane 1C), a
     // deterministic screenshot surface for the visual-regression suite.
     let gallery = args.iter().any(|a| a == "--gallery");
+    // --tour boots straight into the guided tour (the native mirror of the `?tour=1`
+    // web deep link, lane 4c / catalog 20).
+    let tour = args.iter().any(|a| a == "--tour");
     let smoke = flag_value(&args, "--screenshot-smoke");
     let demo_path = flag_value(&args, "--demo-script");
     let out_dir = flag_value(&args, "--out").unwrap_or_else(|| "scratch/ui-frames".to_owned());
@@ -56,7 +59,13 @@ fn main() -> eframe::Result {
         "Reticle",
         native_options,
         Box::new(move |_cc| {
-            let mut app = if gallery { App::gallery() } else { App::new() };
+            let mut app = if gallery {
+                App::gallery()
+            } else if tour {
+                App::with_tour()
+            } else {
+                App::new()
+            };
             if let Some(path) = smoke {
                 app.set_screenshot_smoke(std::path::PathBuf::from(path));
             }

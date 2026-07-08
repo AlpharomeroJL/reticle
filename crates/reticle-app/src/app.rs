@@ -47,7 +47,7 @@ use crate::theme::{
     tokens::{CANVAS, DARK},
 };
 use crate::tool::{Tool, ToolState};
-use crate::tour::{Tour, TourTarget};
+use crate::tour::{Tour, TourTarget, TourVariant};
 use crate::usecases::{Scenario, UseCase};
 use crate::viewports::{self, Split, Viewports};
 /// A transient status message shown in the bottom bar.
@@ -125,9 +125,12 @@ impl TourTargets {
             // The open affordance and the drawing tools both live on the toolbar, so
             // they highlight the toolbar rectangle (the tour points at "the toolbar
             // control" rather than a sub-rect that shifts as the row wraps).
-            TourTarget::OpenAffordance | TourTarget::Toolbar | TourTarget::DrawTools => {
-                self.toolbar
-            }
+            // The viewer chrome (session chip, follow toggle, open-editor button)
+            // rides the toolbar row, so the viewer tour highlights it there.
+            TourTarget::OpenAffordance
+            | TourTarget::Toolbar
+            | TourTarget::DrawTools
+            | TourTarget::ViewerControls => self.toolbar,
             TourTarget::Canvas => self.canvas,
             TourTarget::LayerPanel => self.layers,
             TourTarget::Minimap => self.minimap.or(self.canvas),
@@ -519,6 +522,33 @@ pub struct App {
     /// persists with the session so the automatic tour shows only once.
     tour: Tour,
 
+    // ---- lane 4c: settings, onboarding, and help ----------------------------
+    /// What a bare mouse-wheel scroll does over the canvas (Settings dialog; lane
+    /// 3A's canvas reads it). Persisted with the session.
+    wheel: crate::settings::WheelBehavior,
+    /// Whether the enlarged touch targets are forced on/off or auto-detected
+    /// (Settings dialog; lane 4B reads it). Persisted with the session.
+    touch_mode: crate::settings::TouchMode,
+    /// Which once-only contextual hints have fired (catalog 17). Persisted.
+    hints: crate::onboarding::Hints,
+    /// The active contextual hint bubble to draw this frame, if one just fired.
+    active_hint: Option<crate::onboarding::Hint>,
+    /// The onboarding checklist: completed tasks and the sticky dismiss (catalog
+    /// 19). Persisted.
+    checklist: crate::onboarding::Checklist,
+    /// Whether the first-run GPU capability card has been dismissed (catalog 22).
+    /// Persisted so it shows at most once.
+    gpu_card_dismissed: bool,
+    /// Whether the Settings dialog is open (catalog 98).
+    settings_open: bool,
+    /// Whether the About dialog is open (catalog 99, 100).
+    about_open: bool,
+    /// Whether the "What's new" dialog is open (catalog 26).
+    whats_new_open: bool,
+    /// A URL to open in the browser next frame (Documentation, the issue link).
+    /// Consumed at the top of the frame where the egui context is available.
+    pending_open_url: Option<String>,
+
     /// When set, the app renders the hidden component gallery full-window instead
     /// of the editor (`?gallery=1` web flag / `--gallery` native flag), a stable
     /// screenshot surface for the visual-regression suite (lane 1C/1D). `None` in
@@ -650,6 +680,10 @@ impl App {
         app.share_room.clone_from(&target.room);
         app.viewer_session = Some(crate::viewer::ViewerSession::new());
         app.viewer_target = Some(target);
+        // A viewer gets the shorter viewer-variant tour, not the editor walkthrough
+        // (catalog 15). It stays dormant on the web (the tour is treated as seen so
+        // it does not reopen every visit); the Help menu can relaunch it.
+        app.tour = Tour::viewer(tour_already_seen());
         app
     }
 
@@ -695,6 +729,20 @@ impl App {
         // Browse opens straight onto the canvas, not the worked-use-case chooser.
         app.start_screen = false;
         app.pending_archive_url = Some(url);
+        app
+    }
+
+    /// Creates the app booting **straight into the guided tour** (`?tour=1` web
+    /// deep link / `--tour` native flag, catalog 20).
+    ///
+    /// It opens the editor (skipping the Start chooser so the tour highlights the
+    /// real panels) and forces the tour to run from its first step regardless of the
+    /// persisted "seen" bit, so a shared onboarding link always lands in the tour.
+    #[must_use]
+    pub fn with_tour() -> Self {
+        let mut app = Self::with_start_view(StartView::Editor);
+        app.start_screen = false;
+        app.tour.start_deep_link();
         app
     }
 
@@ -746,10 +794,12 @@ impl App {
         let expanded = Arc::new(retained.expand());
         // Build the outline before `doc` is moved into the history below.
         let outline = OutlineTree::build(&doc);
-        // The theme's density and reduced-motion preference come from the saved
-        // session (defaults on a fresh install or the web); the boot styling hook
-        // in `ui` applies them on the first frame.
-        let (ui_density, reduced_motion) = boot_ui_prefs();
+        // The persisted preferences (theme density and reduced motion, plus the
+        // lane 4c settings and onboarding state) come from the saved session on
+        // native or the localStorage mirror on the web; defaults on a fresh install.
+        // The boot styling hook in `ui` applies the theme ones on the first frame.
+        let boot = boot_session();
+        let (ui_density, reduced_motion) = (boot.ui_density, boot.reduced_motion);
         Self {
             renderer: WgpuRenderer::new(),
             document,
@@ -848,6 +898,16 @@ impl App {
             reduced_motion,
             theme_dirty: true,
             tour: Tour::from_seen(tour_already_seen()),
+            wheel: boot.wheel,
+            touch_mode: boot.touch_mode,
+            hints: boot.hints,
+            active_hint: None,
+            checklist: boot.checklist,
+            gpu_card_dismissed: boot.gpu_card_dismissed,
+            settings_open: false,
+            about_open: false,
+            whats_new_open: false,
+            pending_open_url: None,
             gallery: None,
             #[cfg(not(target_arch = "wasm32"))]
             capture: None,
@@ -2466,6 +2526,18 @@ impl App {
             AppOp::SplitSingle => self.set_split(Split::Single),
             AppOp::SplitHorizontal => self.set_split(Split::Horizontal),
             AppOp::SplitVertical => self.set_split(Split::Vertical),
+            AppOp::TakeTour => {
+                self.tour.relaunch(true);
+                self.status.set("Tour started");
+                self.persist_prefs();
+            }
+            AppOp::OpenSettings => self.settings_open = true,
+            AppOp::OpenAbout => self.about_open = true,
+            AppOp::OpenWhatsNew => self.whats_new_open = true,
+            AppOp::OpenDocs => {
+                self.pending_open_url = Some(crate::help::DOCS_URL.to_owned());
+                self.status.set("Opening documentation");
+            }
         }
     }
 
@@ -2616,21 +2688,49 @@ impl App {
         }
     }
 
-    /// The Help menu: relaunches the first-run tour.
+    /// The Help menu (catalog 15, 18, 26, 98, 99): tour, shortcuts, documentation,
+    /// what's new, settings, and about.
     ///
-    /// "Take the tour" replays the core walkthrough plus the optional Wave 2
-    /// chapter; "Core tour only" replays just the core chapter. Either way the tour
-    /// restarts from the first step (see [`crate::tour::Tour::relaunch`]).
+    /// The tour and the docs/what's-new/settings/about items route through the
+    /// registry (their reserved `help.*` ids) so the palette and this menu share one
+    /// effect; "Core tour only" and "Resume tour" are menu-only affordances the
+    /// registry does not model. Every dialog is drawn later in the frame from the
+    /// flags these items set.
     fn help_menu(&mut self, ui: &mut egui::Ui) {
         // egui closes the menu automatically once a button inside it is clicked.
         ui.menu_button("Help", |ui| {
             if ui.button("Take the tour").clicked() {
-                self.tour.relaunch(true);
-                self.status.set("Tour started");
+                self.dispatch(CommandId("help.tour"));
             }
-            if ui.button("Core tour only").clicked() {
+            // The editor tour has an optional second chapter; the viewer tour does
+            // not, so "Core tour only" is offered only in the editor variant.
+            if self.tour.variant() == TourVariant::Editor && ui.button("Core tour only").clicked() {
                 self.tour.relaunch(false);
                 self.status.set("Core tour started");
+                self.persist_prefs();
+            }
+            if self.tour.can_resume() && ui.button("Resume tour").clicked() {
+                self.tour.resume();
+                self.status.set("Tour resumed");
+            }
+            ui.separator();
+            // The shortcuts overlay itself is generated by lane 3C; this is the Help
+            // entry that opens it (the keymap window this build ships).
+            if ui.button("Keyboard shortcuts").clicked() {
+                self.keymap_open = !self.keymap_open;
+            }
+            if ui.button("Documentation").clicked() {
+                self.dispatch(CommandId("help.docs"));
+            }
+            if ui.button("What's new").clicked() {
+                self.dispatch(CommandId("help.whats_new"));
+            }
+            ui.separator();
+            if ui.button("Settings...").clicked() {
+                self.dispatch(CommandId("help.settings"));
+            }
+            if ui.button("About Reticle").clicked() {
+                self.dispatch(CommandId("help.about"));
             }
         });
     }
@@ -2640,13 +2740,58 @@ impl App {
     /// It is seen unless it is an automatic first-run that has not finished yet, so
     /// a completed or dismissed first run, and any relaunch, persist `tour_seen =
     /// true`. That is what stops the automatic tour from ever showing twice.
-    ///
-    /// Native-only: the only caller is [`eframe::App::save`], which is itself gated
-    /// off on wasm (there is no session file to write there).
-    #[cfg(not(target_arch = "wasm32"))]
     fn tour_seen(&self) -> bool {
         // Seen unless it is an unfinished first run.
         !self.tour.is_first_run() || self.tour.is_finished()
+    }
+
+    /// Builds the persisted session snapshot from the live view, settings, and
+    /// onboarding state.
+    ///
+    /// [`SessionState::capture`] carries the view and the settings (density, motion,
+    /// wheel, touch); the onboarding bits (hints, checklist, GPU card) are not view
+    /// state, so they are grafted on here. This is the single place both the native
+    /// session file and the web localStorage mirror are built from.
+    fn session_snapshot(&self) -> crate::session::SessionState {
+        let hidden: Vec<LayerId> = self
+            .layer_state
+            .rows()
+            .iter()
+            .filter(|r| !r.visible)
+            .map(|r| r.id)
+            .collect();
+        let mut state = crate::session::SessionState::capture(
+            &self.camera,
+            self.tools.active(),
+            self.grid,
+            self.view_export.theme,
+            self.ui_density,
+            self.reduced_motion,
+            self.wheel,
+            self.touch_mode,
+            &hidden,
+            self.tour_seen(),
+        );
+        state.hints = self.hints;
+        state.checklist = self.checklist;
+        state.gpu_card_dismissed = self.gpu_card_dismissed;
+        state
+    }
+
+    /// Persists the current preferences and onboarding state immediately.
+    ///
+    /// Called whenever a setting or onboarding bit changes so the choice sticks
+    /// without waiting for the periodic eframe save. On native it writes the session
+    /// file; on the web it writes the localStorage mirror (there is no filesystem).
+    fn persist_prefs(&self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = crate::session::save(&self.session_snapshot());
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::session::web_save(&self.session_snapshot());
+        }
     }
 
     /// Draws the tour overlay for the current step, if the tour is running.
@@ -2729,8 +2874,405 @@ impl App {
         match action {
             Some(TourAction::Next) => self.tour.next(),
             Some(TourAction::Skip) => self.tour.skip(),
-            Some(TourAction::Close) => self.tour.finish(),
+            // Close parks the tour so the Help menu can offer "Resume tour" and pick
+            // up at the same step, rather than ending it outright.
+            Some(TourAction::Close) => self.tour.dismiss(),
             None => {}
+        }
+        // Any tour transition can flip the persisted "seen" bit, so save it now
+        // rather than waiting for the periodic eframe save.
+        if action.is_some() {
+            self.persist_prefs();
+        }
+    }
+
+    // ---- lane 4c: onboarding hints, checklist, and GPU card -----------------
+
+    /// Advances the onboarding state from observed app state, once per editor frame.
+    ///
+    /// Ticks the checklist tasks off as their action happens (a design opened, DRC
+    /// run, a session shared, the agent tried) and fires the once-only contextual
+    /// hints the first time the user reaches the layers, DRC, or share surface. A
+    /// no-op in a viewer session, whose onboarding is the viewer tour instead.
+    fn update_onboarding(&mut self) {
+        use crate::onboarding::{Hint, Task};
+        if self.is_viewer() {
+            return;
+        }
+        // Checklist completion, inferred from live state.
+        if self.opened_a_design() {
+            self.complete_task(Task::OpenFile);
+        }
+        if self.drc.has_run() {
+            self.complete_task(Task::RunDrc);
+        }
+        if self.live_status.is_open() {
+            self.complete_task(Task::Share);
+        }
+        if self.agent.is_running() || self.replay.is_loaded() {
+            self.complete_task(Task::TryAgent);
+        }
+        // Contextual hints: at most one at a time, and never over the running tour.
+        if self.active_hint.is_some() || self.tour.is_active() {
+            return;
+        }
+        if !self.hints.is_seen(Hint::Layers) && self.layer_state.rows().iter().any(|r| !r.visible) {
+            self.fire_hint(Hint::Layers);
+        } else if !self.hints.is_seen(Hint::Drc) && self.drc.has_run() && !self.drc.is_empty() {
+            self.fire_hint(Hint::Drc);
+        } else if !self.hints.is_seen(Hint::Share) && self.live_status.is_open() {
+            self.fire_hint(Hint::Share);
+        }
+    }
+
+    /// Whether a real design (not the built-in demo) is loaded, for the "Open a
+    /// design" checklist task.
+    fn opened_a_design(&self) -> bool {
+        self.is_viewer() || self.archive.is_some() || self.top_cell != crate::demo::TOP_CELL
+    }
+
+    /// Marks a checklist task complete, persisting only on a real change.
+    fn complete_task(&mut self, task: crate::onboarding::Task) {
+        if self.checklist.complete(task) {
+            self.persist_prefs();
+        }
+    }
+
+    /// Fires a once-only hint: records it seen, shows its bubble, and persists.
+    fn fire_hint(&mut self, hint: crate::onboarding::Hint) {
+        if let Some(shown) = self.hints.fire(hint) {
+            self.active_hint = Some(shown);
+            self.persist_prefs();
+        }
+    }
+
+    /// Draws the onboarding chrome: the active hint bubble, the checklist card, and
+    /// the first-run GPU capability card. A no-op in a viewer session or on the
+    /// Start screen (onboarding belongs to the editor).
+    // Three independent cards laid out inline; the length is layout, not branching.
+    #[allow(clippy::too_many_lines)]
+    fn onboarding_overlay(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+        use crate::onboarding::Task;
+        use crate::theme::components::{Button, Ctx};
+        if self.is_viewer() || self.start_screen {
+            return;
+        }
+        let cctx = Ctx::dark(self.ui_density).with_reduced_motion(self.reduced_motion);
+
+        // The active contextual hint, as a small card below the toolbar.
+        if let Some(hint) = self.active_hint {
+            let mut dismiss = false;
+            egui::Area::new(egui::Id::new("onboarding_hint"))
+                .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 56.0))
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style())
+                        .inner_margin(egui::Margin::same(12))
+                        .show(ui, |ui| {
+                            ui.set_max_width(340.0);
+                            ui.strong(hint.title());
+                            ui.add_space(4.0);
+                            ui.label(hint.body());
+                            ui.add_space(8.0);
+                            if Button::secondary("Got it").show(ui, cctx).clicked() {
+                                dismiss = true;
+                            }
+                        });
+                });
+            if dismiss {
+                self.active_hint = None;
+            }
+        }
+
+        // The onboarding checklist card, bottom-right above the status bar.
+        if self.checklist.is_visible() {
+            let mut dismiss = false;
+            let (done, total) = self.checklist.progress();
+            egui::Area::new(egui::Id::new("onboarding_checklist"))
+                .anchor(Align2::RIGHT_BOTTOM, Vec2::new(-16.0, -48.0))
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style())
+                        .inner_margin(egui::Margin::same(12))
+                        .show(ui, |ui| {
+                            ui.set_max_width(260.0);
+                            ui.horizontal(|ui| {
+                                ui.strong("Get started");
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.weak(format!("{done} of {total}"));
+                                    },
+                                );
+                            });
+                            ui.add_space(4.0);
+                            for task in Task::ALL {
+                                let done = self.checklist.is_done(task);
+                                let mark = if done { "\u{2713}" } else { "\u{25CB}" };
+                                let text = format!("{mark}  {}", task.label());
+                                if done {
+                                    ui.weak(text);
+                                } else {
+                                    ui.label(text);
+                                }
+                            }
+                            ui.add_space(8.0);
+                            if Button::secondary("Dismiss").show(ui, cctx).clicked() {
+                                dismiss = true;
+                            }
+                        });
+                });
+            if dismiss {
+                self.checklist.dismiss();
+                self.persist_prefs();
+            }
+        }
+
+        // The first-run GPU capability card, bottom-left, shown once.
+        if !self.gpu_card_dismissed {
+            let (adapter, backend) = gpu_info(frame);
+            let mut dismiss = false;
+            let mut docs = false;
+            egui::Area::new(egui::Id::new("onboarding_gpu"))
+                .anchor(Align2::LEFT_BOTTOM, Vec2::new(16.0, -48.0))
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style())
+                        .inner_margin(egui::Margin::same(12))
+                        .show(ui, |ui| {
+                            ui.set_max_width(300.0);
+                            ui.strong("Graphics");
+                            ui.add_space(4.0);
+                            ui.label(format!(
+                                "Rendering with {backend} on {adapter}. Reticle runs \
+                                 on WebGPU where available and falls back to WebGL2."
+                            ));
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                if Button::secondary("Learn more").show(ui, cctx).clicked() {
+                                    docs = true;
+                                }
+                                if Button::secondary("Dismiss").show(ui, cctx).clicked() {
+                                    dismiss = true;
+                                }
+                            });
+                        });
+                });
+            if docs {
+                self.pending_open_url = Some(crate::help::DOCS_URL.to_owned());
+            }
+            if dismiss {
+                self.gpu_card_dismissed = true;
+                self.persist_prefs();
+            }
+        }
+    }
+
+    // ---- lane 4c: the Help dialogs ------------------------------------------
+
+    /// The Settings dialog (catalog 98): density, reduced motion, wheel behavior,
+    /// touch mode, and a panel-layout reset.
+    ///
+    /// Changing density or reduced motion flips [`theme_dirty`](Self::theme_dirty)
+    /// so lane 1A's boot styling hook re-applies the theme next frame; every change
+    /// persists immediately (the session file on native, the localStorage mirror on
+    /// the web).
+    fn settings_dialog(&mut self, ctx: &egui::Context) {
+        use crate::settings::{TouchMode, WheelBehavior};
+        use crate::theme::components::{Button, Ctx, Modal, Segmented, ToggleChip};
+        use crate::theme::tokens::Density;
+        if !self.settings_open {
+            return;
+        }
+        let cctx = Ctx::dark(self.ui_density).with_reduced_motion(self.reduced_motion);
+        let mut density_ix = usize::from(self.ui_density == Density::Compact);
+        let mut reduced = self.reduced_motion;
+        let mut wheel_ix = usize::from(self.wheel == WheelBehavior::Pan);
+        let mut touch_ix = match self.touch_mode {
+            TouchMode::Auto => 0,
+            TouchMode::On => 1,
+            TouchMode::Off => 2,
+        };
+        let mut reset_panels = false;
+        let mut close = false;
+        let modal = Modal::new("Settings").overlay(ctx, cctx, |ui, cctx| {
+            ui.set_max_width(340.0);
+            ui.label("Density");
+            Segmented::new(&["Comfortable", "Compact"]).show(ui, cctx, &mut density_ix);
+            ui.add_space(cctx.density.item_spacing().y);
+            if ToggleChip::new("Reduced motion", reduced)
+                .show(ui, cctx)
+                .clicked()
+            {
+                reduced = !reduced;
+            }
+            ui.add_space(cctx.density.item_spacing().y);
+            ui.label("Mouse wheel");
+            Segmented::new(&["Zoom", "Pan"]).show(ui, cctx, &mut wheel_ix);
+            ui.add_space(cctx.density.item_spacing().y);
+            ui.label("Touch targets");
+            Segmented::new(&["Auto", "On", "Off"]).show(ui, cctx, &mut touch_ix);
+            ui.add_space(cctx.density.item_spacing().y);
+            ui.separator();
+            ui.horizontal(|ui| {
+                if Button::secondary("Reset panel layout")
+                    .show(ui, cctx)
+                    .clicked()
+                {
+                    reset_panels = true;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if Button::secondary("Close").show(ui, cctx).clicked() {
+                        close = true;
+                    }
+                });
+            });
+        });
+
+        let new_density = if density_ix == 1 {
+            Density::Compact
+        } else {
+            Density::Comfortable
+        };
+        let new_wheel = if wheel_ix == 1 {
+            WheelBehavior::Pan
+        } else {
+            WheelBehavior::Zoom
+        };
+        let new_touch = match touch_ix {
+            1 => TouchMode::On,
+            2 => TouchMode::Off,
+            _ => TouchMode::Auto,
+        };
+        let mut changed = false;
+        if new_density != self.ui_density {
+            self.ui_density = new_density;
+            self.theme_dirty = true;
+            changed = true;
+        }
+        if reduced != self.reduced_motion {
+            self.reduced_motion = reduced;
+            self.theme_dirty = true;
+            changed = true;
+        }
+        if new_wheel != self.wheel {
+            self.wheel = new_wheel;
+            changed = true;
+        }
+        if new_touch != self.touch_mode {
+            self.touch_mode = new_touch;
+            changed = true;
+        }
+        if changed {
+            self.persist_prefs();
+        }
+        if reset_panels {
+            // A panel-layout reset drops egui's persisted per-widget UI state (panel
+            // widths and collapsible open flags), returning the docked layout to its
+            // defaults without touching the document or the saved view.
+            ctx.data_mut(egui::util::IdTypeMap::clear);
+            self.status.set("Panel layout reset");
+        }
+        if close || modal.should_close() {
+            self.settings_open = false;
+        }
+    }
+
+    /// The About dialog (catalog 99, 100): versions, GPU adapter, bundle hash, a
+    /// one-click copy of the diagnostics, a prefilled issue link, and the verified
+    /// zero-telemetry statement.
+    fn about_dialog(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+        use crate::theme::components::{Button, Ctx, Modal};
+        if !self.about_open {
+            return;
+        }
+        let cctx = Ctx::dark(self.ui_density).with_reduced_motion(self.reduced_motion);
+        let (adapter, backend) = gpu_info(frame);
+        let diagnostics = crate::help::Diagnostics {
+            app_version: env!("CARGO_PKG_VERSION"),
+            bundle_hash: bundle_hash(),
+            platform: platform_label(),
+            gpu_adapter: adapter.as_str(),
+            gpu_backend: backend,
+        };
+        let report = diagnostics.report();
+        let mut copy = false;
+        let mut issue = false;
+        let mut close = false;
+        let modal = Modal::new("About Reticle").overlay(ctx, cctx, |ui, cctx| {
+            ui.set_max_width(420.0);
+            ui.strong(format!("Reticle {}", env!("CARGO_PKG_VERSION")));
+            ui.add_space(4.0);
+            ui.weak(report.as_str());
+            ui.add_space(cctx.density.item_spacing().y);
+            ui.separator();
+            ui.label(crate::help::ZERO_TELEMETRY);
+            ui.add_space(cctx.density.item_spacing().y);
+            ui.horizontal(|ui| {
+                if Button::secondary("Copy diagnostics")
+                    .show(ui, cctx)
+                    .clicked()
+                {
+                    copy = true;
+                }
+                if Button::secondary("Report an issue")
+                    .show(ui, cctx)
+                    .clicked()
+                {
+                    issue = true;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if Button::secondary("Close").show(ui, cctx).clicked() {
+                        close = true;
+                    }
+                });
+            });
+        });
+        if copy {
+            ctx.copy_text(report.clone());
+            self.status.set("Diagnostics copied");
+        }
+        if issue {
+            self.pending_open_url = Some(crate::help::issue_url(&report));
+        }
+        if close || modal.should_close() {
+            self.about_open = false;
+        }
+    }
+
+    /// The "What's new" dialog (catalog 26): the embedded changelog, newest first.
+    fn whats_new_dialog(&mut self, ctx: &egui::Context) {
+        use crate::theme::components::{Button, Ctx, Modal};
+        if !self.whats_new_open {
+            return;
+        }
+        let cctx = Ctx::dark(self.ui_density).with_reduced_motion(self.reduced_motion);
+        let mut close = false;
+        let modal = Modal::new("What's new").overlay(ctx, cctx, |ui, cctx| {
+            ui.set_max_width(460.0);
+            egui::ScrollArea::vertical()
+                .max_height(360.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    for release in crate::help::changelog() {
+                        ui.strong(format!("Version {} ({})", release.version, release.date));
+                        ui.label(release.headline);
+                        ui.add_space(2.0);
+                        for note in release.notes {
+                            ui.label(format!("\u{2022}  {note}"));
+                        }
+                        ui.add_space(cctx.density.item_spacing().y);
+                    }
+                });
+            ui.separator();
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if Button::secondary("Close").show(ui, cctx).clicked() {
+                    close = true;
+                }
+            });
+        });
+        if close || modal.should_close() {
+            self.whats_new_open = false;
         }
     }
 
@@ -7399,10 +7941,23 @@ impl eframe::App for App {
         // The app-wide notification toasts, over the panels and windows.
         self.notifications_area(&ctx);
 
-        // Draw the first-run tour overlay last so its card and highlight sit over
-        // everything else. Suppressed during a demo capture so onboarding chrome does
-        // not cover the feature under test.
+        // Open any URL queued this frame (Documentation, the prefilled issue link).
+        if let Some(url) = self.pending_open_url.take() {
+            ctx.open_url(egui::OpenUrl::new_tab(url));
+        }
+
+        // The Help dialogs (Settings, About, What's new). Each is a no-op unless its
+        // flag is set; they draw over the panels as real modals.
+        self.settings_dialog(&ctx);
+        self.about_dialog(&ctx, frame);
+        self.whats_new_dialog(&ctx);
+
+        // Draw the first-run tour overlay and the onboarding chrome last so their
+        // cards and highlight sit over everything else. Suppressed during a demo
+        // capture so onboarding chrome does not cover the feature under test.
         if !self.in_demo_capture() {
+            self.update_onboarding();
+            self.onboarding_overlay(&ctx, frame);
             self.tour_overlay(&ctx, &tour_targets);
         }
 
@@ -7429,24 +7984,7 @@ impl eframe::App for App {
         // storage is not used directly (no serde dependency in this crate).
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let hidden: Vec<LayerId> = self
-                .layer_state
-                .rows()
-                .iter()
-                .filter(|r| !r.visible)
-                .map(|r| r.id)
-                .collect();
-            let state = crate::session::SessionState::capture(
-                &self.camera,
-                self.tools.active(),
-                self.grid,
-                self.view_export.theme,
-                self.ui_density,
-                self.reduced_motion,
-                &hidden,
-                self.tour_seen(),
-            );
-            let _ = crate::session::save(&state);
+            let _ = crate::session::save(&self.session_snapshot());
             // The keymap persists alongside the session so rebinds survive exit
             // even when the user never pressed Save in the editor.
             let _ = keymap::save(&self.keymap);
@@ -7607,24 +8145,74 @@ fn tour_already_seen() -> bool {
     true
 }
 
-/// The UI density and reduced-motion preference to boot the theme with.
+/// The persisted preferences to boot with (theme density and reduced motion, plus
+/// the lane 4c settings and onboarding state).
 ///
-/// On native these come from the saved session; a missing or unreadable session
-/// falls back to the comfortable, motion-on defaults. There is no filesystem on
-/// `wasm32`, so the web bundle always boots with the defaults.
+/// On native this is the saved session file; on the web it is the localStorage
+/// mirror. A missing or unreadable store falls back to [`SessionState::default`], so
+/// a fresh install boots with the comfortable, motion-on, zoom-wheel defaults and no
+/// onboarding progress.
 #[cfg(not(target_arch = "wasm32"))]
-fn boot_ui_prefs() -> (crate::theme::tokens::Density, bool) {
-    crate::session::load().map_or_else(
-        || (crate::theme::tokens::Density::default(), false),
-        |s| (s.ui_density, s.reduced_motion),
-    )
+fn boot_session() -> crate::session::SessionState {
+    crate::session::load().unwrap_or_default()
 }
 
-/// The UI density and reduced-motion preference to boot the theme with, on the
-/// web (always the defaults; see the native variant).
+/// The persisted preferences to boot with, on the web (from the localStorage
+/// mirror; see the native variant).
 #[cfg(target_arch = "wasm32")]
-fn boot_ui_prefs() -> (crate::theme::tokens::Density, bool) {
-    (crate::theme::tokens::Density::default(), false)
+fn boot_session() -> crate::session::SessionState {
+    crate::session::web_load().unwrap_or_default()
+}
+
+/// The GPU adapter name and a friendly backend label for the About dialog and the
+/// first-run GPU card, from the live wgpu render state.
+///
+/// Falls back to a stand-in when no wgpu state is present (a software or headless
+/// build), so the diagnostics always have something honest to show.
+fn gpu_info(frame: &eframe::Frame) -> (String, &'static str) {
+    match frame.wgpu_render_state() {
+        Some(state) => {
+            let info = state.adapter.get_info();
+            (info.name, backend_label(info.backend))
+        }
+        None => ("software / unknown".to_owned(), "unknown"),
+    }
+}
+
+/// A friendly label for a wgpu backend (the raw `Debug` names are terse).
+// `wgpu::Backend` is `#[non_exhaustive]`, so the catch-all is required for future
+// variants even though it currently also folds in the internal no-op backend.
+#[allow(clippy::match_wildcard_for_single_variants)]
+fn backend_label(backend: eframe::egui_wgpu::wgpu::Backend) -> &'static str {
+    use eframe::egui_wgpu::wgpu::Backend;
+    match backend {
+        Backend::Vulkan => "Vulkan",
+        Backend::Metal => "Metal",
+        Backend::Dx12 => "Direct3D 12",
+        Backend::Gl => "WebGL2 / OpenGL",
+        Backend::BrowserWebGpu => "WebGPU",
+        // `wgpu::Backend` is non-exhaustive (and has a no-op variant), so anything
+        // else reports as unknown rather than naming an internal placeholder.
+        _ => "unknown",
+    }
+}
+
+/// The build/bundle hash for the About diagnostics.
+///
+/// Read from the optional `RETICLE_BUILD_HASH` compile-time env the release build
+/// injects; an unversioned local build reports a stand-in so the field is never
+/// empty.
+fn bundle_hash() -> &'static str {
+    option_env!("RETICLE_BUILD_HASH").unwrap_or("dev build")
+}
+
+/// The platform label for the About diagnostics.
+fn platform_label() -> &'static str {
+    if cfg!(target_arch = "wasm32") {
+        "web (wasm32)"
+    } else {
+        "native"
+    }
 }
 
 /// Converts a canvas [`ScreenRect`] to an egui rectangle.

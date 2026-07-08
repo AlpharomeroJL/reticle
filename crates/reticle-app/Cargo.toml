@@ -100,6 +100,11 @@ web-sys = { version = "0.3", features = [
     "CloseEvent",
     "ErrorEvent",
     "Blob",
+    # The settings/onboarding persistence mirror (`crate::session`, wasm only) stores
+    # the session text in `window.localStorage` so preferences survive a page reload
+    # (lane 4c); `Storage` is the localStorage interface. Already in the lockfile via
+    # eframe, so no new dependency.
+    "Storage",
 ] }
 
 # `reticle-sync`'s live-session wire codec (`reticle_sync::frame`) frames and decodes

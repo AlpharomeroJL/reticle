@@ -101,6 +101,9 @@ enum Boot {
     /// Open as a read-only viewer of the shared session named by a viewer link
     /// (`?view=viewer&room=..&relay=..`, ADR 0038/0058).
     Viewer(reticle_app::share::ViewerTarget),
+    /// Boot straight into the guided tour (`?tour=1`, lane 4c / catalog 20): the
+    /// editor opens with the tour running from its first step.
+    Tour,
     /// Open the editor and go live automatically for `(relay, room)`, publishing the
     /// session for viewers without a manual "Go live" click. Triggered by a `?share=1`
     /// page flag; the browser share-live e2e uses it as the publisher context.
@@ -130,6 +133,7 @@ impl Boot {
             Boot::Gallery => Box::new(App::gallery()),
             Boot::Archive(url) => Box::new(App::with_archive(url)),
             Boot::Viewer(target) => Box::new(App::with_viewer(target)),
+            Boot::Tour => Box::new(App::with_tour()),
             Boot::Share {
                 relay,
                 room,
@@ -216,6 +220,17 @@ fn boot_from_url() -> Boot {
             room,
             e2e_edit,
         };
+    }
+
+    // `?tour=1` boots straight into the guided tour (lane 4c / catalog 20). Checked
+    // after the specialized links so a viewer/share/archive link still wins, but a
+    // plain deep link (optionally with `?view=editor`) lands in the tour.
+    if params
+        .get("tour")
+        .is_some_and(|v| matches!(v.as_str(), "1" | "true"))
+    {
+        web_sys::console::log_1(&"reticle: boot into the guided tour".into());
+        return Boot::Tour;
     }
 
     match params.get("view") {

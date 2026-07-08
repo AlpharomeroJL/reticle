@@ -47,6 +47,8 @@ pub enum Chapter {
     Core,
     /// The optional second chapter covering the Wave 2 tools.
     Wave2,
+    /// The read-only viewer walkthrough, shown only in a shared viewer session.
+    Viewer,
 }
 
 impl Chapter {
@@ -56,8 +58,23 @@ impl Chapter {
         match self {
             Chapter::Core => "Getting started",
             Chapter::Wave2 => "Wave 2 tools",
+            Chapter::Viewer => "Viewing along",
         }
     }
+}
+
+/// Which variant of the tour is running.
+///
+/// A share link opens the viewer chrome (canvas, status bar, Layers, presence, a
+/// follow toggle, and an "Open full editor" affordance) with no draw tools or
+/// Inspector, so a viewer needs a shorter, different walkthrough than the editor
+/// (catalog 15). The app picks the variant from whether it booted as a viewer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TourVariant {
+    /// The full editor tour: the core walkthrough plus the optional Wave 2 chapter.
+    Editor,
+    /// The read-only viewer tour: explore, layers, follow, and jump to the editor.
+    Viewer,
 }
 
 /// The UI region a tour step points at.
@@ -101,6 +118,9 @@ pub enum TourTarget {
     TechPanel,
     /// The view-and-export panel.
     ViewExportPanel,
+    /// The viewer chrome (session chip, follow toggle, and the "Open full editor"
+    /// affordance) shown in a read-only shared session.
+    ViewerControls,
 }
 
 /// One step of the tour: a stable id, a chapter, a highlighted target, and the
@@ -260,6 +280,37 @@ const WAVE2_STEPS: &[TourStep] = &[
     },
 ];
 
+/// The read-only viewer tour: a short walkthrough of the viewer chrome, shown when
+/// a share link opens the app in view-only mode. There is no Wave 2 chapter here.
+const VIEWER_STEPS: &[TourStep] = &[
+    TourStep {
+        id: "viewer-canvas",
+        chapter: Chapter::Viewer,
+        target: TourTarget::Canvas,
+        title: "Explore the design",
+        body: "You are viewing a shared session live. Drag to pan and scroll to zoom \
+               toward the cursor. Press Fit to frame the whole design. Your view is \
+               your own until you follow the presenter.",
+    },
+    TourStep {
+        id: "viewer-layers",
+        chapter: Chapter::Viewer,
+        target: TourTarget::LayerPanel,
+        title: "Layers",
+        body: "The layer manager lists every layer in the shared design. Toggle a row \
+               to hide or show that layer in your view without affecting anyone else.",
+    },
+    TourStep {
+        id: "viewer-follow",
+        chapter: Chapter::Viewer,
+        target: TourTarget::ViewerControls,
+        title: "Follow and open",
+        body: "Turn on Follow to ride the presenter's camera, or open the full editor \
+               in one click to keep exploring on your own. Your live cursor is shown \
+               to everyone in the session.",
+    },
+];
+
 /// Whether the tour is dormant, running, or done.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Phase {
@@ -281,14 +332,21 @@ enum Phase {
 /// [`Tour::skip`], or [`Tour::finish`] from the buttons.
 #[derive(Clone, Debug)]
 pub struct Tour {
-    /// The active, ordered step list. This is `CORE_STEPS` alone, or `CORE_STEPS`
-    /// followed by `WAVE2_STEPS` when the second chapter is included.
+    /// The active, ordered step list. For the editor variant this is `CORE_STEPS`
+    /// alone or `CORE_STEPS` then `WAVE2_STEPS`; for the viewer variant it is
+    /// `VIEWER_STEPS`.
     steps: Vec<TourStep>,
     /// Where in `steps` the tour is, or whether it is idle or finished.
     phase: Phase,
     /// `true` if this run began automatically on first launch (as opposed to a
     /// user-initiated relaunch from the Help menu).
     first_run: bool,
+    /// Whether this is the editor or the read-only viewer tour.
+    variant: TourVariant,
+    /// The step to resume at after a dismiss (the `x`), so the Help menu can offer
+    /// "Resume tour" and pick up where the user left off. `None` once resumed or
+    /// after a clean finish.
+    resume_at: Option<usize>,
 }
 
 impl Tour {
@@ -303,6 +361,8 @@ impl Tour {
             steps: all_steps(),
             phase: Phase::Running { index: 0 },
             first_run: true,
+            variant: TourVariant::Editor,
+            resume_at: None,
         }
     }
 
@@ -314,6 +374,8 @@ impl Tour {
             steps: all_steps(),
             phase: Phase::Idle,
             first_run: false,
+            variant: TourVariant::Editor,
+            resume_at: None,
         }
     }
 
@@ -332,20 +394,93 @@ impl Tour {
         }
     }
 
-    /// Relaunches the tour from the beginning, choosing whether to include the
-    /// optional Wave 2 chapter.
+    /// The read-only viewer tour, built from the persisted "seen" bit.
     ///
-    /// This is what the Help menu calls. It always starts at the first core step and
-    /// is marked as *not* a first run, so the caller can distinguish an automatic
-    /// first-launch tour from a user-requested one.
-    pub fn relaunch(&mut self, include_wave2: bool) {
-        self.steps = if include_wave2 {
-            all_steps()
-        } else {
-            CORE_STEPS.to_vec()
+    /// A share link opens the viewer chrome; an unseen viewer auto-starts the short
+    /// viewer walkthrough, a seen one stays dormant until relaunched from Help. The
+    /// app swaps this in when it boots as a viewer (see [`crate::app::App::with_viewer`]).
+    #[must_use]
+    pub fn viewer(seen: bool) -> Self {
+        Self {
+            steps: VIEWER_STEPS.to_vec(),
+            phase: if seen {
+                Phase::Idle
+            } else {
+                Phase::Running { index: 0 }
+            },
+            first_run: !seen,
+            variant: TourVariant::Viewer,
+            resume_at: None,
+        }
+    }
+
+    /// Which variant (editor or viewer) this tour is.
+    #[must_use]
+    pub fn variant(&self) -> TourVariant {
+        self.variant
+    }
+
+    /// Forces the tour to start from the beginning right now, regardless of the
+    /// "seen" bit.
+    ///
+    /// This backs the `?tour=1` deep link (catalog 20): a visitor lands straight in
+    /// the tour for whichever variant the app booted. It keeps the current variant,
+    /// including the full editor walkthrough (both chapters) or the viewer one.
+    pub fn start_deep_link(&mut self) {
+        self.steps = match self.variant {
+            TourVariant::Editor => all_steps(),
+            TourVariant::Viewer => VIEWER_STEPS.to_vec(),
         };
         self.phase = Phase::Running { index: 0 };
         self.first_run = false;
+        self.resume_at = None;
+    }
+
+    /// Relaunches the tour from the beginning, choosing whether to include the
+    /// optional Wave 2 chapter (ignored for the viewer variant, which has none).
+    ///
+    /// This is what the Help menu calls. It always starts at the first step and
+    /// is marked as *not* a first run, so the caller can distinguish an automatic
+    /// first-launch tour from a user-requested one.
+    pub fn relaunch(&mut self, include_wave2: bool) {
+        self.steps = match self.variant {
+            TourVariant::Editor if include_wave2 => all_steps(),
+            TourVariant::Editor => CORE_STEPS.to_vec(),
+            TourVariant::Viewer => VIEWER_STEPS.to_vec(),
+        };
+        self.phase = Phase::Running { index: 0 };
+        self.first_run = false;
+        self.resume_at = None;
+    }
+
+    /// Whether a dismissed tour can be resumed from where it was left.
+    #[must_use]
+    pub fn can_resume(&self) -> bool {
+        self.resume_at.is_some() && !self.is_active()
+    }
+
+    /// Resumes a dismissed tour at the step it was dismissed on (or the first step
+    /// if that position is no longer valid). A no-op if there is nothing to resume.
+    pub fn resume(&mut self) {
+        if let Some(index) = self.resume_at.take() {
+            let clamped = index.min(self.steps.len().saturating_sub(1));
+            self.phase = Phase::Running { index: clamped };
+            self.first_run = false;
+        }
+    }
+
+    /// Dismisses the tour with the `x`, remembering the current step so it can be
+    /// resumed later.
+    ///
+    /// Unlike [`Tour::finish`] (which ends the tour cleanly), this parks it: the
+    /// step is stored for [`Tour::resume`], the tour goes dormant, and it counts as
+    /// seen so it does not auto-start again unprompted.
+    pub fn dismiss(&mut self) {
+        if let Phase::Running { index } = self.phase {
+            self.resume_at = Some(index);
+        }
+        self.first_run = false;
+        self.phase = Phase::Idle;
     }
 
     /// The step currently shown, or `None` when the tour is idle or finished.
@@ -433,15 +568,19 @@ impl Tour {
                     None => self.phase = Phase::Finished,
                 }
             }
-            Chapter::Wave2 => self.phase = Phase::Finished,
+            Chapter::Wave2 | Chapter::Viewer => self.phase = Phase::Finished,
         }
     }
 
-    /// Ends the tour immediately (the overlay's dismiss/close button).
+    /// Ends the tour immediately and cleanly (the overlay's "Done" or the last
+    /// step's Next).
     ///
-    /// Unlike [`Tour::skip`], this finishes from any step regardless of chapter.
+    /// Unlike [`Tour::skip`], this finishes from any step regardless of chapter, and
+    /// unlike [`Tour::dismiss`], it clears any resume point (there is nothing left to
+    /// resume once the tour is done).
     pub fn finish(&mut self) {
         self.phase = Phase::Finished;
+        self.resume_at = None;
     }
 }
 
@@ -669,6 +808,99 @@ mod tests {
     fn chapter_labels_are_stable() {
         assert_eq!(Chapter::Core.label(), "Getting started");
         assert_eq!(Chapter::Wave2.label(), "Wave 2 tools");
+        assert_eq!(Chapter::Viewer.label(), "Viewing along");
+    }
+
+    #[test]
+    fn viewer_variant_runs_only_viewer_steps() {
+        let mut tour = Tour::viewer(false);
+        assert_eq!(tour.variant(), TourVariant::Viewer);
+        assert!(tour.is_active());
+        assert!(tour.is_first_run());
+        let expected: Vec<&str> = VIEWER_STEPS.iter().map(|s| s.id).collect();
+        for id in &expected {
+            let step = tour.current().expect("still running");
+            assert_eq!(step.id, *id);
+            assert_eq!(step.chapter, Chapter::Viewer);
+            tour.next();
+        }
+        assert!(tour.is_finished());
+    }
+
+    #[test]
+    fn viewer_seen_stays_idle_until_relaunch() {
+        let mut tour = Tour::viewer(true);
+        assert!(!tour.is_active());
+        assert!(!tour.is_first_run());
+        // A relaunch on a viewer tour re-runs the viewer steps, never the editor ones.
+        tour.relaunch(true);
+        assert!(tour.is_active());
+        assert_eq!(tour.current().unwrap().chapter, Chapter::Viewer);
+        assert_eq!(tour.progress(), Some((1, VIEWER_STEPS.len())));
+    }
+
+    #[test]
+    fn dismiss_parks_the_tour_and_resume_picks_it_back_up() {
+        let mut tour = Tour::first_run();
+        tour.next();
+        tour.next();
+        let parked = tour.current().unwrap().id;
+        assert!(!tour.can_resume(), "cannot resume while running");
+        tour.dismiss();
+        assert!(!tour.is_active(), "dismissed tour is dormant");
+        assert!(!tour.is_finished());
+        assert!(!tour.is_first_run(), "a dismissed first run counts as seen");
+        assert!(tour.can_resume());
+        tour.resume();
+        assert!(tour.is_active());
+        assert_eq!(
+            tour.current().unwrap().id,
+            parked,
+            "resumes where it parked"
+        );
+        assert!(!tour.can_resume(), "resume consumes the parked position");
+    }
+
+    #[test]
+    fn a_clean_finish_leaves_nothing_to_resume() {
+        let mut tour = Tour::first_run();
+        tour.next();
+        tour.finish();
+        assert!(tour.is_finished());
+        assert!(!tour.can_resume());
+    }
+
+    #[test]
+    fn deep_link_starts_the_tour_regardless_of_seen() {
+        // The editor deep link runs both chapters from the top even on a seen tour.
+        let mut editor = Tour::already_seen();
+        assert!(!editor.is_active());
+        editor.start_deep_link();
+        assert!(editor.is_active());
+        assert_eq!(editor.current().unwrap().id, "open");
+        assert_eq!(
+            editor.progress(),
+            Some((1, CORE_STEPS.len() + WAVE2_STEPS.len()))
+        );
+
+        // The viewer deep link runs the viewer steps.
+        let mut viewer = Tour::viewer(true);
+        viewer.start_deep_link();
+        assert!(viewer.is_active());
+        assert_eq!(viewer.current().unwrap().chapter, Chapter::Viewer);
+    }
+
+    #[test]
+    fn viewer_step_ids_are_unique() {
+        for (i, a) in VIEWER_STEPS.iter().enumerate() {
+            for b in &VIEWER_STEPS[i + 1..] {
+                assert_ne!(a.id, b.id, "duplicate viewer step id {}", a.id);
+            }
+            assert!(!a.title.is_empty());
+            assert!(!a.body.is_empty());
+            assert!(!a.title.contains('\u{2014}'));
+            assert!(!a.body.contains('\u{2014}'));
+        }
     }
 
     #[test]
