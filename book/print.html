@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-20d64bab.js";
+            window.path_to_searchindex_js = "searchindex-90a3ba69.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-38e0bbb5.js"></script>
+        <script src="toc-8280aaae.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -1581,6 +1581,68 @@ renderings.</p>
 <p>This is the CPU half of the metrology work. A GPU density overlay was scoped and
 explicitly deferred (see the metrology decision record); it is not built here.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="layout-diff"><a class="header" href="#layout-diff">Layout diff</a></h1>
+<p><code>reticle-diff</code> answers “what changed between these two versions of a layout?” It
+computes a pure geometric diff between two <a href="#document-model"><code>Document</code></a> snapshots, and
+the app paints the result over the canvas: shapes added in green, removed in red,
+changed in amber. Like the metrology and DRC crates, it runs on the CPU over the
+flattened top cell, reads only the public APIs of <code>reticle-model</code> and
+<code>reticle-geometry</code>, and never mutates a document.</p>
+<h2 id="the-pure-diff"><a class="header" href="#the-pure-diff">The pure diff</a></h2>
+<p>The one entry point is <code>diff(before, after) -&gt; LayoutDiff</code>, where</p>
+<pre><code class="language-text">LayoutDiff { added: Vec&lt;DiffShape&gt;, removed: Vec&lt;DiffShape&gt;, changed: Vec&lt;DiffShape&gt; }
+DiffShape { layer, rect, label }
+</code></pre>
+<p>The comparison runs over each document’s flattened top cell and treats the two as
+multisets keyed by <code>(layer, exact geometry)</code>:</p>
+<ul>
+<li>A shape present in <code>after</code> with no match in <code>before</code> is <strong>added</strong>.</li>
+<li>A shape present in <code>before</code> with no match in <code>after</code> is <strong>removed</strong>.</li>
+<li>Matched shapes, including matched duplicates (the counts are compared, not just
+presence), are reported as neither.</li>
+</ul>
+<p>Because the key is the exact geometry, not a bounding box, two shapes match only
+when they are geometrically identical. A shape that merely moved therefore reads as
+one removed plus one added. Flattening happens first, so the diff compares leaf
+geometry regardless of how the two documents structured their cells; <code>DiffShape</code>’s
+<code>rect</code> is the shape’s bounding box (what the overlay paints) and <code>label</code> names the
+flattened top cell.</p>
+<h3 id="changed-is-deferred-in-v1"><a class="header" href="#changed-is-deferred-in-v1"><code>changed</code> is deferred in v1</a></h3>
+<p>Telling a moved or resized shape apart from an independent add-plus-remove is a
+fuzzy match, and emitting it wrongly is worse than not emitting it at all. v1
+therefore reports every geometric difference as an add or a remove and always
+leaves <code>changed</code> empty. The field exists so the overlay and any future revision
+keep a stable shape; a same-place resize shows today as a red box plus a green box.</p>
+<h3 id="correctness"><a class="header" href="#correctness">Correctness</a></h3>
+<p>The diff is pinned by property tests, the same discipline the DRC and metrology
+crates use:</p>
+<ul>
+<li><code>diff(d, d)</code> is empty for any document.</li>
+<li><code>diff(empty, d)</code> is all-added, with the added count equal to the flattened shape
+count of <code>d</code>.</li>
+<li><code>diff(d, empty)</code> is all-removed.</li>
+<li>The single-insertion oracle: appending one rectangle to any base document yields
+exactly one added shape and zero removed, whatever the base and whatever the
+rectangle (a duplicate still raises the multiset count by exactly one).</li>
+</ul>
+<h2 id="the-app-overlay"><a class="header" href="#the-app-overlay">The app overlay</a></h2>
+<p>The app consumes the diff through a <code>diff_overlay</code> module (egui-free logic, unit
+tested, mirroring the <a href="#design-rule-checking">DRC panel</a> split) and a “Layout diff” side panel.
+The comparison document comes from a two-snapshot flow rather than a second file
+open, since no clean comparison-document loader exists in this build:</p>
+<ol>
+<li><strong>Snapshot</strong> captures the current document as the baseline (the <em>before</em>).</li>
+<li>Edit the layout.</li>
+<li><strong>Diff vs snapshot</strong> compares the baseline against the now-current document and
+paints the difference on the canvas.</li>
+</ol>
+<p>A <strong>Show diff overlay</strong> checkbox hides or shows the painted rectangles without
+discarding the computed diff, and <strong>Clear</strong> drops the baseline and the diff.
+Loading a new document clears the baseline, since it snapshotted the previous one.</p>
+<p>A comparison-document file loader and a true per-instance (unflattened) diff are
+open work; both can reuse the <code>LayoutDiff</code> surface unchanged. See
+<a href="../decisions/0079-layout-diff-overlay.html">ADR 0079</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="collaboration"><a class="header" href="#collaboration">Collaboration</a></h1>
 <p><code>reticle-sync</code> and <code>reticle-server</code> make a document editable by several people at
 once, with no central authority resolving conflicts.</p>
@@ -1664,6 +1726,77 @@ orders across simulated peers, and the final documents must be identical.</p>
 the identity), including the encoding edge cases (spaces, unicode cell names, an empty
 layer list), and an app-level test proves an emitted permalink restores the same cell,
 camera, and layers on a freshly opened document.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="multi-writer-collaboration"><a class="header" href="#multi-writer-collaboration">Multi-writer collaboration</a></h1>
+<p>The <a href="#collaboration">collaboration</a> layer began as one-writer-broadcasts: a sharer
+published, viewers consumed. Multi-writer turns that into true co-editing, where
+several editors’ edits merge and converge, a read-only viewer cannot write, and each
+editor’s undo affects only their own edits (ADR 0081).</p>
+<h2 id="convergence"><a class="header" href="#convergence">Convergence</a></h2>
+<p>Every editor keeps a <code>SyncDocument</code> backed by a <code>yrs</code> CRDT. Local edits become binary
+updates; editors exchange them both ways and converge to a byte-identical document
+regardless of the order updates arrive in. Disjoint edits (each editor working on a
+different cell) and conflicting edits (both adding to the same cell) both converge:
+records are keyed by a globally-unique <code>actor:counter</code> id, so two editors never write
+the same key, and every record simply coexists as a union.</p>
+<h2 id="roles-editor-and-viewer"><a class="header" href="#roles-editor-and-viewer">Roles: editor and viewer</a></h2>
+<p>A session has two roles, and read-only is a structural property rather than a matter
+of discipline:</p>
+<ul>
+<li>An <strong>editor</strong> joins in Edit mode. It both receives peers’ updates and may publish
+its own.</li>
+<li>A <strong>viewer</strong> joins in View mode (<code>?mode=view</code>). It receives everything but cannot
+write, enforced in two independent places:
+<ul>
+<li><strong>The relay</strong> drops a view-mode connection’s frames outright: they are neither
+added to the room log nor broadcast, so a viewer’s attempted edit never reaches
+another peer. Both the native relay and the Cloudflare Durable Object worker do
+this, and the conformance suite proves they agree.</li>
+<li><strong>The client</strong> viewer transport exposes <em>no</em> method that sends a document frame,
+so a viewer is structurally unable to publish even if the relay backstop were
+removed.</li>
+</ul>
+</li>
+</ul>
+<p>An end-to-end relay test drives two editors and one viewer at once: the editors
+converge, the viewer materializes exactly the union the editors reached, and the
+frame the viewer tries to publish is dropped and never reaches either editor.</p>
+<h2 id="selective-undo"><a class="header" href="#selective-undo">Selective undo</a></h2>
+<p>In a shared document a single global undo stack is wrong: undoing should reverse <em>my</em>
+last edit, not whatever edit happened most recently, and it must never disturb a
+concurrent editor’s work.</p>
+<p>Each editor tags its local edits with a per-actor <strong>origin</strong> (a stable actor id on the
+underlying CRDT transaction) and drives undo through a <code>yrs</code> undo manager scoped to
+that origin. So:</p>
+<ul>
+<li><code>undo</code> reverts only this editor’s own most recent edit; a peer’s edits (applied with
+no local origin) are never on this editor’s undo stack.</li>
+<li>The undo is itself an ordinary CRDT change, so after the editors exchange updates
+again they still converge, now with that one edit removed.</li>
+<li><code>redo</code> re-applies only this editor’s undone edit, and likewise reconverges.</li>
+</ul>
+<p>So two editors can interleave edits, and each can undo and redo their own work
+independently while both documents stay in agreement.</p>
+<h2 id="what-makes-it-converge-and-one-sharp-edge"><a class="header" href="#what-makes-it-converge-and-one-sharp-edge">What makes it converge, and one sharp edge</a></h2>
+<p>Three details are load-bearing:</p>
+<ul>
+<li><strong>Client ids stay below 2^53.</strong> <code>yrs</code> (following Yjs) round-trips client ids through
+a JavaScript-safe-integer representation; a larger id is silently corrupted on the
+wire, which makes peers disagree on which client owns a struct. That is invisible to
+a document comparison but breaks the precise identity undo/redo depends on, so the
+derived client id is masked to 32 bits.</li>
+<li><strong>Deleted structs are kept, not garbage-collected.</strong> Redo re-inserts a
+previously-deleted item; keeping tombstones lets that re-insertion converge across
+peers.</li>
+<li><strong>The undo manager is <code>Send + Sync</code>.</strong> A document is driven from a background task in
+the live-agent path, so it must cross threads.</li>
+</ul>
+<h2 id="status"><a class="header" href="#status">Status</a></h2>
+<p>The sync-layer contract above (convergence, per-actor selective undo) and the relay’s
+view-mode enforcement are delivered and tested. The in-app <em>editor</em> still edits a
+separate document as its source of truth and publishes a reconciled mirror; making the
+live editor CRDT-backed, so it merges inbound peer edits and routes its undo button
+through the per-actor undo manager, is a larger app change deferred to a later step.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="the-relay-two-implementations-one-protocol"><a class="header" href="#the-relay-two-implementations-one-protocol">The relay: two implementations, one protocol</a></h1>
 <p>Reticle ships two collaboration relays, and treats the protocol between them as
@@ -1760,6 +1893,61 @@ would catch a relay that broke the contract, rather than vacuously passing. Run 
 whole suite with <code>just conformance</code>, which runs the native half in-process always
 and the Durable Object half against <code>wrangler dev</code> when <code>worker/node_modules</code>
 exists. <code>just ci</code> stays Node-free.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="comments-and-annotations"><a class="header" href="#comments-and-annotations">Comments and annotations</a></h1>
+<p>A comment is a note anchored to a piece of a layout: a reviewer marks a shape or a
+cell and leaves text next to it, so a review conversation lives on the geometry
+rather than in a separate document. Comments persist inside the layout document
+through a schema version bump, V1 to V2, with a proven-lossless migration of every
+pre-V2 document (see <a href="../decisions/0080-comments-schema-v1-v2-migration.html">ADR 0080</a>).</p>
+<h2 id="the-comment-model"><a class="header" href="#the-comment-model">The comment model</a></h2>
+<p>A comment (<code>reticle_sync::Comment</code>) carries a stable <code>id</code>, the <code>thread_id</code> it
+belongs to, an <code>anchor_ref</code> binding it to a shape or cell (a cell name, or a
+<code>cell/element-id</code> path), an <code>author</code>, the <code>body</code> text, a creation timestamp, and an
+<code>in_reply_to</code> pointing at the comment it replies to (empty for a thread root).
+Replies inherit their parent’s thread and anchor, so a <code>CommentThread</code> groups a root
+with its replies in creation order for display.</p>
+<h2 id="persistence-schema-v1-to-v2"><a class="header" href="#persistence-schema-v1-to-v2">Persistence: schema V1 to V2</a></h2>
+<p>Comments are stored on the document itself. The <code>reticle.proto</code> schema is versioned
+by a <code>SchemaVersion</code> enum, and adding comments is the first real evolution of that
+schema, so it is also the first exercise of the migration contract.</p>
+<p>The change is deliberately <strong>additive</strong>: <code>SCHEMA_VERSION_V2 = 2</code> is added to the
+enum, and a <code>repeated Comment comments</code> field is appended to <code>Document</code> with a new
+field number. Protobuf never reuses field numbers and skips absent fields, so a
+document written under V1 still decodes under V2 with an empty comment list, and a
+V1 document with no comments re-encodes byte-for-byte unchanged.</p>
+<p><code>reticle_proto::migrate::migrate_document</code> upgrades a document to the current
+version: for V1 to V2 it stamps the version to V2 and leaves the (empty) comment
+list alone. It never touches the technology, cells, or top-cell list, so all
+geometry is preserved exactly. An unspecified (version 0) or newer-than-supported
+document is refused rather than guessed at, and migrating a document already at the
+current version is a no-op.</p>
+<h3 id="proving-the-migration-is-lossless"><a class="header" href="#proving-the-migration-is-lossless">Proving the migration is lossless</a></h3>
+<p>The migration is proven against a real pre-V2 artifact, not an argument. A
+representative V1 document, serialized with the pre-V2 build, is committed as a
+frozen <strong>golden fixture</strong> (<code>v1_document_golden.bin</code>). It was captured and committed
+<em>before</em> the schema was edited: had the schema changed first, the fixture would be a
+V2 document and prove nothing.</p>
+<p>The migration test then decodes that committed fixture with the V2 code, confirms
+the comment list is empty and the geometry is intact, runs <code>migrate_document</code>, and
+asserts the version becomes V2 while the geometry is byte-for-byte identical before
+and after. A second, two-way test builds a V2 document carrying a root-and-reply
+thread, round-trips it through encode and decode, and confirms the comments, their
+thread structure, and their anchor bindings all survive, and that a migrated V1
+document lists zero comments.</p>
+<h2 id="comment-pins-in-the-app"><a class="header" href="#comment-pins-in-the-app">Comment pins in the app</a></h2>
+<p>The app surfaces comments as <strong>pins</strong> on the canvas and a list in the side panel,
+following the same egui-free-logic split the DRC and diff panels use: a
+<code>comment_pins</code> module holds the comment set, resolves an <code>anchor_ref</code> to a world
+point (the centre of the anchored cell’s geometry), and formats a comment for the
+list, all unit-tested without a UI. The “Comments” panel adds a comment on the
+current top cell, lists the comments, and selects one; the canvas paints a numbered
+pin at each anchor, with the selected pin drawn larger and highlighted.</p>
+<p>The in-app pins are held in memory today. Serializing them into a saved V2 document
+(and into the collaborative CRDT for live sharing) reuses the same
+<code>Document.comments</code> field and the <code>to_proto_comments</code> / <code>from_proto_comments</code>
+converters the persistence tests already exercise; that save/load wiring is open
+work.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="scripting"><a class="header" href="#scripting">Scripting</a></h1>
 <p><code>reticle-script</code> embeds a scripting language so a layout can be built, queried, and
@@ -3369,6 +3557,54 @@ STATUS EXCLUDED mystery.rtla: license not on redistribution allowlist: NoSuchLic
 STATUS EXCLUDED orphan.rtla: no license manifest (expected orphan.rtla.NOTICE)
 verify-licenses: 3 archive(s): 1 verified, 2 excluded
 </code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="install-and-offline-pwa"><a class="header" href="#install-and-offline-pwa">Install and offline (PWA)</a></h1>
+<p>The browser bundle is a Progressive Web App: it can be installed to the home
+screen or desktop and it loads its app shell offline. Three pieces make that
+work, all shipped from <code>crates/web</code> and copied verbatim into the Trunk <code>dist</code>:</p>
+<ul>
+<li><strong><code>manifest.json</code></strong> declares the install metadata: the name, the standalone
+display mode, the <code>#0b0e14</code> theme and background colors, and 192 and 512 px
+icons (including a maskable variant). It is linked from <code>index.html</code> with a
+relative <code>href="manifest.json"</code>.</li>
+<li><strong><code>sw.js</code></strong> is the service worker. On install it pre-caches the navigation
+shell; on activate it drops caches from older versions and claims open
+clients; on fetch it serves navigation network-first (falling back to the
+cached shell when offline) and static assets cache-first, populating the cache
+from the network on a miss.</li>
+<li>An inline registration script in <code>index.html</code> registers <code>./sw.js</code> on window
+load, when service workers are supported and the page is not opened from
+<code>file://</code>.</li>
+</ul>
+<h2 id="subpath-correctness"><a class="header" href="#subpath-correctness">Subpath correctness</a></h2>
+<p>Production serves the site under a subpath,
+<code>https://alpharomerojl.github.io/reticle/</code>, not at the domain root. So every
+PWA path is <strong>relative</strong>:</p>
+<ul>
+<li>the manifest link is <code>href="manifest.json"</code>, and its <code>start_url</code> and <code>scope</code>
+are both <code>"."</code>;</li>
+<li>the registration call is <code>register("./sw.js")</code>;</li>
+<li>inside the worker, every cached URL is derived from
+<code>self.registration.scope</code> (the absolute URL the worker controls), so the same
+worker is correct at the dev root <strong>and</strong> under <code>/reticle/</code> with no hardcoded
+leading <code>/</code>.</li>
+</ul>
+<p>Because the hashed <code>web-&lt;hash&gt;.js</code> and <code>web-&lt;hash&gt;_bg.wasm</code> names are not known
+at install time, the worker discovers and caches them at runtime on the first
+controlled load rather than listing them in a pre-cache manifest.</p>
+<h2 id="how-it-reaches-the-deploy-artifact"><a class="header" href="#how-it-reaches-the-deploy-artifact">How it reaches the deploy artifact</a></h2>
+<p>The Trunk <code>copy-file</code> directives in <code>index.html</code> emit <code>manifest.json</code>, <code>sw.js</code>,
+and both icons into <code>dist</code>. <code>scripts/deploy-pages.ps1</code> copies <code>dist/*</code>
+wholesale into the Pages staging directory, so the PWA files ride along to
+<code>gh-pages</code> under <code>/reticle/</code> with no extra deploy step.</p>
+<h2 id="proof"><a class="header" href="#proof">Proof</a></h2>
+<p><code>just e2e-pwa</code> runs the <code>pwa</code> Playwright project (<code>e2e/tests/pwa.spec.ts</code>)
+against the root-served <code>dist</code>. It asserts a linked, parseable manifest with a
+name, a <code>start_url</code>, and resolvable icons; that the service worker registers and
+controls the page after a reload; and, best-effort, that the app shell still
+renders after the network is cut and the page reloaded. The subpath boot gate
+(<code>just e2e-subpath</code>) separately proves the relative asset paths resolve under
+<code>/reticle/</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="contributing"><a class="header" href="#contributing">Contributing</a></h1>
 <h2 id="the-build-gate"><a class="header" href="#the-build-gate">The build gate</a></h2>

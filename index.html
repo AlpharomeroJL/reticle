@@ -9,6 +9,15 @@
       content="Browser-native, GPU-accelerated editor for very large hierarchical 2D IC-layout scenes."
     />
     <!--
+      PWA install metadata. All paths are RELATIVE so they resolve both at the
+      dev root and under the gh-pages subpath (https://.../reticle/). The
+      manifest declares start_url/scope "." (relative), and the icons/theme mirror
+      the app shell background (#0b0e14).
+    -->
+    <link rel="manifest" href="manifest.json" />
+    <meta name="theme-color" content="#0b0e14" />
+    <link rel="icon" type="image/png" href="icon-192.png" />
+    <!--
       Failure surface. Trunk injects its own `<script type="module">` in place of
       the `data-trunk rel="rust"` link below; that module does a top-level
       `await init(...)` to fetch and instantiate the wasm. If the fetch 404s (for
@@ -97,8 +106,8 @@
     </script>
     
 <script type="module">
-import init, * as bindings from '/reticle/web-d9e257c768201db7.js';
-const wasm = await init({ module_or_path: '/reticle/web-d9e257c768201db7_bg.wasm' });
+import init, * as bindings from '/reticle/web-8298841dabff52a3.js';
+const wasm = await init({ module_or_path: '/reticle/web-8298841dabff52a3_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -107,6 +116,15 @@ window.wasmBindings = bindings;
 dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
 </script>
+    <!--
+      Emit the PWA shell assets into dist. Trunk copies these verbatim into the
+      dist root, so the wholesale `dist/*` copy in scripts/deploy-pages.ps1
+      carries manifest.json, sw.js, and the icons to gh-pages under /reticle/.
+    -->
+    
+    
+    
+    
     <style>
       :root {
         color-scheme: dark;
@@ -174,7 +192,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         background: rgba(49, 50, 68, 0.95);
       }
     </style>
-  <link rel="modulepreload" href="/reticle/web-d9e257c768201db7.js" crossorigin="anonymous" integrity="sha384-OVZR8nixvxCxoMfO06PCxYXeZ2X188lued98TXLwVQGbL4G8rBB0uNnA1wunj41B"><link rel="preload" href="/reticle/web-d9e257c768201db7_bg.wasm" crossorigin="anonymous" integrity="sha384-w/t3I1a+qWDfODpVXU4/aXvzOx4jClA5zQShMnPT3UI1xN1H8ZAhICUgc0YZ2n8U" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/reticle/web-8298841dabff52a3.js" crossorigin="anonymous" integrity="sha384-pKK9AGPNOZZF0i8O8cQzrRGFhTMYJAxuPRTfSiHoHj36HNxIRZudCSbsVCHohG+A"><link rel="preload" href="/reticle/web-8298841dabff52a3_bg.wasm" crossorigin="anonymous" integrity="sha384-er98jUHzeMZ7pFVgNveLEbSjPLQynlhHP4yW2MO5I7yhJ0qofV+yOQn9qKR7NwkE" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="reticle-canvas"></canvas>
     <a id="view-switch" href="?view=editor">Open the full editor</a>
@@ -217,6 +235,28 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
           link.textContent = "Open the full editor";
           link.href = "?view=editor";
         }
+      })();
+    </script>
+    <script>
+      // Register the service worker so the app is installable and loads its
+      // shell offline. "./sw.js" is RELATIVE, so it resolves under the dev root
+      // AND the gh-pages /reticle/ subpath; the scope is derived from the
+      // document location (the directory this page was served from), which is
+      // the same directory sw.js lives in. Registered on window "load" so it
+      // never competes with the wasm boot. This is a no-op where service workers
+      // are unsupported or the page is opened from file://, and a registration
+      // failure is logged, never fatal.
+      (function () {
+        if (!("serviceWorker" in navigator)) return;
+        if (window.location.protocol === "file:") return;
+        var scope = new URL("./", window.location.href).pathname;
+        window.addEventListener("load", function () {
+          navigator.serviceWorker
+            .register("./sw.js", { scope: scope })
+            .catch(function (err) {
+              console.warn("service worker registration failed:", err);
+            });
+        });
       })();
     </script>
   </body>
