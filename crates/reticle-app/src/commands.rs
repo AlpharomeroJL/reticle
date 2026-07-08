@@ -71,6 +71,15 @@ pub enum AppOp {
     SplitHorizontal,
     /// Split the canvas into two stacked panes.
     SplitVertical,
+    // --- lane 3c ---
+    /// Open the palette prompting for a coordinate to jump to (`palette.goto_coordinate`).
+    PromptGotoCoordinate,
+    /// Open the palette prompting for a cell to jump to (`palette.goto_cell`).
+    PromptGotoCell,
+    /// Advance keyboard focus to the next focus region (`focus.cycle`, F6).
+    CycleFocus,
+    /// Toggle the generated keyboard-shortcuts overlay (`help.shortcuts`, ?).
+    ToggleShortcuts,
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -341,6 +350,47 @@ static REGISTRY: &[CommandSpec] = &[
         run: RunAs::App(AppOp::OpenPalette),
         scope: Scope::Global,
     },
+    // --- 3C: palette / keys ---
+    CommandSpec {
+        id: CommandId("palette.goto_coordinate"),
+        label: "Go to coordinate...",
+        category: "Go to",
+        menu_path: None,
+        default_chord: None,
+        rebindable: true,
+        run: RunAs::App(AppOp::PromptGotoCoordinate),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("palette.goto_cell"),
+        label: "Go to cell...",
+        category: "Go to",
+        menu_path: None,
+        default_chord: None,
+        rebindable: true,
+        run: RunAs::App(AppOp::PromptGotoCell),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("focus.cycle"),
+        label: "Cycle focus region",
+        category: "View",
+        menu_path: None,
+        default_chord: Some("F6"),
+        rebindable: true,
+        run: RunAs::App(AppOp::CycleFocus),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("help.shortcuts"),
+        label: "Keyboard shortcuts",
+        category: "Help",
+        menu_path: Some(&["Help"]),
+        default_chord: Some("?"),
+        rebindable: true,
+        run: RunAs::App(AppOp::ToggleShortcuts),
+        scope: Scope::Global,
+    },
 ];
 
 /// The full command registry.
@@ -350,6 +400,46 @@ static REGISTRY: &[CommandSpec] = &[
 #[must_use]
 pub fn registry() -> &'static [CommandSpec] {
     REGISTRY
+}
+
+/// A surface a right-click can raise a context menu on (lane 3C, item 47).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MenuContext {
+    /// Empty canvas: navigation and tool actions.
+    Canvas,
+    /// A selected shape on the canvas.
+    Shape,
+    /// A row in the Layers panel (dynamic per-layer actions are added by the caller).
+    LayerRow,
+    /// A panel header (Inspector / Layers title bars).
+    PanelHeader,
+}
+
+impl MenuContext {
+    /// The registry command ids a right-click on this surface offers, so context
+    /// menus are driven by the registry rather than a hand-kept parallel list
+    /// (item 47). The renderer skips any id not present in the current build and,
+    /// for [`MenuContext::LayerRow`], prepends the dynamic toggle/select actions.
+    #[must_use]
+    pub fn command_ids(self) -> &'static [&'static str] {
+        match self {
+            MenuContext::Canvas => &[
+                "tool.select",
+                "view.zoom_fit",
+                "select.clear",
+                "palette.goto_coordinate",
+                "palette.open",
+            ],
+            MenuContext::Shape => &[
+                "view.zoom_fit",
+                "select.clear",
+                "tool.vertices",
+                "palette.open",
+            ],
+            MenuContext::LayerRow => &["view.labels", "view.minimap"],
+            MenuContext::PanelHeader => &["palette.open", "help.shortcuts", "focus.cycle"],
+        }
+    }
 }
 
 /// The spec for `id`, or `None` if no command has that id.
@@ -456,5 +546,48 @@ mod tests {
             let spec = super::spec(CommandId(id)).expect("id in registry");
             assert_eq!(spec.menu_path, Some(path), "menu path for {id}");
         }
+    }
+
+    #[test]
+    fn every_context_menu_id_is_a_registered_command() {
+        // Context menus are registry-driven: every id they name must resolve to a
+        // real command so the menu never shows a dead row (item 47).
+        for context in [
+            MenuContext::Canvas,
+            MenuContext::Shape,
+            MenuContext::LayerRow,
+            MenuContext::PanelHeader,
+        ] {
+            let ids = context.command_ids();
+            assert!(!ids.is_empty(), "{context:?} menu must offer something");
+            for id in ids {
+                assert!(
+                    super::spec(CommandId(id)).is_some(),
+                    "{context:?} menu id {id} must be in the registry"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn lane_3c_reserved_ids_match_the_section_4_contract() {
+        // ia-inventory section 4: id -> (menu path, default chord). The goto and
+        // focus commands are palette-only (no menu path); help.shortcuts lives on
+        // the Help menu.
+        let goto_coord = super::spec(CommandId("palette.goto_coordinate")).expect("registered");
+        assert_eq!(goto_coord.menu_path, None);
+        assert_eq!(goto_coord.default_chord, None);
+
+        let goto_cell = super::spec(CommandId("palette.goto_cell")).expect("registered");
+        assert_eq!(goto_cell.menu_path, None);
+        assert_eq!(goto_cell.default_chord, None);
+
+        let cycle = super::spec(CommandId("focus.cycle")).expect("registered");
+        assert_eq!(cycle.menu_path, None);
+        assert_eq!(cycle.default_chord, Some("F6"));
+
+        let shortcuts = super::spec(CommandId("help.shortcuts")).expect("registered");
+        assert_eq!(shortcuts.menu_path, Some(&["Help"][..]));
+        assert_eq!(shortcuts.default_chord, Some("?"));
     }
 }

@@ -63,6 +63,33 @@ fn resolve_key(key: &str) -> Option<CommandId> {
     commands::rebindable_id(dotted)
 }
 
+/// Multi-key shortcut sequences: press the prefix key, then a suffix key (`g`
+/// then `c`), each mapping to a registry command id (item 81). Keys are canonical
+/// egui names (uppercase letters). Sequences use bare keys with no modifiers so a
+/// prefix never shadows a modified chord; the shortcuts overlay documents them.
+pub const SEQUENCES: &[(&str, &str, &str)] = &[
+    ("G", "C", "palette.goto_cell"),
+    ("G", "X", "palette.goto_coordinate"),
+    ("G", "F", "view.zoom_fit"),
+];
+
+/// Whether `key` (a canonical egui key name) begins a shortcut sequence, so the
+/// glue layer can hold it as a pending prefix instead of running a command.
+#[must_use]
+pub fn is_sequence_prefix(key: &str) -> bool {
+    SEQUENCES.iter().any(|(prefix, _, _)| *prefix == key)
+}
+
+/// The registry command a `prefix`-then-`suffix` sequence runs, if any (both are
+/// canonical egui key names).
+#[must_use]
+pub fn sequence_command(prefix: &str, suffix: &str) -> Option<CommandId> {
+    SEQUENCES
+        .iter()
+        .find(|(p, s, _)| *p == prefix && *s == suffix)
+        .map(|(_, _, id)| CommandId(id))
+}
+
 /// Key names accepted beyond single letters and digits; these match egui's
 /// canonical `Key::name()` strings, so chord lookup is a string compare.
 const NAMED_KEYS: &[&str] = &[
@@ -108,22 +135,74 @@ const NAMED_KEYS: &[&str] = &[
     "F12",
 ];
 
+/// Punctuation keys a chord may be written as the symbol itself (`?`), each paired
+/// with the canonical egui `Key::name()` used for event matching and, where the
+/// symbol is normally produced with Shift held, whether that Shift is redundant.
+///
+/// The overlay binds `?`; a US-layout `?` press arrives as `Key::Questionmark`
+/// with Shift set, so the pressed chord must normalize the Shift away to match a
+/// `?` binding. Symbols reachable without Shift (`/`, `;`, `-`) keep it meaningful.
+const SYMBOL_KEYS: &[(&str, &str, bool)] = &[
+    ("?", "Questionmark", true),
+    ("!", "Exclamationmark", true),
+    (":", "Colon", true),
+    ("|", "Pipe", true),
+    ("+", "Plus", true),
+    ("{", "OpenCurlyBracket", true),
+    ("}", "CloseCurlyBracket", true),
+    ("/", "Slash", false),
+    ("\\", "Backslash", false),
+    ("`", "Backtick", false),
+    ("[", "OpenBracket", false),
+    ("]", "CloseBracket", false),
+    (";", "Semicolon", false),
+    (",", "Comma", false),
+    (".", "Period", false),
+    ("-", "Minus", false),
+    ("=", "Equals", false),
+];
+
+/// The symbol form of a canonical key name (`Questionmark` -> `?`), or the name
+/// itself when it has no symbol form, so a chord prints the way it is authored.
+fn key_symbol(name: &str) -> &str {
+    SYMBOL_KEYS
+        .iter()
+        .find(|(_, canon, _)| *canon == name)
+        .map_or(name, |(sym, _, _)| *sym)
+}
+
+/// Whether a canonical key name is a symbol whose Shift is redundant (`?`), so the
+/// pressed-chord Shift flag can be dropped to match a Shift-free binding.
+fn shift_is_implied(name: &str) -> bool {
+    SYMBOL_KEYS
+        .iter()
+        .any(|(_, canon, implied)| *canon == name && *implied)
+}
+
 /// The canonical key name for a chord token, or `None` if unrecognized.
 ///
-/// Single alphanumeric characters canonicalize to uppercase (`z` -> `Z`); longer
-/// tokens must match a [`NAMED_KEYS`] entry case-insensitively.
+/// Single alphanumeric characters canonicalize to uppercase (`z` -> `Z`);
+/// punctuation may be written as its symbol (`?`) or its egui name
+/// (`Questionmark`); longer tokens must match a [`NAMED_KEYS`] entry
+/// case-insensitively.
 fn canonical_key(token: &str) -> Option<String> {
     let t = token.trim();
+    if let Some((_, canon, _)) = SYMBOL_KEYS.iter().find(|(sym, _, _)| *sym == t) {
+        return Some((*canon).to_owned());
+    }
     let mut chars = t.chars();
     if let (Some(c), None) = (chars.next(), chars.next())
         && c.is_ascii_alphanumeric()
     {
         return Some(c.to_ascii_uppercase().to_string());
     }
-    NAMED_KEYS
+    if let Some(k) = NAMED_KEYS.iter().find(|k| k.eq_ignore_ascii_case(t)) {
+        return Some((*k).to_owned());
+    }
+    SYMBOL_KEYS
         .iter()
-        .find(|k| k.eq_ignore_ascii_case(t))
-        .map(|k| (*k).to_owned())
+        .find(|(_, canon, _)| canon.eq_ignore_ascii_case(t))
+        .map(|(_, canon, _)| (*canon).to_owned())
 }
 
 /// A keyboard chord: modifier flags plus one key, e.g. `Ctrl+Shift+Z`.
@@ -172,12 +251,28 @@ impl Chord {
                 }
             }
         }
-        Some(Chord {
-            ctrl,
-            shift,
-            alt,
-            key: key?,
-        })
+        Some(
+            Chord {
+                ctrl,
+                shift,
+                alt,
+                key: key?,
+            }
+            .normalized(),
+        )
+    }
+
+    /// The chord with a redundant Shift dropped for symbols whose Shift is
+    /// implied (a US-layout `?` is `Key::Questionmark` with Shift held, but the
+    /// binding is written `?`). Applied to parsed and pressed chords alike so
+    /// authoring and matching always agree; letter and non-implied symbol chords
+    /// are returned unchanged.
+    #[must_use]
+    pub fn normalized(mut self) -> Chord {
+        if self.shift && shift_is_implied(&self.key) {
+            self.shift = false;
+        }
+        self
     }
 }
 
@@ -192,7 +287,7 @@ impl fmt::Display for Chord {
         if self.alt {
             write!(f, "Alt+")?;
         }
-        write!(f, "{}", self.key)
+        write!(f, "{}", key_symbol(&self.key))
     }
 }
 
@@ -449,6 +544,77 @@ mod tests {
     }
 
     #[test]
+    fn sequence_prefix_is_recognized_and_resolves_a_suffix() {
+        assert!(is_sequence_prefix("G"), "g starts a sequence");
+        assert!(!is_sequence_prefix("Z"), "z is not a sequence prefix");
+        assert_eq!(
+            sequence_command("G", "C"),
+            Some(id("palette.goto_cell")),
+            "g then c goes to a cell"
+        );
+        assert_eq!(
+            sequence_command("G", "X"),
+            Some(id("palette.goto_coordinate"))
+        );
+    }
+
+    #[test]
+    fn sequence_command_is_none_for_unknown_pairs() {
+        assert_eq!(sequence_command("G", "Q"), None, "no g-q sequence");
+        assert_eq!(sequence_command("Z", "C"), None, "z is not a prefix");
+    }
+
+    #[test]
+    fn every_sequence_resolves_to_a_real_command() {
+        for (prefix, suffix, target) in SEQUENCES {
+            assert!(is_sequence_prefix(prefix), "{prefix} must be a prefix");
+            assert_eq!(
+                sequence_command(prefix, suffix),
+                Some(CommandId(target)),
+                "{prefix}{suffix} -> {target}"
+            );
+            assert!(
+                commands::spec(CommandId(target)).is_some(),
+                "sequence target {target} must exist in the registry"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_symbol_keys_written_as_the_symbol() {
+        // The shortcuts overlay binds `?`; it must parse and canonicalize to the
+        // egui key name so a pressed key can be matched by a string compare.
+        let q = Chord::parse("?").expect("? parses");
+        assert_eq!(q.key, "Questionmark");
+        // It prints back as the symbol, not the egui name (the overlay shows `?`).
+        assert_eq!(q.to_string(), "?");
+        // Long-form egui names also parse, to the same chord.
+        assert_eq!(Chord::parse("Questionmark"), Some(q));
+    }
+
+    #[test]
+    fn shift_implied_symbols_normalize_away_the_shift_flag() {
+        // A US-layout `?` press arrives as Key::Questionmark with Shift held; the
+        // `?` binding carries no Shift, so the pressed chord must normalize to it.
+        let pressed = Chord {
+            ctrl: false,
+            shift: true,
+            alt: false,
+            key: "Questionmark".to_owned(),
+        }
+        .normalized();
+        assert_eq!(pressed, Chord::parse("?").expect("parses"));
+        assert!(!pressed.shift, "the redundant Shift is dropped");
+    }
+
+    #[test]
+    fn letters_keep_their_shift_flag_under_normalization() {
+        // Shift is meaningful for letter keys and must survive normalization.
+        let shifted = Chord::parse("Shift+Z").expect("parses").normalized();
+        assert!(shifted.shift);
+    }
+
+    #[test]
     fn parse_full_chord_with_modifiers() {
         let c = Chord::parse("Ctrl+Shift+Z").expect("parses");
         assert!(c.ctrl && c.shift && !c.alt);
@@ -492,9 +658,10 @@ mod tests {
 
     #[test]
     fn defaults_match_the_shortcut_regression_list() {
-        // The exact defaults ia-inventory section 1 pins; the 1E regression test.
+        // The exact defaults ia-inventory section 1 pins; this is the Wave 0
+        // regression list every lane must keep green.
         let m = Keymap::defaults();
-        let expect = [
+        let regression = [
             ("palette.open", "Ctrl+P"),
             ("edit.undo", "Ctrl+Z"),
             ("edit.redo", "Ctrl+Y"),
@@ -509,7 +676,7 @@ mod tests {
             ("view.split_h", "Ctrl+2"),
             ("view.split_v", "Ctrl+3"),
         ];
-        for (command, text) in expect {
+        for (command, text) in regression {
             assert_eq!(
                 m.chord_for(id(command)),
                 Chord::parse(text).as_ref(),
@@ -517,7 +684,22 @@ mod tests {
             );
         }
         assert_eq!(m.chord_for(id("view.snap")), None, "snap ships unbound");
-        assert_eq!(m.len(), expect.len(), "no extra default bindings");
+        // Lane 3C adds two new default chords on top of the frozen list (the
+        // section-4 chord-conflict note authorizes F6 and ?); they must not
+        // collide with the regression chords, which is what `conflicts()` proves.
+        let lane_3c = [("focus.cycle", "F6"), ("help.shortcuts", "?")];
+        for (command, text) in lane_3c {
+            assert_eq!(
+                m.chord_for(id(command)),
+                Chord::parse(text).as_ref(),
+                "{command} must default to {text}"
+            );
+        }
+        assert_eq!(
+            m.len(),
+            regression.len() + lane_3c.len(),
+            "exactly the regression list plus the lane-3C defaults"
+        );
         assert!(m.conflicts().is_empty(), "defaults must not conflict");
     }
 
