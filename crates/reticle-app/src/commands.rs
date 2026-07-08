@@ -80,6 +80,18 @@ pub enum AppOp {
     CycleFocus,
     /// Toggle the generated keyboard-shortcuts overlay (`help.shortcuts`, ?).
     ToggleShortcuts,
+    // lane 4c: help and onboarding effects (no palette `Command` equivalent).
+    /// Relaunch the guided tour from the first step (both editor chapters, or the
+    /// viewer walkthrough in a viewer session).
+    TakeTour,
+    /// Open the Settings dialog (catalog 98).
+    OpenSettings,
+    /// Open the About dialog (catalog 99, 100).
+    OpenAbout,
+    /// Open the "What's new" dialog (catalog 26).
+    OpenWhatsNew,
+    /// Open the documentation in the browser (catalog, Help > Documentation).
+    OpenDocs,
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -389,6 +401,57 @@ static REGISTRY: &[CommandSpec] = &[
         default_chord: Some("?"),
         rebindable: true,
         run: RunAs::App(AppOp::ToggleShortcuts),
+        scope: Scope::Global,
+    },
+    // --- lane 4c: help and onboarding ---
+    CommandSpec {
+        id: CommandId("help.tour"),
+        label: "Take the tour",
+        category: "Help",
+        menu_path: Some(&["Help"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::TakeTour),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("help.docs"),
+        label: "Documentation",
+        category: "Help",
+        menu_path: Some(&["Help"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::OpenDocs),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("help.whats_new"),
+        label: "What's new",
+        category: "Help",
+        menu_path: Some(&["Help"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::OpenWhatsNew),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("help.settings"),
+        label: "Settings...",
+        category: "Help",
+        menu_path: Some(&["Help"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::OpenSettings),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("help.about"),
+        label: "About Reticle",
+        category: "Help",
+        menu_path: Some(&["Help"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::OpenAbout),
         scope: Scope::Global,
     },
 ];
