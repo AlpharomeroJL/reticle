@@ -218,6 +218,17 @@ byte-for-byte identical across the migration. The app lists comments and paints 
 each anchor; wiring the in-app pins into document save/load (and the CRDT) is deferred. See
 [ADR 0080](docs/decisions/0080-comments-schema-v1-v2-migration.md).
 
+**Multi-writer collaboration.** Several editors' edits merge and converge to a byte-identical
+document, and each editor's undo is *selective*: it tags local edits with a per-actor CRDT origin
+and drives a `yrs` undo manager scoped to that origin, so undo reverts only that editor's own last
+edit, leaves a concurrent peer's edit intact, and still reconverges after exchange. Read-only is
+enforced in depth: the relay drops a view-mode connection's frames (native and Durable Object
+worker alike) and the viewer transport has no publish method at all. Proven natively (two-writer
+convergence, selective-undo-then-reconverge, redo convergence) and end-to-end over the relay (two
+editors converge, a viewer sees the union but its write is dropped). Making the in-app editor
+CRDT-backed so it merges inbound peer edits live is deferred. See
+[ADR 0081](docs/decisions/0081-multi-writer-convergence-view-permission-selective-undo.md).
+
 **Generators.** Each of the six generators is a pure function from a typed `ParamSchema` to
 geometry. One schema drives all three surfaces (the Generate panel, the MCP tools, the
 benchmark checker), and a property test runs every generator over 400 random valid parameter
