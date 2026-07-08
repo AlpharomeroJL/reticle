@@ -47,6 +47,10 @@ pub struct SessionState {
     /// Whether functional motion is suppressed (reduced-motion preference). Off
     /// by default; the theme zeroes animation time when it is on.
     pub reduced_motion: bool,
+    /// Whether touch mode is on (lane 4B). Off by default; when on the theme
+    /// raises `interact_size.y` to the touch minimum over either density so hit
+    /// targets meet the tablet/phone floor. Lane 4C's Settings dialog toggles it.
+    pub touch_mode: bool,
     /// Whether the first-run tour has been shown. `false` on a fresh install, so
     /// the tour auto-starts once; set `true` after it finishes so it never shows
     /// again unprompted (the Help menu can still relaunch it). See [`crate::tour`].
@@ -67,14 +71,16 @@ impl Default for SessionState {
             theme: Theme::Dark,
             ui_density: Density::Comfortable,
             reduced_motion: false,
+            touch_mode: false,
             tour_seen: false,
         }
     }
 }
 
 impl SessionState {
-    /// Builds a snapshot from the live camera, tool, grid, theme, UI density and
-    /// reduced-motion preferences, hidden layers, and the tour-seen flag.
+    /// Builds a snapshot from the live camera, tool, grid, theme, UI density,
+    /// reduced-motion and touch-mode preferences, hidden layers, and the
+    /// tour-seen flag.
     // The arguments are the independent pieces of view state the app owns; a
     // wrapper struct would just move the same fields around.
     #[allow(clippy::too_many_arguments)]
@@ -86,6 +92,7 @@ impl SessionState {
         theme: Theme,
         ui_density: Density,
         reduced_motion: bool,
+        touch_mode: bool,
         hidden: &[LayerId],
         tour_seen: bool,
     ) -> Self {
@@ -102,6 +109,7 @@ impl SessionState {
             theme,
             ui_density,
             reduced_motion,
+            touch_mode,
             tour_seen,
         }
     }
@@ -149,7 +157,7 @@ impl SessionState {
             .map(|(l, d)| format!("{l}/{d}"))
             .collect();
         format!(
-            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nui_density={}\nreduced_motion={}\nhidden={}\ntour_seen={}\n",
+            "center_x={}\ncenter_y={}\nppd={}\ntool={}\ngrid_visible={}\nsnap={}\ngrid_step={}\ntheme={}\nui_density={}\nreduced_motion={}\ntouch_mode={}\nhidden={}\ntour_seen={}\n",
             self.center_x,
             self.center_y,
             self.pixels_per_dbu,
@@ -160,6 +168,7 @@ impl SessionState {
             self.theme.tag(),
             self.ui_density.tag(),
             self.reduced_motion,
+            self.touch_mode,
             hidden.join(","),
             self.tour_seen
         )
@@ -208,6 +217,7 @@ impl SessionState {
                 "theme" => s.theme = Theme::from_tag(value),
                 "ui_density" => s.ui_density = Density::from_tag(value),
                 "reduced_motion" => s.reduced_motion = value == "true",
+                "touch_mode" => s.touch_mode = value == "true",
                 "hidden" => s.hidden_layers = parse_hidden(value),
                 "tour_seen" => s.tour_seen = value == "true",
                 _ => {}
@@ -329,6 +339,7 @@ mod tests {
             theme: Theme::Light,
             ui_density: Density::Compact,
             reduced_motion: true,
+            touch_mode: true,
             tour_seen: true,
         }
     }
@@ -351,6 +362,7 @@ mod tests {
             Theme::Light,
             Density::Compact,
             true,
+            true,
             &[LayerId::new(3, 0)],
             true,
         );
@@ -361,27 +373,32 @@ mod tests {
         assert_eq!(s.theme(), Theme::Light);
         assert_eq!(s.ui_density, Density::Compact);
         assert!(s.reduced_motion, "capture carries the reduced-motion flag");
+        assert!(s.touch_mode, "capture carries the touch-mode flag");
         assert_eq!(s.hidden_layers(), vec![LayerId::new(3, 0)]);
         assert!(s.tour_seen, "capture carries the tour-seen flag through");
     }
 
     #[test]
     fn ui_prefs_round_trip_and_default() {
-        // The new density and reduced-motion keys round-trip through the text
-        // format...
+        // The density, reduced-motion, and touch-mode keys round-trip through the
+        // text format...
         let s = SessionState {
             ui_density: Density::Compact,
             reduced_motion: true,
+            touch_mode: true,
             ..SessionState::default()
         };
         let parsed = SessionState::from_text(&s.to_text()).expect("parses");
         assert_eq!(parsed.ui_density, Density::Compact);
         assert!(parsed.reduced_motion);
-        // ...and an older file without them keeps the comfortable, motion-on
-        // defaults (unknown-key tolerance makes the addition non-breaking).
+        assert!(parsed.touch_mode);
+        // ...and an older file without them keeps the comfortable, motion-on,
+        // touch-off defaults (unknown-key tolerance makes the addition
+        // non-breaking).
         let older = SessionState::from_text("center_x=1\n").expect("parses");
         assert_eq!(older.ui_density, Density::Comfortable);
         assert!(!older.reduced_motion);
+        assert!(!older.touch_mode, "an older file defaults touch mode off");
     }
 
     #[test]

@@ -19,18 +19,22 @@ use eframe::egui::{
 use super::tokens::{self, Density, RADIUS_LG, RADIUS_MD, RADIUS_XL, Tokens};
 
 /// Builds the applied [`egui::Style`] for `density`, zeroing animation when
-/// `reduced_motion` is set.
+/// `reduced_motion` is set and raising hit targets to the touch minimum when
+/// `touch` is set.
 ///
 /// Colors come from [`tokens::DARK`] (v8.1 ships one theme); spacing, the type
-/// scale, and the animation length come from the [`Density`] methods. The
-/// result is a complete style ready to hand to [`egui::Context::set_style_of`].
+/// scale, and the animation length come from the [`Density`] methods. When
+/// `touch` is on, `interact_size.y` rises to [`tokens::TOUCH_INTERACT_HEIGHT`]
+/// over either density (lane 4B), so toolbar, menu, and panel controls meet the
+/// touch minimum on tablet and phone. The result is a complete style ready to
+/// hand to [`egui::Context::set_style_of`].
 #[must_use]
-pub fn style(density: Density, reduced_motion: bool) -> egui::Style {
+pub fn style(density: Density, reduced_motion: bool, touch: bool) -> egui::Style {
     let mut style = egui::Style {
         visuals: visuals(&tokens::DARK),
         ..Default::default()
     };
-    apply_spacing(&mut style, density);
+    apply_spacing(&mut style, density, touch);
     apply_type_scale(&mut style, density);
     // Functional motion only: transitions communicate state change and go to
     // zero under reduced motion, which also stops the smooth-scroll easing.
@@ -41,14 +45,16 @@ pub fn style(density: Density, reduced_motion: bool) -> egui::Style {
     style
 }
 
-/// Installs the dark token style on `ctx` for `density` and `reduced_motion`.
+/// Installs the dark token style on `ctx` for `density`, `reduced_motion`, and
+/// `touch`.
 ///
 /// The same dark style is set for both egui themes and the theme preference is
 /// pinned to Dark, so an OS "light" preference cannot resurrect the retired
 /// stock-egui light look between frames: whatever egui resolves the active
-/// theme to, it renders the tokened dark style.
-pub fn apply(ctx: &egui::Context, density: Density, reduced_motion: bool) {
-    let style = style(density, reduced_motion);
+/// theme to, it renders the tokened dark style. `touch` raises the hit-target
+/// minimum for tablet and phone (lane 4B); see [`style`].
+pub fn apply(ctx: &egui::Context, density: Density, reduced_motion: bool, touch: bool) {
+    let style = style(density, reduced_motion, touch);
     ctx.set_style_of(egui::Theme::Dark, style.clone());
     ctx.set_style_of(egui::Theme::Light, style);
     ctx.set_theme(egui::ThemePreference::Dark);
@@ -142,12 +148,14 @@ fn widget(
     }
 }
 
-/// Applies the density's spacing rhythm (all values on the 4px grid).
-fn apply_spacing(style: &mut egui::Style, d: Density) {
+/// Applies the density's spacing rhythm (all values on the 4px grid). When
+/// `touch` is set, the interactive-height floor rises to the touch minimum
+/// (lane 4B) while every other rhythm value is unchanged.
+fn apply_spacing(style: &mut egui::Style, d: Density, touch: bool) {
     let s = &mut style.spacing;
     s.item_spacing = d.item_spacing();
     s.button_padding = d.button_padding();
-    s.interact_size.y = d.interact_height();
+    s.interact_size.y = d.touch_interact_height(touch);
     s.window_margin = Margin::same(d.window_margin() as i8);
     s.menu_margin = Margin::same(d.menu_margin() as i8);
     s.indent = d.indent();
@@ -234,7 +242,7 @@ mod tests {
     #[test]
     fn both_densities_build_a_style() {
         for d in [Density::Comfortable, Density::Compact] {
-            let s = style(d, false);
+            let s = style(d, false, false);
             // Surfaces mapped from tokens, not egui defaults.
             assert_eq!(s.visuals.panel_fill, tokens::DARK.bg_panel);
             assert_eq!(s.visuals.window_fill, tokens::DARK.bg_raised);
@@ -261,16 +269,80 @@ mod tests {
     fn focus_ring_lives_on_active_widget_stroke() {
         // Lane 4A depends on this: a keyboard-focused widget resolves to the
         // `active` visuals, whose bg_stroke is the accent focus ring.
-        let s = style(Density::Comfortable, false);
+        let s = style(Density::Comfortable, false, false);
         assert_eq!(s.visuals.widgets.active.bg_stroke.color, tokens::DARK.focus);
         assert!((s.visuals.widgets.active.bg_stroke.width - 1.5).abs() < f32::EPSILON);
     }
 
     #[test]
     fn reduced_motion_zeroes_animation() {
-        let s = style(Density::Comfortable, true);
+        let s = style(Density::Comfortable, true, false);
         assert!(s.animation_time.abs() < f32::EPSILON);
-        let moving = style(Density::Comfortable, false);
+        let moving = style(Density::Comfortable, false, false);
         assert!(moving.animation_time > 0.0);
+    }
+
+    #[test]
+    fn touch_mode_raises_interact_size_over_either_density() {
+        // Touch on lifts the interactive-height floor to the touch minimum on
+        // both densities; touch off leaves the density's resting height. Only
+        // interact_size.y moves: the rest of the spacing rhythm is unchanged, so
+        // touch is a hit-target lift, not a re-layout.
+        for d in [Density::Comfortable, Density::Compact] {
+            let desktop = style(d, false, false);
+            let touch = style(d, false, true);
+            assert!(
+                (touch.spacing.interact_size.y - tokens::TOUCH_INTERACT_HEIGHT).abs()
+                    < f32::EPSILON,
+                "touch must reach the touch minimum on {d:?}"
+            );
+            assert!(
+                (desktop.spacing.interact_size.y - d.interact_height()).abs() < f32::EPSILON,
+                "touch off must keep the resting height on {d:?}"
+            );
+            assert_eq!(
+                touch.spacing.item_spacing, desktop.spacing.item_spacing,
+                "touch must not change item spacing"
+            );
+            assert_eq!(
+                touch.spacing.button_padding, desktop.spacing.button_padding,
+                "touch must not change button padding"
+            );
+        }
+    }
+
+    #[test]
+    fn chrome_scales_coherently_at_125_and_150_percent() {
+        // Text scaling in egui is a single global multiplier (`pixels_per_point`
+        // / `zoom_factor`): the applied Style stays in logical points and every
+        // size scales by the same factor at paint time, so a layout that fits at
+        // 100% cannot begin to clip at 125% or 150%. This test proves the
+        // invariant that guards interactive chrome from clipping under scaling: at
+        // every density, touch setting, and zoom, a control's interactive height
+        // has room for a line of its Button-style label (the text style toolbar,
+        // menu, and panel controls draw their labels in), so a single-line label
+        // never overflows its row. The check is on the ratio, so it holds
+        // identically at any zoom; the loop makes that concrete for the two scales
+        // the packet calls out. (egui grows a widget past interact_size when its
+        // content is taller, so this is headroom, not a hard ceiling.)
+        //
+        // `1.35 * size` is a generous upper bound on egui's row height for Inter
+        // (nearer 1.2 in practice), leaving slack for ascenders and descenders.
+        const LINE_HEIGHT_BOUND: f32 = 1.35;
+        for zoom in [1.0_f32, 1.25, 1.5] {
+            for d in [Density::Comfortable, Density::Compact] {
+                for touch in [false, true] {
+                    let s = style(d, false, touch);
+                    let row_px = s.spacing.interact_size.y * zoom;
+                    let label_px =
+                        s.text_styles[&egui::TextStyle::Button].size * LINE_HEIGHT_BOUND * zoom;
+                    assert!(
+                        row_px >= label_px,
+                        "chrome row clips its label at zoom {zoom} on {d:?} (touch {touch}): \
+                         row {row_px}px < label line {label_px}px"
+                    );
+                }
+            }
+        }
     }
 }

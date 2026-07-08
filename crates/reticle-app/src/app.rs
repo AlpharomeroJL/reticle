@@ -508,9 +508,15 @@ pub struct App {
     /// Whether functional motion is suppressed. Loaded from the session; zeroes
     /// the theme's animation time when set.
     reduced_motion: bool,
-    /// Set when the applied egui style needs a re-apply (density or reduced-motion
-    /// change). Starts `true` so the theme is installed on the first frame instead
-    /// of per frame; the boot styling hook reads it at the top of the frame body.
+    /// Whether touch mode is on (lane 4B). Loaded from the session; raises the
+    /// theme's `interact_size.y` to the touch minimum over either density so hit
+    /// targets meet the tablet/phone floor. Lane 4C's Settings dialog flips this
+    /// and sets [`theme_dirty`](Self::theme_dirty) to re-apply the style.
+    touch_mode: bool,
+    /// Set when the applied egui style needs a re-apply (density, reduced-motion,
+    /// or touch-mode change). Starts `true` so the theme is installed on the first
+    /// frame instead of per frame; the boot styling hook reads it at the top of
+    /// the frame body.
     theme_dirty: bool,
 
     // ---- Lane 4A: first-run tour --------------------------------------------
@@ -746,10 +752,10 @@ impl App {
         let expanded = Arc::new(retained.expand());
         // Build the outline before `doc` is moved into the history below.
         let outline = OutlineTree::build(&doc);
-        // The theme's density and reduced-motion preference come from the saved
-        // session (defaults on a fresh install or the web); the boot styling hook
-        // in `ui` applies them on the first frame.
-        let (ui_density, reduced_motion) = boot_ui_prefs();
+        // The theme's density, reduced-motion, and touch-mode preferences come
+        // from the saved session (defaults on a fresh install or the web); the
+        // boot styling hook in `ui` applies them on the first frame.
+        let (ui_density, reduced_motion, touch_mode) = boot_ui_prefs();
         Self {
             renderer: WgpuRenderer::new(),
             document,
@@ -846,6 +852,7 @@ impl App {
             view_export: crate::viewexport::ViewExport::new(),
             ui_density,
             reduced_motion,
+            touch_mode,
             theme_dirty: true,
             tour: Tour::from_seen(tour_already_seen()),
             gallery: None,
@@ -866,6 +873,29 @@ impl App {
     #[must_use]
     pub fn start_view(&self) -> StartView {
         self.start_view
+    }
+
+    /// Whether touch mode is on (lane 4B).
+    ///
+    /// When on, the tokened style raises `interact_size.y` to the touch minimum
+    /// over either density so hit targets meet the tablet/phone floor.
+    #[must_use]
+    pub fn touch_mode(&self) -> bool {
+        self.touch_mode
+    }
+
+    /// Sets touch mode and schedules a style re-apply if it changed (lane 4B).
+    ///
+    /// The plumbing seam for lane 4C's Settings toggle: flipping this marks the
+    /// applied style dirty, so the next frame's boot styling hook reinstalls the
+    /// style with the touch hit-target floor raised or lowered. A no-op when the
+    /// value is unchanged, so it is cheap to call every frame from a bound
+    /// setting. The choice persists with the session on the next save.
+    pub fn set_touch_mode(&mut self, touch: bool) {
+        if self.touch_mode != touch {
+            self.touch_mode = touch;
+            self.theme_dirty = true;
+        }
     }
 
     /// Whether the Start screen (the worked-use-case chooser) is currently shown.
@@ -7263,7 +7293,7 @@ impl eframe::App for App {
         // light preference cannot resurrect the retired stock-light look.
         if self.theme_dirty {
             crate::theme::fonts::install(&ctx);
-            crate::theme::apply::apply(&ctx, self.ui_density, self.reduced_motion);
+            crate::theme::apply::apply(&ctx, self.ui_density, self.reduced_motion, self.touch_mode);
             self.theme_dirty = false;
         }
 
@@ -7443,6 +7473,7 @@ impl eframe::App for App {
                 self.view_export.theme,
                 self.ui_density,
                 self.reduced_motion,
+                self.touch_mode,
                 &hidden,
                 self.tour_seen(),
             );
@@ -7607,24 +7638,25 @@ fn tour_already_seen() -> bool {
     true
 }
 
-/// The UI density and reduced-motion preference to boot the theme with.
+/// The UI density, reduced-motion, and touch-mode preferences to boot the theme
+/// with.
 ///
 /// On native these come from the saved session; a missing or unreadable session
-/// falls back to the comfortable, motion-on defaults. There is no filesystem on
-/// `wasm32`, so the web bundle always boots with the defaults.
+/// falls back to the comfortable, motion-on, touch-off defaults. There is no
+/// filesystem on `wasm32`, so the web bundle always boots with the defaults.
 #[cfg(not(target_arch = "wasm32"))]
-fn boot_ui_prefs() -> (crate::theme::tokens::Density, bool) {
+fn boot_ui_prefs() -> (crate::theme::tokens::Density, bool, bool) {
     crate::session::load().map_or_else(
-        || (crate::theme::tokens::Density::default(), false),
-        |s| (s.ui_density, s.reduced_motion),
+        || (crate::theme::tokens::Density::default(), false, false),
+        |s| (s.ui_density, s.reduced_motion, s.touch_mode),
     )
 }
 
-/// The UI density and reduced-motion preference to boot the theme with, on the
-/// web (always the defaults; see the native variant).
+/// The UI density, reduced-motion, and touch-mode preferences to boot the theme
+/// with, on the web (always the defaults; see the native variant).
 #[cfg(target_arch = "wasm32")]
-fn boot_ui_prefs() -> (crate::theme::tokens::Density, bool) {
-    (crate::theme::tokens::Density::default(), false)
+fn boot_ui_prefs() -> (crate::theme::tokens::Density, bool, bool) {
+    (crate::theme::tokens::Density::default(), false, false)
 }
 
 /// Converts a canvas [`ScreenRect`] to an egui rectangle.
@@ -8008,6 +8040,27 @@ mod tests {
         assert!(!app.scene.is_empty());
         assert_eq!(app.top_cell, demo::TOP_CELL);
         assert!(app.history.document().cell(demo::TOP_CELL).is_some());
+    }
+
+    #[test]
+    fn touch_mode_setter_marks_the_style_dirty_only_on_change() {
+        // The plumbing seam lane 4C's Settings toggle drives: a fresh app boots
+        // touch off, and flipping it schedules a style re-apply so the next frame
+        // installs the raised hit-target floor.
+        let mut app = App::new();
+        assert!(!app.touch_mode(), "touch mode defaults off");
+        // Clear the boot-time dirty flag so the assertion isolates the setter.
+        app.theme_dirty = false;
+        app.set_touch_mode(true);
+        assert!(app.touch_mode());
+        assert!(app.theme_dirty, "enabling touch schedules a re-apply");
+        // Setting the same value again is a no-op: no needless re-apply.
+        app.theme_dirty = false;
+        app.set_touch_mode(true);
+        assert!(
+            !app.theme_dirty,
+            "an unchanged set does not re-dirty the style"
+        );
     }
 
     #[test]

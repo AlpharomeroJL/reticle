@@ -281,6 +281,19 @@ e2e-pwa:
     cd e2e; npx playwright install chromium
     cd e2e; npx playwright test --project=pwa
 
+# Touch-input gate (lane 4B). Builds the Trunk bundle and runs the `phone`
+# Playwright project: a Pixel 7 device descriptor (mobile viewport + hasTouch)
+# synthesizes a two-finger pinch and drag and asserts the live camera zooms and
+# pans, proving the app navigates a design BY TOUCH on tablet and phone. WebGL2
+# fallback, like the other projects, since headless Chromium has no WebGPU
+# adapter. Mirrors the e2e-* recipes; `npx playwright test` is the trailing
+# native command so its exit code is the recipe's. See e2e/tests/phone-touch.spec.ts.
+e2e-touch:
+    cd crates/web; trunk build index.html
+    npm --prefix e2e install
+    cd e2e; npx playwright install chromium
+    cd e2e; npx playwright test --project=phone
+
 book:
     mdbook build docs
 

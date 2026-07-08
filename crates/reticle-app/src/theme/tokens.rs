@@ -277,6 +277,24 @@ impl Density {
         }
     }
 
+    /// The minimum interactive height for this density with touch mode either
+    /// on or off (lane 4B).
+    ///
+    /// Touch mode raises the hit target to [`TOUCH_INTERACT_HEIGHT`] (40) on
+    /// top of either density's resting [`interact_height`](Self::interact_height),
+    /// so toolbar, menu, and panel controls meet the touch minimum on tablet and
+    /// phone; `touch = false` keeps the density's resting height. The floor is a
+    /// `max`, not a swap, so a density whose resting height ever exceeds 40 keeps
+    /// its taller target rather than shrinking under touch.
+    #[must_use]
+    pub fn touch_interact_height(self, touch: bool) -> f32 {
+        if touch {
+            self.interact_height().max(TOUCH_INTERACT_HEIGHT)
+        } else {
+            self.interact_height()
+        }
+    }
+
     /// `Spacing::window_margin` (uniform).
     #[must_use]
     pub fn window_margin(self) -> f32 {
@@ -476,5 +494,33 @@ mod tests {
     fn reduced_motion_zeroes_animation() {
         assert!(Density::Comfortable.animation_time(true).abs() < f32::EPSILON);
         assert!(Density::Comfortable.animation_time(false) > 0.0);
+    }
+
+    #[test]
+    fn touch_raises_hit_targets_to_the_touch_minimum() {
+        // Touch mode lifts every density to the 40px touch floor, so a tablet or
+        // phone tap lands a target regardless of the resting density.
+        for d in [Density::Comfortable, Density::Compact] {
+            assert!(
+                (d.touch_interact_height(true) - TOUCH_INTERACT_HEIGHT).abs() < f32::EPSILON,
+                "touch mode must reach {TOUCH_INTERACT_HEIGHT}px on {d:?}"
+            );
+            // With touch off the density keeps its resting height (28 / 22), so
+            // desktop chrome does not grow.
+            assert!(
+                (d.touch_interact_height(false) - d.interact_height()).abs() < f32::EPSILON,
+                "touch off must keep the resting height on {d:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn touch_floor_clears_both_resting_densities() {
+        // The `max` floor only lifts, never shrinks: both resting heights are
+        // below 40, so touch always raises rather than lowering a target.
+        for d in [Density::Comfortable, Density::Compact] {
+            assert!(d.interact_height() < TOUCH_INTERACT_HEIGHT);
+            assert!(d.touch_interact_height(true) >= d.interact_height());
+        }
     }
 }
