@@ -242,6 +242,16 @@ e2e-archive:
     cd e2e; npx playwright install chromium
     cd e2e; npx playwright test --project=served-archive
 
+# `e2e-convert` proves in-browser conversion (lane v8-6c): the built bundle converts a
+# committed GDS to a `.rtla` in OPFS via the convert Web Worker, then reopens it through
+# the `?archive=` streaming path (the SW OPFS bridge answers the ranged reads). Skips the
+# render half honestly where OPFS is unavailable headless.
+e2e-convert:
+    cd crates/web; trunk build index.html
+    npm --prefix e2e install
+    cd e2e; npx playwright install chromium
+    cd e2e; npx playwright test --project=browser-convert
+
 # PWA install + offline gate (lane v8-4d-pwa). Builds the Trunk bundle (which now
 # emits manifest.json, sw.js, and the icons into dist) and runs the `pwa`
 # Playwright project against the root-served dist. It asserts a linked, valid
