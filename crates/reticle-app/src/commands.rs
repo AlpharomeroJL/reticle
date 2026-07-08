@@ -92,6 +92,12 @@ pub enum AppOp {
     OpenWhatsNew,
     /// Open the documentation in the browser (catalog, Help > Documentation).
     OpenDocs,
+    // --- lane 2A: developer actions (Help > Developer) ---
+    /// Insert a demo rectangle through the undo history (the retired debug-register
+    /// action, relocated to Help > Developer; catalog 70).
+    AddDemoRect,
+    /// Toggle the replay-theater window (developer entry point).
+    ToggleReplayTheater,
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -452,6 +458,30 @@ static REGISTRY: &[CommandSpec] = &[
         default_chord: None,
         rebindable: false,
         run: RunAs::App(AppOp::OpenAbout),
+        scope: Scope::Global,
+    },
+    // --- 2A: developer (Help > Developer) ---
+    // The debug-register actions retired from the History and Agent panels into a
+    // product-grade Help > Developer submenu (catalog 70). These ids are owned by
+    // lane 2A per the reserved table; their effects run through `run_app_op`.
+    CommandSpec {
+        id: CommandId("dev.add_demo_rect"),
+        label: "Insert demo rectangle",
+        category: "Developer",
+        menu_path: Some(&["Help", "Developer"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::AddDemoRect),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("dev.replay_theater"),
+        label: "Replay theater",
+        category: "Developer",
+        menu_path: Some(&["Help", "Developer"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::ToggleReplayTheater),
         scope: Scope::Global,
     },
 ];
