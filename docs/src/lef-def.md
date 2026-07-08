@@ -117,7 +117,7 @@ import against OpenROAD, a real place-and-route tool, run over the exact same LE
 inside a pinned Docker container. It follows the external-oracle pattern ADR 0054 set for
 the TinyTapeout precheck: pin the tool image by digest, run it non-interactively over a
 mounted work directory, parse its structured output, and skip honestly (never fail) when
-Docker or the image is absent. ADR 0083 records the choice.
+Docker or the image is absent. ADR 0088 records the choice.
 
 The oracle is OpenROAD, bundled in `hpretl/iic-osic-tools:2025.01` (the same image the
 precheck pins). A short Tcl script does `read_lef` then `read_def` and prints four
