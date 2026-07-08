@@ -67,7 +67,18 @@ node subpath-check.mjs              # standalone subpath boot check (see below)
   that a viewer's frame is dropped server-side is the headless Rust relay test
   `crates/reticle-server/tests/share_live.rs`. A's "Go live" is triggered by the
   `?share=1` boot flag rather than a DOM click because that button is canvas-painted;
-  the publish path exercised is identical.
+  the publish path exercised is identical. Beyond boot and transport, the spec adds two
+  behavioral proofs over the wasm `window.__reticle_stats` seam (ADR 0058/0093): an edit
+  made in A paints in B (with `?e2e-edit=1` A places one scripted rect; a no-edit control
+  room isolates it to exactly `+1` applied shape), and a view-mode socket cannot write
+  (the same captured relay frame is dropped when sent from `?mode=view` but applied when
+  sent edit-mode, a positive control so the drop is not vacuous). Pixels stay out of
+  scope; the counter seam is the browser-observable proof.
+- `phone` (ADR 0093) runs the touch spec on a Pixel 7 device descriptor (mobile viewport,
+  `hasTouch`). It opens an example document via an intercepted `?gds=` fetch, synthesizes
+  a two-finger pinch and drag with CDP `Input.dispatchTouchEvent`, and asserts the camera
+  moved via `window.__reticle_stats.camera` (the wasm camera-readout seam). It needs no
+  relay; run it with `npx playwright test --project=phone`.
 
 Playwright's bundled headless Chromium ships without WebGPU, so on this host the
 `webgpu` project's backend assertion skips and the app is verified on the WebGL2
@@ -83,9 +94,9 @@ boot. It needs the same `--public-url /reticle/` bundle.
 
 ## Layout
 
-- `playwright.config.ts` four projects (`webgl2`, `webgpu`, `ghpages-subpath`,
-  `share-live`) plus the static `webServer`s (root and `/reticle/`, and the relay when
-  `SHARE_LIVE=1`).
+- `playwright.config.ts` five projects (`webgl2`, `webgpu`, `ghpages-subpath`,
+  `share-live`, `phone`) plus the static `webServer`s (root and `/reticle/`, and the relay
+  when `SHARE_LIVE=1`).
 - `serve-dist.mjs` dependency-free static server for `../crates/web/dist` at root
   (serves `application/wasm` correctly).
 - `serve-subpath.mjs` the same, but mounted under `/reticle/` to mirror GitHub Pages;
@@ -96,7 +107,12 @@ boot. It needs the same `--public-url /reticle/` bundle.
 - `tests/reticle-boot.spec.ts` the boot-and-render gate and the backend-path check
   (root projects).
 - `tests/subpath-boot.spec.ts` the subpath boot gate (`ghpages-subpath` project only).
-- `tests/share-live.spec.ts` the share-link LIVE transport two-context proof
-  (`share-live` project only; needs the relay).
+- `tests/share-live.spec.ts` the share-link LIVE transport two-context proof plus the
+  edit-paints-in-B and view-mode-cannot-write behavioral proofs (`share-live` project
+  only; needs the relay).
+- `tests/phone-touch.spec.ts` the phone-viewport touch pan-zoom proof (`phone` project).
+- `capture-share.mjs` a standalone harness (NOT part of the test run) that drives two
+  headed browser contexts over the relay to capture the real share GIF; run via
+  `just capture-share`.
 - `subpath-check.mjs` standalone subpath boot check (not part of the default gate).
 - `probe-capability.mjs` standalone capability probe (not part of the gate).
