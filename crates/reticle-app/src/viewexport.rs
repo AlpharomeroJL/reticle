@@ -31,56 +31,11 @@
 use reticle_geometry::{LayerId, Point, Rect, Shape};
 use reticle_model::{DrawShape, ShapeKind};
 
-/// The colour theme applied to the egui visuals.
-///
-/// The editor defaults to [`Theme::Dark`]; the toggle switches to [`Theme::Light`]
-/// and the choice is persisted with the rest of the view state.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum Theme {
-    /// The dark visuals (the editor default).
-    #[default]
-    Dark,
-    /// The light visuals.
-    Light,
-}
-
-impl Theme {
-    /// The other theme (the one the toggle switches to).
-    #[must_use]
-    pub fn toggled(self) -> Self {
-        match self {
-            Theme::Dark => Theme::Light,
-            Theme::Light => Theme::Dark,
-        }
-    }
-
-    /// A short human label for the current theme, for the panel button.
-    #[must_use]
-    pub fn label(self) -> &'static str {
-        match self {
-            Theme::Dark => "Dark",
-            Theme::Light => "Light",
-        }
-    }
-
-    /// The stable text tag used when persisting the theme.
-    #[must_use]
-    pub fn tag(self) -> &'static str {
-        match self {
-            Theme::Dark => "dark",
-            Theme::Light => "light",
-        }
-    }
-
-    /// Parses a persisted tag, defaulting to [`Theme::Dark`] for anything else.
-    #[must_use]
-    pub fn from_tag(tag: &str) -> Self {
-        match tag.trim().to_ascii_lowercase().as_str() {
-            "light" => Theme::Light,
-            _ => Theme::Dark,
-        }
-    }
-}
+/// The color theme, now owned by the theme module (ADR 0095). Re-exported here
+/// so existing call sites and the persisted session tag keep compiling
+/// unchanged after the move; v8.1 renders one dark theme, so the enum only
+/// carries the persisted tag forward (see [`crate::theme::Theme`]).
+pub use crate::theme::Theme;
 
 /// A saved camera position: a world center and a zoom, under a user-given name.
 ///
@@ -208,12 +163,6 @@ impl ViewExport {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Flips the active theme and returns the new one.
-    pub fn toggle_theme(&mut self) -> Theme {
-        self.theme = self.theme.toggled();
-        self.theme
     }
 
     /// Adds a bookmark with the given name at `center`/`pixels_per_dbu`.
@@ -564,12 +513,10 @@ mod tests {
     // ---- Theme -----------------------------------------------------------
 
     #[test]
-    fn theme_defaults_to_dark_and_toggles() {
-        let mut ve = ViewExport::new();
+    fn theme_defaults_to_dark() {
+        // v8.1 renders one dark theme; the toggle is retired (ADR 0095).
+        let ve = ViewExport::new();
         assert_eq!(ve.theme, Theme::Dark);
-        assert_eq!(ve.toggle_theme(), Theme::Light);
-        assert_eq!(ve.theme, Theme::Light);
-        assert_eq!(ve.toggle_theme(), Theme::Dark);
     }
 
     #[test]

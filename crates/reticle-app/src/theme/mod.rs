@@ -19,5 +19,50 @@
 //! * `icons` (lane 1B), generated Lucide glyph constants.
 //! * `components` (lane 1C), the widget library every panel builds from.
 
+pub mod apply;
+pub mod contrast;
 pub mod gallery;
 pub mod tokens;
+
+/// The color theme selection, persisted with the session.
+///
+/// v8.1 ships a single tokened dark theme (ADR 0095); the stock-egui light
+/// toggle is gone. The enum stays so a future light variant is a second token
+/// table rather than an architecture change, and so session files written by
+/// v8.0 that carry `theme=light` keep parsing. Any value other than `Dark`
+/// resolves to the dark style at apply time (see [`apply`]); [`Theme::Light`]
+/// therefore exists only to keep the persisted tag round-tripping and does not
+/// change what the user sees this packet.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Theme {
+    /// The dark visuals (the only rendered theme this packet).
+    #[default]
+    Dark,
+    /// A retired selection kept for tag compatibility; resolves to [`Theme::Dark`]
+    /// when applied.
+    Light,
+}
+
+impl Theme {
+    /// The stable text tag used when persisting the theme.
+    #[must_use]
+    pub fn tag(self) -> &'static str {
+        match self {
+            Theme::Dark => "dark",
+            Theme::Light => "light",
+        }
+    }
+
+    /// Parses a persisted tag, defaulting to [`Theme::Dark`] for anything else.
+    ///
+    /// The retired `light` tag is preserved so an older session file still
+    /// round-trips through [`Theme::tag`]; it resolves to the dark style when
+    /// applied.
+    #[must_use]
+    pub fn from_tag(tag: &str) -> Self {
+        match tag.trim().to_ascii_lowercase().as_str() {
+            "light" => Theme::Light,
+            _ => Theme::Dark,
+        }
+    }
+}
