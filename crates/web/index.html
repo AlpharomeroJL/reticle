@@ -177,50 +177,29 @@
         color: #f38ba8;
         max-width: 40rem;
       }
-      /* A small, always-clickable link to switch between the replay theater (the
-         public default) and the full editor. Stays visible after the app mounts. */
-      #view-switch {
-        position: fixed;
-        top: 0.6rem;
-        right: 0.8rem;
-        z-index: 10;
-        font-size: 0.85rem;
-        padding: 0.3rem 0.6rem;
-        border-radius: 0.4rem;
-        background: rgba(30, 34, 45, 0.85);
-        color: #cdd6f4;
-        text-decoration: none;
-        border: 1px solid #313244;
-      }
-      #view-switch:hover {
-        background: rgba(49, 50, 68, 0.95);
-      }
-      /* The in-browser "convert a GDS to a streamable archive" action (lane v8-6c).
-         Top-left, mirroring the view switch, and always clickable over the canvas. */
+      /* The theater/editor view switch and the in-browser convert action now live on
+         the egui toolbar (lane v8-ui), where they participate in the layout instead of
+         floating over the canvas and occluding controls. The HTML elements are kept in
+         the DOM -- the convert file input still drives the worker, and the boot scripts
+         still reference them -- but the floating visuals are hidden. */
+      #view-switch,
       #convert-gds {
-        position: fixed;
-        top: 0.6rem;
-        left: 0.8rem;
-        z-index: 10;
-        font-size: 0.85rem;
-        padding: 0.3rem 0.6rem;
-        border-radius: 0.4rem;
-        background: rgba(30, 34, 45, 0.85);
-        color: #cdd6f4;
-        border: 1px solid #313244;
-        cursor: pointer;
+        display: none;
       }
-      #convert-gds:hover {
-        background: rgba(49, 50, 68, 0.95);
-      }
+      /* Transient convert progress/error text. Anchored bottom-center over the canvas
+         (clear of the toolbar and side panels) so it never covers a clickable control;
+         only shown while a conversion is in flight. */
       #convert-status {
         position: fixed;
-        top: 2.4rem;
-        left: 0.8rem;
+        bottom: 2rem;
+        left: 50%;
+        transform: translateX(-50%);
         z-index: 10;
         font-size: 0.8rem;
         color: #f9e2af;
-        max-width: 22rem;
+        max-width: 28rem;
+        text-align: center;
+        pointer-events: none;
       }
     </style>
   </head>
@@ -262,10 +241,11 @@
           }
         }
 
-        // Point the view switch at the other view. The public default (no
-        // parameter, or view=replay) is the theater, so offer the editor; when the
-        // editor is showing, offer the theater. The Rust entry point reads the same
-        // parameter to pick the start view.
+        // Point the (now hidden) view-switch link at the other view, kept in sync for
+        // the boot window before the app mounts. The public default (no parameter, or
+        // view=replay) is the theater, so offer the editor; when the editor is showing,
+        // offer the theater. The Rust entry point reads the same parameter to pick the
+        // start view.
         var params = new URLSearchParams(window.location.search);
         var view = (params.get("view") || "replay").toLowerCase();
         var link = document.getElementById("view-switch");
@@ -276,6 +256,15 @@
           link.textContent = "Open the full editor";
           link.href = "?view=editor";
         }
+
+        // The egui toolbar's view-switch button (lane v8-ui) calls this to navigate.
+        // The target is recomputed from the live URL so it is correct regardless of the
+        // current view, mirroring the link behaviour above.
+        window.__reticleSwitchView = function () {
+          var p = new URLSearchParams(window.location.search);
+          var v = (p.get("view") || "replay").toLowerCase();
+          window.location.search = v === "editor" ? "?view=replay" : "?view=editor";
+        };
       })();
     </script>
     <script>
@@ -366,6 +355,15 @@
         window.__reticleOpenArchive = openConvertedArchive;
 
         var input = document.getElementById("convert-gds-input");
+
+        // The egui toolbar's "Convert GDS -> archive" button (lane v8-ui) calls this to
+        // open the file picker; the change handler below then runs the worker. The input
+        // stays a hidden element in the DOM, so a programmatic click still opens the
+        // native picker.
+        window.__reticleTriggerConvert = function () {
+          if (input) input.click();
+        };
+
         if (input) {
           input.addEventListener("change", function () {
             var file = input.files && input.files[0];
