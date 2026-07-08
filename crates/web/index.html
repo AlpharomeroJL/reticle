@@ -106,6 +106,21 @@
     </script>
     <link data-trunk rel="rust" data-bin="web" data-wasm-opt="z" />
     <!--
+      The in-browser GDS -> .rtla convert Web Worker (lane v8-6c). Trunk builds
+      bin/convert_worker.rs as a `no-modules` wasm-bindgen bundle emitted at the stable
+      (unhashed) names convert_worker.js / convert_worker_bg.wasm. That bundle only
+      defines `wasm_bindgen`; it does not boot itself, so the app spawns the classic
+      worker `convert-worker-boot.js` below, which importScripts it and calls init.
+    -->
+    <link
+      data-trunk
+      rel="rust"
+      data-bin="convert_worker"
+      data-type="worker"
+      data-wasm-opt="z"
+    />
+    <link data-trunk rel="copy-file" href="convert-worker-boot.js" />
+    <!--
       Emit the PWA shell assets into dist. Trunk copies these verbatim into the
       dist root, so the wholesale `dist/*` copy in scripts/deploy-pages.ps1
       carries manifest.json, sw.js, and the icons to gh-pages under /reticle/.
@@ -180,11 +195,48 @@
       #view-switch:hover {
         background: rgba(49, 50, 68, 0.95);
       }
+      /* The in-browser "convert a GDS to a streamable archive" action (lane v8-6c).
+         Top-left, mirroring the view switch, and always clickable over the canvas. */
+      #convert-gds {
+        position: fixed;
+        top: 0.6rem;
+        left: 0.8rem;
+        z-index: 10;
+        font-size: 0.85rem;
+        padding: 0.3rem 0.6rem;
+        border-radius: 0.4rem;
+        background: rgba(30, 34, 45, 0.85);
+        color: #cdd6f4;
+        border: 1px solid #313244;
+        cursor: pointer;
+      }
+      #convert-gds:hover {
+        background: rgba(49, 50, 68, 0.95);
+      }
+      #convert-status {
+        position: fixed;
+        top: 2.4rem;
+        left: 0.8rem;
+        z-index: 10;
+        font-size: 0.8rem;
+        color: #f9e2af;
+        max-width: 22rem;
+      }
     </style>
   </head>
   <body>
     <canvas id="reticle-canvas"></canvas>
     <a id="view-switch" href="?view=editor">Open the full editor</a>
+    <!--
+      In-browser GDS -> archive conversion (lane v8-6c). Picking a .gds runs the convert
+      Web Worker, which writes an .rtla into OPFS; the page then reopens it through the
+      streaming `?archive=` path. A plain <label>+<input> so it works with no app changes.
+    -->
+    <label id="convert-gds" title="Convert a GDS to a streamable .rtla archive, in your browser">
+      Convert GDS &rarr; archive
+      <input id="convert-gds-input" type="file" accept=".gds,.gds2,.gdsii" hidden />
+    </label>
+    <div id="convert-status"></div>
     <div id="overlay">
       <div class="title">Reticle</div>
       <div class="status" id="status">Loading the replay theater&hellip;</div>
@@ -246,6 +298,95 @@
               console.warn("service worker registration failed:", err);
             });
         });
+      })();
+    </script>
+    <script>
+      // In-browser GDS -> .rtla conversion driver (lane v8-6c). Runs the convert Web
+      // Worker on a chosen/dropped GDS, then reopens the resulting OPFS archive through
+      // the existing `?archive=` streaming path. Exposes __reticleConvertGds /
+      // __reticleOpenArchive so the browser e2e can drive the same flow programmatically.
+      (function () {
+        var WORKER_URL = "convert-worker-boot.js";
+
+        function setStatus(text) {
+          var el = document.getElementById("convert-status");
+          if (el) el.textContent = text || "";
+        }
+
+        // Drive the worker for one GDS byte buffer. Resolves with the worker's `done`
+        // message ({ path, records, bytes }); rejects on a worker error.
+        function convertGdsToArchive(bytes, name) {
+          return new Promise(function (resolve, reject) {
+            var worker;
+            try {
+              worker = new Worker(WORKER_URL);
+            } catch (e) {
+              reject(e);
+              return;
+            }
+            var settled = false;
+            worker.onmessage = function (ev) {
+              var msg = ev.data || {};
+              if (msg.type === "ready") {
+                worker.postMessage({ gds: bytes, name: name || "converted.rtla" });
+              } else if (msg.type === "status") {
+                setStatus("Converting: " + msg.stage + "…");
+              } else if (msg.type === "done") {
+                settled = true;
+                worker.terminate();
+                resolve(msg);
+              } else if (msg.type === "error") {
+                settled = true;
+                worker.terminate();
+                reject(new Error(msg.message || "conversion failed"));
+              }
+            };
+            worker.onerror = function (e) {
+              if (settled) return;
+              settled = true;
+              try {
+                worker.terminate();
+              } catch (_) {
+                /* ignore */
+              }
+              reject(new Error((e && e.message) || "worker error"));
+            };
+          });
+        }
+
+        // Reopen the OPFS archive at `opfsPath` (e.g. "archives/converted.rtla") through
+        // the streaming path: the service worker serves it over Range at this URL.
+        function openConvertedArchive(opfsPath) {
+          var url = new URL("opfs-archive/" + opfsPath, window.location.href).toString();
+          window.location.search =
+            "?archive=" + encodeURIComponent(url) + "&view=editor";
+        }
+
+        window.__reticleConvertGds = convertGdsToArchive;
+        window.__reticleOpenArchive = openConvertedArchive;
+
+        var input = document.getElementById("convert-gds-input");
+        if (input) {
+          input.addEventListener("change", function () {
+            var file = input.files && input.files[0];
+            if (!file) return;
+            var archiveName = file.name.replace(/\.[^.]+$/, "") + ".rtla";
+            setStatus("Reading " + file.name + "…");
+            file
+              .arrayBuffer()
+              .then(function (buf) {
+                return convertGdsToArchive(new Uint8Array(buf), archiveName);
+              })
+              .then(function (msg) {
+                setStatus("Converted " + msg.records + " shapes; opening…");
+                openConvertedArchive(msg.path);
+              })
+              .catch(function (err) {
+                console.error("convert failed:", err);
+                setStatus("Convert failed: " + (err && err.message ? err.message : err));
+              });
+          });
+        }
       })();
     </script>
   </body>

@@ -248,7 +248,7 @@ whole layout, and a user can fold a new constraint into the running loop between
 **Multimodal verification.** A second, best-effort oracle renders a task's layout through
 the same headless `RenderPng` path and asks a local vision model (`llava:7b` over Ollama,
 about 4.7 GB resident) a yes/no question about the render, reported beside the authoritative
-DRC/checker oracle as an agreement rate (ADR 0090, placeholder number). The graded pass/fail
+DRC/checker oracle as an agreement rate (ADR 0090). The graded pass/fail
 stays the deterministic checker's; the vision verdict is corroboration, not the verdict of
 record. A missing model or a host with no GPU is an honest not-run, never an error and never
 a fabricated number. On the development host the live oracle ran (`llava:7b`) and agreed with
@@ -269,6 +269,17 @@ running in a pinned container (ADR 0088): a faithful import matches the tool on 
 component, and pin counts and the die area, a corrupted DEF diverges, and the check skips
 honestly when Docker is absent. The live cross-check ran on the development host in about
 22 seconds.
+
+**In-browser conversion.** _(placeholder row, pending the Wave 6 merge.)_ The browser
+converts a GDS to a streamable `.rtla` archive itself, with no server and no upload: a Web
+Worker runs the frozen streaming GDS reader and an additive in-memory archive builder
+(`build_rtla_to_vec`, byte-identical to the native builder for browser-scale layouts),
+writes the archive into the Origin Private File System (OPFS), and reopens it through the
+existing `?archive=` streaming path via a service-worker Range bridge. It mirrors the
+native converter's v1 flatten and leveling scope (ADR 0072); very large dies stay a
+native-converter job. OPFS is used honestly (a secure context and a Worker), and the
+`browser-convert` e2e proves the full path headless. See
+[ADR 0091](docs/decisions/0091-in-browser-gds-to-rtla-conversion-opfs.md).
 
 ## What it does not do, and where it is thin
 

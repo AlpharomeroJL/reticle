@@ -197,6 +197,138 @@ where
     Ok(())
 }
 
+/// Builds a `.rtla` archive entirely in memory, returning its bytes.
+///
+/// This is the in-browser counterpart to [`build_rtla`] (lane v8-6c). On
+/// `wasm32-unknown-unknown` there is no filesystem for the external builder to spill
+/// sorted runs to or to seek-and-backpatch an output file against, so the streaming
+/// disk path cannot run in a browser Web Worker. This variant does the same work with
+/// one in-memory sort instead of an external merge sort, and assembles the archive into
+/// a single `Vec<u8>` (which the worker then writes to OPFS).
+///
+/// It is a drop-in for [`build_rtla`]: for any input whose placements fit in a single
+/// sort chunk (`CHUNK_ENTRIES`), it produces **byte-identical** output. The collection
+/// order, the `sort_unstable_by_key(tile_index)`, the per-tile [`MAX_TILE_RECORDS`] cap,
+/// and the framing (preamble, header, directory, aligned tiles) are all shared with the
+/// external builder, so the frozen reader parses either identically. A test in
+/// `tests/rtla_to_vec.rs` pins the byte equality.
+///
+/// The trade-off is that peak memory is the whole archive rather than one sort chunk, so
+/// this is for the browser v1 scope (layouts that fit in memory); the native
+/// `reticle convert` keeps the bounded-memory streaming builder for large dies.
+///
+/// # Errors
+///
+/// Returns [`BuildError::InvalidHeader`] if `header` is not a valid `.rtla` v1 header, or
+/// [`BuildError::Serialize`] if rkyv fails to archive a block. It performs no I/O, so it
+/// never returns [`BuildError::Io`].
+pub fn build_rtla_to_vec<I>(header: &RtlaHeader, records: I) -> Result<Vec<u8>, BuildError>
+where
+    I: IntoIterator<Item = TileRecord>,
+{
+    let levels = validate_and_plan(header)?;
+    let total_tiles: u64 = levels
+        .iter()
+        .map(|l| u64::from(l.cols) * u64::from(l.rows))
+        .sum();
+    let world = header.world.to_rect();
+
+    // Pass 1: expand every record into per-level tile placements in the same order the
+    // external builder emits them, then sort once by tile index (a single in-memory sort
+    // stands in for spill-then-k-way-merge; for one chunk the byte result is identical).
+    let mut entries: Vec<Entry> = Vec::new();
+    for (ordinal, record) in records.into_iter().enumerate() {
+        let rect = record.rect.to_rect();
+        let ordinal = ordinal as u64;
+        for level in &levels {
+            if level.stride > 1 && !ordinal.is_multiple_of(level.stride) {
+                continue;
+            }
+            let (tx0, tx1) =
+                tile_span(world.min.x, world.max.x, rect.min.x, rect.max.x, level.cols);
+            let (ty0, ty1) =
+                tile_span(world.min.y, world.max.y, rect.min.y, rect.max.y, level.rows);
+            for ty in ty0..=ty1 {
+                for tx in tx0..=tx1 {
+                    let tile_index =
+                        level.base + u64::from(ty) * u64::from(level.cols) + u64::from(tx);
+                    entries.push(Entry { tile_index, record });
+                }
+            }
+        }
+    }
+    entries.sort_unstable_by_key(|e| e.tile_index);
+
+    // Block layout, derived exactly as in `build_rtla`: the directory's serialized length
+    // depends only on the (fixed-size) tile count, so a zeroed placeholder measures it.
+    let header_bytes = rkyv::to_bytes::<rancor::Error>(header)?;
+    let header_off = PREAMBLE_LEN;
+    let header_len = header_bytes.len() as u64;
+    let dir_off = align_up(header_off + header_len, BLOCK_ALIGN);
+    let placeholder_dir = vec![TileDirEntry { offset: 0, len: 0 }; total_tiles as usize];
+    let dir_len = rkyv::to_bytes::<rancor::Error>(&placeholder_dir)?.len() as u64;
+    let data_start = align_up(dir_off + dir_len, BLOCK_ALIGN);
+
+    // Pass 2: walk the sorted placements in one forward scan, emitting each tile in
+    // directory order and recording its absolute (offset, len). Because the whole build
+    // is in memory the directory is known before the tiles are written, so no seek or
+    // backpatch is needed -- unlike the disk builder, which writes a placeholder first.
+    let mut tiles_blob: Vec<u8> = Vec::new();
+    let mut directory: Vec<TileDirEntry> = Vec::with_capacity(total_tiles as usize);
+    let mut cursor = 0usize;
+    let mut offset = data_start;
+    for global_idx in 0..total_tiles {
+        let mut tile_records: Vec<TileRecord> = Vec::new();
+        while cursor < entries.len() && entries[cursor].tile_index == global_idx {
+            if tile_records.len() < MAX_TILE_RECORDS {
+                tile_records.push(entries[cursor].record);
+            }
+            cursor += 1;
+        }
+        let bytes = rkyv::to_bytes::<rancor::Error>(&TilePayload {
+            records: tile_records,
+        })?;
+        let tile_off = align_up(offset, BLOCK_ALIGN);
+        push_zeros(&mut tiles_blob, (tile_off - offset) as usize);
+        tiles_blob.extend_from_slice(&bytes);
+        directory.push(TileDirEntry {
+            offset: tile_off,
+            len: bytes.len() as u64,
+        });
+        offset = tile_off + bytes.len() as u64;
+    }
+
+    let dir_bytes = rkyv::to_bytes::<rancor::Error>(&directory)?;
+    if dir_bytes.len() as u64 != dir_len {
+        return Err(BuildError::InvalidHeader(
+            "directory serialized to an unexpected length",
+        ));
+    }
+
+    // Assemble the archive: preamble, header, directory, then the tile blob, each block
+    // padded up to its BLOCK_ALIGN start, matching `build_rtla`'s on-disk framing.
+    let mut out = Vec::with_capacity(data_start as usize + tiles_blob.len());
+    let mut preamble = [0u8; PREAMBLE_LEN as usize];
+    preamble[0..8].copy_from_slice(&RTLA_MAGIC);
+    preamble[8..12].copy_from_slice(&RTLA_VERSION.to_le_bytes());
+    preamble[16..24].copy_from_slice(&header_len.to_le_bytes());
+    preamble[24..32].copy_from_slice(&dir_len.to_le_bytes());
+    out.extend_from_slice(&preamble);
+    out.extend_from_slice(&header_bytes);
+    let pad_before_dir = (dir_off - out.len() as u64) as usize;
+    push_zeros(&mut out, pad_before_dir);
+    out.extend_from_slice(&dir_bytes);
+    let pad_before_data = (data_start - out.len() as u64) as usize;
+    push_zeros(&mut out, pad_before_data);
+    out.extend_from_slice(&tiles_blob);
+    Ok(out)
+}
+
+/// Appends `n` zero bytes to `buf`, the in-memory equivalent of [`pad_to`].
+fn push_zeros(buf: &mut Vec<u8>, n: usize) {
+    buf.resize(buf.len() + n, 0);
+}
+
 /// Validates the header and precomputes each level's directory base and coarse-level
 /// subsample stride. The finest level is the last in [`RtlaHeader::levels`].
 fn validate_and_plan(header: &RtlaHeader) -> Result<Vec<Level>, BuildError> {
