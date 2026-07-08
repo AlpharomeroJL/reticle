@@ -3,6 +3,181 @@
 All notable changes to Reticle are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com), and the project uses
 [conventional commits](https://www.conventionalcommits.org).
+## [8.0.0] - 2026-07-08
+
+### Features
+
+- Freeze the Wave 2 streamed-archive contract (ADR 0062)
+- Reconnect backoff state and pure schedule
+- Add SyncDocument::encode_full_state for reconnect resync
+- Wasm reconnect with backoff and full-state resync
+- Freeze the SyncMessage first-byte wire invariant
+- Two-target relay conformance suite with the native half green
+- Cloudflare Durable Object relay in workers-rs, DO conformance green
+- Add per-shape set/remove StepEdit ops
+- Mirror TransformShapes/DeleteShapes via an ElementId map
+- Add native live-room run mode (reticle-agent::live)
+- Pure apply_pinch touch-zoom helper
+- Permalink, session, room-mint, and e2e-edit link logic
+- Wire permalinks, one-click share, touch, and e2e seam
+- Apply permalink and e2e-edit flag at boot
+- Forward-only streaming GDS record reader
+- External two-pass .rtla archive builder
+- Implement the three TileSource readers over .rtla
+- Archive-serving worker with R2 range, Cache API, CORS lock
+- Verify-licenses redistribution gate
+- DocHost edit/stream split and StreamedScene tile residency
+- Convert GDSII to a streamable .rtla archive
+- Wire ?archive= served-archive browse with progressive residency + HUD
+- Compute-shader DRC heatmap (binning + check + overlay)
+- GPU-resident hierarchy, chunked expand+cull+compact
+- Track edit dirty regions for incremental live DRC
+- LiveDrc incremental checker and spell-checker underline geometry
+- Wire DRC-as-you-type into the frame loop with live underlines
+- Scaffold reticle-metrology crate
+- Per-layer area and perimeter report
+- Connectivity statistics report
+- Simplified per-net antenna-ratio screen
+- Combined report with CSV and Markdown export
+- Add web app manifest, icons, and manifest link (step 1)
+- Add service worker caching the app shell (step 2)
+- Register the service worker from index.html (step 3)
+- Reticle-diff crate with pure LayoutDiff + oracle property tests
+- Layout-diff overlay panel painting added/removed/changed rects
+- Schema V2 with additive Document.comments field
+- Lossless V1->V2 document migration + golden-fixture proof
+- Anchored comment pins panel and canvas markers
+- Multi-writer convergence + per-actor selective undo
+- New crate parsing LEF/DEF into the model document
+- Parse a documented subset of KLayout .lydrc DRC decks
+- Second PDK (IHP SG13G2) + both-PDK cleanliness proptests
+- Conformant-OASIS writer + GDS/OASIS interop harness
+- PyO3 abi3 bindings for documents, generators, render
+- Maturin packaging, Jupyter widget, example notebook
+- Lefdef_oracle harness (pinned-container OpenROAD, honest skip)
+- Recognize SKY130 MOSFETs and device-level LVS-lite
+- Vision second-oracle (render+ask over Ollama, agreement test)
+- Add build_rtla_to_vec, an in-memory .rtla builder for wasm
+- GDS->.rtla conversion core reusable in wasm (lane v8-6c step 1)
+- Convert Web Worker + Trunk wiring, writes .rtla to OPFS (step 2)
+- Convert action + SW OPFS bridge to open archive via ?archive= (step 3)
+- Deterministic leaderboard generator and validate-records subcommand
+- Build_anchor example + scale-demo disposition (232 MiB anchor staged; GB-class ledgered)
+- Expose live camera in __reticle_stats seam (wasm-only)
+
+### Bug fixes
+
+- Normalize out-of-range GDSII dates before gds21 parses
+- Bound OASIS reader pre-allocations to input size
+- Reject zero-length GDSII string records before gds21 parses
+- Use SQLite-backed Durable Objects for free-plan deploy
+- Em-dash in Wave 2 contract ADR heading; web passes &str to parse_e2e_edit
+- Resolve the adversarial-review high/medium findings on live collab
+- Reconcile the .rtla preamble so the builder and reader agree
+- Private-item doc links to plain code spans, and mis-* typos in Wave 2 lane docs
+- Cap DrcHeatmap::run to device limits (Wave 3 review MEDIUM)
+- Renumber 5b LEF/DEF-oracle ADR 0083->0088 (collided with 5c lydrc)
+- 3D-stack and cross-section windows start collapsed, tucked below the toolbar
+- Offset the streaming HUD clear of the ruler so its text is not clipped
+- Build_anchor uses canonical plan_levels so large anchors stream (318 MiB proven live, 0.0014% fetched)
+- Move floating Convert + view-switch onto the toolbar; unblock occluded controls
+- Nudge collapsed 3D + Cross-section windows clear of the panels
+- Share-GIF harness forces WebGL2 and opens a chip on the sharer
+
+### Benchmark suite
+
+- 10 more tasks in the row extension (35/83, still PARTIAL)
+- Final overnight batch, row now 81/83 (PARTIAL)
+- 30M/100M GPU-resident hierarchy measurement + PERF table
+
+### Documentation and media
+
+- Reconnect subsection and ADR 0062
+- Book chapter and ADRs for the two-relay conformance work
+- ADR 0062 and agent chapter for the live-room agent
+- Permalinks, touch pan-zoom, and ADR 0062
+- Fully-qualify the reconcile_to intra-doc link so reticle-app docs build
+- Streaming reader + .rtla builder (ADR 0063, io book, README)
+- Document the .rtla TileSource readers and add ADR 0063
+- CORS/Range/Cache design, license-gate policy, ADR 0068
+- ADR 0068 and streaming chapter for the DocHost split and residency
+- Document the convert command flatten scope and leveling
+- Assign 0072 to the 2f converter ADR (placeholder -> number at merge)
+- Fix rustdoc private/wasm links to code spans and drop em-dashes
+- ?archive browse + streaming HUD (streaming.md, PERF numbers, ADR + README row)
+- GPU DRC heatmap book page, PERF row, and ADR (placeholder number)
+- Assign 0075 to the 3b GPU DRC heatmap ADR
+- GPU-resident hierarchy subsection + ADR (placeholder 0074)
+- DRC-as-you-type subsection, per-edit PERF numbers, ADR 0074
+- Book page, ADR 0074 (placeholder), README row
+- Plain code span for private device_instance_cap (doc-build gate)
+- Book page, SUMMARY entry, ADR 0078, README row (step 5)
+- Layout diff book page, ADR 0078 (placeholder), README rows
+- Comments/annotations book page, ADR 0080, README rows
+- Multi-writer collaboration book page, ADR 0081, README row
+- Interop chapter, ADR 0063, and README/decisions rows
+- Document the KLayout .lydrc compatibility subset
+- Interop + second-PDK chapters, ADRs 0068-0070, OASIS honesty rename
+- Python bindings book chapter
+- Document input-gate atomicity of the conn-id allocation
+- LEF/DEF import oracle (ADR 0083, book subsection, README row)
+- Device recognition chapter, ADR 0063, README boundary update
+- Multimodal verification chapter, ADR 0090, README row
+- Add 6b vision second-oracle index row (0090); lane created the file but not the index entry
+- In-browser conversion book page, ADR 0090 (placeholder), README row
+- Plain code span for private MAX_TILE_RECORDS in build_rtla_to_vec (doc-build gate)
+- Leaderboard chapter, submission harness, and ADR 0068
+- Reconcile benchmark table to the deterministic leaderboard
+- Fold in the conformant OASIS writer and Python bindings
+- Add a what-is-new-in-v8 paragraph to the landing page
+- Trim stale pre-v8 scaffolding and fix a broken ADR link
+- Measured 3.01 GiB read-side streaming claim + live demo URL
+- Real share GIF, browser-proof ADR 0068, e2e project docs
+- Browser-level proof subsection in the collaboration chapter
+- Correct streaming number to app-measured 188 KiB (0.006%)
+
+### Refactoring
+
+- Data-driven GenTech, generators read it via the tech arg
+
+### Testing
+
+- Commit v8 seed corpora and record the campaign
+- Kill-and-reconnect resync over the real relay
+- Deployed-relay smoke branch and native-tls for wss
+- Convergence + skipped tests and the DRC-fix demo transcript
+- In-process relay integration test for the live agent
+- Prove streamed viewport query equals the R-tree query
+- Coarse-then-fine residency proof against a latency-injecting MemSource
+- Served-archive spec + local Range server + committed .rtla fixture
+- GPU DRC heatmap flags vs CPU oracle proptest + native bench
+- Adapter-gated GPU hierarchy correctness + chunking + zero-CPU
+- App-level two-way live DRC and per-edit latency at 1M shapes
+- E2e proving manifest + SW registration + offline shell (step 4)
+- Freeze V1 golden document fixture (pre-V2 build)
+- Persist comments through a V2 document, two-way
+- 2 editors converge + 1 viewer sees but cannot write
+- Pin the V1 golden fixture byte-exact (Wave 4 review)
+- End-to-end .lydrc subset deck through DrcEngine
+- KLayout verdict-comparison harness for the .lydrc subset
+- LEF/DEF import oracle cross-check, proven both ways vs OpenROAD
+- Add Magic container oracle for device recognition
+- In-browser convert -> OPFS -> ?archive= streaming (lane v8-6c step 4)
+- Golden byte-stability test and fixture record set
+- Behavioral share-live proofs, phone touch project, share GIF harness
+
+### Build, tooling, and CI
+
+- Remove em-dashes from reconnect code and docs
+- Lock native-tls deps for the conformance wss smoke
+- Untrack a lane RESULT.md that was force-added into scratch (belongs out of tree)
+- Add just e2e-archive recipe (served-archive browser streaming spec, reproducible)
+- Lock reticle-drc dev-dep edge for reticle-render
+- Strip em-dashes from lane 3c GPU-hierarchy files (voice rule)
+- Lock reticle-gen dev-deps (reticle-io, toml)
+- Exclude a non-default PyO3 abi3 crate from the workspace
+- Allowlist IHP 'Activ' layer name and OASIS 'SSEE' notation
+- Fix em-dash in ADR 0062 title to satisfy the voice gate
 ## [7.0.0] - 2026-07-07
 
 ### Bug fixes

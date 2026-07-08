@@ -9,7 +9,7 @@
 
 [package]
 name = "reticle-py"
-version = "7.0.0"
+version = "8.0.0"
 edition = "2024"
 rust-version = "1.94"
 authors = ["Josef Long <Josefdean@protonmail.com>"]

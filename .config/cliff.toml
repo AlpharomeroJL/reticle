@@ -38,6 +38,11 @@ commit_parsers = [
     # Process bookkeeping: not changelog-worthy.
     { message = "^merge", skip = true },
     { message = "^wip", skip = true },
+    # Multi-wave build orchestration commits record run progress (lane dispatch, gate
+    # state, resume anchors), not product changes. Skip these scopes for the same reason.
+    { message = "^chore\\((wave|endgame|flagship|lane|pre-tag|run-state|ui)", skip = true },
+    # Per-lane RESULT.md write-ups are internal build artifacts, not documentation.
+    { message = "^docs.*RESULT", skip = true },
 
     # Conventional change types.
     { message = "^feat", group = "<!-- 00 -->Features" },
