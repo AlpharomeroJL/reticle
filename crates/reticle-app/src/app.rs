@@ -7194,6 +7194,8 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Install the embedded subset faces once (idempotent; ADR 0097, lane 1B).
+        crate::theme::fonts::install(&ctx);
         // Apply the chosen theme to the egui visuals for this frame (dark by
         // default; the view/export panel toggles it). Setting it every frame keeps
         // the visuals in sync after a toggle or a restored session.
