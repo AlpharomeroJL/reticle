@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-155cd532.js";
+            window.path_to_searchindex_js = "searchindex-4bc64347.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-76930c15.js"></script>
@@ -260,6 +260,27 @@ orders across simulated peers, and the final documents must be identical.</p>
 the identity), including the encoding edge cases (spaces, unicode cell names, an empty
 layer list), and an app-level test proves an emitted permalink restores the same cell,
 camera, and layers on a freshly opened document.</p>
+<h3 id="browser-level-proof-adr-0058-0093"><a class="header" href="#browser-level-proof-adr-0058-0093">Browser-level proof (ADR 0058, 0093)</a></h3>
+<p>The read-only contract and the transport are proven twice. The authority is a headless
+Rust relay test (<code>crates/reticle-server/tests/share_live.rs</code>): a real publisher and a real
+viewer connect over an ephemeral port, and it asserts the publisher’s frames materialize
+in the viewer and that a frame a view-mode client sends is dropped and never enters the
+room log. On top of that, a two-context Playwright suite (<code>just e2e-share</code>) proves the
+<em>browser</em> side, reading a wasm instrumentation seam (<code>window.__reticle_stats</code>) because the
+egui canvas is GPU-painted and has no DOM node to assert on:</p>
+<ul>
+<li>an edit made in the sharer paints in a read-only viewer (a no-edit control room isolates
+the scripted edit to exactly one extra applied shape in the viewer);</li>
+<li>a view-mode socket cannot write: the same captured relay frame is dropped when a browser
+sends it from a <code>?mode=view</code> socket but applied when sent from an edit-mode socket, a
+positive control that keeps the drop assertion from passing vacuously;</li>
+<li>a phone navigates a design by touch: on a mobile viewport a two-finger pinch changes the
+zoom and a drag changes the pan, read back from the camera field of the same seam.</li>
+</ul>
+<p>What these do not assert is the pixels of the rendered canvas; that stays the job of the
+Rust relay test (for the read-only contract) and the pure camera unit tests (for the
+pan/zoom transform). The README’s share clip is captured from this same two-context flow
+by <code>just capture-share</code>.</p>
 
                     </main>
 
