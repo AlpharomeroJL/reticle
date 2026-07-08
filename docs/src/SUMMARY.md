@@ -12,6 +12,7 @@
 - [Drawing and vertex editing](draw.md)
 - [Boolean and transform operations](boolean-transform.md)
 - [File formats](io.md)
+  - [LEF/DEF import](lef-def.md)
 - [Rendering and scale](rendering.md)
   - [GPU DRC heatmap](gpu-drc-heatmap.md)
 - [Streamed documents](streaming.md)

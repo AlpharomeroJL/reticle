@@ -1,0 +1,20 @@
+VERSION 5.8 ;
+DESIGN tinycore ;
+UNITS DISTANCE MICRONS 1000 ;
+
+DIEAREA ( 0 0 ) ( 20000 20000 ) ;
+
+ROW ROW_0 unithd 0 0 N DO 40 BY 1 STEP 460 0 ;
+
+COMPONENTS 2 ;
+  - u1 INV + PLACED ( 1000 0 ) N ;
+  - u3 INV + PLACED ( 5000 0 ) FN ;
+END COMPONENTS
+
+NETS 1 ;
+  - n_a ( u1 Y ) ( u3 A )
+    + USE SIGNAL
+    + ROUTED met1 ( 1100 1100 ) ( 5200 1100 ) ;
+END NETS
+
+END DESIGN

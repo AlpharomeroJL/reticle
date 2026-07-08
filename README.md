@@ -246,6 +246,13 @@ concurrent edits converge regardless of delivery order, proven by order-independ
 convergence tests. A thin relay broadcasts updates and presence; edits made offline
 reconcile on reconnect. A remote edit echoes to a peer in about 788 us on the localhost relay.
 
+**LEF/DEF import.** A `reticle-lefdef` crate reads the technology and macro abstracts (LEF)
+and the placed, routed design (DEF) an OpenROAD run emits, and lowers them to the document
+plus the run metadata a viewer overlays (die area, rows, sites, nets with per-net segments,
+and pins). It parses a defined subset (ADR 0082), skips the rest with a warning instead of
+failing, and never panics or hangs on malformed input. It carries no external dependency, so
+it builds for the browser alongside the rest.
+
 ## What it does not do, and where it is thin
 
 Reticle is a portfolio-grade engineering project and a research vehicle for machine-driven

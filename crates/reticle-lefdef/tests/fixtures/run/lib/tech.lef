@@ -1,0 +1,40 @@
+UNITS
+  DATABASE MICRONS 1000 ;
+END UNITS
+
+LAYER li1
+  TYPE ROUTING ;
+  WIDTH 0.17 ;
+END li1
+
+LAYER met1
+  TYPE ROUTING ;
+  WIDTH 0.14 ;
+END met1
+
+SITE unithd
+  CLASS CORE ;
+  SIZE 0.46 BY 2.72 ;
+END unithd
+
+MACRO INV
+  CLASS CORE ;
+  SIZE 1.38 BY 2.72 ;
+  SITE unithd ;
+  PIN A
+    DIRECTION INPUT ;
+    PORT
+      LAYER li1 ;
+        RECT 0.20 1.00 0.40 1.20 ;
+    END
+  END A
+  PIN Y
+    DIRECTION OUTPUT ;
+    PORT
+      LAYER li1 ;
+        RECT 0.90 1.00 1.10 1.20 ;
+    END
+  END Y
+END INV
+
+END LIBRARY
