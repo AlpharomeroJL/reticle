@@ -184,6 +184,20 @@ enum ViaLayerField {
     Cut,
 }
 
+/// What a toast's Retry action re-runs (lane 3b).
+///
+/// The pure [`Notification`](crate::notify::Notification) model deliberately carries
+/// no callback, so the app remembers the most recent retryable operation here and a
+/// toast's [`Retry`](crate::notify::NotificationAction::Retry) click replays it.
+#[derive(Clone, Debug)]
+enum RetryOp {
+    /// Re-open the file picker (a failed open from a drop or the picker).
+    Picker,
+    /// Re-fetch a remote URL (a failed Open-from-URL).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    FetchUrl(String),
+}
+
 /// The top-level application state: the collaborative document and the renderer.
 ///
 /// The [`renderer`](App::renderer) and [`document`](App::document) accessors are the
@@ -391,6 +405,29 @@ pub struct App {
     /// wasm (native never spawns the path), so it is dead there by design.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     web_open_started: bool,
+    /// The open/closed and text state of this lane's dialogs (Open-from-URL, Convert,
+    /// Share). Folded into one field to keep the many flags together (see
+    /// [`crate::dialogs::DialogState`]).
+    dialogs: crate::dialogs::DialogState,
+    /// Online/offline tracking for the offline badge and reconnect toasts (item 74).
+    /// Fed by the live transport's socket open/close; produces at-most-one toast per
+    /// real transition (see [`crate::notify::ConnectivityState`]).
+    connectivity: crate::notify::ConnectivityState,
+    /// Text staged for the clipboard by an action dispatched outside a `ui`/context
+    /// closure (a menu or shortcut copy). The frame loop copies it and clears this.
+    pending_clipboard: Option<String>,
+    /// The most recent retryable operation, replayed when a toast's Retry action is
+    /// clicked (item 71). `None` when the last failure was not retryable.
+    retry: Option<RetryOp>,
+    /// The URL of the in-flight remote open, so a fetch failure can name it in the
+    /// CORS/network explainer (item 2). Set when an Open-from-URL fetch starts.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    last_fetch_url: Option<String>,
+    /// Set when the user cancels an in-flight remote open from the progress card
+    /// (item 6). The background fetch cannot be aborted mid-flight on the browser, so
+    /// its eventual result is dropped instead of installed.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    load_canceled: bool,
 
     // ---- Served-archive browse (`?archive=`, lane v8-2e) -------------------
     /// The open archive browse, present only when the page opened a served `.rtla` via
@@ -817,6 +854,12 @@ impl App {
             load_progress: crate::webopen::LoadProgress::Idle,
             web_open: crate::webopen::WebOpenInbox::new(),
             web_open_started: false,
+            dialogs: crate::dialogs::DialogState::default(),
+            connectivity: crate::notify::ConnectivityState::new(),
+            pending_clipboard: None,
+            retry: None,
+            last_fetch_url: None,
+            load_canceled: false,
             archive: None,
             archive_open: crate::archive::ArchiveOpenInbox::new(),
             pending_archive_url: None,
@@ -988,11 +1031,18 @@ impl App {
         self.open_warnings = warnings;
         self.start_screen = false;
         if self.open_warnings.is_empty() {
-            self.status
-                .set(format!("Opened document ({cell_count} cells)"));
-            self.notifications.info(
-                format!("Opened document ({cell_count} cells)"),
-                String::new(),
+            let summary = format!("Opened document ({cell_count} cells)");
+            self.status.set(summary.clone());
+            // A post-open summary toast (catalog item 7): shapes, layers, bounding
+            // box, and a Fit action so the user can reframe with one click. Metrics
+            // are read from the freshly installed document and layer table.
+            self.notifications.push(
+                crate::notify::Notification::new(
+                    crate::notify::Severity::Info,
+                    summary,
+                    self.post_open_detail(),
+                )
+                .with_action(crate::notify::NotificationAction::Fit),
             );
         } else {
             self.status.set(format!(
@@ -1020,6 +1070,223 @@ impl App {
     /// Clears the stored open-warnings (dismisses the warnings window).
     pub fn clear_open_warnings(&mut self) {
         self.open_warnings.clear();
+    }
+
+    /// The one-line body for the post-open summary toast (item 7): shape count, layer
+    /// count, and the top cell's bounding box in DBU. Read from the just-installed
+    /// document and layer table.
+    fn post_open_detail(&self) -> String {
+        let shapes = self.scene.shapes().len();
+        let layers = self.layer_state.rows().len();
+        let bbox = self
+            .history
+            .document()
+            .cell_bbox(&self.top_cell)
+            .map_or_else(
+                || "empty".to_owned(),
+                |b| format!("{} x {} DBU", b.width(), b.height()),
+            );
+        format!("{shapes} shapes on {layers} layers, bounding box {bbox}")
+    }
+
+    /// Opens a named file's `bytes` through the same hardened path drag-and-drop uses:
+    /// classify the format from the name, apply the big-file size band, open through
+    /// the seam, and record the recent entry, surfacing a rich [`crate::notify`]
+    /// failure (cause, next step, copyable diagnostic) on any refusal.
+    ///
+    /// This is the single funnel the file picker (native and browser), a paste, and a
+    /// multi-file open route through, so every open surface reports success and
+    /// failure identically (items 1, 4, 8, 72). Returns whether the file opened.
+    fn open_named_bytes(&mut self, name: &str, bytes: &[u8]) -> bool {
+        let Some(format) = crate::webopen::classify_drop(name) else {
+            self.report_failure(
+                format!("Could not open {name}"),
+                crate::dialogs::unsupported_file_diagnostic(name),
+                Some(RetryOp::Picker),
+            );
+            return false;
+        };
+        let plan = crate::webopen::LoadPlan::for_size(bytes.len() as u64);
+        if let Some(message) = plan.refusal_message() {
+            self.report_failure(
+                format!("{name} is too large for the browser build"),
+                crate::notify::Diagnostic::new(
+                    message,
+                    "Open it in the desktop app, or split it into smaller cells.",
+                    format!("file: {name}\nsize: {} bytes", bytes.len()),
+                ),
+                Some(RetryOp::Picker),
+            );
+            return false;
+        }
+        match crate::open::open_document_bytes(bytes, format) {
+            Ok(outcome) => {
+                self.open_outcome(outcome);
+                self.record_recent_file(crate::webopen::RecentFile::local(
+                    name.to_owned(),
+                    bytes.len() as u64,
+                ));
+                self.persist_recent_files();
+                true
+            }
+            Err(e) => {
+                self.report_failure(
+                    format!("Could not open {name}"),
+                    crate::dialogs::open_error_diagnostic(&e),
+                    Some(RetryOp::Picker),
+                );
+                false
+            }
+        }
+    }
+
+    /// Opens the native/browser file picker (rfd) and routes the chosen file through
+    /// [`open_named_bytes`](Self::open_named_bytes), the same hardened path as
+    /// drag-and-drop (catalog item 1, `file.open_dialog`, Ctrl+O).
+    ///
+    /// On native this uses the blocking [`rfd::FileDialog`] and reads the file inline.
+    /// On the web there is no filesystem, so [`rfd::AsyncFileDialog`] shows the hidden
+    /// HTML file input; the async read posts the bytes into the shared
+    /// [`WebOpenInbox`](crate::webopen::WebOpenInbox) as a
+    /// [`WebOpenEvent::Opened`](crate::webopen::WebOpenEvent::Opened), so the picker
+    /// rides the exact same classify -> plan -> seam path the inbox already drains.
+    fn open_file_dialog(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let picked = rfd::FileDialog::new()
+                .add_filter("Layout files", &["gds", "gdsii", "gds2", "oas", "oasis"])
+                .pick_file();
+            if let Some(path) = picked {
+                let name = path.file_name().map_or_else(
+                    || path.display().to_string(),
+                    |n| n.to_string_lossy().into_owned(),
+                );
+                match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        self.open_named_bytes(&name, &bytes);
+                    }
+                    Err(e) => self.notifications.fail(
+                        format!("Could not read {name}"),
+                        crate::notify::Diagnostic::new(
+                            "The file could not be read from disk.",
+                            "Check that the file still exists and is readable, then try again.",
+                            format!("path: {}\n{e}", path.display()),
+                        ),
+                    ),
+                }
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let inbox = self.web_open.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                let Some(handle) = rfd::AsyncFileDialog::new()
+                    .add_filter("Layout files", &["gds", "gdsii", "gds2", "oas", "oasis"])
+                    .pick_file()
+                    .await
+                else {
+                    return;
+                };
+                let name = handle.file_name();
+                let Some(format) = crate::webopen::classify_drop(&name) else {
+                    inbox.post(crate::webopen::WebOpenEvent::Failed(format!(
+                        "\"{name}\" is not a .gds or .oas file"
+                    )));
+                    return;
+                };
+                let bytes = handle.read().await;
+                let size = bytes.len() as u64;
+                inbox.post(crate::webopen::WebOpenEvent::Opened {
+                    bytes,
+                    format,
+                    recent: crate::webopen::RecentFile::local(name, size),
+                });
+            });
+        }
+    }
+
+    /// Starts an Open-from-URL fetch of the (already validated) `url`, feeding the
+    /// bytes through the same inbox path as a `?gds=` link (item 2, `file.open_url`).
+    ///
+    /// On the web this spawns the browser `fetch`; a CORS block or network failure
+    /// comes back as a [`WebOpenEvent::Failed`](crate::webopen::WebOpenEvent::Failed),
+    /// which [`apply_web_open_event`](Self::apply_web_open_event) turns into the
+    /// plain-language CORS/network explainer. On native there is no cross-origin fetch
+    /// story (the desktop build opens local files), so this explains that and points
+    /// at the file picker.
+    // On wasm the URL is consumed (moved into the fetch task and the recent entry); on
+    // native it is only named in a message, so it is borrowed there.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(clippy::needless_pass_by_value))]
+    fn start_url_open(&mut self, url: String) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let Some(format) = crate::webopen::classify_drop(&crate::webopen::url_file_name(&url))
+            else {
+                self.report_failure(
+                    "Could not open the URL",
+                    crate::dialogs::unsupported_file_diagnostic(&url),
+                    None,
+                );
+                return;
+            };
+            self.last_fetch_url = Some(url.clone());
+            self.load_canceled = false;
+            self.load_progress = crate::webopen::LoadProgress::fetched(0, 0);
+            let inbox = self.web_open.clone();
+            let name = crate::webopen::url_file_name(&url);
+            wasm_bindgen_futures::spawn_local(async move {
+                match crate::webopen::fetch_gds_bytes(&url).await {
+                    Ok(bytes) => {
+                        let size = bytes.len() as u64;
+                        if let Some(message) =
+                            crate::webopen::LoadPlan::for_size(size).refusal_message()
+                        {
+                            inbox.post(crate::webopen::WebOpenEvent::Failed(message));
+                        } else {
+                            inbox.post(crate::webopen::WebOpenEvent::Opened {
+                                bytes,
+                                format,
+                                recent: crate::webopen::RecentFile::remote(name, size, url),
+                            });
+                        }
+                    }
+                    Err(message) => {
+                        inbox.post(crate::webopen::WebOpenEvent::Failed(message));
+                    }
+                }
+            });
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = &url;
+            self.report_failure(
+                "Open from URL is available in the browser build",
+                crate::notify::Diagnostic::new(
+                    "The desktop app opens files from your computer, so it does not \
+                     fetch remote URLs.",
+                    "Use Open to pick the file from disk, or download it first.",
+                    format!("requested url: {url}"),
+                ),
+                None,
+            );
+        }
+    }
+
+    /// Copies the read-only viewer link for the current room to the clipboard
+    /// (`share.copy_viewer_link`).
+    ///
+    /// Dispatched from a menu, the palette, or a shortcut, none of which thread an
+    /// egui context, so the link is staged in [`pending_clipboard`](Self::pending_clipboard)
+    /// and the frame loop copies it (the same defer the dialogs use for their copy
+    /// buttons that run outside a `ui` closure).
+    fn copy_viewer_link(&mut self) {
+        let link =
+            crate::share::viewer_link(&self.share_page, &self.share_server, &self.share_room);
+        self.pending_clipboard = Some(link);
+        self.notify(
+            "Viewer link copied",
+            "Anyone with this link can watch, view-only.",
+        );
     }
 
     /// Stashes a permalink parsed from the page URL to apply once a `?gds=` open
@@ -1290,6 +1557,42 @@ impl App {
         }
     }
 
+    /// Reports a rich failure that carries a Copy-details action and, when `retry` is
+    /// given, a Retry action wired to replay that operation (items 71, 72).
+    ///
+    /// Every failing open/URL/convert/share path routes through here (or the plain
+    /// [`Notifications::fail`](crate::notify::Notifications::fail) for a non-retryable
+    /// one), so no failure is silent and each carries a cause, a next step, and a
+    /// copyable diagnostic.
+    fn report_failure(
+        &mut self,
+        summary: impl Into<String>,
+        diagnostic: crate::notify::Diagnostic,
+        retry: Option<RetryOp>,
+    ) {
+        let mut note = crate::notify::Notification::new(
+            crate::notify::Severity::Error,
+            summary,
+            diagnostic.next_step.clone(),
+        )
+        .with_diagnostic(diagnostic)
+        .with_action(crate::notify::NotificationAction::CopyDetails);
+        if retry.is_some() {
+            note = note.with_action(crate::notify::NotificationAction::Retry);
+            self.retry = retry;
+        }
+        self.notifications.push(note);
+    }
+
+    /// Replays the most recent retryable operation for a toast's Retry action.
+    fn run_retry(&mut self) {
+        match self.retry.clone() {
+            Some(RetryOp::Picker) => self.open_file_dialog(),
+            Some(RetryOp::FetchUrl(url)) => self.start_url_open(url),
+            None => {}
+        }
+    }
+
     /// The recently opened files, most-recent first.
     ///
     /// A Start screen (a sibling lane) renders these as reopen rows; the browser build
@@ -1355,42 +1658,36 @@ impl App {
         if dropped.is_empty() {
             return false;
         }
-        for file in dropped {
-            let Some(format) = crate::webopen::classify_drop(&file.name) else {
+        // Open the first dropped file that names a layout format, routing it through
+        // the same hardened helper the file picker uses so a refusal (unsupported
+        // extension, too large, corrupt) surfaces a rich diagnostic (items 5, 8, 72).
+        for file in &dropped {
+            if crate::webopen::classify_drop(&file.name).is_none() {
                 continue;
-            };
-            let bytes = Self::dropped_file_bytes(&file);
-            let Some(bytes) = bytes else {
-                self.status
-                    .set(format!("Could not read the dropped file {}", file.name));
+            }
+            let Some(bytes) = Self::dropped_file_bytes(file) else {
+                self.notifications.fail(
+                    format!("Could not read {}", file.name),
+                    crate::notify::Diagnostic::new(
+                        "The dropped file could not be read.",
+                        "Try dragging it again, or use Open to pick it from disk.",
+                        format!("file: {}", file.name),
+                    ),
+                );
                 return true;
             };
-            let plan = crate::webopen::LoadPlan::for_size(bytes.len() as u64);
-            if let Some(message) = plan.refusal_message() {
-                self.status.set(message.clone());
-                self.load_progress = crate::webopen::LoadProgress::failed(message);
-                return true;
-            }
-            match self.open_document_bytes(&bytes, format) {
-                Ok(()) => {
-                    self.record_recent_file(crate::webopen::RecentFile::local(
-                        file.name.clone(),
-                        bytes.len() as u64,
-                    ));
-                    self.load_progress = crate::webopen::LoadProgress::Idle;
-                    self.persist_recent_files();
-                }
-                Err(e) => {
-                    self.status.set(e.to_string());
-                    self.load_progress = crate::webopen::LoadProgress::failed(e.to_string());
-                }
-            }
+            self.open_named_bytes(&file.name, &bytes);
             return true;
         }
-        // Every dropped file was a non-layout type: tell the user rather than
-        // silently ignoring the gesture.
-        self.status
-            .set("Drop a .gds or .oas file to open it".to_owned());
+        // Every dropped file was a non-layout type: explain the refusal with the
+        // supported-format list rather than silently ignoring the gesture (item 8).
+        let name = dropped
+            .first()
+            .map_or_else(|| "that file".to_owned(), |f| f.name.clone());
+        self.notifications.fail(
+            format!("Could not open {name}"),
+            crate::dialogs::unsupported_file_diagnostic(&name),
+        );
         true
     }
 
@@ -1442,11 +1739,24 @@ impl App {
             Stroke::new(3.0, CANVAS.drop_frame),
             StrokeKind::Inside,
         );
+        let style = ctx.style_of(egui::Theme::Dark);
         painter.text(
             screen.center(),
             Align2::CENTER_CENTER,
-            "Drop a .gds or .oas file to open it",
-            egui::TextStyle::Heading.resolve(&ctx.style_of(egui::Theme::Dark)),
+            "Drop a layout file to open it",
+            egui::TextStyle::Heading.resolve(&style),
+            CANVAS.hud_text,
+        );
+        // A supported-format hint under the prompt so the drop target says what it
+        // accepts, not just that it accepts something (item 5).
+        painter.text(
+            screen.center() + Vec2::new(0.0, 28.0),
+            Align2::CENTER_CENTER,
+            format!(
+                "Supported: {}",
+                crate::dialogs::SUPPORTED_FORMATS.join("  |  ")
+            ),
+            egui::TextStyle::Body.resolve(&style),
             CANVAS.hud_text,
         );
     }
@@ -1465,34 +1775,67 @@ impl App {
         match &self.load_progress {
             LoadProgress::Idle | LoadProgress::Done => {}
             LoadProgress::Fetching { .. } | LoadProgress::Indexing => {
-                let fraction = self.load_progress.fraction();
-                let label = match &self.load_progress {
-                    LoadProgress::Fetching { received, total } if *total > 0 => {
+                let cctx = self.ui_ctx();
+                // Stage line: which honest phase the open is in (item 6). The remote
+                // path fetches, then builds the index (the parse/tessellate work); the
+                // GPU upload happens on the first paint after the document installs.
+                let (stage, detail, fraction) = match &self.load_progress {
+                    LoadProgress::Fetching { received, total } if *total > 0 => (
+                        crate::dialogs::OpenStage::Parse,
                         format!(
-                            "Downloading... {} / {} MiB",
+                            "Downloading {} / {} MiB",
                             received / (1024 * 1024),
                             total / (1024 * 1024)
-                        )
-                    }
-                    LoadProgress::Fetching { received, .. } => {
-                        format!("Downloading... {} MiB", received / (1024 * 1024))
-                    }
-                    _ => "Building the index...".to_owned(),
+                        ),
+                        Some(self.load_progress.fraction().unwrap_or(0.0)),
+                    ),
+                    LoadProgress::Fetching { received, .. } => (
+                        crate::dialogs::OpenStage::Parse,
+                        format!("Downloading {} MiB", received / (1024 * 1024)),
+                        None,
+                    ),
+                    _ => (
+                        crate::dialogs::OpenStage::Tessellate,
+                        "Building the index".to_owned(),
+                        Some(crate::dialogs::OpenStage::Tessellate.fraction()),
+                    ),
                 };
+                let mut cancel = false;
                 egui::Window::new("Opening")
                     .id(egui::Id::new("load_progress_window"))
                     .collapsible(false)
                     .resizable(false)
                     .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
                     .show(ctx, |ui| {
-                        ui.label(label);
-                        let bar = match fraction {
-                            Some(f) => egui::ProgressBar::new(f).show_percentage(),
-                            // Indeterminate: an animated bar with no fixed fraction.
-                            None => egui::ProgressBar::new(0.0).animate(true),
-                        };
-                        ui.add(bar);
+                        ui.set_min_width(320.0);
+                        ui.label(egui::RichText::new(stage.label()).color(DARK.text));
+                        ui.label(egui::RichText::new(detail).color(DARK.text_weak));
+                        ui.add_space(cctx.density.item_spacing().y);
+                        // A determinate row when the fetch total is known, else an
+                        // indeterminate animated bar; both carry a cancel affordance.
+                        if let Some(f) = fraction {
+                            let out = crate::theme::components::ProgressRow::new("", f)
+                                .cancelable(true)
+                                .show(ui, cctx);
+                            cancel = out.canceled;
+                        } else {
+                            ui.add(egui::ProgressBar::new(0.0).animate(true));
+                            if crate::theme::components::Button::secondary("Cancel")
+                                .show(ui, cctx)
+                                .clicked()
+                            {
+                                cancel = true;
+                            }
+                        }
                     });
+                if cancel {
+                    // The browser fetch cannot be aborted mid-flight, so mark the load
+                    // canceled and drop its eventual result rather than installing it.
+                    self.load_progress = LoadProgress::Idle;
+                    self.load_canceled = true;
+                    self.status.set("Open canceled");
+                    self.notify("Open canceled", "");
+                }
                 ctx.request_repaint();
             }
             LoadProgress::Failed { message } => {
@@ -1551,6 +1894,20 @@ impl App {
     /// becomes both a status line and the load-failure card.
     fn apply_web_open_event(&mut self, event: crate::webopen::WebOpenEvent) {
         use crate::webopen::WebOpenEvent;
+        // A canceled load (item 6) drops the fetch's late results instead of installing
+        // them; the flag clears once the in-flight result has been discarded.
+        if self.load_canceled
+            && matches!(
+                event,
+                WebOpenEvent::Progress(_) | WebOpenEvent::Opened { .. }
+            )
+        {
+            if matches!(event, WebOpenEvent::Opened { .. }) {
+                self.load_canceled = false;
+            }
+            self.load_progress = crate::webopen::LoadProgress::Idle;
+            return;
+        }
         match event {
             WebOpenEvent::Progress(progress) => {
                 self.load_progress = progress;
@@ -1563,6 +1920,7 @@ impl App {
                 Ok(()) => {
                     self.record_recent_file(recent);
                     self.load_progress = crate::webopen::LoadProgress::Idle;
+                    self.last_fetch_url = None;
                     self.persist_recent_files();
                     // A `?gds=` link may also carry a permalink (cell/camera/layers) to
                     // restore on top of the freshly opened document.
@@ -1571,13 +1929,39 @@ impl App {
                     }
                 }
                 Err(e) => {
-                    self.status.set(e.to_string());
-                    self.load_progress = crate::webopen::LoadProgress::failed(e.to_string());
+                    // A fetched file that will not import gets the same corrupt-file
+                    // explainer as a local one (items 8, 72), with Retry wired to the
+                    // source (re-fetch a URL, else the picker).
+                    let retry = self
+                        .last_fetch_url
+                        .take()
+                        .map_or(RetryOp::Picker, RetryOp::FetchUrl);
+                    self.report_failure(
+                        "Could not open the file",
+                        crate::dialogs::open_error_diagnostic(&e),
+                        Some(retry),
+                    );
+                    self.load_progress = crate::webopen::LoadProgress::Idle;
                 }
             },
             WebOpenEvent::Failed(message) => {
                 self.status.set(message.clone());
-                self.load_progress = crate::webopen::LoadProgress::failed(message);
+                // Turn the transport's message into a rich toast: a CORS block gets
+                // the plain-language explainer, any other network/HTTP failure the
+                // generic fetch diagnostic, both naming the URL and offering Retry
+                // (items 2, 72). The load card is cleared so the toast is the single
+                // surface.
+                let url = self.last_fetch_url.take();
+                let named = url.clone().unwrap_or_else(|| "the file".to_owned());
+                let lower = message.to_lowercase();
+                let diagnostic = if lower.contains("cors") || lower.contains("cross-origin") {
+                    crate::dialogs::cors_diagnostic(&named)
+                } else {
+                    crate::dialogs::fetch_failure_diagnostic(&named, &message)
+                };
+                let retry = url.map(RetryOp::FetchUrl);
+                self.report_failure("Could not open the file", diagnostic, retry);
+                self.load_progress = crate::webopen::LoadProgress::Idle;
             }
             WebOpenEvent::RecentsLoaded(recents) => {
                 // Adopt the persisted list, but keep anything opened this session ahead
@@ -1731,6 +2115,19 @@ impl App {
                     self.publish_full_next = true;
                 }
                 self.status.set(status.label());
+                // Drive the offline badge and reconnect toasts off the live socket
+                // state (item 74): an open socket is online, a reconnecting or terminal
+                // one is offline. Each real transition yields at most one toast.
+                let toast = if status.is_open() {
+                    self.connectivity.set_online()
+                } else if status.is_reconnecting() || status.is_terminal() {
+                    self.connectivity.set_offline()
+                } else {
+                    None
+                };
+                if let Some(note) = toast {
+                    self.notifications.push(note);
+                }
                 self.live_status = status;
                 false
             }
@@ -2466,6 +2863,18 @@ impl App {
             AppOp::SplitSingle => self.set_split(Split::Single),
             AppOp::SplitHorizontal => self.set_split(Split::Horizontal),
             AppOp::SplitVertical => self.set_split(Split::Vertical),
+            // --- lane 3b: open flow and dialogs ---
+            AppOp::OpenFileDialog => self.open_file_dialog(),
+            AppOp::OpenUrlDialog => {
+                self.dialogs.open_url_shown = !self.dialogs.open_url_shown;
+            }
+            AppOp::ConvertDialog => {
+                self.dialogs.convert_shown = !self.dialogs.convert_shown;
+            }
+            AppOp::ShareDialog => {
+                self.dialogs.share_shown = !self.dialogs.share_shown;
+            }
+            AppOp::CopyViewerLink => self.copy_viewer_link(),
         }
     }
 
@@ -2508,19 +2917,7 @@ impl App {
                 }
             }
             ui.separator();
-            // The open affordance the first-run tour points at. It returns to the
-            // Start screen, which holds the file-open guidance, the drag-and-drop
-            // target, the example-chip gallery, and recent files, so opening a design
-            // works the same on native and on the web (where there is no filesystem
-            // dialog). Dragging a file onto the window opens it directly (see
-            // `handle_dropped_files`).
-            if ui
-                .button("Open")
-                .on_hover_text("Open a design, or drag a GDSII/OASIS file onto the window")
-                .clicked()
-            {
-                self.start_screen = true;
-            }
+            self.file_share_toolbar(ui);
             // Web only: the in-browser GDS -> .rtla convert picker sits on the toolbar
             // next to Open (lane v8-ui). It was formerly a floating top-left HTML label
             // that overlapped the toolbar; the button delegates to the web shell's hidden
@@ -2592,6 +2989,44 @@ impl App {
                 }
             }
         });
+    }
+
+    /// The lane 3b file/share affordances on the toolbar: Open (picker), Open URL,
+    /// Start (Start screen), and Share. Each dispatches its reserved command so the
+    /// button, a menu, the palette, and a shortcut all route through one funnel.
+    fn file_share_toolbar(&mut self, ui: &mut egui::Ui) {
+        // Open through the native/browser file picker (rfd), the same hardened path as
+        // drag-and-drop (item 1, file.open_dialog, Ctrl+O). A design still opens by
+        // dropping a file on the window; the Start screen (recents, gallery) is one
+        // click away via Start.
+        if ui
+            .button("Open")
+            .on_hover_text("Open a GDSII/OASIS file (Ctrl+O), or drag one onto the window")
+            .clicked()
+        {
+            self.dispatch(CommandId("file.open_dialog"));
+        }
+        if ui
+            .button("Open URL")
+            .on_hover_text("Open a .gds or .oas file from a link")
+            .clicked()
+        {
+            self.dispatch(CommandId("file.open_url"));
+        }
+        if ui
+            .button("Start")
+            .on_hover_text("Back to the Start screen: recent files and the example gallery")
+            .clicked()
+        {
+            self.start_screen = true;
+        }
+        if ui
+            .button("Share")
+            .on_hover_text("Share this session: mint a link, copy, or test-open it")
+            .clicked()
+        {
+            self.dispatch(CommandId("share.dialog"));
+        }
     }
 
     /// Invokes a zero-argument function stored as a global `window[name]`, if the web
@@ -4584,42 +5019,364 @@ impl App {
     /// loop). A dismissal is collected and applied after the layout closure so the
     /// borrow of `self` ends first.
     fn notifications_area(&mut self, ctx: &egui::Context) {
+        use crate::notify::NotificationAction as NA;
+        use crate::theme::components::{Button, ButtonVariant, Severity as CSeverity, Toast};
         if self.notifications.is_empty() {
             return;
         }
+        let cctx = self.ui_ctx();
+        // A dismissal, or a resolved action to apply after the layout closure so the
+        // borrow of `self.notifications` ends first.
         let mut dismiss: Option<usize> = None;
+        // (index, action, resolved diagnostic clipboard text for CopyDetails).
+        let mut act: Option<(usize, NA, Option<String>)> = None;
         egui::Area::new(egui::Id::new("notifications_area"))
             .anchor(Align2::RIGHT_BOTTOM, Vec2::new(-12.0, -12.0))
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
+                ui.set_max_width(380.0);
                 for (index, note) in self.notifications.iter().enumerate() {
-                    let accent = severity_color(note.severity);
-                    egui::Frame::popup(ui.style())
-                        .stroke(Stroke::new(1.5, accent))
-                        .inner_margin(egui::Margin::same(10))
-                        .show(ui, |ui| {
-                            ui.set_max_width(360.0);
-                            ui.horizontal(|ui| {
-                                ui.colored_label(accent, note.severity.label());
-                                ui.strong(&note.summary);
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if ui.small_button("x").clicked() {
-                                            dismiss = Some(index);
-                                        }
-                                    },
-                                );
-                            });
-                            if note.has_detail() {
-                                ui.label(egui::RichText::new(&note.detail).small().weak());
-                            }
-                        });
+                    let severity = match note.severity {
+                        crate::notify::Severity::Info => CSeverity::Info,
+                        crate::notify::Severity::Warning => CSeverity::Warning,
+                        crate::notify::Severity::Error => CSeverity::Danger,
+                    };
+                    let message = if note.has_detail() {
+                        format!("{}\n{}", note.summary, note.detail)
+                    } else {
+                        note.summary.clone()
+                    };
+                    let mut toast = Toast::new(severity, message);
+                    for &action in &note.actions {
+                        let variant = match action {
+                            NA::Fit => ButtonVariant::Primary,
+                            NA::CopyDetails => ButtonVariant::Ghost,
+                            NA::Retry | NA::Undo => ButtonVariant::Secondary,
+                        };
+                        toast = toast.action(Button::new(action.label(), variant));
+                    }
+                    let resp = toast.show(ui, cctx);
+                    if let Some(i) = resp.action
+                        && let Some(&action) = note.actions.get(i)
+                    {
+                        let diag = note
+                            .diagnostic
+                            .as_ref()
+                            .map(crate::notify::Diagnostic::clipboard_text);
+                        act = Some((index, action, diag));
+                    }
+                    if resp.closed {
+                        dismiss = Some(index);
+                    }
                     ui.add_space(6.0);
                 }
             });
-        if let Some(index) = dismiss {
+        // Apply an action first (it dismisses its own toast); otherwise a plain close.
+        if let Some((index, action, diag)) = act {
+            match action {
+                NA::CopyDetails => {
+                    if let Some(text) = diag {
+                        self.pending_clipboard = Some(text);
+                        self.notify("Diagnostics copied", "Paste them into a bug report.");
+                    }
+                    self.notifications.dismiss(index);
+                }
+                NA::Retry => {
+                    self.notifications.dismiss(index);
+                    self.run_retry();
+                }
+                NA::Undo => {
+                    self.notifications.dismiss(index);
+                    self.run_command(Command::Undo, None);
+                }
+                NA::Fit => {
+                    self.fit_requested = true;
+                    self.notifications.dismiss(index);
+                }
+            }
+        } else if let Some(index) = dismiss {
             self.notifications.dismiss(index);
+        }
+    }
+
+    /// Draws the offline badge (item 74): a small pill, top-center, shown only while
+    /// the live connection is down, so a paused share is visible without opening a
+    /// panel. Nothing is drawn while online.
+    fn draw_offline_badge(&self, ctx: &egui::Context) {
+        let Some(label) = self.connectivity.badge_label() else {
+            return;
+        };
+        egui::Area::new(egui::Id::new("offline_badge"))
+            .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 8.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(DARK.bg_raised)
+                    .stroke(Stroke::new(1.0, DARK.warning))
+                    .corner_radius(egui::CornerRadius::same(crate::theme::tokens::RADIUS_LG))
+                    .inner_margin(egui::Margin::symmetric(10, 5))
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new(label).color(DARK.warning));
+                    });
+            });
+    }
+
+    /// A [`components::Ctx`](crate::theme::components::Ctx) for this frame: the dark
+    /// palette at the app's resolved density and reduced-motion preference. Threaded
+    /// into every `theme::components` call this lane makes (toasts, dialogs).
+    fn ui_ctx(&self) -> crate::theme::components::Ctx {
+        crate::theme::components::Ctx::dark(self.ui_density)
+            .with_reduced_motion(self.reduced_motion)
+    }
+
+    /// Draws the Open-from-URL dialog (item 2, `file.open_url`): a validated URL field
+    /// with an inline reason, a CORS-aware next step, and Open/Cancel.
+    ///
+    /// Validation is the pure [`crate::dialogs::validate_open_url`]; the fetch itself
+    /// (and its CORS explainer on failure) is [`start_url_open`](Self::start_url_open).
+    fn open_url_dialog(&mut self, ctx: &egui::Context) {
+        use crate::theme::components::{Button, TextField};
+        if !self.dialogs.open_url_shown {
+            return;
+        }
+        let cctx = self.ui_ctx();
+        let mut open = true;
+        let mut submit = false;
+        let mut cancel = false;
+        egui::Window::new("Open from URL")
+            .id(egui::Id::new("open_url_dialog"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.set_max_width(440.0);
+                ui.label("Paste a link to a .gds or .oas file:");
+                let resp = TextField::new(&mut self.dialogs.open_url_text)
+                    .hint("https://example.com/chip.gds")
+                    .desired_width(410.0)
+                    .show(ui, cctx);
+                submit = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let validation = crate::dialogs::validate_open_url(&self.dialogs.open_url_text);
+                // An inline reason once the user has typed something invalid.
+                if let Err(e) = validation
+                    && !self.dialogs.open_url_text.trim().is_empty()
+                {
+                    ui.colored_label(DARK.danger, e.message());
+                }
+                ui.add_space(cctx.density.item_spacing().y);
+                ui.horizontal(|ui| {
+                    if Button::primary("Open")
+                        .enabled(validation.is_ok())
+                        .show(ui, cctx)
+                        .clicked()
+                    {
+                        submit = true;
+                    }
+                    if Button::ghost("Cancel").show(ui, cctx).clicked() {
+                        cancel = true;
+                    }
+                });
+                ui.add_space(cctx.density.item_spacing().y);
+                ui.label(
+                    egui::RichText::new(
+                        "If the file is on another site it may be blocked by the browser's \
+                         cross-origin (CORS) policy. You can also drag the file onto the window.",
+                    )
+                    .color(DARK.text_weak),
+                );
+            });
+        if submit && let Ok(url) = crate::dialogs::validate_open_url(&self.dialogs.open_url_text) {
+            self.start_url_open(url);
+            self.dialogs.open_url_shown = false;
+            self.dialogs.open_url_text.clear();
+        }
+        if cancel || !open {
+            self.dialogs.open_url_shown = false;
+        }
+    }
+
+    /// Draws the Convert-to-archive dialog (`file.convert_gds`): a short explanation of
+    /// the streamable `.rtla` output and the trigger for the in-browser converter.
+    ///
+    /// The conversion itself runs in the web worker the shell wires up
+    /// (`__reticleTriggerConvert`), so on the web this dialog is the labelled entry to
+    /// it; on native, where there is no browser worker, it explains that and points at
+    /// the desktop's direct open.
+    fn convert_dialog(&mut self, ctx: &egui::Context) {
+        use crate::theme::components::Button;
+        if !self.dialogs.convert_shown {
+            return;
+        }
+        let cctx = self.ui_ctx();
+        let mut open = true;
+        let mut close = false;
+        egui::Window::new("Convert GDS to archive")
+            .id(egui::Id::new("convert_dialog"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.set_max_width(460.0);
+                ui.label("Source: a GDSII file");
+                ui.label("Destination: a streamable .rtla archive");
+                ui.add_space(cctx.density.item_spacing().y);
+                ui.label(
+                    egui::RichText::new(
+                        "A .rtla archive streams tile by tile, so a large layout opens \
+                         instantly and pages in only what the viewport touches.",
+                    )
+                    .color(DARK.text_weak),
+                );
+                ui.add_space(cctx.density.item_spacing().y);
+                ui.horizontal(|ui| {
+                    #[cfg(target_arch = "wasm32")]
+                    if Button::primary("Choose a GDS file...")
+                        .show(ui, cctx)
+                        .clicked()
+                    {
+                        Self::call_window_fn("__reticleTriggerConvert");
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let _ = &cctx;
+                        ui.label(
+                            egui::RichText::new(
+                                "Conversion runs in the browser build. On the desktop, open \
+                                 the GDS directly.",
+                            )
+                            .color(DARK.text_weak),
+                        );
+                    }
+                    if Button::ghost("Close").show(ui, cctx).clicked() {
+                        close = true;
+                    }
+                });
+            });
+        if close || !open {
+            self.dialogs.convert_shown = false;
+        }
+    }
+
+    /// Draws the Share dialog (item 85, `share.dialog`): mint-and-go-live, an
+    /// editable/view-only link toggle, copy and test-open, and an honest expiry and
+    /// live-status line.
+    ///
+    /// The link primitives ([`room_link`](crate::share::room_link),
+    /// [`viewer_link`](crate::share::viewer_link)) and [`go_live`](Self::go_live) are
+    /// the same ones the Inspector's Share section uses, so this dialog is a second
+    /// surface over the one share model, not a fork.
+    fn share_dialog(&mut self, ctx: &egui::Context) {
+        use crate::theme::components::{Button, Segmented};
+        if !self.dialogs.share_shown {
+            return;
+        }
+        let cctx = self.ui_ctx();
+        let editable = crate::share::room_link(&self.share_server, &self.share_room);
+        let viewer =
+            crate::share::viewer_link(&self.share_page, &self.share_server, &self.share_room);
+        let live = self.sharer_transport.is_some();
+        let mut open = true;
+        let mut close = false;
+        let mut mint = false;
+        let mut copy: Option<String> = None;
+        let mut test_open = false;
+        egui::Window::new("Share this session")
+            .id(egui::Id::new("share_dialog"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.set_max_width(480.0);
+                if Button::primary(if live {
+                    "Mint a fresh room and go live again"
+                } else {
+                    "Mint a room and go live"
+                })
+                .show(ui, cctx)
+                .clicked()
+                {
+                    mint = true;
+                }
+                ui.add_space(cctx.density.item_spacing().y);
+                // Editable vs view-only link toggle.
+                let mut idx = usize::from(self.dialogs.share_view_only);
+                Segmented::new(&["Editable link", "View-only link"]).show(ui, cctx, &mut idx);
+                self.dialogs.share_view_only = idx == 1;
+                let link = if self.dialogs.share_view_only {
+                    viewer.clone()
+                } else {
+                    editable.clone()
+                };
+                ui.monospace(&link);
+                ui.horizontal(|ui| {
+                    if Button::secondary("Copy").show(ui, cctx).clicked() {
+                        copy = Some(link.clone());
+                    }
+                    if Button::ghost("Test open (view-only)")
+                        .show(ui, cctx)
+                        .clicked()
+                    {
+                        test_open = true;
+                    }
+                });
+                ui.add_space(cctx.density.item_spacing().y);
+                ui.label(
+                    egui::RichText::new("Expiry: this link works while your session stays live.")
+                        .color(DARK.text_weak),
+                );
+                let status = if live {
+                    self.live_status.label()
+                } else {
+                    "Not live yet. Mint a room to start sharing.".to_owned()
+                };
+                ui.label(egui::RichText::new(format!("Status: {status}")).color(DARK.text_weak));
+                ui.add_space(cctx.density.item_spacing().y);
+                if Button::ghost("Close").show(ui, cctx).clicked() {
+                    close = true;
+                }
+            });
+        if mint {
+            let seed = ctx.input(|i| (i.time * 1_000_000.0) as u64);
+            self.share_room = crate::share::minted_room_id(&self.top_cell, seed);
+            self.go_live(ctx);
+            self.notify("Room minted and live", "Copy a link to invite others.");
+        }
+        if let Some(link) = copy {
+            self.pending_clipboard = Some(link);
+            self.notify("Link copied", "");
+        }
+        if test_open {
+            #[cfg(target_arch = "wasm32")]
+            {
+                Self::open_url_in_new_tab(&viewer);
+                self.notify(
+                    "Opened the view-only link",
+                    "Check that it shows your session, view-only.",
+                );
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.pending_clipboard = Some(viewer.clone());
+                self.notify(
+                    "Viewer link copied",
+                    "Open it in a browser to test the view-only session.",
+                );
+            }
+        }
+        if close || !open {
+            self.dialogs.share_shown = false;
+        }
+    }
+
+    /// Opens `url` in a new browser tab so the Share dialog's test-open shows the viewer
+    /// link live (wasm only; the desktop build stages the link to the clipboard).
+    #[cfg(target_arch = "wasm32")]
+    fn open_url_in_new_tab(url: &str) {
+        if let Some(window) = web_sys::window() {
+            let _ = window.open_with_url_and_target(url, "_blank");
         }
     }
 
@@ -7396,7 +8153,17 @@ impl eframe::App for App {
         self.keymap_window(&ctx);
         self.replay_window(&ctx);
         self.open_warnings_window(&ctx);
-        // The app-wide notification toasts, over the panels and windows.
+        // Lane 3b dialogs: Open-from-URL, Convert, Share (each a no-op unless open).
+        self.open_url_dialog(&ctx);
+        self.convert_dialog(&ctx);
+        self.share_dialog(&ctx);
+        // Copy any text an out-of-context action (a menu/shortcut copy, a dialog Copy
+        // button) staged this frame.
+        if let Some(text) = self.pending_clipboard.take() {
+            ctx.copy_text(text);
+        }
+        // The offline badge (top-center) and the app-wide notification toasts.
+        self.draw_offline_badge(&ctx);
         self.notifications_area(&ctx);
 
         // Draw the first-run tour overlay last so its card and highlight sit over
@@ -7633,19 +8400,6 @@ fn egui_rect_of(screen: &ScreenRect) -> EguiRect {
         Pos2::new(screen.left, screen.top),
         Vec2::new(screen.width, screen.height),
     )
-}
-
-/// The accent color for a notification severity in the toast area.
-///
-/// Blue for a neutral notice, amber for a recoverable warning, red for a hard
-/// failure. Kept beside the toast drawing so the color mapping lives with the egui
-/// glue rather than in the pure [`crate::notify`] model.
-fn severity_color(severity: crate::notify::Severity) -> Color32 {
-    match severity {
-        crate::notify::Severity::Info => DARK.accent,
-        crate::notify::Severity::Warning => DARK.warning,
-        crate::notify::Severity::Error => DARK.danger,
-    }
 }
 
 /// The display name of the layer row at `index`, or an empty string.

@@ -95,6 +95,7 @@ pub mod comment_pins;
 pub mod culling;
 pub mod demo;
 pub mod demoscript;
+pub mod dialogs;
 pub mod diff_overlay;
 pub mod dochost;
 pub mod draw;

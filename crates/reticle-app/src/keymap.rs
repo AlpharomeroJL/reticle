@@ -508,6 +508,8 @@ mod tests {
             ("view.split_single", "Ctrl+1"),
             ("view.split_h", "Ctrl+2"),
             ("view.split_v", "Ctrl+3"),
+            // Reserved new default from ia-inventory section 4 (lane 3b, file.open_dialog).
+            ("file.open_dialog", "Ctrl+O"),
         ];
         for (command, text) in expect {
             assert_eq!(
