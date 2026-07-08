@@ -83,9 +83,6 @@ pub enum MenuChoice {
     /// Open a recent file: routed to the Start screen, where recent files are
     /// actionable (the live reopen is lane 2D's catalog item 9).
     OpenRecent,
-    /// Trigger the in-browser GDS convert picker (web only; lane 3B's effect).
-    #[cfg(target_arch = "wasm32")]
-    ConvertGds,
 }
 
 /// Whether a command's [`Scope`] is reachable on the current build target.
@@ -255,8 +252,8 @@ fn render_menu_content(
     choice: &mut Option<MenuChoice>,
 ) {
     render_nodes(ui, &menu.nodes, choice);
-    // The File menu carries the only non-registry items: the dynamic Open Recent
-    // list and, on the web, the in-browser GDS convert picker.
+    // The File menu carries the only non-registry item: the dynamic Open Recent list.
+    // (Convert GDS is a registry command now, `file.convert_gds`, lane 3B.)
     if menu.label == "File" {
         ui.separator();
         egui::containers::menu::SubMenuButton::new("Open Recent").ui(ui, |ui| {
@@ -270,15 +267,6 @@ fn render_menu_content(
                 }
             }
         });
-        // Web only: the in-browser GDS convert picker (lane 3B owns
-        // `file.convert_gds`; this reaches the shipped web-shell call directly).
-        #[cfg(target_arch = "wasm32")]
-        if egui::Button::new("Convert GDS to archive...")
-            .ui(ui)
-            .clicked()
-        {
-            *choice = Some(MenuChoice::ConvertGds);
-        }
     }
 }
 

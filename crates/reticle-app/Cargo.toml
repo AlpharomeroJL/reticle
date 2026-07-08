@@ -57,6 +57,15 @@ reticle-gen = { workspace = true }
 reticle-agent-api = { workspace = true }
 serde_json = { workspace = true }
 
+# The native/browser file picker (`file.open_dialog`, lane 3b). `rfd` gives one API
+# over the OS dialog on native and the hidden HTML `<input type=file>` on wasm; the
+# chosen bytes are then routed through the SAME hardened open path as drag-and-drop
+# (classify -> LoadPlan -> the `open` seam). Default features are used: on native
+# Windows it wraps the win32 dialog with no extra system libraries, and on wasm32 it
+# is a thin `web-sys` shim over the file input, so the browser bundle grows only by
+# that shim (see docs/design/bundle-ledger.md).
+rfd = "0.17"
+
 # `reticle-io` supplies the technology-file parser and serializer the technology
 # editor round-trips through (`parse_technology`/`write_technology`). It is already
 # in the wasm graph via `reticle-agent-api`, so making it a first-class dependency

@@ -686,6 +686,8 @@ mod tests {
             // legacy regression list above.
             ("view.zoom_selection", "Shift+F"),
             ("edit.duplicate", "Ctrl+D"),
+            // Reserved new default from ia-inventory section 4 (lane 3b, file.open_dialog).
+            ("file.open_dialog", "Ctrl+O"),
         ];
         for (command, text) in regression {
             assert_eq!(

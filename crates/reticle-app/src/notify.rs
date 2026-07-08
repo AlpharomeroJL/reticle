@@ -33,6 +33,64 @@
 //! printing or swallowing, so the surfaces converge on a single, consistent toast
 //! area.
 
+/// The structured explanation attached to a failure: what went wrong, what to do
+/// next, and a copyable technical block for a bug report.
+///
+/// Catalog item 72 requires that *every* failure path show a cause, a next step,
+/// and a copyable diagnostic block (never a console-only error). A [`Diagnostic`]
+/// is the pure carrier of those three strings; the toast glue in [`crate::app`]
+/// renders the cause and next step inline and offers a Copy-details action that
+/// copies [`clipboard_text`](Diagnostic::clipboard_text). Kept `egui`-free so the
+/// wording and the clipboard rendering are unit-tested in plain code.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct Diagnostic {
+    /// What went wrong, in plain language a non-expert can act on.
+    pub cause: String,
+    /// The next step the user can take (an alternative path, a fix, a workaround).
+    pub next_step: String,
+    /// A technical block (request, status, versions, stack) for a bug report, or
+    /// empty when the cause and next step already say everything.
+    pub details: String,
+}
+
+impl Diagnostic {
+    /// A diagnostic with a `cause`, a `next_step`, and an optional technical
+    /// `details` block.
+    #[must_use]
+    pub fn new(
+        cause: impl Into<String>,
+        next_step: impl Into<String>,
+        details: impl Into<String>,
+    ) -> Self {
+        Self {
+            cause: cause.into(),
+            next_step: next_step.into(),
+            details: details.into(),
+        }
+    }
+
+    /// Whether a technical details block is present beyond the cause and next step.
+    #[must_use]
+    pub fn has_details(&self) -> bool {
+        !self.details.is_empty()
+    }
+
+    /// The full copyable block a user pastes into a bug report: the cause, the next
+    /// step, and the technical details, each labeled so the paste is self-describing.
+    ///
+    /// Labeled and newline-separated (never em-dash-joined, per the style gate) so a
+    /// maintainer reading a pasted block sees exactly what the user saw.
+    #[must_use]
+    pub fn clipboard_text(&self) -> String {
+        let mut out = format!("Cause: {}\nNext step: {}", self.cause, self.next_step);
+        if self.has_details() {
+            out.push_str("\n\nDetails:\n");
+            out.push_str(&self.details);
+        }
+        out
+    }
+}
+
 /// How serious a [`Notification`] is, which selects its toast color and icon.
 ///
 /// The variants are ordered least-to-most severe so they derive a sensible
@@ -62,6 +120,40 @@ impl Severity {
     }
 }
 
+/// An action button a [`Notification`] can carry (catalog item 71): the app maps
+/// each to a [`theme::components::Button`](crate::theme::components::Button) and
+/// interprets a click.
+///
+/// Kept a small closed enum (rather than a boxed callback) so the model stays
+/// `egui`-free and unit-testable: the toast glue in [`crate::app`] renders a button
+/// per action and, on click, runs the matching effect (re-run the operation, copy
+/// the diagnostic block, undo the reversible action).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum NotificationAction {
+    /// Re-run the failed operation (a failed open, a failed share mint).
+    Retry,
+    /// Copy the [`Diagnostic`] block to the clipboard for a bug report (item 72).
+    CopyDetails,
+    /// Undo a just-performed reversible action (do-then-Undo, item 78).
+    Undo,
+    /// Fit the freshly opened document to the view (the post-open summary toast,
+    /// item 7).
+    Fit,
+}
+
+impl NotificationAction {
+    /// The button label shown for this action.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            NotificationAction::Retry => "Retry",
+            NotificationAction::CopyDetails => "Copy details",
+            NotificationAction::Undo => "Undo",
+            NotificationAction::Fit => "Fit",
+        }
+    }
+}
+
 /// One entry in the notification queue: a severity, a one-line summary, and an
 /// optional longer detail.
 ///
@@ -82,10 +174,17 @@ pub struct Notification {
     /// Seconds this toast has been shown, accumulated by [`Notifications::advance`].
     /// Used to auto-expire non-error toasts; starts at zero.
     pub seen_secs: f32,
+    /// The action buttons this toast offers (item 71), in display order. Empty for a
+    /// plain notice.
+    pub actions: Vec<NotificationAction>,
+    /// The structured cause / next-step / copyable diagnostic (item 72), when this
+    /// notification carries one (failures do; plain notices do not).
+    pub diagnostic: Option<Diagnostic>,
 }
 
 impl Notification {
-    /// A notification with a summary and a detail at the given severity.
+    /// A notification with a summary and a detail at the given severity, no actions
+    /// and no diagnostic.
     #[must_use]
     pub fn new(severity: Severity, summary: impl Into<String>, detail: impl Into<String>) -> Self {
         Self {
@@ -93,13 +192,38 @@ impl Notification {
             summary: summary.into(),
             detail: detail.into(),
             seen_secs: 0.0,
+            actions: Vec::new(),
+            diagnostic: None,
         }
+    }
+
+    /// Adds an action button to this notification (builder; keeps insertion order).
+    #[must_use]
+    pub fn with_action(mut self, action: NotificationAction) -> Self {
+        if !self.actions.contains(&action) {
+            self.actions.push(action);
+        }
+        self
+    }
+
+    /// Attaches a [`Diagnostic`] (cause, next step, copyable block) to this
+    /// notification (item 72).
+    #[must_use]
+    pub fn with_diagnostic(mut self, diagnostic: Diagnostic) -> Self {
+        self.diagnostic = Some(diagnostic);
+        self
     }
 
     /// Whether this notification has a longer detail beyond its summary.
     #[must_use]
     pub fn has_detail(&self) -> bool {
         !self.detail.is_empty()
+    }
+
+    /// Whether this notification offers the given action.
+    #[must_use]
+    pub fn has_action(&self, action: NotificationAction) -> bool {
+        self.actions.contains(&action)
     }
 }
 
@@ -111,6 +235,12 @@ const AUTO_DISMISS_SECS: f32 = 6.0;
 /// The most notifications kept at once. Older ones are dropped when the cap is
 /// exceeded, so a burst of failures cannot grow the queue without bound.
 const MAX_QUEUED: usize = 6;
+
+/// The most notifications retained in the notification-center history (item 69).
+/// Once a toast leaves the live queue (dismissed, expired, cleared, or trimmed) it
+/// is archived here, newest last, so the center can show recent activity; the ring
+/// is bounded so a long session cannot grow it without limit.
+const HISTORY_CAP: usize = 50;
 
 /// A bounded, severity-tagged queue of notifications: the app's single error and
 /// notice surface.
@@ -124,6 +254,9 @@ const MAX_QUEUED: usize = 6;
 pub struct Notifications {
     /// The live queue, oldest first. Capped at [`MAX_QUEUED`].
     items: Vec<Notification>,
+    /// The notification-center history, newest last. Capped at [`HISTORY_CAP`]. A
+    /// toast is archived here as it leaves the live queue (item 69).
+    history: Vec<Notification>,
 }
 
 impl Notifications {
@@ -141,10 +274,59 @@ impl Notifications {
         self.items.push(note);
         // Drop the oldest entries if we are over the cap, keeping the newest
         // `MAX_QUEUED`. A flurry of errors cannot grow the queue without bound.
+        // Trimmed entries were still shown, so they are archived to the history.
         if self.items.len() > MAX_QUEUED {
             let overflow = self.items.len() - MAX_QUEUED;
-            self.items.drain(0..overflow);
+            let trimmed: Vec<Notification> = self.items.drain(0..overflow).collect();
+            for note in trimmed {
+                self.archive(note);
+            }
         }
+    }
+
+    /// Reports a rich failure (item 72): an [`Severity::Error`] notification carrying
+    /// a [`Diagnostic`] (cause, next step, copyable block) and a
+    /// [`Copy details`](NotificationAction::CopyDetails) action, so no failure is
+    /// silent, console-only, or missing a next step.
+    ///
+    /// This is the single rich-failure entry point every open/URL/share/convert path
+    /// routes through; the plain [`error`](Self::error) remains for a failure whose
+    /// summary and detail already say everything.
+    pub fn fail(&mut self, summary: impl Into<String>, diagnostic: Diagnostic) {
+        let note = Notification::new(Severity::Error, summary, diagnostic.next_step.clone())
+            .with_diagnostic(diagnostic)
+            .with_action(NotificationAction::CopyDetails);
+        self.push(note);
+    }
+
+    /// Reports a completed reversible action as a do-then-Undo notice (item 78): an
+    /// informational toast carrying an [`Undo`](NotificationAction::Undo) action,
+    /// replacing a blocking confirmation dialog. The action already happened; the
+    /// user can undo it from the toast while it is on screen.
+    pub fn undoable(&mut self, summary: impl Into<String>, detail: impl Into<String>) {
+        let note = Notification::new(Severity::Info, summary, detail)
+            .with_action(NotificationAction::Undo);
+        self.push(note);
+    }
+
+    /// Archives a notification into the bounded history as it leaves the live queue.
+    fn archive(&mut self, note: Notification) {
+        self.history.push(note);
+        if self.history.len() > HISTORY_CAP {
+            let overflow = self.history.len() - HISTORY_CAP;
+            self.history.drain(0..overflow);
+        }
+    }
+
+    /// The notification-center history, oldest first, newest last (item 69).
+    #[must_use]
+    pub fn history(&self) -> &[Notification] {
+        &self.history
+    }
+
+    /// Empties the notification-center history (a user "clear history").
+    pub fn clear_history(&mut self) {
+        self.history.clear();
     }
 
     /// Reports a hard failure: pushes an [`Severity::Error`] notification.
@@ -201,27 +383,369 @@ impl Notifications {
         for n in &mut self.items {
             n.seen_secs += dt.max(0.0);
         }
-        self.items
-            .retain(|n| n.severity == Severity::Error || n.seen_secs < AUTO_DISMISS_SECS);
-    }
-
-    /// Removes the notification at `index` (a user dismissal). Out-of-range indices
-    /// are ignored so a stale click cannot panic.
-    pub fn dismiss(&mut self, index: usize) {
-        if index < self.items.len() {
-            self.items.remove(index);
+        // Partition: expired non-error toasts leave the live queue and are archived.
+        let mut expired = Vec::new();
+        self.items.retain(|n| {
+            let keep = n.severity == Severity::Error || n.seen_secs < AUTO_DISMISS_SECS;
+            if !keep {
+                expired.push(n.clone());
+            }
+            keep
+        });
+        for note in expired {
+            self.archive(note);
         }
     }
 
-    /// Clears every notification (dismiss all).
+    /// Removes the notification at `index` (a user dismissal), archiving it into the
+    /// history. Out-of-range indices are ignored so a stale click cannot panic.
+    pub fn dismiss(&mut self, index: usize) {
+        if index < self.items.len() {
+            let note = self.items.remove(index);
+            self.archive(note);
+        }
+    }
+
+    /// Clears every live notification (dismiss all), archiving each into the history.
     pub fn clear(&mut self) {
-        self.items.clear();
+        let cleared = std::mem::take(&mut self.items);
+        for note in cleared {
+            self.archive(note);
+        }
+    }
+}
+
+/// Whether the app currently has a live connection to the share relay.
+///
+/// Drives the offline badge and the reconnect toasts (item 74). The transport in
+/// [`crate::livesync`] reports socket open/close, which
+/// [`ConnectivityState`] turns into at-most-one toast per real transition.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Connectivity {
+    /// Connected (or never went offline): no badge.
+    #[default]
+    Online,
+    /// The connection dropped: show the offline badge and, on the edge, a toast.
+    Offline,
+}
+
+/// Tracks online/offline state so the reconnect toasts fire once per real
+/// transition, not on every socket heartbeat (item 74).
+///
+/// Pure: the wasm socket callbacks call [`set_offline`](ConnectivityState::set_offline)
+/// / [`set_online`](ConnectivityState::set_online) and the app pushes any returned
+/// [`Notification`], so the "warn once when we drop, reassure once when we return"
+/// policy is unit-tested without a socket.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct ConnectivityState {
+    current: Connectivity,
+}
+
+impl ConnectivityState {
+    /// A fresh state, assumed online.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The current connectivity.
+    #[must_use]
+    pub fn current(self) -> Connectivity {
+        self.current
+    }
+
+    /// Records that the connection dropped. Returns a warning [`Notification`] on the
+    /// online -> offline edge, or `None` if already offline (no repeat toast).
+    pub fn set_offline(&mut self) -> Option<Notification> {
+        if self.current == Connectivity::Offline {
+            return None;
+        }
+        self.current = Connectivity::Offline;
+        Some(Notification::new(
+            Severity::Warning,
+            "You are offline",
+            "Live sharing is paused. Reticle will reconnect automatically when the \
+             connection returns.",
+        ))
+    }
+
+    /// Records that the connection returned. Returns an informational
+    /// [`Notification`] on the offline -> online edge, or `None` if already online.
+    pub fn set_online(&mut self) -> Option<Notification> {
+        if self.current == Connectivity::Online {
+            return None;
+        }
+        self.current = Connectivity::Online;
+        Some(Notification::new(
+            Severity::Info,
+            "Reconnected",
+            "Live sharing has resumed.",
+        ))
+    }
+
+    /// The offline-badge label to show in the status bar, or `None` while online.
+    #[must_use]
+    pub fn badge_label(self) -> Option<&'static str> {
+        match self.current {
+            Connectivity::Offline => Some("Offline"),
+            Connectivity::Online => None,
+        }
+    }
+}
+
+/// Seconds a task must run before its status-bar spinner appears (item 73).
+const SPINNER_AFTER_SECS: f32 = 0.3;
+/// Seconds a task must run before it earns a cancelable progress toast (item 73).
+const PROGRESS_AFTER_SECS: f32 = 2.0;
+
+/// How prominently an in-flight long task is surfaced, by how long it has run
+/// (item 73): nothing under 300 ms, a status-bar spinner past 300 ms, a cancelable
+/// progress toast past 2 s. Encoding the thresholds here keeps the "don't flash a
+/// spinner for an instant task, don't leave a long task silent" policy in one
+/// unit-tested place.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TaskStage {
+    /// Under the spinner threshold: show nothing (the task will likely finish first).
+    Hidden,
+    /// Past 300 ms: a quiet status-bar spinner so the user knows work is underway.
+    Spinner,
+    /// Past 2 s: a progress toast with a cancel affordance.
+    Progress,
+}
+
+impl TaskStage {
+    /// The stage for a task that has run `elapsed` seconds.
+    #[must_use]
+    pub fn for_elapsed(elapsed: f32) -> Self {
+        if elapsed >= PROGRESS_AFTER_SECS {
+            TaskStage::Progress
+        } else if elapsed >= SPINNER_AFTER_SECS {
+            TaskStage::Spinner
+        } else {
+            TaskStage::Hidden
+        }
+    }
+
+    /// Whether this stage warrants a cancel affordance (only the progress toast does).
+    #[must_use]
+    pub fn shows_cancel(self) -> bool {
+        matches!(self, TaskStage::Progress)
+    }
+}
+
+/// A running long task tracked for the long-task surfacing pattern (item 73): a
+/// label and the elapsed time, from which the [`TaskStage`] is derived.
+///
+/// The app advances one of these per frame while a cancelable operation (a staged
+/// open, a convert, a share mint) runs, and reads [`stage`](LongTask::stage) to
+/// decide whether to show nothing, a spinner, or a cancelable progress toast.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LongTask {
+    label: String,
+    elapsed: f32,
+}
+
+impl LongTask {
+    /// A task labeled `label` at zero elapsed time.
+    #[must_use]
+    pub fn new(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            elapsed: 0.0,
+        }
+    }
+
+    /// Adds `dt` seconds (a frame's delta) to the elapsed time.
+    pub fn advance(&mut self, dt: f32) {
+        self.elapsed += dt.max(0.0);
+    }
+
+    /// The current surfacing stage for the elapsed time.
+    #[must_use]
+    pub fn stage(&self) -> TaskStage {
+        TaskStage::for_elapsed(self.elapsed)
+    }
+
+    /// The task's label (for the spinner tooltip and the progress toast).
+    #[must_use]
+    pub fn label(&self) -> &str {
+        &self.label
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnostic_clipboard_block_carries_cause_next_step_and_details() {
+        // Item 72: every failure shows a cause, a next step, and a copyable
+        // technical block. The clipboard rendering folds all three into one block a
+        // user can paste into a bug report.
+        let d = Diagnostic::new(
+            "The server did not allow a cross-origin request (CORS).",
+            "Host the file with permissive CORS headers, or open it in the desktop app.",
+            "GET https://host/chip.gds\nstatus: (opaque)\norigin: https://reticle.example",
+        );
+        let block = d.clipboard_text();
+        assert!(block.contains("CORS"), "cause is present: {block}");
+        assert!(block.contains("Next step"), "labels the next step: {block}");
+        assert!(
+            block.contains("desktop app"),
+            "next step text is present: {block}"
+        );
+        assert!(
+            block.contains("status: (opaque)"),
+            "the technical details are present: {block}"
+        );
+        // The block is em-dash free (the style gate) and non-empty.
+        assert!(!block.contains('\u{2014}'));
+        assert!(d.has_details());
+    }
+
+    #[test]
+    fn diagnostic_without_details_still_renders_cause_and_next_step() {
+        let d = Diagnostic::new("Cause line.", "Do this next.", "");
+        assert!(!d.has_details());
+        let block = d.clipboard_text();
+        assert!(block.contains("Cause line."));
+        assert!(block.contains("Do this next."));
+    }
+
+    #[test]
+    fn actions_have_distinct_nonempty_labels() {
+        // Item 71: a toast can carry action buttons (Retry, Copy details, Undo).
+        let all = [
+            NotificationAction::Retry,
+            NotificationAction::CopyDetails,
+            NotificationAction::Undo,
+            NotificationAction::Fit,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for a in all {
+            let label = a.label();
+            assert!(!label.is_empty());
+            assert!(!label.contains('\u{2014}'), "no em-dash in {label}");
+            assert!(seen.insert(label), "labels are distinct: {label}");
+        }
+    }
+
+    #[test]
+    fn fail_queues_an_error_with_diagnostic_and_a_copy_action() {
+        // Item 72: every failure carries a cause, a next step, and a copyable
+        // diagnostic. `fail` is the single rich-failure entry point: an Error
+        // notification whose diagnostic is attached and whose Copy-details action is
+        // present so the block can be lifted into a bug report.
+        let mut n = Notifications::new();
+        let diag = Diagnostic::new("It broke.", "Try again.", "trace: ...");
+        n.fail("Could not open the file", diag.clone());
+        let note = n.iter().next().expect("one notification");
+        assert_eq!(note.severity, Severity::Error);
+        assert_eq!(note.diagnostic.as_ref(), Some(&diag));
+        assert!(
+            note.actions.contains(&NotificationAction::CopyDetails),
+            "a failure offers Copy details"
+        );
+    }
+
+    #[test]
+    fn undoable_queues_an_info_notice_with_an_undo_action() {
+        // Item 78: a reversible action reports as a do-then-Undo toast rather than a
+        // blocking confirmation. The notice is informational (the action already
+        // happened) and carries an Undo action the app wires to its undo stack.
+        let mut n = Notifications::new();
+        n.undoable("Deleted 3 shapes", "");
+        let note = n.iter().next().expect("one notification");
+        assert_eq!(note.severity, Severity::Info);
+        assert!(note.actions.contains(&NotificationAction::Undo));
+    }
+
+    #[test]
+    fn dismissed_and_expired_toasts_are_retained_in_history() {
+        // Item 69: a notification center keeps recent toasts after they leave the
+        // live queue, so a toast that auto-expired is still reviewable.
+        let mut n = Notifications::new();
+        n.info("opened document", "");
+        n.error("boom", "");
+        assert!(n.history().is_empty(), "nothing archived while still live");
+        // Expire the info toast: it leaves the live queue but is archived.
+        n.advance(AUTO_DISMISS_SECS + 1.0);
+        assert_eq!(n.len(), 1, "the error is still live");
+        assert!(
+            n.history().iter().any(|h| h.summary == "opened document"),
+            "the expired info toast is in history"
+        );
+        // Dismissing the error also archives it.
+        n.dismiss(0);
+        assert!(n.history().iter().any(|h| h.summary == "boom"));
+    }
+
+    #[test]
+    fn history_is_bounded() {
+        let mut n = Notifications::new();
+        for i in 0..(HISTORY_CAP + 10) {
+            n.info(format!("note {i}"), "");
+            n.advance(AUTO_DISMISS_SECS + 1.0); // expire it straight into history
+        }
+        assert!(
+            n.history().len() <= HISTORY_CAP,
+            "history never grows unbounded"
+        );
+        // The newest is retained; the oldest fell off.
+        assert!(
+            n.history()
+                .iter()
+                .any(|h| h.summary == format!("note {}", HISTORY_CAP + 9))
+        );
+    }
+
+    #[test]
+    fn connectivity_transitions_produce_reconnect_and_offline_toasts() {
+        // Item 74: an offline badge plus reconnect toasts, wired to the live
+        // reconnect states. Going offline warns; coming back reassures. A repeated
+        // same-state update produces no toast (no spam on every socket heartbeat).
+        let mut c = ConnectivityState::new();
+        assert_eq!(c.current(), Connectivity::Online);
+        assert!(c.set_offline().is_some(), "first drop warns");
+        assert!(c.set_offline().is_none(), "still offline, no repeat toast");
+        assert_eq!(c.current(), Connectivity::Offline);
+        let back = c.set_online().expect("reconnect reassures");
+        assert_eq!(back.severity, Severity::Info);
+        assert!(c.set_online().is_none(), "already online, no repeat toast");
+        // The badge label is present only while offline.
+        c.set_offline();
+        assert!(c.badge_label().is_some());
+        c.set_online();
+        assert!(c.badge_label().is_none());
+    }
+
+    #[test]
+    fn long_task_stage_follows_the_300ms_and_2s_thresholds() {
+        // Item 73: under 300 ms show nothing, past 300 ms a status-bar spinner, past
+        // 2 s a progress toast with cancel.
+        assert_eq!(TaskStage::for_elapsed(0.0), TaskStage::Hidden);
+        assert_eq!(TaskStage::for_elapsed(0.29), TaskStage::Hidden);
+        assert_eq!(TaskStage::for_elapsed(0.30), TaskStage::Spinner);
+        assert_eq!(TaskStage::for_elapsed(1.9), TaskStage::Spinner);
+        assert_eq!(TaskStage::for_elapsed(2.0), TaskStage::Progress);
+        // Only the progress stage warrants a cancel affordance.
+        assert!(!TaskStage::Hidden.shows_cancel());
+        assert!(!TaskStage::Spinner.shows_cancel());
+        assert!(TaskStage::Progress.shows_cancel());
+    }
+
+    #[test]
+    fn long_task_accumulates_elapsed_time() {
+        let mut t = LongTask::new("Opening chip.gds");
+        assert_eq!(t.stage(), TaskStage::Hidden);
+        t.advance(0.2);
+        assert_eq!(t.stage(), TaskStage::Hidden);
+        t.advance(0.2); // 0.4 total
+        assert_eq!(t.stage(), TaskStage::Spinner);
+        t.advance(2.0); // 2.4 total
+        assert_eq!(t.stage(), TaskStage::Progress);
+        assert_eq!(t.label(), "Opening chip.gds");
+    }
 
     #[test]
     fn severity_orders_info_lt_warning_lt_error() {

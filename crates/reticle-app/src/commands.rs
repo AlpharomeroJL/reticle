@@ -152,6 +152,18 @@ pub enum AppOp {
     /// Close the current design and return to the Start screen (lane 2D, id
     /// `file.close_design`).
     CloseDesign,
+    // --- lane 3b: open flow and dialogs ---
+    /// Open the native/browser file picker (rfd), feeding bytes into the hardened
+    /// open path (`file.open_dialog`).
+    OpenFileDialog,
+    /// Toggle the Open-from-URL dialog (`file.open_url`).
+    OpenUrlDialog,
+    /// Toggle the Convert-to-archive dialog (`file.convert_gds`).
+    ConvertDialog,
+    /// Toggle the Share dialog (`share.dialog`).
+    ShareDialog,
+    /// Copy the read-only viewer link to the clipboard (`share.copy_viewer_link`).
+    CopyViewerLink,
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -856,6 +868,59 @@ static REGISTRY: &[CommandSpec] = &[
         run: RunAs::Command(Command::CopyPermalink),
         scope: Scope::Global,
     },
+    // --- lane 3b: open flow, dialogs, share ---
+    // Ids, labels, menu paths, and chords match the reserved table in
+    // docs/design/ia-inventory.md section 4 exactly (Gate 2 asserts this).
+    CommandSpec {
+        id: CommandId("file.open_dialog"),
+        label: "Open...",
+        category: "File",
+        menu_path: Some(&["File"]),
+        default_chord: Some("Ctrl+O"),
+        rebindable: true,
+        run: RunAs::App(AppOp::OpenFileDialog),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("file.open_url"),
+        label: "Open from URL...",
+        category: "File",
+        menu_path: Some(&["File"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::OpenUrlDialog),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("file.convert_gds"),
+        label: "Convert GDS to archive...",
+        category: "File",
+        menu_path: Some(&["File"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::ConvertDialog),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("share.dialog"),
+        label: "Share this session...",
+        category: "Share",
+        menu_path: Some(&["Share"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::ShareDialog),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("share.copy_viewer_link"),
+        label: "Copy viewer link",
+        category: "Share",
+        menu_path: Some(&["Share"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::CopyViewerLink),
+        scope: Scope::Global,
+    },
 ];
 
 /// The full command registry.
@@ -996,6 +1061,35 @@ mod tests {
         // select.clear is a real command but not rebindable.
         assert_eq!(rebindable_id("select.clear"), None);
         assert_eq!(rebindable_id("not.a.command"), None);
+    }
+
+    #[test]
+    fn lane_3b_reserved_ids_match_section_4() {
+        // The cross-lane contract Gate 2 asserts: id -> (label, menu path, chord)
+        // exactly as ia-inventory.md section 4 spells it for lane 3b.
+        let cases: [(&str, &str, &[&str], Option<&str>); 5] = [
+            ("file.open_dialog", "Open...", &["File"], Some("Ctrl+O")),
+            ("file.open_url", "Open from URL...", &["File"], None),
+            (
+                "file.convert_gds",
+                "Convert GDS to archive...",
+                &["File"],
+                None,
+            ),
+            ("share.dialog", "Share this session...", &["Share"], None),
+            (
+                "share.copy_viewer_link",
+                "Copy viewer link",
+                &["Share"],
+                None,
+            ),
+        ];
+        for (id, label, path, chord) in cases {
+            let s = super::spec(CommandId(id)).expect("reserved id in registry");
+            assert_eq!(s.label, label, "label for {id}");
+            assert_eq!(s.menu_path, Some(path), "menu path for {id}");
+            assert_eq!(s.default_chord, chord, "chord for {id}");
+        }
     }
 
     #[test]
