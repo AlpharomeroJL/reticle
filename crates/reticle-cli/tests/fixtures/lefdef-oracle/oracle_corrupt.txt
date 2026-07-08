@@ -1,0 +1,20 @@
+[INFO] USER_ID: 1000, GROUP_ID: 1000
+[INFO] Final PATH variable: /foss/tools/bin:/foss/tools/sak/:/usr/local/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/foss/tools/klayout:/foss/tools/libman:/foss/tools/osic-multitool:/foss/tools/rftoolkit/bin:/foss/tools/yosys/bin
+[INFO] Final PYTHONPATH variable: /usr/lib/python312.zip:/usr/lib/python3.12:/usr/lib/python3.12/lib-dynload:/usr/local/lib/python3.12/dist-packages:/usr/lib/python3/dist-packages:/foss/tools/ngspyce/local/lib/python3.12/dist-packages:/foss/tools/yosys/share/yosys/python3:/foss/tools/klayout/pymod
+[INFO] SKIPPING UI STARTUP
+[INFO] Executing command: 'bash -lc cd /work && openroad -no_init -exit oracle_corrupt.tcl'
+OpenROAD v2.0-16235-gedf00dff9 
+Features included (+) or not (-): +Charts +GPU +GUI +Python
+This program is licensed under the BSD-3 license. See the LICENSE file for details.
+Components of this program may be licensed under more restrictive licenses which must be honored.
+[INFO ODB-0227] LEF file: /work/design.lef, created 3 layers, 2 library cells
+[INFO ODB-0127] Reading DEF file: /work/corrupt.def
+[INFO ODB-0128] Design: tinycore
+[INFO ODB-0130]     Created 2 pins.
+[INFO ODB-0131]     Created 2 components and 5 component-terminals.
+[INFO ODB-0133]     Created 2 nets and 2 connections.
+[INFO ODB-0134] Finished DEF file: /work/corrupt.def
+ORACLE components=2
+ORACLE pins=2
+ORACLE diearea=0 0 20000 20000
+ORACLE macros=2
