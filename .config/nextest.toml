@@ -1,0 +1,16 @@
+# cargo-nextest configuration.
+#
+# The visual-regression suite (`reticle-app`'s `ui_snapshots` binary) drives a
+# real GPU adapter through egui_kittest's wgpu backend. Only one GPU test may run
+# at a time, so its whole binary is pinned to a single-slot test group: nextest
+# will never schedule two `ui_snapshots` tests concurrently, even inside one run
+# and even when the rest of the suite fans out across cores. This keeps the ten
+# concurrent lane worktrees off the single GPU (ADR 0094) and keeps the suite's
+# own two tests from contending for the device.
+
+[test-groups.gpu-serial]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = 'binary(ui_snapshots)'
+test-group = 'gpu-serial'

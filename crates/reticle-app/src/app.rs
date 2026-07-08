@@ -1909,6 +1909,23 @@ impl App {
         self.capture = Some(crate::demoscript::CaptureState::smoke(out_path));
     }
 
+    /// Opens or closes the command palette. A one-line state hook for the visual
+    /// regression suite (`tests/ui_snapshots.rs`), which snapshots the
+    /// palette-open editor state; production toggles it through the toolbar and
+    /// shortcut instead.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_palette_open(&mut self, open: bool) {
+        self.palette_open = open;
+    }
+
+    /// Finishes the first-run tour so a snapshot shows the steady editor rather
+    /// than environment-dependent onboarding chrome. A one-line state hook for
+    /// the visual regression suite (`tests/ui_snapshots.rs`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn suppress_onboarding_for_snapshot(&mut self) {
+        self.tour.finish();
+    }
+
     /// Arms a scripted demo run (native launcher only), writing captured frames under
     /// `out_dir`.
     ///

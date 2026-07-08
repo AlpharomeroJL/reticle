@@ -1,0 +1,7 @@
+# Only the committed baselines (`*.png`) belong in git. egui_kittest writes these
+# transient artifacts next to them on a mismatch or update: the fresh render, the
+# per-pixel diff, and the pre-update backup. They are local review aids, never
+# committed.
+*.new.png
+*.diff.png
+*.old.png

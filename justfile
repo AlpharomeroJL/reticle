@@ -383,3 +383,21 @@ coverage:
 conformance:
     if (-not (Test-Path worker/node_modules)) { npm --prefix worker ci }
     $env:RETICLE_CONFORMANCE_DO = "1"; cargo nextest run -p reticle-relay-conformance --no-tests=pass; exit $LASTEXITCODE
+
+# ---------------------------------------------------------------------------
+# Visual-regression suite (ADR 0094 GPU suite; orchestrator-only at the gates).
+# ---------------------------------------------------------------------------
+# `ui-check` diffs the gallery and full-app snapshots against the committed PNG
+# baselines under crates/reticle-app/tests/snapshots/. The .config/nextest.toml
+# override serializes the ui_snapshots binary so its GPU tests never run
+# concurrently. It skips honestly (a test-level println + pass) on a host with no
+# GPU adapter. NOT part of `just ci` (GPU-bound); run by the orchestrator.
+ui-check:
+    cargo nextest run -p reticle-app --test ui_snapshots --no-tests=pass
+
+# `ui-baselines` recaptures ALL baselines (UPDATE_SNAPSHOTS=force) on the GPU, then
+# the changed PNGs are reviewed and committed. `force` recaptures every image (its
+# comparison threshold is 0, so any difference is rewritten); use it after an
+# intended visual change or at the Gate 1 recapture. Needs a GPU adapter.
+ui-baselines:
+    $env:UPDATE_SNAPSHOTS = "force"; cargo nextest run -p reticle-app --test ui_snapshots --no-tests=pass; exit $LASTEXITCODE
