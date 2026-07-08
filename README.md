@@ -6,6 +6,7 @@
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Runs in the browser via WebGPU and WASM](https://img.shields.io/badge/web-WebGPU%20%2B%20WASM-orange.svg)](https://alpharomerojl.github.io/reticle/)
+[![Sponsor AlpharomeroJL](https://img.shields.io/badge/Sponsor-AlpharomeroJL-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/AlpharomeroJL)
 
 A local 20B model solves 52 of 75 design-rule-verified layout tasks in this editor's
 command API. The editor itself runs in your browser.
@@ -342,6 +343,23 @@ For where Reticle sits among layout tools and the full list of non-goals, see
 Rust, `wgpu` (WebGPU / Vulkan / Metal / DX12 with a WebGL2 fallback), `egui` and `eframe`
 (with an `egui-wgpu` paint callback for the canvas), `i_overlay`, `rstar`, `gds21`, `lyon`,
 `yrs`, `axum`, `prost`, `rhai`, `pathfinding`, `criterion`, `proptest`, and `cargo-fuzz`.
+
+## Sponsor
+
+If Reticle is useful to you, you can support its development on GitHub Sponsors:
+
+[![Sponsor AlpharomeroJL](https://img.shields.io/badge/Sponsor-AlpharomeroJL-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/AlpharomeroJL)
+
+<!--
+GitHub strips <iframe> from README markdown, so the badge above is used here.
+The official iframe embeds below render on external sites / GitHub Pages:
+
+Button:
+<iframe src="https://github.com/sponsors/AlpharomeroJL/button" title="Sponsor AlpharomeroJL" height="32" width="114" style="border: 0; border-radius: 6px;"></iframe>
+
+Card:
+<iframe src="https://github.com/sponsors/AlpharomeroJL/card" title="Sponsor AlpharomeroJL" height="225" width="600" style="border: 0;"></iframe>
+-->
 
 ## License
 
