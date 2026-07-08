@@ -305,6 +305,18 @@ capture-media:
 capture-ui *args:
     cargo run -p xtask --release -- capture-ui {{args}}
 
+# Real two-context share GIF (lane v8-1e): the live-share flow is two browser contexts
+# over the relay, which the native capture-ui harness cannot record. This builds the
+# bundle and the relay, then drives a headed Chromium window holding the editor and the
+# read-only viewer side by side (real iframes talking only over the relay), animates the
+# sharer's cursor so the viewer shows the remote presence live, and assembles
+# assets/tour-share.gif with gifski (<= 6 MB). Needs `gifski` on PATH and a GPU/display.
+capture-share:
+    cd crates/web; trunk build index.html --release
+    cargo build -p reticle-server
+    npm --prefix e2e install
+    cd e2e; node capture-share.mjs
+
 # ---------------------------------------------------------------------------
 # TinyTapeout precheck oracle (ADR 0054): run TinyTapeout's OWN precheck over a
 # GDS as the authoritative GDS-mode submission gate. Additive and NOT part of

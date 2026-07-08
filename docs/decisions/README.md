@@ -98,3 +98,4 @@ superseded decision is marked and linked to its replacement.
 | [0090](0090-multimodal-vision-second-oracle.md) | A multimodal vision model (llava:7b via Ollama) as a second, best-effort oracle for the agent benchmark, with an honest not-run when VRAM-bound |
 | [0091](0091-in-browser-gds-to-rtla-conversion-opfs.md) | In-browser GDS-to-.rtla conversion into OPFS: a Web Worker runs the frozen streaming reader + an additive in-memory builder (byte-identical to build_rtla), writes the archive to OPFS, and reopens it through the existing ?archive= path via a service-worker Range bridge |
 | [0092](0092-static-leaderboard-record-format-as-api.md) | A deterministic static leaderboard with the record format as its API |
+| [0093](0093-browser-proof-of-live-share-and-touch.md) | Browser-proof of live share and touch: what a counter seam can honestly assert, and what stays the Rust test's job |

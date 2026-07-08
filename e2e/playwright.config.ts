@@ -1,4 +1,4 @@
-import { defineConfig } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test";
 
 // End-to-end tests for the Reticle browser demo.
 //
@@ -72,13 +72,14 @@ export default defineConfig({
   projects: [
     {
       name: "webgl2",
-      // The subpath and share-live specs run in their own projects.
-      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts/,
+      // The subpath, share-live, served-archive, pwa, convert, and phone specs each run
+      // in their own project below.
+      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts|phone-touch\.spec\.ts/,
       use: { launchOptions: { args: WEBGL2_ARGS } },
     },
     {
       name: "webgpu",
-      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts/,
+      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts|phone-touch\.spec\.ts/,
       use: { launchOptions: { args: WEBGPU_ARGS } },
     },
     {
@@ -126,6 +127,18 @@ export default defineConfig({
       name: "pwa",
       testMatch: /pwa\.spec\.ts/,
       use: { launchOptions: { args: WEBGL2_ARGS } },
+    },
+    {
+      // Phone viewport (lane v8-1e): a Pixel 7 device descriptor (mobile viewport,
+      // deviceScaleFactor, and hasTouch) drives the touchscreen so a pinch/pan proves
+      // the app navigates a design by touch. WebGL2 fallback, like webgl2 above, since
+      // the headless host has no WebGPU adapter. Served at root by serve-dist.mjs.
+      name: "phone",
+      testMatch: /phone-touch\.spec\.ts/,
+      use: {
+        ...devices["Pixel 7"],
+        launchOptions: { args: WEBGL2_ARGS },
+      },
     },
   ],
   webServer: [

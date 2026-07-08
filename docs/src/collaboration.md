@@ -99,3 +99,26 @@ The permalink parser and emitter are pure and round-trip tested (`emit` then `pa
 the identity), including the encoding edge cases (spaces, unicode cell names, an empty
 layer list), and an app-level test proves an emitted permalink restores the same cell,
 camera, and layers on a freshly opened document.
+
+### Browser-level proof (ADR 0058, 0093)
+
+The read-only contract and the transport are proven twice. The authority is a headless
+Rust relay test (`crates/reticle-server/tests/share_live.rs`): a real publisher and a real
+viewer connect over an ephemeral port, and it asserts the publisher's frames materialize
+in the viewer and that a frame a view-mode client sends is dropped and never enters the
+room log. On top of that, a two-context Playwright suite (`just e2e-share`) proves the
+*browser* side, reading a wasm instrumentation seam (`window.__reticle_stats`) because the
+egui canvas is GPU-painted and has no DOM node to assert on:
+
+- an edit made in the sharer paints in a read-only viewer (a no-edit control room isolates
+  the scripted edit to exactly one extra applied shape in the viewer);
+- a view-mode socket cannot write: the same captured relay frame is dropped when a browser
+  sends it from a `?mode=view` socket but applied when sent from an edit-mode socket, a
+  positive control that keeps the drop assertion from passing vacuously;
+- a phone navigates a design by touch: on a mobile viewport a two-finger pinch changes the
+  zoom and a drag changes the pan, read back from the camera field of the same seam.
+
+What these do not assert is the pixels of the rendered canvas; that stays the job of the
+Rust relay test (for the read-only contract) and the pure camera unit tests (for the
+pan/zoom transform). The README's share clip is captured from this same two-context flow
+by `just capture-share`.

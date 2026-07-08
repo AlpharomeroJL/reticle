@@ -1123,6 +1123,52 @@ impl App {
         );
     }
 
+    /// Publishes the live view camera into `window.__reticle_stats.camera` so lane
+    /// v8-1e's phone-touch browser e2e can observe a pinch/pan actually move the camera
+    /// (the canvas is GPU-painted, so there is no DOM node or reliable pixel readback to
+    /// assert on; this readout is the browser-observable proof, mirroring the
+    /// applied-frame counters [`record_viewer_stats`](Self::record_viewer_stats) exposes).
+    ///
+    /// Written every editor frame from [`ui`](Self::ui): `camera.pixels_per_dbu` is the
+    /// zoom and `camera.center_x`/`camera.center_y` the world point at the canvas center,
+    /// so a test reads a baseline, performs a touch gesture, and asserts the readout moved.
+    /// A no-op if the window is unavailable, so it never disturbs a normal session, and it
+    /// only writes (never reads app state back), so it cannot affect rendering.
+    #[cfg(target_arch = "wasm32")]
+    fn record_camera_stats(&self) {
+        use wasm_bindgen::JsValue;
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let key = JsValue::from_str("__reticle_stats");
+        let stats = match js_sys::Reflect::get(window.as_ref(), &key) {
+            Ok(v) if v.is_object() => v,
+            _ => {
+                let obj = js_sys::Object::new();
+                let _ = js_sys::Reflect::set(window.as_ref(), &key, obj.as_ref());
+                JsValue::from(obj)
+            }
+        };
+        let center = self.camera.center();
+        let cam = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(
+            &cam,
+            &JsValue::from_str("center_x"),
+            &JsValue::from_f64(f64::from(center.x)),
+        );
+        let _ = js_sys::Reflect::set(
+            &cam,
+            &JsValue::from_str("center_y"),
+            &JsValue::from_f64(f64::from(center.y)),
+        );
+        let _ = js_sys::Reflect::set(
+            &cam,
+            &JsValue::from_str("pixels_per_dbu"),
+            &JsValue::from_f64(self.camera.pixels_per_dbu()),
+        );
+        let _ = js_sys::Reflect::set(&stats, &JsValue::from_str("camera"), cam.as_ref());
+    }
+
     /// Reports a hard failure to the app's one human-readable error surface.
     ///
     /// This is the single sink every failure path routes through (see
@@ -7204,6 +7250,11 @@ impl eframe::App for App {
             ctx.request_repaint();
             return;
         }
+
+        // Publish the live camera into the browser stats seam every editor frame, so the
+        // phone-touch e2e can read a baseline and assert a pinch/pan moved the camera.
+        #[cfg(target_arch = "wasm32")]
+        self.record_camera_stats();
 
         self.handle_shortcuts(&ctx);
 
