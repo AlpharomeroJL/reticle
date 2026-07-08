@@ -126,6 +126,7 @@ pub mod startscreen;
 pub mod store;
 pub mod streamed;
 pub mod tech_editor;
+pub mod theme;
 pub mod tinytapeout;
 pub mod tinytapeout_example;
 pub mod tool;

@@ -99,3 +99,8 @@ superseded decision is marked and linked to its replacement.
 | [0091](0091-in-browser-gds-to-rtla-conversion-opfs.md) | In-browser GDS-to-.rtla conversion into OPFS: a Web Worker runs the frozen streaming reader + an additive in-memory builder (byte-identical to build_rtla), writes the archive to OPFS, and reopens it through the existing ?archive= path via a service-worker Range bridge |
 | [0092](0092-static-leaderboard-record-format-as-api.md) | A deterministic static leaderboard with the record format as its API |
 | [0093](0093-browser-proof-of-live-share-and-touch.md) | Browser-proof of live share and touch: what a counter seam can honestly assert, and what stays the Rust test's job |
+| [0094](0094-v8-1-interface-packet-run-structure.md) | v8.1 interface-packet run structure: two fan-outs, two integration gates, deployable-every-gate with insurance deploys, GPU suites orchestrator-only |
+| [0095](0095-semantic-token-theme-module.md) | Semantic token system in a theme module (not a crate), WCAG contrast proven by unit tests, one dark theme this packet with the light toggle retired |
+| [0096](0096-managed-panels-over-egui-dock.md) | Managed panels over egui_dock 0.20.1: persistence simplicity and dependency budget; grouped Inspector, 3D/cross-section become panels under View |
+| [0097](0097-typography-and-lucide-icon-font.md) | Typography and icons: Inter + JetBrains Mono (OFL) subset via pyftsubset, the Lucide icon font (ISC) with generated glyph constants, default-fonts offset attempt |
+| [0098](0098-style-ratchet-and-bundle-gate.md) | UI style-lint ratchet (grandfathered baseline that only tightens) and the measured bundle-size ledger + 450 KB gz budget gate in xtask |

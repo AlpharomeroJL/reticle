@@ -39,3 +39,6 @@ fo = "fo"
 Activ = "Activ"
 # OASIS extension-scheme byte notation `0000SSEE` (two S bits, two E bits) in oasis_std.
 SSEE = "SSEE"
+# flate2 is the gzip/deflate crate name (the bundle-size ledger tool uses it); typos
+# splits the identifier on the digit and reads the "flate" stem as "flat".
+flate = "flate"

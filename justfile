@@ -90,6 +90,11 @@ typos:
 check-style:
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check-style.ps1
 
+# Tighten the UI style baseline (scripts/style-baseline.json) to the current
+# violation counts; the ratchet never loosens, and at zero it deletes the file.
+style-ratchet:
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/check-style.ps1 -Ratchet
+
 # ---- Secret scan: fail if any leaked key/secret pattern is in the working tree ----
 # Pass `-History` to also scan the full git history (slower). Runs before every
 # release; the real Anthropic key must only ever come from the environment.
@@ -164,6 +169,18 @@ web-build:
 
 web-serve:
     cd crates/web; trunk serve index.html
+
+# Measure the release bundle: raw and gzip size per dist artifact plus totals
+# (machine-readable TOTAL_GZ=/WASM_GZ= lines). Depends on web-build so the
+# numbers describe a fresh release dist, never a stale one.
+bundle-size: web-build
+    cargo run -p xtask --release -- bundle-size
+
+# Budget gate: fail when the gz total exceeds the v8.0-baseline row of
+# docs/design/bundle-ledger.md by more than 450 KiB. Record a deliberate new
+# baseline with `cargo run -p xtask --release -- bundle-size --append-ledger v8.0-baseline`.
+bundle-gate: web-build
+    cargo run -p xtask --release -- bundle-size --assert-delta-kb 450
 
 # ---------------------------------------------------------------------------
 # GitHub Pages artifact (the public "front door")

@@ -10,7 +10,10 @@
 //!   transcript into `examples/tapeout/` (Lane 4C).
 //! - `verify-licenses <dir>`, verify a redistribution license for every `.rtla`
 //!   archive in a staged content directory and exclude any it cannot verify.
+//! - `bundle-size`, measure the built web bundle (raw and gzip) against the
+//!   ledger in `docs/design/bundle-ledger.md`.
 
+mod bundle;
 mod generator;
 mod media;
 mod overlay;
@@ -33,9 +36,10 @@ fn main() -> ExitCode {
         "perf-check" => perf::perf_check(),
         "tapeout-example" => tapeout::cmd_tapeout_example(args.get(1).map(String::as_str)),
         "verify-licenses" => verify_licenses::cmd_verify_licenses(args.get(1).map(String::as_str)),
+        "bundle-size" => bundle::cmd_bundle_size(&args[1..]),
         "" => {
             eprintln!(
-                "usage: xtask <gen-layout|capture-media [asset]|capture-ui [name]|perf-check|tapeout-example [out-dir]|verify-licenses <dir>> [options]"
+                "usage: xtask <gen-layout|capture-media [asset]|capture-ui [name]|perf-check|tapeout-example [out-dir]|verify-licenses <dir>|bundle-size> [options]"
             );
             ExitCode::FAILURE
         }
@@ -111,7 +115,7 @@ fn cmd_capture_media(only: Option<&str>) -> ExitCode {
 }
 
 /// Returns the value following `name` in `args`, if present.
-fn flag(args: &[String], name: &str) -> Option<String> {
+pub(crate) fn flag(args: &[String], name: &str) -> Option<String> {
     args.iter()
         .position(|arg| arg.as_str() == name)
         .and_then(|i| args.get(i + 1))

@@ -62,3 +62,4 @@ Thumbs.db
 
 # Lane RESULT.md files belong under scratch/lanes/<id>/, never the repo root.
 /RESULT.md
+.playwright-mcp/

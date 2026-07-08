@@ -26,6 +26,9 @@ reticle-sync = { workspace = true }
 # through the frozen agent command surface) and re-verifies transcript replay before
 # writing the committed artifacts.
 reticle-agent-api = { workspace = true }
+# `bundle-size` gzips each dist artifact at best compression to approximate the
+# on-the-wire size GitHub Pages serves; flate2 1.1.9 is already in the lock.
+flate2 = "1"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 # Media capture renders offscreen with reticle-render, writes PNGs with `image`,
 # and assembles GIFs with the installed `gifski` CLI.
