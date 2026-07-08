@@ -132,6 +132,16 @@ impl DurableObject for ReticleRoom {
 
         // Tag the connection with a stable id and its mode, so both survive
         // hibernation and echo suppression can key off the id.
+        //
+        // The read-modify-write below is atomic without an explicit lock. A Durable
+        // Object input gate defers delivery of every other event (including a second
+        // join's `fetch`) while a storage operation is outstanding, and the gate does
+        // not reopen between the `get` resolving and the immediately-following `put`
+        // because there is no non-storage await in between (`get_or` is a single
+        // `storage.get`). So two near-simultaneous joins cannot both read the same id;
+        // this is the canonical DO counter pattern, and it keeps `broadcast_except`'s
+        // id-based echo suppression correct. (A Wave 4 review flagged a possible race
+        // here; it is prevented by the input gate.)
         let id: u64 = get_or(&storage, "next_conn").await;
         storage.put("next_conn", id + 1).await?;
         server.serialize_attachment(Conn { id, view })?;
