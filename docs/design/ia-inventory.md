@@ -146,13 +146,17 @@ Packet v8.1.0-R adds, additively (existing keys untouched), the standing
 demo-observability seam keys and one e2e-only query param:
 `__reticle_stats.hash_check` (the replay verdict `Match`/`Mismatch`/`Pending`/
 `Unverifiable`, previously canvas-only), `__reticle_stats.render_nonblank` (a
-bool: the app is painting real geometry with a live camera this frame), and
-`__reticle_stats.applied_shapes` now also published on every editor frame (it
-was viewer-path only). The `?e2e-autoplay=1` param starts the replay theater
-playing on boot so a headed guard can read `hash_check` without clicking the
-GPU-painted transport (the public `?view=replay` landing still waits at Play).
-These are add-only: the pre-existing keys and param semantics are unchanged, so
-the seam canaries keep passing.
+bool: the app is painting real geometry with a live camera this frame),
+`__reticle_stats.applied_scene_shapes` (the flattened renderable shape count,
+which counts a hierarchical design's instance-expanded geometry, unlike the
+top-cell-direct `applied_shapes`), and `__reticle_stats.applied_shapes` now also
+published on every editor frame (it was viewer-path only). Two e2e-only params:
+`?e2e-autoplay=1` starts the replay theater playing on boot so a headed guard can
+read `hash_check` without clicking the GPU-painted transport (the public
+`?view=replay` landing still waits at Play), and `?e2e-example=<id>` (`tt03` /
+`sky130`) boots straight into a compiled-in example, since the Start-screen cards
+are canvas-painted and not DOM-clickable. These are add-only: the pre-existing
+keys and param semantics are unchanged, so the seam canaries keep passing.
 
 ## 4. Reserved CommandIds (cross-lane wiring contract)
 

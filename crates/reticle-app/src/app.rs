@@ -1851,12 +1851,16 @@ impl App {
     /// viewer-path-only signals browser-readable, so the headed demo guards can assert
     /// them:
     ///
-    /// - `applied_shapes`: the live top-cell shape count. [`record_viewer_stats`]
+    /// - `applied_shapes`: the live top-cell DIRECT shape count. [`record_viewer_stats`]
     ///   (Self::record_viewer_stats) publishes this only on the share-live viewer path;
-    ///   here it is republished every editor frame, so an example opened from the Start
-    ///   screen is observable as loaded.
-    /// - `render_nonblank`: `true` when the app is painting real geometry this frame,
-    ///   the editor scene has shapes, or a streamed archive is painting records, with a
+    ///   here it is republished every editor frame. It is 0 for a hierarchical design
+    ///   whose top cell holds only instances, so `applied_scene_shapes` is the metric a
+    ///   per-example load check should use.
+    /// - `applied_scene_shapes`: the flattened renderable shape count (the top cell with
+    ///   every instance expanded). It is > 0 whenever the editor has geometry to draw,
+    ///   hierarchical or flat, so it is the honest "the example loaded" signal.
+    /// - `render_nonblank`: `true` when the app is painting real geometry this frame (the
+    ///   flattened scene has shapes, or a streamed archive is painting records) with a
     ///   finite positive zoom. It separates "rendered the design" from a black canvas: a
     ///   backgrounded tab pauses the rAF loop so this method never runs and the key stays
     ///   absent/stale. It does NOT assert every pixel is lit; the headed screenshot guards
@@ -1885,6 +1889,9 @@ impl App {
             }
         };
         // The live top-cell shape count (the same expression the viewer path publishes).
+        // For a hierarchical design the top cell holds instances, not direct shapes, so
+        // this is 0 there; `applied_scene_shapes` below is the count that reflects the
+        // rendered geometry.
         let shapes = self
             .history
             .document()
@@ -1895,14 +1902,24 @@ impl App {
             &JsValue::from_str("applied_shapes"),
             &JsValue::from_f64(shapes as f64),
         );
-        // Painting real geometry (editor scene shapes, or a streamed archive with records
-        // painted) with a live camera.
+        // The flattened renderable shape count: the top cell with every instance expanded
+        // (`SceneIndex` is built from `document.flatten`). It is > 0 whenever the editor
+        // has geometry to draw, including a hierarchical design whose top cell has no
+        // direct shapes (the Tiny Tapeout sample), so it is the per-example loaded signal.
+        let scene_shapes = self.scene.len();
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("applied_scene_shapes"),
+            &JsValue::from_f64(scene_shapes as f64),
+        );
+        // Painting real geometry (the flattened editor scene has shapes, or a streamed
+        // archive is painting records) with a live camera.
         let ppd = self.camera.pixels_per_dbu();
         let archive_painting = self
             .archive
             .as_ref()
             .is_some_and(|b| b.stats().records_painted > 0);
-        let nonblank = ppd.is_finite() && ppd > 0.0 && (shapes > 0 || archive_painting);
+        let nonblank = ppd.is_finite() && ppd > 0.0 && (scene_shapes > 0 || archive_painting);
         let _ = js_sys::Reflect::set(
             &stats,
             &JsValue::from_str("render_nonblank"),

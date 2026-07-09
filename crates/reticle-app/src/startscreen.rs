@@ -67,6 +67,20 @@ impl ExampleChip {
     /// followed by the single standard cell.
     pub const ALL: [ExampleChip; 2] = [ExampleChip::TinyTapeoutMin, ExampleChip::Sky130Inverter];
 
+    /// Maps an `?e2e-example=<id>` value to a chip, for the headed examples guard that
+    /// opens each embedded design straight from a URL. The Start-screen cards are
+    /// egui-canvas-painted, so a browser test cannot click them; this lets the guard
+    /// boot directly into one. `tt03` selects the Tiny Tapeout sample, `sky130` the
+    /// inverter cell. Case-insensitive; `None` for an unknown id.
+    #[must_use]
+    pub fn from_e2e_id(id: &str) -> Option<Self> {
+        match id.trim().to_ascii_lowercase().as_str() {
+            "tt03" | "tinytapeout" => Some(ExampleChip::TinyTapeoutMin),
+            "sky130" | "inv" | "inv1" => Some(ExampleChip::Sky130Inverter),
+            _ => None,
+        }
+    }
+
     /// A short title for the gallery card.
     #[must_use]
     pub fn title(self) -> &'static str {
@@ -395,6 +409,24 @@ mod tests {
         for chip in ExampleChip::ALL {
             assert_eq!(chip.format(), DocFormat::Gds);
         }
+    }
+
+    #[test]
+    fn from_e2e_id_maps_the_examples_guard_ids() {
+        assert_eq!(
+            ExampleChip::from_e2e_id("tt03"),
+            Some(ExampleChip::TinyTapeoutMin)
+        );
+        assert_eq!(
+            ExampleChip::from_e2e_id("TinyTapeout"),
+            Some(ExampleChip::TinyTapeoutMin)
+        );
+        assert_eq!(
+            ExampleChip::from_e2e_id("sky130"),
+            Some(ExampleChip::Sky130Inverter)
+        );
+        assert_eq!(ExampleChip::from_e2e_id("nope"), None);
+        assert_eq!(ExampleChip::from_e2e_id(""), None);
     }
 
     #[test]

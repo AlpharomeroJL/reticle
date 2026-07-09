@@ -109,6 +109,10 @@ enum Boot {
     /// link (lane v8-2e, ADR 0062). The bundle opens the archive on its first frame and
     /// paints the read-only streamed die with progressive residency.
     Archive(String),
+    /// Boot straight into a compiled-in example (`?e2e-example=<id>`): the headed
+    /// examples guard uses it because the Start-screen gallery cards are egui-painted
+    /// and not DOM-clickable. Opens the embedded GDS through the normal open seam.
+    Example(reticle_app::ExampleChip),
     /// Open as a read-only viewer of the shared session named by a viewer link
     /// (`?view=viewer&room=..&relay=..`, ADR 0038/0058).
     Viewer(reticle_app::share::ViewerTarget),
@@ -152,6 +156,13 @@ impl Boot {
             }
             Boot::Gallery => Box::new(App::gallery()),
             Boot::Archive(url) => Box::new(App::with_archive(url)),
+            Boot::Example(chip) => {
+                let mut app = App::with_start_view(StartView::Editor);
+                // Open the compiled-in design through the same seam the gallery click
+                // uses, leaving the Start screen on the editor canvas.
+                app.open_example_chip(chip);
+                Box::new(app)
+            }
             Boot::Viewer(target) => Box::new(App::with_viewer(target)),
             Boot::Tour => Box::new(App::with_tour()),
             Boot::Share {
@@ -259,6 +270,16 @@ fn boot_from_url() -> Boot {
     {
         web_sys::console::log_1(&"reticle: boot into the guided tour".into());
         return Boot::Tour;
+    }
+
+    // `?e2e-example=<id>` boots straight into a compiled-in example (the headed examples
+    // guard uses it; the Start-screen gallery cards are canvas-painted, not
+    // DOM-clickable). A normal visitor never sets it.
+    if let Some(id) = params.get("e2e-example")
+        && let Some(chip) = reticle_app::ExampleChip::from_e2e_id(&id)
+    {
+        web_sys::console::log_1(&format!("reticle: e2e open example '{id}'").into());
+        return Boot::Example(chip);
     }
 
     match params.get("view") {
