@@ -14,10 +14,21 @@
 //   * activate - drop caches from older versions, then claim open clients so the
 //                 already-open page becomes controlled without a manual reload.
 //   * fetch    - navigation requests: network-first, falling back to the cached
-//                 shell when offline. Other same-origin GETs (js/wasm/json/png):
-//                 cache-first, populating the cache from the network on a miss.
+//                 shell when offline. Immutable content-hashed bundle assets
+//                 (`web-<hash>.js` / `_bg.wasm`): cache-first, since the hash in the
+//                 name changes every deploy so a cached copy is never stale, and
+//                 caching it is the offline contract. Stable-named shell assets
+//                 (`convert_worker.js` / `_bg.wasm`, `manifest.json`, the icons):
+//                 network-first, so a new deploy is never served a stale copy from a
+//                 previous deploy's cache.
+//
+// Cache versioning: the cache name carries a version. Bumping it makes `activate`
+// drop every prior cache, so a deploy that changes a stable-named asset cannot leave
+// an old copy resident. Before v2 the name was a fixed `reticle-pwa-v1`, so `activate`
+// never purged anything across deploys and stable-named assets (the convert worker,
+// manifest, icons) could be served stale indefinitely under the old cache-first rule.
 
-const CACHE_VERSION = "reticle-pwa-v1";
+const CACHE_VERSION = "reticle-pwa-v2";
 
 // The scope root, e.g. "http://host/" or "http://host/reticle/". Everything the
 // worker caches is resolved relative to this so it is subpath-correct.
@@ -190,37 +201,62 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Only the app SHELL's own static assets are cache-first: the hashed
-  // `web-<hash>.js` / `_bg.wasm` bundle, the convert worker, styles, the
-  // manifest, icons, and fonts. That is the whole offline contract.
+  // Only the app SHELL's own static assets are cached: the hashed
+  // `web-<hash>.js` / `_bg.wasm` bundle, the convert worker, styles, the manifest,
+  // icons, and fonts. That is the whole offline contract.
   //
-  // Every OTHER same-origin GET is passed straight through to the network,
-  // untouched. The one that matters is a user's `?gds=`/`?oas=` design fetched
-  // by the open path (webopen.rs `fetch_gds_bytes`): a loaded design is mutable
-  // user data, not part of the shell, so caching it cache-first would hand back
-  // a STALE design on the next open. Passing it through also leaves the request
-  // in the page context, so the open path (and the phone-touch e2e's route
-  // interception of the fixture) sees the real network response instead of a
-  // worker-synthesized one. Without this, once the worker controls the page the
-  // design fetch never reaches the page network, and a `?gds=` deep link that
+  // Every OTHER same-origin GET is passed straight through to the network, untouched.
+  // The one that matters is a user's `?gds=`/`?oas=` design fetched by the open path
+  // (webopen.rs `fetch_gds_bytes`): a loaded design is mutable user data, not part of
+  // the shell, so caching it would hand back a STALE design on the next open. Passing
+  // it through also leaves the request in the page context, so the open path (and the
+  // phone-touch e2e's route interception of the fixture) sees the real network response
+  // instead of a worker-synthesized one. Without this, once the worker controls the
+  // page the design fetch never reaches the page network, and a `?gds=` deep link that
   // resolves to the SPA fallback loads the shell HTML as if it were a design.
   const path = new URL(request.url).pathname;
   const isShellAsset = /\.(?:js|mjs|wasm|css|json|png|svg|ico|woff2)$/.test(path);
   if (!isShellAsset) return;
 
-  // On a miss, fetch and populate the cache so the hashed bundle is available
-  // offline next time.
-  event.respondWith(
-    (async () => {
-      const cache = await caches.open(CACHE_VERSION);
-      const cached = await cache.match(request);
-      if (cached) return cached;
-      const response = await fetch(request);
-      // Only cache successful, basic (same-origin) responses.
-      if (response && response.status === 200 && response.type === "basic") {
-        cache.put(request, response.clone());
-      }
-      return response;
-    })(),
-  );
+  // Immutable content-hashed bundle assets (`web-<hash>.js` / `_bg.wasm`) are safe to
+  // serve cache-first: the hash in the filename changes every deploy, so a cached copy
+  // is never stale, and caching it is what makes the app load offline. Every other
+  // shell asset keeps a STABLE name across deploys (`convert_worker.js` / `_bg.wasm`,
+  // `manifest.json`, the icons), so cache-first would serve a stale copy forever; serve
+  // those network-first instead, so a new deploy is picked up on the next load with the
+  // cached copy only as the offline fallback.
+  const isImmutable = /-[0-9a-f]{8,}(?:_bg)?\.(?:js|wasm)$/i.test(path);
+  event.respondWith(isImmutable ? cacheFirst(request) : networkFirst(request));
 });
+
+// Serve the cached copy if present, else fetch and cache a successful same-origin
+// response. Used for the immutable content-hashed bundle so it is available offline.
+async function cacheFirst(request) {
+  const cache = await caches.open(CACHE_VERSION);
+  const cached = await cache.match(request);
+  if (cached) return cached;
+  const response = await fetch(request);
+  // Only cache successful, basic (same-origin) responses.
+  if (response && response.status === 200 && response.type === "basic") {
+    cache.put(request, response.clone());
+  }
+  return response;
+}
+
+// Fetch fresh and refresh the cache, falling back to the cached copy only when the
+// network is unavailable. Used for stable-named shell assets so a new deploy is never
+// served stale from a previous deploy's cache.
+async function networkFirst(request) {
+  const cache = await caches.open(CACHE_VERSION);
+  try {
+    const response = await fetch(request);
+    if (response && response.status === 200 && response.type === "basic") {
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch (err) {
+    const cached = await cache.match(request);
+    if (cached) return cached;
+    throw err;
+  }
+}

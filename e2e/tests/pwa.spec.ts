@@ -141,3 +141,53 @@ test("best-effort: the app shell loads offline from the SW cache", async ({
   // Offline reload is best-effort per the lane spec: (a)+(b) are the hard gate.
   // Report the outcome above; do not fail the suite if offline was flaky.
 });
+
+test("a stale prior cache is purged on activate (versioned cache, no manual clear)", async ({
+  page,
+}) => {
+  // Simulate a returning visitor who still holds the OLD `reticle-pwa-v1` cache from a
+  // previous deploy. Seeded from an init script so it exists BEFORE the page registers
+  // the service worker, i.e. before the worker's `activate` runs its purge. Reproduces
+  // the packet's stale-cache signature: a fixed cache name that a deploy never dropped.
+  await page.addInitScript(async () => {
+    try {
+      const stale = await caches.open("reticle-pwa-v1");
+      await stale.put(
+        new Request("./manifest.json", { cache: "reload" }),
+        new Response('{"stale":true}', {
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    } catch {
+      /* Cache API unavailable here; the assertion below tolerates that honestly. */
+    }
+  });
+
+  await page.goto("");
+  await waitForActiveWorker(page);
+
+  // The worker's `activate` drops every cache whose name is not the current version, so
+  // the stale `reticle-pwa-v1` is gone and the visitor is on the new bundle with NO
+  // manual cache clear. Poll: activation may land just after the worker is first active.
+  await page.waitForFunction(
+    async () => {
+      const names = await caches.keys();
+      return (
+        !names.includes("reticle-pwa-v1") &&
+        names.some((n) => n.startsWith("reticle-pwa-v"))
+      );
+    },
+    null,
+    { timeout: 30_000 },
+  );
+
+  const names = await page.evaluate(() => caches.keys());
+  expect(
+    names,
+    "the stale v1 cache was purged on upgrade (no manual clear needed)",
+  ).not.toContain("reticle-pwa-v1");
+  expect(
+    names.some((n) => n.startsWith("reticle-pwa-v") && n !== "reticle-pwa-v1"),
+    `a bumped versioned cache is present: ${JSON.stringify(names)}`,
+  ).toBeTruthy();
+});
