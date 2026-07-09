@@ -1714,6 +1714,25 @@ impl App {
         self.e2e_edit = on;
     }
 
+    /// Starts the replay theater playing on boot when the page requested it
+    /// (`?e2e-autoplay=1`, see [`crate::share::parse_e2e_replay_autoplay`]).
+    ///
+    /// The public `?view=replay` landing waits at Play; a headed browser test flips this
+    /// on so it can drive playback to the end and assert the wasm replay reproduces the
+    /// recorded hash from the DOM (`window.__reticle_stats.hash_check`), without clicking
+    /// the GPU-painted transport. A no-op unless a transcript is loaded (the replay-theater
+    /// start view), so it never affects the editor or a normal visitor.
+    pub fn set_replay_autoplay(&mut self) {
+        if self.replay.is_loaded() {
+            // Play fast so the headed guard reaches the end (and the hash verdict)
+            // quickly. Speed only controls how many records apply per tick; it does not
+            // affect the replayed document or its hash, so the Match verdict is identical
+            // to playing at 1x.
+            self.replay.set_speed(32.0);
+            self.replay.play();
+        }
+    }
+
     /// Sets whether the bundle is embedded (`?embed=1`, catalog 94): minimal chrome
     /// for an iframe. Threaded in by the web entry at boot from
     /// [`crate::share::parse_embed`]; a no-op modifier on native.
@@ -1824,6 +1843,83 @@ impl App {
             &JsValue::from_f64(self.camera.pixels_per_dbu()),
         );
         let _ = js_sys::Reflect::set(&stats, &JsValue::from_str("camera"), cam.as_ref());
+    }
+
+    /// Publishes the additive demo-observability keys to `window.__reticle_stats`
+    /// (wasm only), alongside the camera [`record_camera_stats`](Self::record_camera_stats)
+    /// writes each editor frame. These make three otherwise canvas-only or
+    /// viewer-path-only signals browser-readable, so the headed demo guards can assert
+    /// them:
+    ///
+    /// - `applied_shapes`: the live top-cell shape count. [`record_viewer_stats`]
+    ///   (Self::record_viewer_stats) publishes this only on the share-live viewer path;
+    ///   here it is republished every editor frame, so an example opened from the Start
+    ///   screen is observable as loaded.
+    /// - `render_nonblank`: `true` when the app is painting real geometry this frame,
+    ///   the editor scene has shapes, or a streamed archive is painting records, with a
+    ///   finite positive zoom. It separates "rendered the design" from a black canvas: a
+    ///   backgrounded tab pauses the rAF loop so this method never runs and the key stays
+    ///   absent/stale. It does NOT assert every pixel is lit; the headed screenshot guards
+    ///   prove the pixels.
+    /// - `hash_check`: the replay verdict (`"Match"`/`"Mismatch"`/`"Pending"`/
+    ///   `"Unverifiable"`) as a DOM-readable string. The theater otherwise paints this on
+    ///   the GPU canvas, unreadable by automation.
+    ///
+    /// Additive only: it extends the same stats object and never rewrites an existing
+    /// key, so the add-only seam canaries keep passing. A no-op if the window is
+    /// unavailable, so it never disturbs a normal session.
+    #[cfg(target_arch = "wasm32")]
+    fn record_frame_stats(&self) {
+        use crate::replay::HashCheck;
+        use wasm_bindgen::JsValue;
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let key = JsValue::from_str("__reticle_stats");
+        let stats = match js_sys::Reflect::get(window.as_ref(), &key) {
+            Ok(v) if v.is_object() => v,
+            _ => {
+                let obj = js_sys::Object::new();
+                let _ = js_sys::Reflect::set(window.as_ref(), &key, obj.as_ref());
+                JsValue::from(obj)
+            }
+        };
+        // The live top-cell shape count (the same expression the viewer path publishes).
+        let shapes = self
+            .history
+            .document()
+            .cell(&self.top_cell)
+            .map_or(0, |c| c.shapes.len());
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("applied_shapes"),
+            &JsValue::from_f64(shapes as f64),
+        );
+        // Painting real geometry (editor scene shapes, or a streamed archive with records
+        // painted) with a live camera.
+        let ppd = self.camera.pixels_per_dbu();
+        let archive_painting = self
+            .archive
+            .as_ref()
+            .is_some_and(|b| b.stats().records_painted > 0);
+        let nonblank = ppd.is_finite() && ppd > 0.0 && (shapes > 0 || archive_painting);
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("render_nonblank"),
+            &JsValue::from_bool(nonblank),
+        );
+        // The replay verdict as a DOM-readable string (canvas-only otherwise).
+        let verdict = match self.replay.hash_check() {
+            HashCheck::Pending => "Pending",
+            HashCheck::Unverifiable => "Unverifiable",
+            HashCheck::Match => "Match",
+            HashCheck::Mismatch => "Mismatch",
+        };
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("hash_check"),
+            &JsValue::from_str(verdict),
+        );
     }
 
     /// Reports a hard failure to the app's one human-readable error surface.
@@ -12214,6 +12310,10 @@ impl eframe::App for App {
         // phone-touch e2e can read a baseline and assert a pinch/pan moved the camera.
         #[cfg(target_arch = "wasm32")]
         self.record_camera_stats();
+        // Publish the additive demo-observability keys (applied_shapes, render_nonblank,
+        // hash_check) so the headed demo guards can read them from the DOM.
+        #[cfg(target_arch = "wasm32")]
+        self.record_frame_stats();
 
         self.handle_shortcuts(&ctx);
 

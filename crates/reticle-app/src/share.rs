@@ -505,6 +505,28 @@ pub fn parse_e2e_edit(query: &str) -> bool {
     false
 }
 
+/// Whether the page URL asks the replay theater to start playing on boot
+/// (`?e2e-autoplay=1`).
+///
+/// The public `?view=replay` landing waits at Play so a first-time visitor sees
+/// the transport before anything moves (a deliberate choice; see the `?view=replay`
+/// boot path). This e2e-only flag opts a headed browser test into automatic
+/// playback so it can assert the wasm replay reproduces the recorded hash
+/// (`window.__reticle_stats.hash_check == "Match"`) without clicking the
+/// GPU-painted transport. Pure string logic mirroring [`parse_e2e_edit`], so it is
+/// unit-tested without a browser.
+#[must_use]
+pub fn parse_e2e_replay_autoplay(query: &str) -> bool {
+    let query = query.trim_start_matches('?');
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if key == "e2e-autoplay" {
+            return matches!(value, "1" | "true");
+        }
+    }
+    false
+}
+
 /// Whether the page URL requests embed mode (`?embed=1`, lane 2D, catalog 94):
 /// minimal chrome for an `<iframe>`, hiding every panel and menu and leaving only
 /// the canvas plus a small "open in Reticle" affordance.
@@ -867,6 +889,18 @@ mod tests {
         assert!(!parse_e2e_edit(""));
         // Not a partial-key match.
         assert!(!parse_e2e_edit("e2eedit=1"));
+    }
+
+    #[test]
+    fn parse_e2e_replay_autoplay_reads_the_flag() {
+        assert!(parse_e2e_replay_autoplay("e2e-autoplay=1"));
+        assert!(parse_e2e_replay_autoplay("?view=replay&e2e-autoplay=1"));
+        assert!(parse_e2e_replay_autoplay("e2e-autoplay=true"));
+        assert!(!parse_e2e_replay_autoplay("e2e-autoplay=0"));
+        assert!(!parse_e2e_replay_autoplay("view=replay"));
+        assert!(!parse_e2e_replay_autoplay(""));
+        // Not a partial-key match.
+        assert!(!parse_e2e_replay_autoplay("e2eautoplay=1"));
     }
 
     #[test]

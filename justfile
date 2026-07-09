@@ -294,6 +294,21 @@ e2e-touch:
     cd e2e; npx playwright install chromium
     cd e2e; npx playwright test --project=phone
 
+# Headed demo-quality guards (packet v8.1.0-R). Builds the Trunk bundle and runs the
+# demo-*.spec.ts guards in a FOREGROUND, HEADED browser on both backends (the
+# headed-webgl2 and headed-webgpu projects). Headed is mandatory: eframe pauses its
+# requestAnimationFrame loop in a backgrounded or occluded tab, so the canvas goes black
+# and window.__reticle_stats reads null (NORMAL browser behavior, not a defect). The
+# guards call page.bringToFront() and assert document.visibilityState === "visible"
+# before reading, so a background black canvas is never mistaken for a defect. Requires
+# an interactive desktop session (real browser windows open). `npx playwright test` is
+# the trailing native command so its exit code is the recipe's. See e2e/tests/demo-*.spec.ts.
+e2e-headed:
+    cd crates/web; trunk build index.html
+    npm --prefix e2e install
+    cd e2e; npx playwright install chromium
+    cd e2e; npx playwright test --project=headed-webgl2 --project=headed-webgpu
+
 book:
     mdbook build docs
 

@@ -74,12 +74,12 @@ export default defineConfig({
       name: "webgl2",
       // The subpath, share-live, served-archive, pwa, convert, and phone specs each run
       // in their own project below.
-      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts|phone-touch\.spec\.ts/,
+      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts|phone-touch\.spec\.ts|demo-.*\.spec\.ts/,
       use: { launchOptions: { args: WEBGL2_ARGS } },
     },
     {
       name: "webgpu",
-      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts|phone-touch\.spec\.ts/,
+      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts|phone-touch\.spec\.ts|demo-.*\.spec\.ts/,
       use: { launchOptions: { args: WEBGPU_ARGS } },
     },
     {
@@ -139,6 +139,29 @@ export default defineConfig({
         ...devices["Pixel 7"],
         launchOptions: { args: WEBGL2_ARGS },
       },
+    },
+    {
+      // Headed demo-quality guards (packet v8.1.0-R). These run in a FOREGROUND,
+      // HEADED browser on purpose: eframe/egui pauses its requestAnimationFrame loop
+      // in a backgrounded or occluded tab, so the canvas goes black and
+      // window.__reticle_stats reads null. A black canvas from a background context is
+      // NORMAL browser behavior, not a defect, and must never be reported as one. The
+      // demo-*.spec.ts guards each call page.bringToFront() and assert
+      // document.visibilityState === "visible" before reading stats, so they measure
+      // the real, visible runtime. WebGL2 forced (navigator.gpu deleted in the spec).
+      name: "headed-webgl2",
+      testMatch: /demo-.*\.spec\.ts/,
+      use: { launchOptions: { headless: false, args: WEBGL2_ARGS } },
+    },
+    {
+      // The same headed demo guards on the WebGPU path. On this host's real GPU a
+      // headed Chromium with the WebGPU flags gets a hardware adapter (unlike the
+      // headless CI Chromium, which ships without one), so the example-render guard
+      // exercises BOTH backends. Specs that assert a WebGPU-only fact skip honestly
+      // where no adapter is present.
+      name: "headed-webgpu",
+      testMatch: /demo-.*\.spec\.ts/,
+      use: { launchOptions: { headless: false, args: WEBGPU_ARGS } },
     },
   ],
   webServer: [

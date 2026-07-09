@@ -92,7 +92,15 @@ fn set_overlay_error(document: &web_sys::Document, message: &str) {
 #[cfg(target_arch = "wasm32")]
 enum Boot {
     /// Open into a normal start view (editor or replay theater), per `?view=`.
-    View(reticle_app::StartView),
+    View {
+        /// The start view selected by `?view=` (or the theater default).
+        start_view: reticle_app::StartView,
+        /// Whether `?e2e-autoplay=1` was set: start the replay theater playing on boot so
+        /// a headed browser test can assert the wasm replay hash without clicking the
+        /// GPU-painted transport (a no-op for the editor start view). The public landing
+        /// still waits at Play.
+        autoplay: bool,
+    },
     /// Render the hidden component gallery full-window (`?gallery=1`, lane 1C): a
     /// deterministic screenshot surface over the theme's component library, used
     /// by the visual-regression suite. Carries no document or session state.
@@ -132,7 +140,16 @@ impl Boot {
     fn into_app(self) -> Box<reticle_app::App> {
         use reticle_app::{App, StartView};
         match self {
-            Boot::View(start_view) => Box::new(App::with_start_view(start_view)),
+            Boot::View {
+                start_view,
+                autoplay,
+            } => {
+                let mut app = App::with_start_view(start_view);
+                if autoplay {
+                    app.set_replay_autoplay();
+                }
+                Box::new(app)
+            }
             Boot::Gallery => Box::new(App::gallery()),
             Boot::Archive(url) => Box::new(App::with_archive(url)),
             Boot::Viewer(target) => Box::new(App::with_viewer(target)),
@@ -164,6 +181,11 @@ fn boot_from_url() -> Boot {
     let search = web_sys::window()
         .and_then(|w| w.location().search().ok())
         .unwrap_or_default();
+
+    // `?e2e-autoplay=1` starts the replay theater playing on boot so the headed replay
+    // guard can drive playback without clicking the GPU-painted transport. Parsed once
+    // here so every `?view=` path below carries it; it is a no-op for the editor view.
+    let autoplay = reticle_app::share::parse_e2e_replay_autoplay(&search);
 
     // `?gallery=1` renders the hidden component gallery (lane 1C), a deterministic
     // screenshot surface for the visual-regression suite. Checked first so the dev
@@ -198,7 +220,10 @@ fn boot_from_url() -> Boot {
 
     // `search` is like "?view=editor"; UrlSearchParams accepts the leading '?'.
     let Ok(params) = web_sys::UrlSearchParams::new_with_str(&search) else {
-        return Boot::View(StartView::ReplayTheater);
+        return Boot::View {
+            start_view: StartView::ReplayTheater,
+            autoplay,
+        };
     };
 
     // `?share=1&room=..&relay=..` boots the editor and goes live automatically (the
@@ -237,9 +262,15 @@ fn boot_from_url() -> Boot {
     }
 
     match params.get("view") {
-        Some(value) => Boot::View(StartView::from_query_value(&value)),
+        Some(value) => Boot::View {
+            start_view: StartView::from_query_value(&value),
+            autoplay,
+        },
         // No explicit view: the public default is the replay theater.
-        None => Boot::View(StartView::ReplayTheater),
+        None => Boot::View {
+            start_view: StartView::ReplayTheater,
+            autoplay,
+        },
     }
 }
 

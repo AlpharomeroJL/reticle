@@ -142,6 +142,18 @@ keep their exact semantics; console signals `reticle-live: socket open` and
 `first frame` stay), `run_command`'s existing arms, and the wasm boot contract
 (`#overlay` hides only after WebRunner start).
 
+Packet v8.1.0-R adds, additively (existing keys untouched), the standing
+demo-observability seam keys and one e2e-only query param:
+`__reticle_stats.hash_check` (the replay verdict `Match`/`Mismatch`/`Pending`/
+`Unverifiable`, previously canvas-only), `__reticle_stats.render_nonblank` (a
+bool: the app is painting real geometry with a live camera this frame), and
+`__reticle_stats.applied_shapes` now also published on every editor frame (it
+was viewer-path only). The `?e2e-autoplay=1` param starts the replay theater
+playing on boot so a headed guard can read `hash_check` without clicking the
+GPU-painted transport (the public `?view=replay` landing still waits at Play).
+These are add-only: the pre-existing keys and param semantics are unchanged, so
+the seam canaries keep passing.
+
 ## 4. Reserved CommandIds (cross-lane wiring contract)
 
 Gate 2 asserts every id below exists in the merged registry with this exact
