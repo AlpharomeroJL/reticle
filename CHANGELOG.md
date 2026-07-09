@@ -3,14 +3,19 @@
 All notable changes to Reticle are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com), and the project uses
 [conventional commits](https://www.conventionalcommits.org).
-## [8.1.0] - 2026-07-08
+## [8.1.0] - 2026-07-09
+
+Re-cut on a fixed head with post-tag fixes (wasm replay-hash determinism,
+start-screen example loading, deep-zoom rendering, service-worker cache versioning,
+command palette, canvas drawing, and the replay theater) and with non-design internal
+run documents removed from history.
 
 ### Features
 
 - Add command registry, dispatch funnel, keymap by CommandId
 - Encode tokens as applied egui style and drain UI literals
-- Component library and hidden gallery (Wave 1, lane 1C)
-- Embed subset Inter, JetBrains Mono, and Lucide fonts (lane 1B)
+- Component library and hidden gallery
+- Embed subset Inter, JetBrains Mono, and Lucide fonts
 - Touch mode raises hit targets to 40px, add e2e-touch gate
 - Component states, functional motion, frame guard
 - Registry-driven palette, shortcuts overlay, context menus, focus, esc
@@ -25,33 +30,36 @@ All notable changes to Reticle are documented here. The format follows
 
 ### Bug fixes
 
+- Make the wasm replay document_hash platform-independent (native/wasm parity)
+- Graft the SKY130 technology so start-screen examples open with named, colored layers
+- Command palette: Enter and row-click both activate the top hit
+- Canvas draw: rectangle and marquee select commit from the true drag press point
+- Compact the docked replay theater so the main canvas stays the hero
+- Route post-boot runtime panics to a readable overlay
+- Version the service-worker cache and serve stable-named assets network-first
+- Guard the deep-zoom render cycle
 - Pass same-origin design fetches through so ?gds= deep-link opens (e2e-touch)
 - Resolve the three HIGH design-review blockers (H1/H2/H3)
 
 ### Documentation and media
 
 - Add GitHub Sponsors button
-- Add IconButton spec for lane 1C (ADR 0097)
+- Add IconButton spec (ADR 0097)
 - Add v8.1 catalog dispositions (100-item completeness gate)
 - Add skeptical v8.1.0 section and honest-limits ledger
 - Add design-system and redesign-gallery chapters
-- V8.1 after gallery captured from the live redesigned bundle
+- Refresh gallery and hero media from the live redesigned bundle
+- Expose additive __reticle_stats seams for headed regression detection
 
 ### Testing
 
-- Egui_kittest 0.35 UI snapshot suite with GPU serialization (lane 1D)
+- Egui_kittest 0.35 UI snapshot suite with GPU serialization
+- Standing headed e2e suite for the palette, drawing, marquee, and replay theater
 
 ### Build, tooling, and CI
 
-- Wave 0 interface packet (design system foundation, contracts, tooling)
-- Recapture baselines on merged main; fix rustdoc links and typos allowlist
-- Bundle ledger row, RUN_STATE and TASKS Gate 1 record
-- Wave 2 lanes complete, starting Gate 2 merge
-- Fix cross-lane intra-doc links, untrack stray lane RESULT.md
-- Recapture ui baselines on merged main
-- Bundle ledger wave2 row and RUN_STATE gate-2 record
-- Complete and deployed; redesign live at the pages URL
-- Record adversarial review and HIGH-fix closure
+- Design-system foundation, contracts, and tooling
+- Recapture UI baselines on merged main; fix rustdoc links and typos allowlist
 ## [8.0.0] - 2026-07-08
 
 ### Features
