@@ -6,14 +6,12 @@ the sweep that closes the completeness contract in brief.md: a silent drop is a
 sweep failure, and a missed P1 without a recorded genuine blocker is a
 release-hold condition.
 
-Method. The owner and tier per item come from catalog-map.md. Each lane's
-RESULT.md (under `scratch/lanes/<id>/`, not committed) is the narrative source;
-this document does not rely on it alone. Every SHIPPED row is backed by a
+Method. Every SHIPPED row is backed by a
 committed artifact a reader can open: a command id in
 `crates/reticle-app/src/commands.rs`, a module or symbol under
 `crates/reticle-app/src/`, a bench row in `benches/history/baseline.json`, a
 token in `docs/design/tokens.md`, or an ADR under `docs/decisions/`. Where a
-RESULT was silent or a claim looked soft, the merged code was grepped and the
+claim looked soft, the merged code was grepped and the
 finding recorded here (item 38 is the clearest example: the Settings toggle
 exists but the canvas does not yet consume it).
 
@@ -76,7 +74,7 @@ Of the 17 P2 ledgers, 11 are the pre-authorized 3A P2/P3 tail named in
 catalog-map.md (31, 33, 37, 38, 41, 50, 58, 76, 77, plus 34 and 49 shipped in
 part); the remainder are cross-crate seams frozen this packet (multi-document,
 PWA manifest, presence/relay broadcast, comment-to-toast wiring) or the
-orchestrator capture-track item 95.
+deferred capture-track item 95.
 
 ## A. Opening and files
 
@@ -216,7 +214,7 @@ orchestrator capture-track item 95.
 |---|---|---|---|---|
 | 93 | P1 | 2D | SHIPPED | `view.presentation` (P), `AppOp::TogglePresentation`, `presentation_canvas`: hide all chrome |
 | 94 | P2 | 2D | SHIPPED | `share::parse_embed`: `?embed=1` minimal chrome with the CORS/CSP doc note |
-| 95 | P2 | W5 | LEDGERED | cinematic auto-pan capture mode: not built at the time of this sweep (no `cinematic`/`auto-pan` symbol in `crates/`, `scripts/`, or the capture harness). Owned by the orchestrator Wave 5 capture track, which reuses the media harness; recorded here honestly as pending |
+| 95 | P2 | W5 | LEDGERED | cinematic auto-pan capture mode: not built at the time of this sweep (no `cinematic`/`auto-pan` symbol in `crates/`, `scripts/`, or the capture harness). Deferred; it reuses the media capture harness, recorded here honestly as pending |
 | 96 | P1 | 2D | SHIPPED | gallery info card ("what am I looking at"): the `Landmark` dropdown per card in `start_gallery_section` |
 
 ## J. Load, settings, help
@@ -240,7 +238,7 @@ orchestrator capture-track item 95.
   file handlers in the web manifest), 13 (File System Access save-back), 56
   (same-cell needs scene cell attribution), 69 (notification-center panel), 88
   (presence/relay one-shot broadcast), 89 (comment-event to toast wiring).
-- **Orchestrator capture track**: 95 (cinematic auto-pan), pending in Wave 5.
+- **Capture track**: 95 (cinematic auto-pan), deferred.
 
 ## Rejected design directions (not catalog items)
 

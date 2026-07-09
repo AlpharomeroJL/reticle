@@ -1,18 +1,14 @@
-# Catalog map: Appendix A ownership (the Wave 5 completeness contract)
+# Catalog map: the Appendix A improvement catalog
 
-Every numbered item of the packet's Improvement Catalog, its confirmed tier, and
-its owning lane. The owner ships the item (or ledgers it with a reason) inside
-its Wave 2 lane; Wave 1 lanes own only system plumbing. The Wave 5 audit walks
-this table and records a disposition per item in catalog-dispositions.md.
-[fluidity] marks the three authorized engine-adjacent exceptions.
-
-Owner key: Wave 2 lanes 2A menus/toolbar, 2B inspector, 2C layers/views,
-2D viewer/start, 3A canvas/nav/fluidity, 3B open/dialogs, 3C palette/keys,
-4A states/motion, 4B touch/a11y, 4C onboarding/help; W5 = orchestrator Wave 5.
+Every numbered item of the Improvement Catalog, with its confirmed priority tier
+and a short description. `catalog-dispositions.md` records a disposition per item
+(shipped, ledgered, or deferred) backed by a committed evidence pointer.
+[fluidity] marks the three authorized engine-adjacent exceptions. The `area` column
+groups items by the interface area they belong to.
 
 ## A. Opening and files
 
-| # | tier | owner | item (short) |
+| # | tier | area | item (short) |
 |---|---|---|---|
 | 1 | P1 | 3B | Native file picker (rfd) on File > Open, toolbar, Ctrl+O |
 | 2 | P1 | 3B | Open-from-URL dialog + CORS explainer |
@@ -31,7 +27,7 @@ Owner key: Wave 2 lanes 2A menus/toolbar, 2B inspector, 2C layers/views,
 
 ## B. Onboarding and first contact
 
-| # | tier | owner | item |
+| # | tier | area | item |
 |---|---|---|---|
 | 15 | P1 | 4C | 60-second interactive tour, editor + viewer variants |
 | 16 | P1 | 2D | Empty-canvas state with exactly three primary actions |
@@ -48,7 +44,7 @@ Owner key: Wave 2 lanes 2A menus/toolbar, 2B inspector, 2C layers/views,
 
 ## C. Canvas, navigation, fluidity
 
-| # | tier | owner | item |
+| # | tier | area | item |
 |---|---|---|---|
 | 27 | P1 | 3A | Zoom-to-cursor tuning, pinch calibration |
 | 28 | P1 | 3A | Zoom presets: F, Shift+F, 1:1 DBU, layer extents |
@@ -71,7 +67,7 @@ Owner key: Wave 2 lanes 2A menus/toolbar, 2B inspector, 2C layers/views,
 
 ## D. Selection and editing
 
-| # | tier | owner | item |
+| # | tier | area | item |
 |---|---|---|---|
 | 45 | P1 | 3A | Marquee select, shift-add, alt-subtract, same-layer filter |
 | 46 | P1 | 3A | Hover pre-highlight of click target |
@@ -90,7 +86,7 @@ Owner key: Wave 2 lanes 2A menus/toolbar, 2B inspector, 2C layers/views,
 
 ## E. Panels and IA details
 
-| # | tier | owner | item |
+| # | tier | area | item |
 |---|---|---|---|
 | 59 | P1 | 2B | Panels collapse to icon rail; Tab toggles all |
 | 60 | P2 | 2B | Per-panel gear menus |
@@ -107,7 +103,7 @@ Owner key: Wave 2 lanes 2A menus/toolbar, 2B inspector, 2C layers/views,
 
 ## F. Feedback and errors
 
-| # | tier | owner | item |
+| # | tier | area | item |
 |---|---|---|---|
 | 71 | P1 | 3B | Unified toast system: severity + action buttons |
 | 72 | P1 | 3B | Every failure: cause, next step, copyable diagnostic |
@@ -120,7 +116,7 @@ Owner key: Wave 2 lanes 2A menus/toolbar, 2B inspector, 2C layers/views,
 
 ## G. Keyboard and palette
 
-| # | tier | owner | item |
+| # | tier | area | item |
 |---|---|---|---|
 | 79 | P1 | 3C | Palette: fuzzy, recents, groups, hints, argument prompts |
 | 80 | P1 | 3C | Palette searches layers, cells, bookmarks |
@@ -131,7 +127,7 @@ Owner key: Wave 2 lanes 2A menus/toolbar, 2B inspector, 2C layers/views,
 
 ## H. Collaboration and share
 
-| # | tier | owner | item |
+| # | tier | area | item |
 |---|---|---|---|
 | 85 | P1 | 3B | Share dialog: mode toggle, expiry, viewer count, test-open |
 | 86 | P1 | 2D | Named presence cursors: display name, colors, idle fade |
@@ -144,7 +140,7 @@ Owner key: Wave 2 lanes 2A menus/toolbar, 2B inspector, 2C layers/views,
 
 ## I. Viewer and demo experience
 
-| # | tier | owner | item |
+| # | tier | area | item |
 |---|---|---|---|
 | 93 | P1 | 2D | Presentation mode on P (hide all chrome) |
 | 94 | P2 | 2D | ?embed=1 minimal chrome + CORS/CSP notes |
@@ -153,29 +149,15 @@ Owner key: Wave 2 lanes 2A menus/toolbar, 2B inspector, 2C layers/views,
 
 ## J. Load, settings, help
 
-| # | tier | owner | item |
+| # | tier | area | item |
 |---|---|---|---|
 | 97 | P1 | 3A | Splash with progress + rotating tip during wasm init |
 | 98 | P1 | 4C | Settings dialog, persisted (density, motion, wheel, touch, reset) |
 | 99 | P1 | 4C | Diagnostics in About: versions, GPU, hash, copy, issue link |
 | 100 | P1 | 4C | Zero-telemetry statement in About, verified true |
 
-## Load summary (for dispatch and the ledger-if-squeezed call)
+## Priority tally
 
-| lane | items | P1 | P2 | P3 | list |
-|---|---|---|---|---|---|
-| 3A | 31 | 18 | 12 | 1 | 27-38, 40-46 minus 39, 48-53, 55, 58, 68, 76, 77, 97 (heaviest; the P2/P3 tail is the designated ledger set) |
-| 3B | 19 | 12 | 6 | 1 | 1-8, 11, 13, 69, 71, 72, 73, 74, 78, 85, 89, 92 |
-| 2D | 15 | 8 | 5 | 2 | 9, 10, 14, 16, 23, 24, 75, 86, 87, 88, 90, 91, 93, 94, 96 |
-| 2B | 12 | 6 | 6 | 0 | 12, 21, 54, 56, 59, 60, 61, 63, 64, 65, 66, 67 |
-| 4C | 9 | 6 | 3 | 0 | 15, 17, 19, 20, 22, 26, 98, 99, 100 |
-| 3C | 8 | 6 | 1 | 1 | 18, 47, 79, 80, 81, 82, 83, 84 |
-| 2C | 3 | 1 | 2 | 0 | 39, 57, 62 (+ managed panels from the wave text) |
-| 2A | 2 | 2 | 0 | 0 | 25, 70 (+ menu bar/toolbar from the wave text) |
-| 4A/4B | 0 | 0 | 0 | 0 | no numbered items; scope is the packet's Wave 4 text (states, motion, frame guard; touch targets, text scaling, e2e-touch) |
-| W5 | 1 | 0 | 1 | 0 | 95 |
-
-Tally: 59 P1 + 36 P2 + 5 P3 = 100 (verified against the packet). 3A's tail (31,
-33, 34, 36, 37, 38, 41, 49, 50, 58, 76, 77) is pre-authorized to ledger if its
-P1 set is at risk; every other lane is expected to finish its list or ledger
-with a specific reason.
+59 P1 + 36 P2 + 5 P3 = 100 items, verified against the catalog. The disposition of
+each item (shipped, ledgered, or deferred), with a committed evidence pointer, is
+in `catalog-dispositions.md`.
