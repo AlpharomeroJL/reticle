@@ -289,6 +289,13 @@ pub struct App {
     /// An in-progress guide drag: the axis being pulled from a ruler. `Some` from
     /// the press inside a ruler bar until the pointer is released on the canvas.
     dragging_guide: Option<crate::snap::Axis>,
+    /// The screen position where the current canvas drag began, captured on
+    /// `drag_started` (when `interact_pointer_pos` is the press point). Drags that
+    /// commit on release — the rectangle tool and the marquee band — need the drag
+    /// *start*, which egui cannot report at `drag_stopped` (`drag_delta` is per-frame
+    /// and zero on the release frame, so reconstructing it from the delta yields the
+    /// release point instead). Stashing the press point makes those gestures work.
+    drag_press_pos: Option<Pos2>,
     /// Whether the canvas text-label overlay (cell names, selection captions, live
     /// dimensions) is drawn.
     labels_visible: bool,
@@ -435,6 +442,12 @@ pub struct App {
 
     /// Whether the command palette window is open.
     palette_open: bool,
+    /// Set on the frame the palette (or its argument prompt) opens, so the input
+    /// field requests keyboard focus exactly once. Requesting focus *every* frame
+    /// keeps `focus.id == field`, which forces `Response::lost_focus()` to `false`
+    /// forever, so the Enter-to-run path can never fire; latching it to the open
+    /// edge restores the standard `lost_focus() && Enter` idiom.
+    palette_focus_pending: bool,
     /// The command-palette search query.
     palette_query: String,
     /// The active inline argument prompt (goto coordinate / cell), if the palette
@@ -1068,6 +1081,7 @@ impl App {
             snap: SnapState::default(),
             snap_hint: None,
             dragging_guide: None,
+            drag_press_pos: None,
             labels_visible: true,
             minimap_visible: true,
             rulers_visible: true,
@@ -1119,6 +1133,7 @@ impl App {
             keymap_open: false,
             rebinding: None,
             palette_open: false,
+            palette_focus_pending: false,
             palette_query: String::new(),
             palette_arg: None,
             palette_recents: Vec::new(),
@@ -1951,6 +1966,44 @@ impl App {
             &stats,
             &JsValue::from_str("hash_check"),
             &JsValue::from_str(verdict),
+        );
+        // Regression seams (v8.1-REGRESSION): the live interaction state, so a headed
+        // matrix can prove an action had an EFFECT, not just that a widget exists.
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("active_tool"),
+            &JsValue::from_str(self.tools.active().label()),
+        );
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("selection_count"),
+            &JsValue::from_f64(self.selection.len() as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("undo_depth"),
+            &JsValue::from_f64(self.history.undo_depth() as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("redo_depth"),
+            &JsValue::from_f64(self.history.redo_depth() as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("agent_running"),
+            &JsValue::from_bool(self.agent.is_running()),
+        );
+        let (replay_step, replay_total) = self.replay.progress();
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("replay_step"),
+            &JsValue::from_f64(replay_step as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("replay_total"),
+            &JsValue::from_f64(replay_total as f64),
         );
     }
 
@@ -2840,6 +2893,7 @@ impl App {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn set_palette_open(&mut self, open: bool) {
         self.palette_open = open;
+        self.palette_focus_pending = open;
     }
 
     /// Finishes the first-run tour so a snapshot shows the steady editor rather
@@ -3556,10 +3610,47 @@ impl App {
         let Some(spec) = commands::spec(id) else {
             return;
         };
+        #[cfg(target_arch = "wasm32")]
+        let rev_before = self.history.revision();
         match spec.run {
             RunAs::Command(cmd) => self.run_command(cmd, None),
             RunAs::App(op) => self.run_app_op(op),
         }
+        // Regression seam: record which command fired and whether it mutated the
+        // document, so a headed test can prove an action FIRED and had an EFFECT.
+        #[cfg(target_arch = "wasm32")]
+        self.record_command_stats(id, rev_before);
+    }
+
+    /// Publishes the last dispatched command id and whether it changed the document
+    /// revision to `window.__reticle_stats` (wasm only, additive), so a headed
+    /// regression test proves a command FIRED (`last_command_id`) and had an EFFECT
+    /// (`last_command_mutated`). A no-op if the window is unavailable.
+    #[cfg(target_arch = "wasm32")]
+    fn record_command_stats(&self, id: CommandId, rev_before: u64) {
+        use wasm_bindgen::JsValue;
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let key = JsValue::from_str("__reticle_stats");
+        let stats = match js_sys::Reflect::get(window.as_ref(), &key) {
+            Ok(v) if v.is_object() => v,
+            _ => {
+                let obj = js_sys::Object::new();
+                let _ = js_sys::Reflect::set(window.as_ref(), &key, obj.as_ref());
+                JsValue::from(obj)
+            }
+        };
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("last_command_id"),
+            &JsValue::from_str(id.0),
+        );
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("last_command_mutated"),
+            &JsValue::from_bool(self.history.revision() != rev_before),
+        );
     }
 
     /// Runs an [`AppOp`]: an app-level effect with no palette [`Command`]
@@ -3571,6 +3662,9 @@ impl App {
         match op {
             AppOp::OpenPalette => {
                 self.palette_open = !self.palette_open;
+                // Focus the search field only on the frame it opens (see
+                // `palette_focus_pending`); re-requesting every frame breaks Enter.
+                self.palette_focus_pending = self.palette_open;
                 self.palette_query.clear();
             }
             AppOp::ToggleLabels => {
@@ -3720,6 +3814,9 @@ impl App {
     fn open_palette_arg(&mut self, arg: command::PaletteArg) {
         self.palette_open = true;
         self.palette_arg = Some(arg);
+        // Focus the argument field on this opening frame only (see
+        // `palette_focus_pending`).
+        self.palette_focus_pending = true;
         self.palette_query.clear();
     }
 
@@ -4830,7 +4927,13 @@ impl App {
         let cctx = self.ui_ctx();
         egui::Panel::bottom("replay_theater")
             .resizable(true)
-            .default_size(300.0)
+            // Compact by default so the main canvas stays the hero (the packet's
+            // "must not open half-screen"): a slim docked strip carrying the load row,
+            // transport, and readouts, plus a small live preview. The size range caps
+            // the panel well under half the viewport; the user can drag within it.
+            // Docked, never floating (ADR 0026).
+            .default_size(196.0)
+            .size_range(egui::Rangef::new(150.0, 248.0))
             .show(ui, |ui| {
                 let close = view_panel_header(ui, cctx, "Replay theater");
                 self.replay_load_row(ui);
@@ -8631,7 +8734,12 @@ impl App {
     fn replay_canvas(&self, ui: &mut egui::Ui) {
         use crate::replay::{FitView, shapes_bbox};
 
-        let size = Vec2::new(ui.available_width().max(160.0), 240.0);
+        // A slim fixed-height preview so the docked theater stays compact and the main
+        // canvas is the hero. `available_height` reports the whole region during the
+        // panel's content pass, so using it here re-inflates the panel past its cap;
+        // a small fixed strip keeps the total deterministic (controls + this < cap).
+        let h = 72.0;
+        let size = Vec2::new(ui.available_width().max(160.0), h);
         let (response, painter) = ui.allocate_painter(size, Sense::hover());
         let rect = response.rect;
         painter.rect_filled(rect, 4.0, DARK.bg_input);
@@ -9538,6 +9646,10 @@ impl App {
         let items = command::build_items(commands::registry(), &self.keymap, &targets);
 
         let mut open = self.palette_open;
+        // Request keyboard focus only on the frame the palette opened; see
+        // `palette_focus_pending`. Re-requesting every frame pins `focus.id` to the
+        // field, which makes `lost_focus()` forever false so Enter never runs a command.
+        let focus_pending = self.palette_focus_pending;
         // The row the user activated this frame, as (action, recents key).
         let mut chosen: Option<(command::PaletteAction, String)> = None;
         let mut commit_arg = false;
@@ -9555,7 +9667,9 @@ impl App {
                         .hint(arg.hint())
                         .desired_width(f32::INFINITY)
                         .show(ui, cctx);
-                    resp.request_focus();
+                    if focus_pending {
+                        resp.request_focus();
+                    }
                     if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         commit_arg = true;
                     }
@@ -9578,7 +9692,9 @@ impl App {
                         .hint("Type a command, layer, cell, or bookmark...")
                         .desired_width(f32::INFINITY)
                         .show(ui, cctx);
-                    resp.request_focus();
+                    if focus_pending {
+                        resp.request_focus();
+                    }
                     let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     let groups =
                         command::results(&items, &self.palette_recents, &self.palette_query);
@@ -9609,6 +9725,9 @@ impl App {
                         });
                 }
             });
+        // Focus was requested (if pending) during this frame's show; consume the latch
+        // so subsequent frames leave the field alone and Enter's focus-surrender works.
+        self.palette_focus_pending = false;
         self.palette_open = open;
         if !self.palette_open || cancel {
             self.palette_open = false;
@@ -10414,6 +10533,14 @@ impl App {
             self.hover_pick = None;
         }
 
+        // Stash the press point at the start of every canvas drag. `interact_pointer_pos`
+        // is the press only while the button is held; on the `drag_stopped` release frame
+        // it is the release point, so gestures that commit on release (rectangle, marquee)
+        // must capture the origin here, up front, rather than reconstruct it later.
+        if response.drag_started() {
+            self.drag_press_pos = response.interact_pointer_pos();
+        }
+
         // Guide drag: a drag that begins inside a ruler bar pulls out a guide line.
         // While such a drag is live it owns the pointer, so no tool acts on it; on
         // release the guide is dropped at the cursor (grid-snapped). Handled before
@@ -10543,7 +10670,7 @@ impl App {
         if !response.drag_stopped() {
             return;
         }
-        let (Some(origin), Some(current)) = (Self::drag_origin(response), response.hover_pos())
+        let (Some(origin), Some(current)) = (self.drag_press_pos.take(), response.hover_pos())
         else {
             return;
         };
@@ -10882,7 +11009,7 @@ impl App {
         // that shape's layer (item 45).
         if response.drag_stopped()
             && let (Some(origin), Some(current)) =
-                (Self::drag_origin(response), response.hover_pos())
+                (self.drag_press_pos.take(), response.hover_pos())
         {
             let a = self.camera.screen_to_world(screen, origin.x, origin.y);
             let b = self.camera.screen_to_world(screen, current.x, current.y);
@@ -10920,15 +11047,6 @@ impl App {
 
     /// The screen position where the current drag started, if any.
     ///
-    /// egui exposes the press origin via `interact_pointer_pos` during a drag; when
-    /// the drag has just stopped we reconstruct the origin from the current pointer
-    /// and the accumulated drag delta.
-    fn drag_origin(response: &egui::Response) -> Option<Pos2> {
-        let current = response.hover_pos()?;
-        let delta = response.drag_delta();
-        Some(Pos2::new(current.x - delta.x, current.y - delta.y))
-    }
-
     /// The guide axis a screen point sits over, if it is inside a ruler bar.
     ///
     /// A press inside the top bar (but past the top-left corner square) starts a
@@ -10963,7 +11081,7 @@ impl App {
             return false;
         };
         if response.drag_stopped() {
-            if let Some(pos) = response.hover_pos().or_else(|| Self::drag_origin(response)) {
+            if let Some(pos) = response.hover_pos().or(self.drag_press_pos) {
                 let world = self
                     .grid
                     .snap(self.camera.screen_to_world(screen, pos.x, pos.y));
@@ -11809,7 +11927,7 @@ impl App {
             Tool::DrawRect => {
                 if response.dragged()
                     && let (Some(origin), Some(current)) =
-                        (Self::drag_origin(response), response.hover_pos())
+                        (self.drag_press_pos, response.hover_pos())
                 {
                     let anchor = self
                         .grid
