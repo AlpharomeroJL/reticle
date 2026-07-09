@@ -86,6 +86,24 @@ pub struct LayerState {
     presets: Vec<VisibilityPreset>,
 }
 
+/// Whether `name` is the synthesized `L{layer}D{datatype}` placeholder a bare GDS/OASIS
+/// import assigns to a layer with no technology name (`reticle_io` writes
+/// `format!("L{}D{}", layer, datatype)`). A real technology name is a word such as
+/// `met1` or `nwell`, never this shape.
+fn is_placeholder_layer_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix('L') else {
+        return false;
+    };
+    let Some(dpos) = rest.find('D') else {
+        return false;
+    };
+    let (layer, datatype) = (&rest[..dpos], &rest[dpos + 1..]);
+    !layer.is_empty()
+        && !datatype.is_empty()
+        && layer.bytes().all(|b| b.is_ascii_digit())
+        && datatype.bytes().all(|b| b.is_ascii_digit())
+}
+
 impl LayerState {
     /// Builds layer state from a document [`Technology`] table.
     ///
@@ -117,6 +135,19 @@ impl LayerState {
     #[must_use]
     pub fn rows(&self) -> &[LayerRow] {
         &self.rows
+    }
+
+    /// The number of layer rows with a real technology name, i.e. NOT a synthesized
+    /// `L{layer}D{datatype}` placeholder. Zero means the document opened with no named
+    /// technology grafted, which renders every layer as an opaque default fill that
+    /// overpaints to one blob. Exposed to the browser stats seam so a headed guard can
+    /// fail a white-blob example whose layermap was never applied.
+    #[must_use]
+    pub fn named_layer_count(&self) -> usize {
+        self.rows
+            .iter()
+            .filter(|r| !is_placeholder_layer_name(&r.name))
+            .count()
     }
 
     /// Mutable access to all layer rows (for the panel's checkboxes).
@@ -410,6 +441,22 @@ mod tests {
         let mut s = s;
         assert!(s.toggle(LayerId::new(999, 7)).is_none());
         assert!(!s.set_visible(LayerId::new(999, 7), false));
+    }
+
+    #[test]
+    fn named_layer_count_excludes_l_d_placeholders() {
+        // The synthesized "L{layer}D{datatype}" shape a bare import assigns is not a
+        // named layer; a real technology name (a word) is.
+        assert!(is_placeholder_layer_name("L64D5"));
+        assert!(is_placeholder_layer_name("L68D20"));
+        assert!(!is_placeholder_layer_name("met1"));
+        assert!(!is_placeholder_layer_name("nwell"));
+        assert!(!is_placeholder_layer_name("li1"));
+        assert!(!is_placeholder_layer_name("L")); // no D
+        assert!(!is_placeholder_layer_name("LD")); // empty numbers
+        assert!(!is_placeholder_layer_name("L6xD3")); // non-digit
+        // The demo technology has real, named layers, so the count is positive.
+        assert!(state().named_layer_count() > 0);
     }
 
     #[test]

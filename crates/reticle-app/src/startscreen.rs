@@ -132,13 +132,34 @@ impl ExampleChip {
         }
     }
 
-    /// Opens this example through the document-open seam.
+    /// The technology to graft onto this example after import.
     ///
-    /// Runs the exact same hardened path ([`open_document_bytes`]) the file-open
-    /// button and drag-and-drop use, so the gallery has no privileged loading route:
-    /// on success it yields an [`OpenOutcome`] (document, top cell, and any non-fatal
-    /// warnings) the app installs with
-    /// [`App::open_outcome`](crate::app::App::open_outcome).
+    /// A bare GDSII import carries only a synthesized, unnamed layer table
+    /// (`L64D5`, `L68D20`, ...) with default fills, because GDSII has no layer names;
+    /// with no per-layer color or alpha every layer paints an opaque default and they
+    /// overpaint to one solid blob (the reported "white examples"). Both bundled
+    /// examples are SKY130-process designs, so both graft the committed SKY130
+    /// technology, the same table the Inspect-a-cell scenario uses
+    /// (see [`crate::usecases::inspect_document`]): named, per-layer colored, correctly
+    /// alpha'd layers, plus the physical stack the 3D view extrudes.
+    #[must_use]
+    pub fn technology(self) -> reticle_model::Technology {
+        match self {
+            ExampleChip::TinyTapeoutMin | ExampleChip::Sky130Inverter => {
+                crate::usecases::sky130_technology()
+            }
+        }
+    }
+
+    /// Opens this example through the document-open seam, then grafts its technology so
+    /// the layers render named and colored rather than as a single opaque blob.
+    ///
+    /// Import runs the exact same hardened path ([`open_document_bytes`]) the file-open
+    /// button and drag-and-drop use, so the gallery has no privileged loading route; the
+    /// technology graft ([`technology`](Self::technology)) is the one gallery-specific
+    /// step, mirroring [`crate::usecases::inspect_document`]. On success it yields an
+    /// [`OpenOutcome`] (document, top cell, and any non-fatal warnings) the app installs
+    /// with [`App::open_outcome`](crate::app::App::open_outcome).
     ///
     /// # Errors
     ///
@@ -146,7 +167,9 @@ impl ExampleChip {
     /// (which a unit test guards against, so no user can observe it); the app routes
     /// any such error to its notification surface.
     pub fn open(self) -> Result<OpenOutcome, OpenError> {
-        open_document_bytes(self.bytes(), self.format())
+        let mut outcome = open_document_bytes(self.bytes(), self.format())?;
+        outcome.document.set_technology(self.technology());
+        Ok(outcome)
     }
 }
 
@@ -427,6 +450,27 @@ mod tests {
         );
         assert_eq!(ExampleChip::from_e2e_id("nope"), None);
         assert_eq!(ExampleChip::from_e2e_id(""), None);
+    }
+
+    #[test]
+    fn examples_open_with_named_colored_layers() {
+        // Every gallery example must open with its technology grafted, so the layer
+        // table is named and colored. A bare GDS import would synthesize only "L#D#"
+        // placeholders with default fills that overpaint to one solid blob (the reported
+        // "white examples" bug).
+        for chip in ExampleChip::ALL {
+            let outcome = chip.open().expect("example opens");
+            let tech = outcome.document.technology();
+            assert_eq!(tech.name, "sky130", "{chip:?} grafts the SKY130 technology");
+            assert!(
+                tech.layers.iter().any(|l| l.name == "met1"),
+                "{chip:?} names met1 (not the L68D20 placeholder)"
+            );
+            // Named layers carry distinct colors, so they do not overpaint to one blob.
+            let distinct: std::collections::HashSet<u32> =
+                tech.layers.iter().map(|l| l.color_rgba).collect();
+            assert!(distinct.len() >= 2, "{chip:?} has multiple layer colors");
+        }
     }
 
     #[test]

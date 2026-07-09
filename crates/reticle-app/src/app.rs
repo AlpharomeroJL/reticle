@@ -1912,6 +1912,21 @@ impl App {
             &JsValue::from_str("applied_scene_shapes"),
             &JsValue::from_f64(scene_shapes as f64),
         );
+        // Named vs total layer rows. A correctly opened example grafts its technology so
+        // the layers are named and colored; a document opened WITHOUT a technology has
+        // only synthesized "L#D#" placeholders with default opaque fills that overpaint
+        // to one blob (the white-examples bug). named_layers == 0 flags that, so a
+        // headed guard fails a white blob even though it is "not blank".
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("named_layers"),
+            &JsValue::from_f64(self.layer_state.named_layer_count() as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("applied_layers"),
+            &JsValue::from_f64(self.layer_state.rows().len() as f64),
+        );
         // Painting real geometry (the flattened editor scene has shapes, or a streamed
         // archive is painting records) with a live camera.
         let ppd = self.camera.pixels_per_dbu();

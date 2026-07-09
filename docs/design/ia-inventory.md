@@ -149,8 +149,12 @@ demo-observability seam keys and one e2e-only query param:
 bool: the app is painting real geometry with a live camera this frame),
 `__reticle_stats.applied_scene_shapes` (the flattened renderable shape count,
 which counts a hierarchical design's instance-expanded geometry, unlike the
-top-cell-direct `applied_shapes`), and `__reticle_stats.applied_shapes` now also
-published on every editor frame (it was viewer-path only). Two e2e-only params:
+top-cell-direct `applied_shapes`), `__reticle_stats.named_layers` and
+`__reticle_stats.applied_layers` (the count of layer rows with a real technology
+name versus the total, so a headed guard fails an example that opened WITHOUT its
+layermap and rendered every layer as a `L#D#` placeholder overpainting to one
+blob), and `__reticle_stats.applied_shapes` now also published on every editor
+frame (it was viewer-path only). Two e2e-only params:
 `?e2e-autoplay=1` starts the replay theater playing on boot so a headed guard can
 read `hash_check` without clicking the GPU-painted transport (the public
 `?view=replay` landing still waits at Play), and `?e2e-example=<id>` (`tt03` /
