@@ -105,3 +105,4 @@ superseded decision is marked and linked to its replacement.
 | [0097](0097-typography-and-lucide-icon-font.md) | Typography and icons: Inter + JetBrains Mono (OFL) subset via pyftsubset, the Lucide icon font (ISC) with generated glyph constants, default-fonts offset attempt |
 | [0098](0098-style-ratchet-and-bundle-gate.md) | UI style-lint ratchet (grandfathered baseline that only tightens) and the measured bundle-size ledger + 450 KB gz budget gate in xtask |
 | [0099](0099-service-worker-cache-versioning.md) | Service-worker cache versioning (bumped name purges stale) and network-first for stable-named shell assets, cache-first for the immutable hashed bundle |
+| [0100](0100-deep-zoom-precision-not-reproduced.md) | Deep-zoom "starry" not reproduced on shipped near-origin examples; floating-origin fix deferred, zoom-cycle coherence guard added, f32 far-from-origin limit documented |
