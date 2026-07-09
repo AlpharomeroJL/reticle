@@ -291,7 +291,7 @@ pub struct App {
     dragging_guide: Option<crate::snap::Axis>,
     /// The screen position where the current canvas drag began, captured on
     /// `drag_started` (when `interact_pointer_pos` is the press point). Drags that
-    /// commit on release — the rectangle tool and the marquee band — need the drag
+    /// commit on release (the rectangle tool and the marquee band) need the drag
     /// *start*, which egui cannot report at `drag_stopped` (`drag_delta` is per-frame
     /// and zero on the release frame, so reconstructing it from the delta yields the
     /// release point instead). Stashing the press point makes those gestures work.
