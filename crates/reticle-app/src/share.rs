@@ -527,6 +527,25 @@ pub fn parse_e2e_replay_autoplay(query: &str) -> bool {
     false
 }
 
+/// Whether the page URL asks the web build to expose a deliberate runtime-panic trigger
+/// (`?e2e-panic=1`).
+///
+/// When set, the wasm entry installs `window.__reticleTestPanic`, a function that panics,
+/// so the panic-overlay guard can prove a post-boot runtime panic surfaces a readable
+/// `#overlay` (cause + bundle hash + reload link) instead of a silent blank canvas. Inert
+/// and absent for every normal visitor. Pure string logic mirroring [`parse_e2e_edit`].
+#[must_use]
+pub fn parse_e2e_panic(query: &str) -> bool {
+    let query = query.trim_start_matches('?');
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if key == "e2e-panic" {
+            return matches!(value, "1" | "true");
+        }
+    }
+    false
+}
+
 /// Whether the page URL requests embed mode (`?embed=1`, lane 2D, catalog 94):
 /// minimal chrome for an `<iframe>`, hiding every panel and menu and leaving only
 /// the canvas plus a small "open in Reticle" affordance.
@@ -901,6 +920,16 @@ mod tests {
         assert!(!parse_e2e_replay_autoplay(""));
         // Not a partial-key match.
         assert!(!parse_e2e_replay_autoplay("e2eautoplay=1"));
+    }
+
+    #[test]
+    fn parse_e2e_panic_reads_the_flag() {
+        assert!(parse_e2e_panic("e2e-panic=1"));
+        assert!(parse_e2e_panic("?view=editor&e2e-panic=true"));
+        assert!(!parse_e2e_panic("e2e-panic=0"));
+        assert!(!parse_e2e_panic("view=editor"));
+        assert!(!parse_e2e_panic(""));
+        assert!(!parse_e2e_panic("e2epanic=1"));
     }
 
     #[test]

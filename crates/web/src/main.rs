@@ -19,9 +19,23 @@
 fn main() {
     use eframe::wasm_bindgen::JsCast as _;
 
-    console_error_panic_hook::set_once();
+    // Route panics to the console (the rich message + stack `console_error_panic_hook`
+    // gives) AND to the visible `#overlay`, so a runtime panic after boot is a readable
+    // message with the bundle hash and a reload link, not a silently frozen or blank
+    // canvas (catalog 72: no console-only errors, no silent black canvas).
+    install_panic_overlay_hook();
     let web_options = eframe::WebOptions::default();
     let boot = boot_from_url();
+
+    // e2e-only: `?e2e-panic=1` exposes `window.__reticleTestPanic`, so the panic-overlay
+    // guard can trigger a real post-boot runtime panic and assert the overlay appears.
+    // Never installed for a normal visitor.
+    let search = web_sys::window()
+        .and_then(|w| w.location().search().ok())
+        .unwrap_or_default();
+    if reticle_app::share::parse_e2e_panic(&search) {
+        install_test_panic_trigger();
+    }
 
     wasm_bindgen_futures::spawn_local(async move {
         let document = web_sys::window()
@@ -85,6 +99,98 @@ fn set_overlay_error(document: &web_sys::Document, message: &str) {
             "Failed to load Reticle: {message}. Check the console."
         )));
     }
+}
+
+/// Installs a panic hook that reports to BOTH the console and the visible `#overlay`.
+///
+/// [`console_error_panic_hook`] alone routes a wasm panic only to `console.error`, so a
+/// runtime panic AFTER boot leaves a frozen or blank canvas with nothing on screen. This
+/// chains that rich console output with [`show_panic_overlay`], so the failure is a
+/// readable message (cause + bundle hash + a reload link) instead of a silent black
+/// canvas.
+#[cfg(target_arch = "wasm32")]
+fn install_panic_overlay_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        console_error_panic_hook::hook(info);
+        show_panic_overlay(&info.to_string());
+    }));
+}
+
+/// Surfaces a runtime panic in `#overlay`: un-hides the overlay (a successful boot hid
+/// it), writes the cause and the bundle hash into `#status`, and appends a one-time
+/// reload link. Best-effort and defensive throughout: a panic hook must never itself
+/// panic.
+#[cfg(target_arch = "wasm32")]
+fn show_panic_overlay(message: &str) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
+    // Un-hide the overlay: the Ok boot path set `style="display:none"`; clearing the
+    // inline style restores the CSS default (visible).
+    if let Some(overlay) = document.get_element_by_id("overlay") {
+        let _ = overlay.remove_attribute("style");
+    }
+    if let Some(status) = document.get_element_by_id("status") {
+        status.set_class_name("status error");
+        let hash = bundle_hash_from_dom(&document).unwrap_or_else(|| "unknown".to_owned());
+        status.set_text_content(Some(&format!(
+            "Reticle hit an internal error and stopped: {message} (bundle {hash}). \
+             Reload the page to recover; if it repeats, please report it with the console log."
+        )));
+    }
+    // A one-time reload link (the current URL, so it reloads in place).
+    if document.get_element_by_id("panic-reload").is_none()
+        && let Some(overlay) = document.get_element_by_id("overlay")
+        && let Ok(link) = document.create_element("a")
+    {
+        let _ = link.set_attribute("id", "panic-reload");
+        if let Ok(href) = window.location().href() {
+            let _ = link.set_attribute("href", &href);
+        }
+        link.set_text_content(Some("Reload Reticle"));
+        let _ = overlay.append_child(&link);
+    }
+}
+
+/// Extracts the content-hashed bundle id (`web-<hash>`) from the page's module/preload
+/// references, so a panic report names the exact deploy. `None` when no hashed asset
+/// reference is present.
+#[cfg(target_arch = "wasm32")]
+fn bundle_hash_from_dom(document: &web_sys::Document) -> Option<String> {
+    let el = document
+        .query_selector("link[href*='web-'], script[src*='web-']")
+        .ok()??;
+    let url = el
+        .get_attribute("href")
+        .or_else(|| el.get_attribute("src"))?;
+    let pos = url.find("web-")?;
+    let hash: String = url[pos + 4..]
+        .chars()
+        .take_while(|c| c.is_ascii_hexdigit())
+        .collect();
+    (hash.len() >= 8).then_some(hash)
+}
+
+/// e2e-only: exposes `window.__reticleTestPanic`, a function that deliberately panics, so
+/// the panic-overlay guard can prove a post-boot runtime panic surfaces the overlay.
+/// Installed only under `?e2e-panic=1`; never present for a normal visitor.
+#[cfg(target_arch = "wasm32")]
+fn install_test_panic_trigger() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let cb = eframe::wasm_bindgen::closure::Closure::<dyn Fn()>::new(|| {
+        panic!("deliberate e2e panic via window.__reticleTestPanic");
+    });
+    let _ = js_sys::Reflect::set(
+        window.as_ref(),
+        &wasm_bindgen::JsValue::from_str("__reticleTestPanic"),
+        cb.as_ref(),
+    );
+    cb.forget();
 }
 
 /// How the bundle boots, decided from the page URL: a normal start view, or a
