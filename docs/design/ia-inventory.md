@@ -30,10 +30,10 @@ Chords are the shipped defaults (`keymap.rs` `defaults()`); freq is an estimate
 | Select by layer name | Layers panel | none | M |
 | Add demo rectangle | History section button | none | L (debug) |
 | Step back / Step fwd (undo steps) | History section | none | M |
-| Run DRC / Clear; Check as you type; Ask agent to fix | DRC section | none | H |
+| Run DRC / Clear; Check as you type | DRC section | none | H |
 | Snapshot / Diff vs snapshot / Clear; Show diff overlay | Diff section | none | M |
 | Add comment; resolve/select pins | Comments section | none | M |
-| Agent Run / Stop; Replay theater; Replay this run | Agent section | none | M |
+| Agent Run / Stop; Replay theater; Replay this run (preview) | Agent (preview) section | none | M |
 | Share this session; copy link / viewer link / permalink | Share section | none | M |
 | Follow the sharer's view (viewer) | Share section checkbox | none | H (viewer) |
 | Boolean ops (union etc.) | Operations section | none | M |

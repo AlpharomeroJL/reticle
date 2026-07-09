@@ -1,16 +1,17 @@
 # In-app agent UX
 
-The editor's agent panel narrates a real propose-verify-correct run without a model
-or an API key (see [Agent API and harness](agent.md) for how the run itself works).
-On top of that narration the editor adds three affordances that make the agent feel
-like a collaborator inside the tool rather than a batch job: a conversation you can
-steer mid-run, a browser for reopening past runs, and a one-click "ask the agent to
-fix this" from a design-rule violation.
+The editor's agent panel is a preview: it narrates a fixed, scripted
+propose-verify-correct run on a built-in demo cell, with no model and no API key (see
+[Agent API and harness](agent.md) for how a real run works). It illustrates the
+plan/approve/execute agent planned for a later release; it does not read or edit your
+open design or its DRC results. On top of that narration the editor adds two
+affordances that make the preview feel like a collaborator rather than a batch job: a
+conversation you can steer mid-run and a browser for reopening past runs.
 
 Everything here is UI-side. The panel logic lives in
 [`agent_panel`](https://docs.rs/reticle-app) and the history browser in
 `agent_history`, both window-free and unit-tested without an egui context; the `app`
-module owns only the thin drawing glue. All three features build and run on both
+module owns only the thin drawing glue. Both features build and run on both
 native and `wasm32-unknown-unknown`, with the one filesystem-touching seam (scanning
 for past transcripts) guarded behind `cfg` with a clean bundled fallback in the
 browser.
@@ -66,32 +67,12 @@ each by its task id (the base name with the suffix and directory stripped, for e
 path separator), sorts by label, and collapses duplicates. It is unit-tested over a
 synthetic listing with no disk touched.
 
-## Ask the agent to fix a violation
+## Preview status
 
-Selecting a violation in the DRC panel reveals an "Ask agent to fix" button. It
-assembles the violation's region and the rule it broke into a scoped context string
-and launches an agent run seeded with it. The context pins the agent to an objective
-target and a bounded area rather than the whole design:
-
-* the region, as the violation's bounding-box corners in DBU plus its width and
-  height;
-* the rule, by name and kind, the layer (or two layers, for spacing, enclosure, and
-  extension rules), and the measured-versus-required values;
-* the original violation message as trailing context.
-
-The kind is tagged with the same keywords the agent API's `run_drc` reports and
-parses, so a scoped fix names constraints the way the checker does.
-
-### The Wave-3B seam
-
-The MINIMAL context pack and the real *scoped* harness (which would clip the session
-to the violation's region and constrain the agent's edits to it) are Wave 3 Lane 3B.
-What ships here is the UI affordance and the assembled context string that harness
-consumes. Assembling the string
-([`drc_panel::fix_violation_prompt`](https://docs.rs/reticle-app)) and handing it off
-(`App::ask_agent_to_fix`) are separated deliberately: today `ask_agent_to_fix` seeds
-the agent panel's prompt and starts the ordinary narrated run, and a Wave-3B harness
-replaces only that hand-off with a scoped-session launch that reads the same context.
-Everything upstream, the DRC button and the assembled string, stays unchanged. The
-seam is honest about being a seam: the scoped run is not yet clipped to the region;
-it is the same model-free narrated run pointed at the violation's context.
+The agent panel is a preview of a planned capability, not a working agent. It runs a
+fixed scripted propose-verify-correct loop on a built-in demo cell so you can see the
+shape of the interaction (plan, narrated steps, verify results, replayable
+transcript). It does not read or edit your open design, and it does not write into the
+DRC panel or the canvas markers, which track your real layout. A real
+plan/approve/execute agent over the editor's command tools is planned for a later
+release; when it lands, this panel becomes its front end.

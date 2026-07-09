@@ -855,14 +855,13 @@ impl DiffKind {
     }
 }
 
-/// One-click starter prompts for the agent panel (catalog 21). Clicking one seeds
-/// the prompt box so a first-time user has a working example instead of a blank
-/// field.
+/// Example prompts for the agent preview (catalog 21). Clicking one seeds the prompt
+/// box; the preview runs the same fixed scripted demo regardless of the text, so these
+/// describe what the demo shows rather than promising edits to your design.
 const AGENT_SAMPLE_PROMPTS: &[&str] = &[
-    "Fix all DRC violations",
-    "Add a guard ring around the selection",
-    "Fill empty tracks with metal",
-    "Widen nets below the minimum width",
+    "Draw a clean wire",
+    "Show the propose-verify-correct loop",
+    "Demonstrate a width-rule fix",
 ];
 
 /// How long, in seconds, the remote-edit attribution glow (catalog 90) lingers
@@ -5084,7 +5083,7 @@ impl App {
                 self.inspector_section(ui, ctx, "comments", "Comments", Self::comment_panel);
             }
             PanelGroup::Automate => {
-                self.inspector_section(ui, ctx, "agent", "Agent", Self::agent_section);
+                self.inspector_section(ui, ctx, "agent", "Agent (preview)", Self::agent_section);
                 self.inspector_section(ui, ctx, "generate", "Generate", Self::generate_section);
             }
             PanelGroup::Settings => {
@@ -7476,24 +7475,6 @@ impl App {
             // Frame the violation on the next canvas pass.
             self.zoom_to_selected_violation = true;
         }
-
-        // "Ask agent to fix" the selected violation: assemble its region + rule
-        // into a scoped context string and launch a scoped agent session on it.
-        if let Some(i) = self.drc.selected()
-            && let Some(v) = self.drc.violations().get(i)
-        {
-            let can_ask = !self.agent.is_running();
-            if ui
-                .add_enabled(can_ask, egui::Button::new("Ask agent to fix"))
-                .on_hover_text(
-                    "Launch a scoped agent run seeded with this violation's region and rule",
-                )
-                .clicked()
-            {
-                let context = drc_panel::fix_violation_prompt(v);
-                self.ask_agent_to_fix(context);
-            }
-        }
     }
 
     /// Draws the layout-diff panel: snapshot/diff/clear actions, a show/hide
@@ -7827,28 +7808,6 @@ impl App {
         self.status.set("Comment added");
     }
 
-    /// Launches a scoped agent run seeded with the assembled violation `context`.
-    ///
-    /// The context string (region bounding box plus the broken rule; see
-    /// [`drc_panel::fix_violation_prompt`]) becomes the agent panel's prompt and
-    /// the run starts, so today the affordance hands the scoped instruction to the
-    /// same panel plumbing a typed prompt drives.
-    ///
-    /// # Wave-3B seam
-    ///
-    /// The MINIMAL context pack and the real *scoped* harness (which would clip the
-    /// session to `context`'s region and constrain edits to it) are Wave 3 Lane 3B.
-    /// This method is the seam that harness consumes: it centralizes assembling the
-    /// scoped instruction and handing it off. A Wave-3B harness replaces the body's
-    /// `self.agent.start()` with a scoped-session launch that reads the same
-    /// `context`, and everything upstream (the DRC button, the assembled string)
-    /// stays unchanged.
-    fn ask_agent_to_fix(&mut self, context: String) {
-        self.agent.prompt = context;
-        self.agent.start();
-        self.status.set("Agent: scoped fix run started");
-    }
-
     /// Draws the agent panel: prompt box, Run/Stop, live status, and narration.
     ///
     /// The state machine and the narration feed live in [`crate::agent_panel`];
@@ -7857,6 +7816,22 @@ impl App {
     /// runs on wasm too.
     fn agent_section(&mut self, ui: &mut egui::Ui) {
         use crate::agent_panel::RunState;
+
+        // Honesty (v8.1 post-tag): this panel is a scripted demonstration, not a live
+        // agent. It narrates a fixed propose-verify-correct script on a built-in demo
+        // cell and does not read or edit the open design or its DRC. The real
+        // plan/approve/execute agent is planned for a later release. Label it plainly so
+        // the Run control never reads as "fix my layout".
+        ui.colored_label(
+            DARK.warning,
+            format!(
+                "{} Preview: scripted demo on a built-in cell; it does not read or edit your design.",
+                crate::theme::icons::TRIANGLE_ALERT
+            ),
+        )
+        .on_hover_text(
+            "A plan/approve/execute agent is planned for a later release. This panel narrates a fixed scripted run for illustration; it never touches your open document or its DRC results.",
+        );
 
         ui.horizontal(|ui| {
             ui.label("Prompt:");
@@ -8118,13 +8093,16 @@ impl App {
         }
     }
 
-    /// A verify step crossed by the *agent panel's own run*: install its overlay
-    /// (as [`apply_agent_drc_update`](Self::apply_agent_drc_update)) and also note
-    /// the result as an agent turn in the conversation, so the dialogue reflects
-    /// the propose-verify-correct loop. The theater's own ticks use the plain
-    /// overlay update, so replaying a transcript there does not write into this
-    /// panel's conversation.
-    fn apply_agent_run_verify(&mut self, violations: Vec<reticle_model::Violation>) {
+    /// A verify step crossed by the *agent preview's own run*: note the result as an
+    /// agent turn in the conversation, so the dialogue reflects the scripted
+    /// propose-verify-correct loop.
+    ///
+    /// The preview runs a fixed script on a built-in demo cell (see
+    /// [`crate::agent_panel`]); it deliberately does NOT write the result into the
+    /// document's DRC panel or overlay. Those track the user's real design, and a
+    /// scripted demo must never make them read as verified. (Giving a replay its own
+    /// DRC view, separate from the document's, is the v8.2 theater redesign.)
+    fn apply_agent_run_verify(&mut self, violations: &[reticle_model::Violation]) {
         let n = violations.len();
         if n == 0 {
             self.agent.note_agent("verified: DRC clean");
@@ -8132,7 +8110,6 @@ impl App {
             self.agent
                 .note_agent(format!("verified: {n} violation(s) remaining"));
         }
-        self.apply_agent_drc_update(violations);
     }
 
     /// Applies a theater seek/step result to the DRC overlay: install the list
@@ -12490,13 +12467,12 @@ impl eframe::App for App {
         self.frame_meter
             .record(std::time::Duration::from_secs_f32(dt));
 
-        // Advance the agent run by this frame's dt so narration and the agent
-        // cursor animate while the panel is running. Each verify step the run
-        // crosses hands back the violation list parsed from its `run_drc`
-        // response, and installing it in the DRC results updates the panel list
-        // and the canvas markers live, mid-run.
+        // Advance the agent preview run by this frame's dt so its narration and
+        // cursor animate while the panel is running. Each verify step is narrated
+        // into the panel's conversation; the preview runs on a built-in demo cell, so
+        // it does not touch the document's DRC panel or the canvas markers.
         if let Some(update) = self.agent.tick(dt) {
-            self.apply_agent_run_verify(update);
+            self.apply_agent_run_verify(&update);
         }
 
         // Advance replay-theater playback the same way; a playing transcript
@@ -13189,53 +13165,45 @@ pub(crate) mod png {
 mod tests {
     use super::*;
 
-    /// An agent verify step's parsed violations must land in the DRC panel (and
-    /// therefore the canvas markers), mid-run, exactly as a local run would.
+    /// The agent preview's run narrates its verify steps into the conversation but
+    /// must NOT write into the document's DRC panel: that panel tracks the user's real
+    /// design, and a scripted demo on a built-in cell must not make it read as verified.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn agent_verify_updates_the_drc_overlay_live() {
+    fn agent_preview_run_does_not_touch_the_real_drc_panel() {
         let mut app = App::new();
         assert!(!app.drc.has_run());
         app.agent.prompt = "overlay wiring".to_owned();
         app.agent.start();
-        // Drain the run one generous tick at a time, applying each verify
-        // update the way the frame loop does.
+        // Drain the run the way the frame loop does: every verify update goes through
+        // apply_agent_run_verify, which narrates and never touches the DRC overlay.
         let mut updates = 0;
         for _ in 0..1_000 {
             if let Some(update) = app.agent.tick(10.0) {
                 updates += 1;
-                app.apply_agent_drc_update(update);
+                app.apply_agent_run_verify(&update);
             }
             if !app.agent.is_running() {
                 break;
             }
         }
         assert!(updates >= 1, "at least one verify step fired");
-        // The script's final verify is clean, so the overlay ends empty but run.
-        assert!(app.drc.has_run());
+        // The real DRC panel is untouched: no run recorded, nothing overwritten, and
+        // the status line is not the misleading "Agent verify: DRC clean".
+        assert!(
+            !app.drc.has_run(),
+            "the demo must not mark the real DRC as run"
+        );
         assert!(app.drc.is_empty());
-        assert_eq!(app.status.text, "Agent verify: DRC clean");
-        // A mid-run flagged list replaces the panel content the same way.
-        let (transcript, _) = crate::agent_panel::scripted_run("flagged");
-        let flagged = transcript
-            .records
-            .iter()
-            .find_map(|r| {
-                if let reticle_agent_api::Outcome::Ok(reticle_agent_api::AgentResponse::Data {
-                    value,
-                    ..
-                }) = &r.outcome
-                {
-                    let v = crate::agent_panel::violations_from_json(value);
-                    if v.is_empty() { None } else { Some(v) }
-                } else {
-                    None
-                }
-            })
-            .expect("the script's first verify flags the thin wire");
-        app.apply_agent_drc_update(flagged);
-        assert!(!app.drc.is_empty());
-        assert!(app.status.text.contains("violation(s)"));
+        assert_ne!(app.status.text, "Agent verify: DRC clean");
+        // The verify result is narrated as an agent turn in the conversation instead.
+        assert!(
+            app.agent
+                .conversation()
+                .iter()
+                .any(|entry| entry.text.contains("DRC clean")),
+            "the clean verify is narrated in the conversation, not the DRC panel"
+        );
     }
 
     /// The replay theater re-executes a transcript against a live session, and
@@ -13267,39 +13235,6 @@ mod tests {
         app.apply_replay_overlay(update);
         assert!(!app.drc.has_run());
         assert_eq!(app.replay.progress(), (0, total));
-    }
-
-    /// "Ask agent to fix" a selected violation seeds the agent panel with the
-    /// assembled region + rule context and starts a run on it (the Wave-3B seam).
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn ask_agent_to_fix_seeds_and_starts_a_scoped_run() {
-        let mut app = App::new();
-        // Install a violation the way an agent verify or a local DRC run would.
-        let v = reticle_model::Violation {
-            rule: "min_width_met1".to_owned(),
-            kind: reticle_model::RuleKind::Width,
-            layer: reticle_geometry::LayerId::new(4, 0),
-            other_layer: None,
-            measured: 60,
-            required: 100,
-            location: reticle_geometry::Rect::new(
-                reticle_geometry::Point::new(23_000, 0),
-                reticle_geometry::Point::new(23_060, 2_000),
-            ),
-            message: "feature 60 < min width 100".to_owned(),
-        };
-        app.drc.set_violations(vec![v.clone()]);
-        app.drc.select(0).expect("index 0 exists");
-
-        let context = crate::drc_panel::fix_violation_prompt(&v);
-        app.ask_agent_to_fix(context.clone());
-        // The prompt is the scoped context and a run is now active.
-        assert_eq!(app.agent.prompt, context);
-        assert!(app.agent.is_running());
-        assert!(app.agent.prompt.contains("(23000, 0)-(23060, 2000)"));
-        assert!(app.agent.prompt.contains("min_width_met1"));
-        assert_eq!(app.status.text, "Agent: scoped fix run started");
     }
 
     /// Loading a history entry through the store drives the replay theater: on
