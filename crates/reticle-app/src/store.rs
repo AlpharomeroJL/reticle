@@ -211,4 +211,36 @@ mod tests {
             "scripted transcript must replay to its recorded final hash"
         );
     }
+
+    // The COMMITTED bundled transcript, parsed the same way the wasm store serves
+    // it (`parse_jsonl(BUNDLED_TRANSCRIPT)` via `default_transcript`), must replay
+    // to its own recorded final hash. Unlike the scripted test above, this exercises
+    // the exact bytes the web build ships and the exact parse path the browser runs,
+    // so it guards two regressions at once: a stale asset (the file's recorded hash
+    // no longer matching a replay) and a document_hash that is not platform stable.
+    // The theater on wasm reported "hash: MISMATCH" because `document_hash` fed
+    // pointer-width lengths (8 bytes native, 4 bytes wasm) to the hasher; the
+    // FixedWidth adapter in reticle-model fixes that, and this pins the contract so
+    // it cannot silently return.
+    #[test]
+    fn committed_bundled_transcript_replays_to_its_recorded_hash() {
+        // The exact committed asset the wasm store serves. `BUNDLED_TRANSCRIPT` is
+        // compiled only on wasm, so this reads the same file to run the guard in the
+        // ordinary native test suite, through the same `parse_jsonl` the store uses.
+        const BUNDLED: &str = include_str!("../assets/theater-demo.transcript.jsonl");
+        let (records, expected) =
+            crate::replay::parse_jsonl(BUNDLED).expect("the committed bundled transcript parses");
+        let expected = expected.expect("the bundled transcript carries a final hash");
+
+        let mut session = reticle_agent_api::Session::new();
+        for record in &records {
+            let _ = session.apply(record.command.clone());
+        }
+        let replayed = document_hash(session.document());
+        assert_eq!(
+            replayed, expected,
+            "the committed bundled transcript (assets/theater-demo.transcript.jsonl, \
+             the exact bytes the wasm store serves) must replay to its recorded final hash"
+        );
+    }
 }
