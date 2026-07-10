@@ -70,7 +70,7 @@ fn relay_ws_base(relay: &str) -> String {
 /// A small, self-contained copy of `crate::share::room_id`'s rule (lowercase
 /// ASCII, keep `[a-z0-9_-]`, collapse everything else to a single `-`, fall back
 /// to `"layout"` when nothing survives), kept local for the reason
-/// [`relay_ws_base`] documents. Idempotent, exactly like `share::room_id`.
+/// `relay_ws_base` documents. Idempotent, exactly like `share::room_id`.
 #[must_use]
 pub fn room_id(name: &str) -> String {
     let mut id = String::with_capacity(name.len());
