@@ -51,6 +51,9 @@
 //!   remote-URL loading, the IndexedDB-persisted recent-files model, the big-file
 //!   size-band decision and its measured ceiling, and the progressive-load progress
 //!   state machine. Pure logic is unit-tested; the fetch/IndexedDB glue is wasm-only.
+//! * [`dxf_dialog`], the DXF layer-map dialog: DXF layer names carry no GDS
+//!   `(layer, datatype)` number, so this remaps the reader's first-seen numbering
+//!   to a user-confirmed one across a whole document.
 //! * [`productivity`], clipboard/duplicate/array/move-delta/via-stack editing logic
 //!   behind the productivity side panel, every edit undo-integrated.
 //! * [`inspector`], the read-only properties summary of the selection.
@@ -100,6 +103,7 @@ pub mod diff_overlay;
 pub mod dochost;
 pub mod draw;
 pub mod drc_panel;
+pub mod dxf_dialog;
 pub mod focus;
 pub mod fps;
 pub mod generate_panel;
