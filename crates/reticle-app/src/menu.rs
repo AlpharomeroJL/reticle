@@ -26,6 +26,17 @@
 //! injected at render time and are the documented exceptions to "every menu item is
 //! a registry id"; the parity test covers the registry-derived tree only. (Take the
 //! tour is a registry command now, `help.tour`, so it renders from the tree.)
+//!
+//! `File > Import` (CIF, DXF, conformant OASIS) is reserved, not live: its three
+//! ids (`file.import_cif`, `file.import_dxf`, `file.import_oasis`) sit in
+//! `commands::RESERVED_CAMPAIGN_IDS` with `menu_path: Some(&["File", "Import"])`
+//! (ADR 0106), so [`build_menus`] does not render them yet. No change is needed
+//! here to activate them later: `insert_into` already walks an arbitrary-depth
+//! path, so once a future step moves the ids into `REGISTRY` with a real `run`
+//! target, `File > Import > ...` renders from the same mechanism `Help >
+//! Developer` exercises today (`developer_actions_live_under_help_developer`).
+//! The importers themselves already open through [`crate::open::open_document_bytes`]
+//! (see `crate::open` and `crate::dxf_dialog`).
 
 use crate::commands::{self, CommandId, Scope};
 use crate::keymap::Keymap;
@@ -456,5 +467,42 @@ mod tests {
         assert_eq!(plan_overflow(&widths, 45.0), 0);
         // Wide enough for three but not the fourth: still folds (reserve applies).
         assert_eq!(plan_overflow(&widths, 119.0), 2);
+    }
+
+    #[test]
+    fn insert_into_supports_a_two_level_import_path_like_reserved_file_import() {
+        // `File > Import > ...` (ADR 0106's reserved file.import_cif/dxf/oasis
+        // ids) is the same shape of two-level path `Help > Developer` already
+        // proves works end to end (`developer_actions_live_under_help_developer`);
+        // this exercises the path-walker (`insert_into`) directly against that
+        // exact shape so activating the reserved ids needs no change to this
+        // function.
+        let mut nodes: Vec<MenuNode> = Vec::new();
+        insert_into(
+            &mut nodes,
+            &["Import"],
+            MenuNode::Item {
+                id: CommandId("file.import_cif"),
+                label: "Import CIF...",
+                chord: None,
+            },
+        );
+        insert_into(
+            &mut nodes,
+            &["Import"],
+            MenuNode::Item {
+                id: CommandId("file.import_dxf"),
+                label: "Import DXF...",
+                chord: None,
+            },
+        );
+        assert_eq!(nodes.len(), 1, "one Import submenu, not two");
+        match &nodes[0] {
+            MenuNode::Sub { label, children } => {
+                assert_eq!(*label, "Import");
+                assert_eq!(children.len(), 2, "both leaves landed under it");
+            }
+            item @ MenuNode::Item { .. } => panic!("expected a submenu, got {item:?}"),
+        }
     }
 }

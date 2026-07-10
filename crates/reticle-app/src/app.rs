@@ -2071,6 +2071,22 @@ impl App {
         }
     }
 
+    // --- lane import-wiring: import open path ---
+    /// Opens DXF bytes and applies a layer remap before installing the result;
+    /// see [`crate::dxf_dialog::DxfLayerMap`]. CIF, DXF, and OASIS (`OasisStd`)
+    /// already open via the existing picker and drop paths with no remap.
+    pub fn open_dxf_with_layer_map(
+        &mut self,
+        bytes: &[u8],
+        map: &crate::dxf_dialog::DxfLayerMap,
+    ) -> Result<(), crate::open::OpenError> {
+        let mut outcome = crate::open::open_document_bytes(bytes, crate::open::DocFormat::Dxf)?;
+        map.apply(&mut outcome.document);
+        self.open_outcome(outcome);
+        Ok(())
+    }
+    // --- end lane import-wiring ---
+
     /// Opens one of the bundled [`ExampleChip`](crate::startscreen::ExampleChip)
     /// gallery designs, routing any failure to the error surface.
     ///

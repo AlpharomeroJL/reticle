@@ -176,9 +176,10 @@ impl LoadPlan {
 ///
 /// A thin, intention-revealing wrapper over [`DocFormat::from_extension`] used by the
 /// drop handler: egui hands a dropped file its `name`, and this decides whether the
-/// bytes should be routed to the GDS or OASIS importer, or the drop ignored with a
-/// "that is not a layout file" note. Kept here (rather than inline in `app.rs`) so the
-/// accept/reject decision is unit-tested next to the rest of the open logic.
+/// bytes should be routed to the GDS, OASIS, CIF, or DXF importer, or the drop
+/// ignored with a "that is not a layout file" note. Kept here (rather than inline in
+/// `app.rs`) so the accept/reject decision is unit-tested next to the rest of the
+/// open logic.
 #[must_use]
 pub fn classify_drop(name: &str) -> Option<DocFormat> {
     DocFormat::from_extension(name)
@@ -719,7 +720,7 @@ pub fn start_web_open(inbox: &WebOpenInbox, repaint: eframe::egui::Context) {
     };
     let Some(format) = DocFormat::from_extension(&url) else {
         inbox.post(WebOpenEvent::Failed(format!(
-            "The ?gds= link does not name a .gds or .oas file: {url}"
+            "The ?gds= link does not name a .gds, .oas, .cif, or .dxf file: {url}"
         )));
         repaint.request_repaint();
         return;
@@ -959,6 +960,48 @@ mod tests {
         assert_eq!(classify_drop("layout.oasis"), Some(DocFormat::Oasis));
         assert_eq!(classify_drop("notes.txt"), None);
         assert_eq!(classify_drop("noextension"), None);
+    }
+
+    #[test]
+    fn classify_drop_accepts_cif_and_dxf() {
+        // Both the picker (`open_named_bytes`) and the drop handler
+        // (`handle_dropped_files`) in `app.rs` classify a file through this
+        // function before opening it, so accepting these extensions here is what
+        // makes CIF and DXF openable via both surfaces with no further app.rs
+        // change: the plan of record for this lane (see RESULT.md).
+        assert_eq!(classify_drop("part.cif"), Some(DocFormat::Cif));
+        assert_eq!(classify_drop("PART.CIF"), Some(DocFormat::Cif));
+        assert_eq!(classify_drop("drawing.dxf"), Some(DocFormat::Dxf));
+        assert_eq!(classify_drop("DRAWING.DXF"), Some(DocFormat::Dxf));
+    }
+
+    #[test]
+    fn cif_and_dxf_open_through_the_exact_classify_then_plan_then_seam_chain() {
+        // The chain both the file picker (`open_named_bytes`) and the drop
+        // handler (`handle_dropped_files`) run, in order: classify the name,
+        // plan by size, open through the seam. A small valid fixture of each
+        // format proves both surfaces work end to end, not just the name check.
+        let cif = b"L M1;\nB 100 100 0 0;\nE;\n".to_vec();
+        let format = classify_drop("part.cif").expect("a .cif name classifies");
+        assert_eq!(format, DocFormat::Cif);
+        assert_eq!(LoadPlan::for_size(cif.len() as u64), LoadPlan::InMemory);
+        let outcome =
+            crate::open::open_document_bytes(&cif, format).expect("the fixture opens cleanly");
+        assert_eq!(outcome.top_cell, "TOP");
+
+        let dxf = concat!(
+            "0\nSECTION\n2\nENTITIES\n",
+            "0\nLINE\n8\nL1\n10\n0\n20\n0\n11\n100\n21\n100\n",
+            "0\nENDSEC\n0\nEOF\n",
+        )
+        .as_bytes()
+        .to_vec();
+        let format = classify_drop("part.dxf").expect("a .dxf name classifies");
+        assert_eq!(format, DocFormat::Dxf);
+        assert_eq!(LoadPlan::for_size(dxf.len() as u64), LoadPlan::InMemory);
+        let outcome =
+            crate::open::open_document_bytes(&dxf, format).expect("the fixture opens cleanly");
+        assert_eq!(outcome.top_cell, "TOP");
     }
 
     #[test]
