@@ -59,6 +59,9 @@
 //! * [`tour`], the pure, egui-free first-run tour state machine (ordered steps,
 //!   next/skip/finish, first-run-once, and the optional Wave 2 chapter).
 //! * [`share`], the share-this-session relay room-link format.
+//! * [`snapshot`], immutable snapshot permalinks: a room's update log frozen at a
+//!   revision and replayed read-only, so a link opened later always shows the same
+//!   geometry regardless of later live edits.
 //! * [`viewports`], the multi-pane split layout, hit-testing, and camera swaps.
 //! * [`view3d`], the extruded 3D layer-stack window (orbit camera + wgpu glue).
 //! * [`xsection`], cut-line cross-sections (interval math + elevation panel).
@@ -132,6 +135,7 @@ pub mod session;
 pub mod settings;
 pub mod share;
 pub mod snap;
+pub mod snapshot;
 pub mod startscreen;
 pub mod store;
 pub mod streamed;

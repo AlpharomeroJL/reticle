@@ -41,6 +41,15 @@
 //! the app-side rule that a viewer simply never publishes; both together make a
 //! shared session safe to hand to an untrusted viewer.
 //!
+//! # Immutable snapshots
+//!
+//! A room's update log (below) is append-only, which is already exactly what an
+//! immutable, shareable permalink needs: `GET /snapshot/{room}` serves the current
+//! revision and `GET /snapshot/{room}/at/{revision}` replays a frozen prefix of the
+//! log, so a link opened later always reproduces the same geometry, no matter how
+//! much further the live room has since moved on. See the crate's internal
+//! `snapshot` module for the design.
+//!
 //! # Example
 //!
 //! ```no_run
@@ -53,6 +62,8 @@
 //! # }
 //! ```
 
+mod snapshot;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -63,7 +74,7 @@ use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::response::Response;
-use axum::routing::any;
+use axum::routing::{any, get};
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio::sync::broadcast;
@@ -281,6 +292,11 @@ impl RelayState {
     pub fn router(self) -> Router {
         Router::new()
             .route("/ws/{room}", any(ws_handler))
+            .route("/snapshot/{room}", get(snapshot::revision_handler))
+            .route(
+                "/snapshot/{room}/at/{revision}",
+                any(snapshot::snapshot_ws_handler),
+            )
             .with_state(self)
     }
 
