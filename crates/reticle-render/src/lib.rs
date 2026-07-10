@@ -30,6 +30,9 @@ mod drc_heatmap;
 mod geometry;
 mod gpu_hierarchy;
 mod indirect;
+// --- lane export3d: mesh export ---
+mod mesh_export;
+// --- end lane export3d ---
 mod pages;
 mod palette;
 mod pipeline3d;
@@ -45,6 +48,9 @@ pub use drc_heatmap::{DrcHeatmap, DrcHeatmapOverlay, DrcOutput, DrcRules};
 pub use geometry::{MeshVertex, RectInstance, SceneGeometry};
 pub use gpu_hierarchy::{ArrayPlacement, GpuHierarchy, cpu_expand_ops};
 pub use indirect::{IndirectRects, MultiDraw, upload_instances};
+// --- lane export3d: mesh export ---
+pub use mesh_export::{to_gltf_binary, to_stl_binary};
+// --- end lane export3d ---
 pub use pages::{Allocation, BufferPages, DEFAULT_PAGE_SIZE, PageAllocator};
 pub use palette::{Palette, Rgba};
 pub use pipeline3d::{
