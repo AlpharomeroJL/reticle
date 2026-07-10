@@ -45,6 +45,7 @@ pub mod device;
 mod intent;
 mod intent_check;
 mod netlist;
+pub mod query;
 mod rules;
 mod union_find;
 
@@ -59,6 +60,9 @@ pub use device::{
 pub use intent::{ForbiddenPair, IntentNet, IntentReport, IntentSpec, Open, Short, Terminal};
 pub use intent_check::{check_intent, sky130_connection_rules, terminal};
 pub use netlist::{Net, NetLabel, Netlist};
+pub use query::{
+    NetAtPoint, NetExtent, NetRef, OpenRecord, RectRecord, ShortRecord, ShortsOpensReport,
+};
 pub use rules::{ConnectionRule, ConnectionRules};
 pub use union_find::DisjointSet;
 

@@ -4326,6 +4326,7 @@ dependencies = [
  "reticle-index",
  "reticle-model",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4364,6 +4365,8 @@ dependencies = [
  "reticle-geometry",
  "rkyv",
  "rstar",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -4424,6 +4427,10 @@ dependencies = [
 [[package]]
 name = "reticle-plugin"
 version = "8.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "reticle-proto"
@@ -4507,6 +4514,10 @@ dependencies = [
 [[package]]
 name = "reticle-sim"
 version = "8.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "reticle-sync"

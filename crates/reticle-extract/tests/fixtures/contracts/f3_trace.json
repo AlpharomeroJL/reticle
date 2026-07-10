@@ -1,0 +1,25 @@
+{
+  "net_at_point": {
+    "revision": 7,
+    "net": { "name": "VDD", "shape_indices": [0, 3, 5] }
+  },
+  "net_extent": {
+    "revision": 7,
+    "net": "VDD",
+    "bbox": { "min_x": 0, "min_y": 0, "max_x": 12000, "max_y": 8000 },
+    "shape_count": 3
+  },
+  "report": {
+    "revision": 7,
+    "shorts": [
+      {
+        "net_a": "VDD",
+        "net_b": "GND",
+        "at": { "min_x": 4000, "min_y": 3000, "max_x": 4200, "max_y": 3200 }
+      }
+    ],
+    "opens": [
+      { "net": "CLK", "pieces": 2 }
+    ]
+  }
+}

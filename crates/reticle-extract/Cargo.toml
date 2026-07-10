@@ -21,4 +21,6 @@ serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 proptest = "1.11.0"
+serde_json = { workspace = true }
 # Wave 2 wires `proptest` against a union-find oracle.
+# serde_json backs the F3 trace-query contract cross-test (query.rs / ADR 0103).
