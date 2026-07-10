@@ -72,6 +72,9 @@
 //! * [`startscreen`], the Start-screen model: the example-chip gallery of
 //!   redistribution-cleared designs (compiled in, opened through the seam) and the
 //!   recent-files display shape.
+//! * [`gallery`], the newer F1-manifest-driven die library (Phase 1): renders one
+//!   card per manifest entry generically, plus the `?archive=`/`{cell,view,layers}`
+//!   deep-link builders.
 //! * [`notify`], the app-wide notification (toast) queue: the single human-readable
 //!   surface every failure path reports through (pure, severity-tagged, bounded).
 //! * [`app`], the [`eframe::App`] implementation that draws it all.
@@ -102,6 +105,7 @@ pub mod draw;
 pub mod drc_panel;
 pub mod focus;
 pub mod fps;
+pub mod gallery;
 pub mod generate_panel;
 pub mod grid;
 pub mod help;
