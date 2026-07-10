@@ -1,0 +1,58 @@
+name: 'Reticle layout diff'
+description: >-
+  Builds reticle-cli from source and runs `reticle diff` on two layout files
+  (GDSII or the in-house OASIS subset). The step fails when the layouts differ,
+  so a workflow can use it as a PR gate against unintended layout changes.
+author: 'Reticle'
+
+inputs:
+  before:
+    description: >-
+      Path to the baseline layout file, relative to the calling workflow's
+      checkout ($GITHUB_WORKSPACE). A `.gds`/`.gdsii` extension is read as
+      GDSII; any other extension is read as the OASIS subset.
+    required: true
+  after:
+    description: 'Path to the updated layout file, compared against `before`.'
+    required: true
+  reticle-ref:
+    description: >-
+      Git ref of AlpharomeroJL/reticle to build the `reticle` CLI from (a tag,
+      branch, or commit SHA).
+    required: false
+    default: 'main'
+
+runs:
+  using: 'composite'
+  steps:
+    # The CLI has no published binary release, so this action always builds it
+    # from source. See README.md for the honest cost of that (a Rust compile,
+    # not a download) and how to cache it.
+    - name: Checkout reticle
+      uses: actions/checkout@v4
+      with:
+        repository: AlpharomeroJL/reticle
+        ref: ${{ inputs.reticle-ref }}
+        path: _reticle-diff-action-src
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache reticle-cli build
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: '_reticle-diff-action-src -> target'
+        prefix-key: 'reticle-diff-action'
+
+    # `cargo run` resolves the right binary name for the runner's OS
+    # (`reticle` on Linux/macOS, `reticle.exe` on Windows), builds it if the
+    # cache above did not already, then forwards its exit code: 0 when
+    # `before` and `after` are identical, non-zero when they differ. That
+    # forwarded exit code is this step's, and this step's is the job's, which
+    # is the whole contract this action exists to provide. See README.md.
+    - name: Run reticle diff
+      shell: bash
+      working-directory: _reticle-diff-action-src
+      run: |
+        cargo run --release --quiet -p reticle-cli --bin reticle -- \
+          diff "${{ github.workspace }}/${{ inputs.before }}" "${{ github.workspace }}/${{ inputs.after }}"

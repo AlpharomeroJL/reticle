@@ -26,6 +26,7 @@ reticle-drc = { workspace = true }
 reticle-route = { workspace = true }
 reticle-extract = { workspace = true }
 reticle-render = { workspace = true }
+reticle-diff = { workspace = true }
 clap = { version = "4.6.1", features = ["derive"] }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 
