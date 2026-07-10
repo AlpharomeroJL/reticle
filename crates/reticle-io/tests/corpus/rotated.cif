@@ -1,0 +1,7 @@
+(Reticle CIF fixture: top-level-only content, no DS/DF at all, so everything
+ lands in the synthetic TOP cell. A plain polygon plus a box rotated 90
+ degrees via its direction vector, exercising the w/h swap on rotation.)
+L MET1;
+P 0 0 100 0 100 100 0 100;
+B 40 20 200 200 0 1;
+E

@@ -1,0 +1,12 @@
+(Reticle CIF fixture: a leaf cell named via a 9 statement, holding a box and
+ a wire, called twice from the implicit top-level content with different
+ transforms. Exercises DS/DF, 9, L, B, W, C with T and M transforms, and E.)
+DS 1 1 1;
+9 leaf;
+L M1;
+B 100 200 50 100;
+W 10 0 0 0 300;
+DF;
+C 1 T 1000 2000;
+C 1 T 3000 4000 M Y;
+E
