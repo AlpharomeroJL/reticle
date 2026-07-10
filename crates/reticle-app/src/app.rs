@@ -13196,6 +13196,19 @@ pub(crate) mod png {
     }
 }
 
+// --- lane snapshots: snapshot viewer ---
+impl App {
+    /// Recognizes a snapshot permalink in a page query string
+    /// ([`crate::snapshot::parse_snapshot_query`]), so a boot path can tell a
+    /// `?view=snapshot` link apart from a live `?view=viewer` link. Pure; owns no
+    /// `App` state (see `crate::snapshot` for the read-only mirror type).
+    #[must_use]
+    pub fn snapshot_permalink_target(query: &str) -> Option<crate::snapshot::SnapshotTarget> {
+        crate::snapshot::parse_snapshot_query(query)
+    }
+}
+// --- end lane snapshots ---
+
 #[cfg(test)]
 mod tests {
     use super::*;
