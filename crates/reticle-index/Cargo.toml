@@ -18,6 +18,9 @@ reticle-geometry = { workspace = true }
 memmap2 = "0.9.11"
 rkyv = "0.8.16"
 rstar = "0.13.0"
+# serde backs the JSON gallery manifest (F1): a git-committed, human-readable metadata
+# file, distinct from the rkyv zero-copy tile archive. See gallery_manifest.rs / ADR 0101.
+serde = { workspace = true, features = ["derive"] }
 # Wave 1 wires `rstar` (bulk-loaded R-tree) and `rkyv` (zero-copy streaming).
 # `memmap2` backs the out-of-core `StreamingIndex`: it maps a tiled archive so a
 # viewport query faults in only the pages it touches.
@@ -25,6 +28,7 @@ rstar = "0.13.0"
 [dev-dependencies]
 criterion = "0.8.2"
 proptest = "1.11.0"
+serde_json = { workspace = true }
 # Wave 1 wires `proptest` (vs the linear oracle here) and `criterion`.
 # Wave 2 (lane 2B) uses `pollster` as a runtime-light executor to drive the async
 # `TileSource` trait in the native streamed-query proptest, so `reticle-index` gains no

@@ -22,6 +22,7 @@
 
 pub mod archive;
 pub mod archive_build;
+pub mod gallery_manifest;
 mod grid;
 mod lod;
 mod rtree;
