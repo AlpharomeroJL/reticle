@@ -999,6 +999,260 @@ pub fn rebindable_id(s: &str) -> Option<CommandId> {
         .map(|spec| spec.id)
 }
 
+// --- campaign f6: reserved command ids ---------------------------------------
+//
+// Every user-reachable command a v8.2 campaign phase will add is reserved here
+// now (the F6 contract), so no phase invents an id and every planned action has
+// one agreed name, menu location, and (later) chord. These are NOT registry
+// commands: they carry no `run` target and never render, so the menu-parity and
+// keymap tests are untouched. When a lane ships one it MOVES the id into
+// `REGISTRY` with a real `run` and deletes the reserved row; the
+// `reserved_campaign_ids_*` test enforces that reserved and live ids stay
+// disjoint. See ADR 0106.
+
+/// A reserved-but-not-yet-implemented command: `(id, label, owner lane, menu
+/// path, chord)`. The id is dotted lowercase; `menu_path` is `None` for a
+/// palette-only command; `chord` is `None` until the owning lane binds one
+/// (assigned at implementation so it cannot clash with a live chord).
+pub type ReservedId = (
+    &'static str,
+    &'static str,
+    &'static str,
+    Option<&'static [&'static str]>,
+    Option<&'static str>,
+);
+
+/// The reserved campaign command ids across all phases (the F6 contract; ADR 0106).
+static RESERVED_CAMPAIGN_IDS: &[ReservedId] = &[
+    // Phase 1: Open Silicon, Review, Formats.
+    (
+        "file.import_oasis",
+        "Import OASIS...",
+        "import-wiring",
+        Some(&["File", "Import"]),
+        None,
+    ),
+    (
+        "file.import_cif",
+        "Import CIF...",
+        "import-wiring",
+        Some(&["File", "Import"]),
+        None,
+    ),
+    (
+        "file.import_dxf",
+        "Import DXF...",
+        "import-wiring",
+        Some(&["File", "Import"]),
+        None,
+    ),
+    (
+        "file.export_stl",
+        "Export STL...",
+        "export3d",
+        Some(&["File", "Export"]),
+        None,
+    ),
+    (
+        "file.export_gltf",
+        "Export glTF...",
+        "export3d",
+        Some(&["File", "Export"]),
+        None,
+    ),
+    (
+        "gallery.open",
+        "Open library gallery",
+        "gallery",
+        Some(&["File"]),
+        None,
+    ),
+    (
+        "gallery.open_die",
+        "Open die from gallery",
+        "gallery",
+        None,
+        None,
+    ),
+    (
+        "review.mint_link",
+        "Create review link...",
+        "review",
+        Some(&["Share"]),
+        None,
+    ),
+    ("review.next_change", "Next change", "review", None, None),
+    (
+        "review.prev_change",
+        "Previous change",
+        "review",
+        None,
+        None,
+    ),
+    ("review.approve", "Approve review", "review", None, None),
+    (
+        "review.request_changes",
+        "Request changes",
+        "review",
+        None,
+        None,
+    ),
+    ("review.comment", "Add review comment", "review", None, None),
+    (
+        "snapshot.create",
+        "Create snapshot...",
+        "snapshots",
+        Some(&["Share"]),
+        None,
+    ),
+    ("snapshot.open", "Open snapshot", "snapshots", None, None),
+    // Phase 2: Agent + Full-Custom.
+    ("agent.plan", "Plan agent run", "agent-panel", None, None),
+    ("agent.approve", "Approve plan", "agent-panel", None, None),
+    (
+        "agent.approve_step",
+        "Approve step",
+        "agent-panel",
+        None,
+        None,
+    ),
+    ("agent.stop", "Stop agent", "agent-panel", None, None),
+    (
+        "agent.replay",
+        "Replay agent run",
+        "agent-panel",
+        None,
+        None,
+    ),
+    (
+        "nl_edit.submit",
+        "Run natural-language edit",
+        "nl-edit",
+        None,
+        None,
+    ),
+    (
+        "pcell.edit_params",
+        "Edit PCell parameters",
+        "pcell-inspect",
+        None,
+        None,
+    ),
+    (
+        "pcell.regenerate",
+        "Regenerate PCell",
+        "pcell-inspect",
+        None,
+        None,
+    ),
+    (
+        "trace.at_point",
+        "Trace net at point",
+        "trace-ui",
+        None,
+        None,
+    ),
+    (
+        "trace.net_extent",
+        "Show net extent",
+        "trace-ui",
+        None,
+        None,
+    ),
+    (
+        "trace.shorts_opens",
+        "Shorts and opens list",
+        "trace-ui",
+        None,
+        None,
+    ),
+    ("trace.next", "Next trace result", "trace-ui", None, None),
+    (
+        "trace.prev",
+        "Previous trace result",
+        "trace-ui",
+        None,
+        None,
+    ),
+    // Phase 3: Depth.
+    (
+        "waveform.run_oracle",
+        "Run simulation oracle",
+        "waveform-ui",
+        None,
+        None,
+    ),
+    (
+        "waveform.export_csv",
+        "Export waveforms CSV...",
+        "waveform-ui",
+        None,
+        None,
+    ),
+    (
+        "file.export_spice",
+        "Export SPICE netlist...",
+        "xschem",
+        Some(&["File", "Export"]),
+        None,
+    ),
+    (
+        "xschem.import_probe",
+        "Import xschem probe...",
+        "xschem",
+        None,
+        None,
+    ),
+    (
+        "classroom.bring_everyone",
+        "Bring everyone here",
+        "classroom",
+        None,
+        None,
+    ),
+    (
+        "classroom.follow",
+        "Follow instructor",
+        "classroom",
+        None,
+        None,
+    ),
+    (
+        "classroom.unlock_student",
+        "Unlock student",
+        "classroom",
+        None,
+        None,
+    ),
+    // Phase 4: Reach.
+    ("plugin.browse", "Browse plugins", "plugin-ui", None, None),
+    ("plugin.install", "Install plugin", "plugin-ui", None, None),
+    ("plugin.enable", "Enable plugin", "plugin-ui", None, None),
+    ("plugin.disable", "Disable plugin", "plugin-ui", None, None),
+    (
+        "underlay.load",
+        "Load die-photo underlay...",
+        "underlay",
+        Some(&["File"]),
+        None,
+    ),
+    ("underlay.align", "Align underlay", "underlay", None, None),
+    (
+        "underlay.opacity",
+        "Underlay opacity",
+        "underlay",
+        None,
+        None,
+    ),
+    ("embed.toggle", "Toggle embed mode", "embed", None, None),
+];
+
+/// The reserved campaign command ids (see [`ReservedId`] and ADR 0106).
+#[must_use]
+pub fn reserved_command_ids() -> &'static [ReservedId] {
+    RESERVED_CAMPAIGN_IDS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1150,5 +1404,38 @@ mod tests {
         let shortcuts = super::spec(CommandId("help.shortcuts")).expect("registered");
         assert_eq!(shortcuts.menu_path, Some(&["Help"][..]));
         assert_eq!(shortcuts.default_chord, Some("?"));
+    }
+
+    #[test]
+    fn reserved_campaign_ids_are_well_formed_unique_and_disjoint_from_the_registry() {
+        // The F6 contract (ADR 0106): every planned campaign command id is reserved now,
+        // is well-formed, unique, and NOT yet a live registry command. When a lane ships
+        // one it moves the id into REGISTRY and deletes the reserved row, so reserved and
+        // live ids stay disjoint. This keeps the parity and keymap tests above untouched.
+        let mut seen = std::collections::HashSet::new();
+        for &(id, label, owner, menu_path, _chord) in reserved_command_ids() {
+            assert!(id.contains('.'), "reserved id `{id}` must be dotted");
+            assert!(
+                id.bytes().all(|b| b.is_ascii_lowercase()
+                    || b.is_ascii_digit()
+                    || b == b'.'
+                    || b == b'_'),
+                "reserved id `{id}` must be lowercase dotted ascii"
+            );
+            assert!(!label.is_empty(), "reserved id `{id}` needs a label");
+            assert!(!owner.is_empty(), "reserved id `{id}` needs an owner lane");
+            if let Some(path) = menu_path {
+                assert!(
+                    !path.is_empty(),
+                    "reserved id `{id}` has an empty menu path"
+                );
+            }
+            assert!(seen.insert(id), "duplicate reserved id `{id}`");
+            assert!(
+                spec(CommandId(id)).is_none(),
+                "reserved id `{id}` is already a live command; move it out of the reserved table when it ships"
+            );
+        }
+        assert!(!seen.is_empty(), "the reserved table must not be empty");
     }
 }
