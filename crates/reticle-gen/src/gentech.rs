@@ -185,6 +185,14 @@ impl GenTech {
         crate::sg13g2::GENTECH
     }
 
+    // --- lane retarget: gf180 gentech ---
+    /// The built-in `GlobalFoundries` GF180MCU generator technology.
+    #[must_use]
+    pub const fn gf180() -> GenTech {
+        crate::gf180::GENTECH
+    }
+    // --- end lane retarget ---
+
     /// SKY130's [`Residue`] (the role binding plus the numbers the deck omits), for
     /// reconstructing [`sky130`](Self::sky130) from a parsed [`Technology`] via
     /// [`derive_gentech`].
@@ -193,6 +201,16 @@ impl GenTech {
     /// SG13G2's [`Residue`], for reconstructing [`sg13g2`](Self::sg13g2) via
     /// [`derive_gentech`].
     pub const SG13G2_RESIDUE: Residue = crate::sg13g2::RESIDUE;
+
+    // --- lane retarget: gf180 gentech ---
+    /// GF180MCU's [`Residue`]. Passing this to [`derive_gentech`] does not succeed
+    /// the way [`SG13G2_RESIDUE`](Self::SG13G2_RESIDUE) does: gf180's subset has
+    /// only two real interconnect levels, and [`gf180`](Self::gf180) pads the
+    /// other two `GenTech` slots by repeating the top one, which the shared
+    /// stack-order guard correctly rejects when handed the full four-slot residue
+    /// (see the `gf180` module docs for the full reasoning).
+    pub const GF180_RESIDUE: Residue = crate::gf180::RESIDUE;
+    // --- end lane retarget ---
 
     /// Picks the built-in `GenTech` for a [`Technology`] by its name, defaulting to
     /// [`sky130`](Self::sky130) for an unrecognized or empty name.
@@ -205,6 +223,9 @@ impl GenTech {
     pub fn for_technology(tech: &Technology) -> GenTech {
         match tech.name.as_str() {
             "sg13g2" | "ihp-sg13g2" | "ihp_sg13g2" => Self::sg13g2(),
+            // --- lane retarget: gf180 gentech ---
+            "gf180" | "gf180mcu" | "gf180-mcu" => Self::gf180(),
+            // --- end lane retarget ---
             _ => Self::sky130(),
         }
     }
