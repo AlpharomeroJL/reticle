@@ -127,6 +127,7 @@ pub mod productivity;
 pub mod qr;
 pub mod query;
 pub mod replay;
+pub mod review_panel;
 pub mod selection;
 pub mod session;
 pub mod settings;
