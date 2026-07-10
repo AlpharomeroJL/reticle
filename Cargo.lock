@@ -4248,6 +4248,7 @@ dependencies = [
  "clap",
  "image",
  "pollster",
+ "reticle-diff",
  "reticle-drc",
  "reticle-extract",
  "reticle-geometry",

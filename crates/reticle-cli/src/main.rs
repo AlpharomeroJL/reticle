@@ -17,6 +17,10 @@ use reticle_cli::{
     synth_route_request,
 };
 
+// --- lane diff-action: diff subcommand ---
+mod diff;
+// --- end lane diff-action ---
+
 /// The Reticle headless layout pipeline.
 #[derive(Parser, Debug)]
 #[command(name = "reticle", version, about, long_about = None)]
@@ -84,6 +88,16 @@ enum Command {
         #[arg(long, default_value_t = 1024)]
         height: u32,
     },
+    // --- lane diff-action: diff subcommand ---
+    /// Compare two layout files and report shape-level differences (added,
+    /// removed, changed). Exits non-zero when the files differ.
+    Diff {
+        /// The baseline layout file.
+        before: PathBuf,
+        /// The updated layout file to compare against `before`.
+        after: PathBuf,
+    },
+    // --- end lane diff-action ---
 }
 
 fn main() -> ExitCode {
@@ -114,6 +128,9 @@ fn run(command: Command) -> Result<ExitCode, CliError> {
             width,
             height,
         } => cmd_render(&file, &out, width, height),
+        // --- lane diff-action: diff subcommand ---
+        Command::Diff { before, after } => diff::run(&before, &after),
+        // --- end lane diff-action ---
     }
 }
 
