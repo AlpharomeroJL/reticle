@@ -5,8 +5,9 @@
 //!
 //! [`Oasis`](crate::Oasis) is an in-house, OASIS-*inspired* binary container (ADR 0004)
 //! that `KLayout` cannot read. This module is the opposite: a genuine SEMI P39 OASIS
-//! *writer* whose output `KLayout` reads as OASIS. A reader is **out of scope** (this is a
-//! one-directional export). The subset is:
+//! *writer* whose output `KLayout` reads as OASIS, paired with a matching *reader*
+//! ([`OasisStd`]'s [`Importer`] impl) that parses the writer's own record subset back
+//! into a [`Document`]. The writer subset is:
 //!
 //! * uncompressed only - no `CBLOCK` (zlib) blocks;
 //! * `RECTANGLE`, `POLYGON`, `PATH`, `PLACEMENT`, and `TEXT` records;
@@ -34,9 +35,29 @@
 //! `magic · START · (CELLNAME)* · (CELL · elements)* · END`, and the `END` record is
 //! padded so the whole record is exactly 256 bytes with no trailing bytes, per §14.2 of
 //! the standard.
+//!
+//! # Reading it back
+//!
+//! [`OasisStd`] also implements [`Importer`]: it reads the exact record subset the
+//! writer emits (`START`, `CELLNAME`, `CELL`, `RECTANGLE`, `POLYGON`, `PATH`,
+//! `PLACEMENT` types 17 and 18, `TEXT`, `END`) back into a [`Document`], so a document
+//! survives a write-then-read round trip. The reader is hardened for untrusted input in
+//! the same spirit as the GDSII importer: the input size, every string length, and every
+//! point-list vertex count are capped, and malformed bytes (a bad magic string, a
+//! truncated record, an unknown record id, an over-cap count) return a
+//! [`reticle_model::ModelError`] rather than panicking or allocating without bound.
+//! Third-party OASIS features outside the writer's subset are not decoded: `CBLOCK`
+//! compression, point-list types other than 4, and repetition records return an
+//! unsupported-format error. See the reader source for the honest coverage ledger.
 
-use reticle_geometry::{Dbu, Endcap, Orientation, Point, Transform};
-use reticle_model::{ArrayInstance, Cell, Document, Exporter, Label, Result, ShapeKind};
+use crate::error::IoError;
+use reticle_geometry::{
+    Dbu, Endcap, LayerId, Magnification, Orientation, Path, Point, Polygon, Rect, Transform,
+};
+use reticle_model::{
+    Anchor, ArrayInstance, Cell, Document, DrawShape, Exporter, Importer, Instance, Label, Result,
+    ShapeKind, Technology,
+};
 
 /// The conformant-OASIS exporter (a practical writer subset; see the [module docs](self)).
 ///
@@ -387,6 +408,733 @@ impl Writer {
         self.uint(252); // padding b-string length
         self.out.extend(std::iter::repeat_n(0u8, 252));
         self.byte(0); // validation-scheme = 0 (no validation)
+    }
+}
+
+// ======================================================================================
+// Reader: parse the writer's own OASIS record subset back into a `Document`.
+//
+// Coverage ledger (honest gaps for third-party OASIS files):
+// * CBLOCK (id 34, zlib-compressed blocks): not decoded. Adding it needs a DEFLATE
+//   dependency, which is outside this reader's boundary; a CBLOCK record errors.
+// * Repetition records (the `R` info bit on any element): not expanded. The writer
+//   never sets it; an element that does returns an unsupported-format error.
+// * Point-list types other than 4 (Manhattan/octangular short forms): not decoded.
+// * Modal inheritance IS honored for the common fields (layer, datatype, geometry and
+//   text coordinates, path half-width, placement cell/coordinates): an element that
+//   omits a field inherits the last value. The single-integer octangular g-delta form
+//   is decoded even though the writer only emits the general two-integer form.
+// ======================================================================================
+
+/// Additional cell record: a cell named inline by an n-string (the writer instead
+/// references the cellname table by number with [`REC_CELL_REF`]).
+const REC_CELL_NAME: u8 = 14;
+/// Additional placement record: a placement whose angle is a 2-bit `0/90/180/270`
+/// field and whose magnification is always unity (the writer emits the richer
+/// [`REC_PLACEMENT_TRANSFORM`] form).
+const REC_PLACEMENT: u8 = 17;
+
+/// The largest OASIS input this reader will attempt, in bytes (256 MiB). A hostile
+/// length past this is refused before any allocation, matching the GDSII importer.
+const MAX_INPUT_BYTES: usize = 256 * 1024 * 1024;
+/// The largest vertex count a single polygon or path point-list may carry into the
+/// model. A conformant point-list is far smaller; this is a defense-in-depth ceiling so
+/// a crafted count can never force an unbounded allocation.
+const MAX_SHAPE_VERTICES: usize = 200_000;
+/// The largest byte length accepted for one name or label string (1 MiB). Also bounded
+/// by the remaining input, so a truncated length can never over-allocate.
+const MAX_STRING_LEN: usize = 1 << 20;
+/// A defense-in-depth ceiling on the number of `CELLNAME` records (the stream length
+/// already bounds the table).
+const MAX_CELL_NAMES: usize = 16 * 1024 * 1024;
+
+impl Importer for OasisStd {
+    fn import(&self, bytes: &[u8]) -> Result<Document> {
+        read_document(bytes)
+    }
+}
+
+/// Parses a conformant-OASIS byte stream produced by [`OasisStd`]'s writer back into a
+/// [`Document`].
+///
+/// Returns a [`reticle_model::ModelError`] (lowered from an [`IoError`]) for any
+/// malformed or out-of-subset input; it never panics and never allocates past the caps
+/// above.
+fn read_document(bytes: &[u8]) -> Result<Document> {
+    if bytes.len() > MAX_INPUT_BYTES {
+        return Err(
+            IoError::Malformed("OASIS input exceeds the maximum accepted size (256 MiB)").into(),
+        );
+    }
+    let mut r = Reader::new(bytes);
+    r.expect_magic()?;
+    let dbu_per_micron = r.read_start()?;
+
+    let mut cellnames: Vec<String> = Vec::new();
+    let mut cells: Vec<Cell> = Vec::new();
+    let mut current: Option<Cell> = None;
+    let mut modal = Modal::default();
+
+    while r.remaining() > 0 {
+        let id = r.read_byte()?;
+        match id {
+            REC_END => break,
+            REC_CELLNAME => {
+                if cellnames.len() >= MAX_CELL_NAMES {
+                    return Err(
+                        IoError::Malformed("OASIS cellname table exceeds the reader cap").into(),
+                    );
+                }
+                cellnames.push(r.read_string()?);
+            }
+            REC_CELL_REF => {
+                flush_cell(&mut cells, &mut current);
+                let idx = r.read_uint()?;
+                current = Some(Cell::new(cellname_at(&cellnames, idx)?));
+                modal = Modal::default();
+            }
+            REC_CELL_NAME => {
+                flush_cell(&mut cells, &mut current);
+                current = Some(Cell::new(r.read_string()?));
+                modal = Modal::default();
+            }
+            REC_RECTANGLE => {
+                let shape = r.read_rectangle(&mut modal)?;
+                cell_mut(&mut current)?.shapes.push(shape);
+            }
+            REC_POLYGON => {
+                let shape = r.read_polygon(&mut modal)?;
+                cell_mut(&mut current)?.shapes.push(shape);
+            }
+            REC_PATH => {
+                let shape = r.read_path(&mut modal)?;
+                cell_mut(&mut current)?.shapes.push(shape);
+            }
+            REC_TEXT => {
+                let label = r.read_text(&mut modal)?;
+                cell_mut(&mut current)?.labels.push(label);
+            }
+            REC_PLACEMENT => {
+                let inst = r.read_placement(&mut modal, &cellnames, false)?;
+                cell_mut(&mut current)?.instances.push(inst);
+            }
+            REC_PLACEMENT_TRANSFORM => {
+                let inst = r.read_placement(&mut modal, &cellnames, true)?;
+                cell_mut(&mut current)?.instances.push(inst);
+            }
+            REC_START => {
+                return Err(IoError::Malformed("unexpected second START record").into());
+            }
+            _ => {
+                return Err(
+                    IoError::Unsupported("OASIS record id not in the reader subset").into(),
+                );
+            }
+        }
+    }
+    flush_cell(&mut cells, &mut current);
+
+    let mut doc = Document::new();
+    doc.set_technology(Technology {
+        dbu_per_micron,
+        ..Technology::default()
+    });
+    for cell in cells {
+        doc.insert_cell(cell);
+    }
+    Ok(doc)
+}
+
+/// Moves the in-progress cell, if any, into the finished list.
+fn flush_cell(cells: &mut Vec<Cell>, current: &mut Option<Cell>) {
+    if let Some(cell) = current.take() {
+        cells.push(cell);
+    }
+}
+
+/// The current cell, or a malformed error when an element appears before any `CELL`.
+fn cell_mut(current: &mut Option<Cell>) -> Result<&mut Cell> {
+    current
+        .as_mut()
+        .ok_or_else(|| IoError::Malformed("OASIS element before any CELL record").into())
+}
+
+/// The cell name for reference number `idx`, or a malformed error if it is out of range.
+fn cellname_at(cellnames: &[String], idx: u64) -> Result<String> {
+    usize::try_from(idx)
+        .ok()
+        .and_then(|i| cellnames.get(i))
+        .cloned()
+        .ok_or_else(|| {
+            IoError::Malformed("OASIS cell reference number past the cellname table").into()
+        })
+}
+
+/// The error returned when an element carries a repetition (the `R` info bit), which the
+/// reader does not expand. The writer never sets it.
+fn repetition_unsupported() -> reticle_model::ModelError {
+    IoError::Unsupported("OASIS repetition records are not decoded by the reader").into()
+}
+
+/// Whether bit `n` (0 = least significant) of an info byte is set.
+fn bit(info: u8, n: u8) -> bool {
+    (info >> n) & 1 == 1
+}
+
+/// A non-negative dimension widened to `i64`, saturating an out-of-range value.
+fn dim_i64(v: u64) -> i64 {
+    i64::try_from(v).unwrap_or(i64::MAX)
+}
+
+/// Builds a [`LayerId`] from modal layer/datatype numbers, narrowing to the model's
+/// 16-bit fields (matching the GDSII importer's behavior).
+fn layer_id(layer: u64, datatype: u64) -> LayerId {
+    LayerId::new(layer as u16, datatype as u16)
+}
+
+/// Accumulates a first vertex and a sequence of deltas into an absolute point ring,
+/// clamping each coordinate into the DBU range so a hostile delta cannot overflow.
+fn accumulate_ring(x0: i64, y0: i64, deltas: &[(i64, i64)]) -> Vec<Point> {
+    let mut points = Vec::with_capacity(deltas.len() + 1);
+    let (mut x, mut y) = (x0, y0);
+    points.push(Point::new(clamp_dbu(x), clamp_dbu(y)));
+    for &(dx, dy) in deltas {
+        x = x.saturating_add(dx);
+        y = y.saturating_add(dy);
+        points.push(Point::new(clamp_dbu(x), clamp_dbu(y)));
+    }
+    points
+}
+
+/// The extension length (in DBU) implied by a two-bit `PATH` extension scheme.
+fn extension_value(scheme: u8, half_width: i64, explicit: Option<i64>) -> i64 {
+    match scheme {
+        2 => half_width,            // half-width extension
+        3 => explicit.unwrap_or(0), // explicit signed extension
+        _ => 0,                     // flush (1) or reserved (0)
+    }
+}
+
+/// Classifies a pair of start/end path extensions into a Reticle [`Endcap`]. A round cap
+/// has no OASIS counterpart, so the writer flushes it and the reader reads flush back as
+/// [`Endcap::Flat`].
+fn endcap_from_extensions(start: i64, end: i64, half_width: i64) -> Endcap {
+    if start == 0 && end == 0 {
+        Endcap::Flat
+    } else if start == half_width && end == half_width {
+        Endcap::Square
+    } else {
+        Endcap::Custom(clamp_dbu(end))
+    }
+}
+
+/// A signed value from a magnitude and a sign flag, erroring if the magnitude overflows
+/// `i64`.
+fn signed_from_magnitude(magnitude: u64, negative: bool) -> Result<i64> {
+    let value = i64::try_from(magnitude)
+        .map_err(|_| IoError::Malformed("OASIS delta magnitude overflows i64"))?;
+    Ok(if negative { -value } else { value })
+}
+
+/// The `(dx, dy)` of a single-integer octangular g-delta for one of the eight compass
+/// directions scaled by `magnitude`.
+fn octangular_delta(direction: u64, magnitude: i64) -> (i64, i64) {
+    match direction & 0b111 {
+        0 => (magnitude, 0),
+        1 => (0, magnitude),
+        2 => (-magnitude, 0),
+        3 => (0, -magnitude),
+        4 => (magnitude, magnitude),
+        5 => (-magnitude, magnitude),
+        6 => (-magnitude, -magnitude),
+        _ => (magnitude, -magnitude),
+    }
+}
+
+/// Reconstructs a [`Magnification`] from the writer's floating-point factor. Unity and
+/// small exact ratios round-trip; a non-finite or non-positive factor falls back to
+/// unity.
+fn magnification_from(factor: f64) -> Magnification {
+    const SCALE: i64 = 1_000_000;
+    if !factor.is_finite() || factor <= 0.0 || (factor - 1.0).abs() < f64::EPSILON {
+        return Magnification::UNITY;
+    }
+    let numerator = (factor * SCALE as f64).round();
+    if !(1.0..=i64::MAX as f64).contains(&numerator) {
+        return Magnification::UNITY;
+    }
+    let numerator = numerator as i64;
+    let divisor = gcd(numerator, SCALE);
+    match (
+        u32::try_from(numerator / divisor),
+        u32::try_from(SCALE / divisor),
+    ) {
+        (Ok(num), Ok(den)) => Magnification::new(num, den).unwrap_or(Magnification::UNITY),
+        _ => Magnification::UNITY,
+    }
+}
+
+/// The greatest common divisor of two positive integers (Euclid), never returning zero.
+fn gcd(mut a: i64, mut b: i64) -> i64 {
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a.max(1)
+}
+
+/// Reconstructs an [`Orientation`] from a rotation angle in degrees and a mirror flag,
+/// inverting the writer's angle/flip split.
+fn orientation_from(angle: f64, mirror: bool) -> Orientation {
+    let quarter = if angle.is_finite() {
+        (angle / 90.0).round().rem_euclid(4.0) as u32
+    } else {
+        0
+    };
+    match (quarter, mirror) {
+        (1, false) => Orientation::R90,
+        (2, false) => Orientation::R180,
+        (3, false) => Orientation::R270,
+        (0, true) => Orientation::MirrorX,
+        (1, true) => Orientation::MirrorX90,
+        (2, true) => Orientation::MirrorX180,
+        (3, true) => Orientation::MirrorX270,
+        _ => Orientation::R0,
+    }
+}
+
+/// The OASIS modal variables the reader tracks. Every field defaults to zero (or an
+/// empty text / absent cell), and each element updates the fields its info byte marks
+/// present, so an element that omits a field inherits the last value. The writer always
+/// marks every field present, so a round trip never depends on inheritance; the state
+/// exists so a third-party file that does use modal inheritance for these common fields
+/// still reads.
+#[derive(Debug, Default)]
+struct Modal {
+    layer: u64,
+    datatype: u64,
+    geom_w: u64,
+    geom_h: u64,
+    geom_x: i64,
+    geom_y: i64,
+    text: String,
+    text_layer: u64,
+    text_type: u64,
+    text_x: i64,
+    text_y: i64,
+    path_half_width: u64,
+    place_x: i64,
+    place_y: i64,
+    place_cell: Option<u64>,
+}
+
+/// A bounds-checked cursor over an OASIS byte stream. Every read is guarded against the
+/// end of input, so a truncated or hostile stream yields an [`IoError`] instead of a
+/// panic.
+#[derive(Debug)]
+struct Reader<'a> {
+    buf: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Reader<'a> {
+    fn new(buf: &'a [u8]) -> Self {
+        Self { buf, pos: 0 }
+    }
+
+    /// Bytes not yet consumed.
+    fn remaining(&self) -> usize {
+        self.buf.len() - self.pos
+    }
+
+    /// Consumes `n` bytes, or errors if the stream is too short.
+    fn take(&mut self, n: usize) -> Result<&'a [u8]> {
+        if n > self.remaining() {
+            return Err(
+                IoError::Malformed("truncated OASIS record (read past end of input)").into(),
+            );
+        }
+        let out = &self.buf[self.pos..self.pos + n];
+        self.pos += n;
+        Ok(out)
+    }
+
+    /// Reads one byte.
+    fn read_byte(&mut self) -> Result<u8> {
+        Ok(self.take(1)?[0])
+    }
+
+    /// Verifies and consumes the 13-byte OASIS magic string.
+    fn expect_magic(&mut self) -> Result<()> {
+        const MAGIC: &[u8] = b"%SEMI-OASIS\r\n";
+        if self.take(MAGIC.len())? == MAGIC {
+            Ok(())
+        } else {
+            Err(IoError::Malformed("not an OASIS stream (bad magic string)").into())
+        }
+    }
+
+    /// Reads the `START` record and returns the database resolution (DBU per micron),
+    /// clamped to at least one.
+    fn read_start(&mut self) -> Result<i64> {
+        if self.read_byte()? != REC_START {
+            return Err(IoError::Malformed("OASIS stream does not begin with START").into());
+        }
+        let _version = self.read_string()?;
+        let unit = self.read_real()?;
+        let offset_flag = self.read_uint()?;
+        if offset_flag == 0 {
+            // Six (flag, offset) table pairs are stored inline; the writer zeroes them.
+            for _ in 0..12 {
+                let _ = self.read_uint()?;
+            }
+        }
+        let dbu = if unit.is_finite() && unit >= 1.0 {
+            unit.round() as i64
+        } else {
+            1000
+        };
+        Ok(dbu)
+    }
+
+    /// Reads an OASIS unsigned integer (7 bits/byte, little-endian, high bit = continue).
+    fn read_uint(&mut self) -> Result<u64> {
+        let mut value: u64 = 0;
+        let mut shift: u32 = 0;
+        loop {
+            let byte = self.read_byte()?;
+            let payload = u64::from(byte & 0x7f);
+            if shift >= 64 || (shift == 63 && payload > 1) {
+                return Err(IoError::Malformed("OASIS unsigned integer overflows 64 bits").into());
+            }
+            value |= payload << shift;
+            if byte & 0x80 == 0 {
+                return Ok(value);
+            }
+            shift += 7;
+        }
+    }
+
+    /// Reads an OASIS signed integer (magnitude shifted left one, sign in the low bit).
+    fn read_sint(&mut self) -> Result<i64> {
+        let raw = self.read_uint()?;
+        signed_from_magnitude(raw >> 1, raw & 1 == 1)
+    }
+
+    /// Reads an unsigned integer that must be non-zero (a real-number denominator).
+    fn read_nonzero_uint(&mut self) -> Result<u64> {
+        match self.read_uint()? {
+            0 => Err(IoError::Malformed("OASIS rational real has a zero denominator").into()),
+            value => Ok(value),
+        }
+    }
+
+    /// Reads a length-prefixed OASIS string (a-string or n-string) as UTF-8.
+    fn read_string(&mut self) -> Result<String> {
+        let len = usize::try_from(self.read_uint()?)
+            .ok()
+            .filter(|&n| n <= MAX_STRING_LEN)
+            .ok_or(IoError::Malformed(
+                "OASIS string length exceeds the reader cap",
+            ))?;
+        let bytes = self.take(len)?;
+        String::from_utf8(bytes.to_vec())
+            .map_err(|_| IoError::Malformed("OASIS string is not valid UTF-8").into())
+    }
+
+    /// Reads an OASIS real number (types 0-7) as an `f64`.
+    fn read_real(&mut self) -> Result<f64> {
+        let real = match self.read_uint()? {
+            0 => self.read_uint()? as f64,
+            1 => -(self.read_uint()? as f64),
+            2 => 1.0 / self.read_nonzero_uint()? as f64,
+            3 => -1.0 / self.read_nonzero_uint()? as f64,
+            4 => self.read_uint()? as f64 / self.read_nonzero_uint()? as f64,
+            5 => -(self.read_uint()? as f64) / self.read_nonzero_uint()? as f64,
+            6 => f64::from(f32::from_le_bytes(
+                self.take(4)?.try_into().unwrap_or([0; 4]),
+            )),
+            7 => f64::from_le_bytes(self.take(8)?.try_into().unwrap_or([0; 8])),
+            _ => return Err(IoError::Malformed("OASIS real number has an unknown type").into()),
+        };
+        Ok(real)
+    }
+
+    /// Reads a count-valued unsigned integer, capping it at `ceiling` and at the number
+    /// of bytes left (each counted item consumes at least one byte), so a hostile count
+    /// can never drive an unbounded allocation.
+    fn read_count(&mut self, ceiling: usize) -> Result<usize> {
+        let count = usize::try_from(self.read_uint()?).unwrap_or(usize::MAX);
+        if count > ceiling || count > self.remaining() {
+            return Err(IoError::Malformed(
+                "OASIS count exceeds the reader cap or remaining input",
+            )
+            .into());
+        }
+        Ok(count)
+    }
+
+    /// Reads one point-list g-delta (type-4 element): a general two-integer delta or a
+    /// single-integer octangular delta. Returns the `(dx, dy)` displacement.
+    fn read_g_delta(&mut self) -> Result<(i64, i64)> {
+        let first = self.read_uint()?;
+        if first & 1 == 1 {
+            let dx = signed_from_magnitude(first >> 2, (first >> 1) & 1 == 1)?;
+            let second = self.read_uint()?;
+            let dy = signed_from_magnitude(second >> 1, second & 1 == 1)?;
+            Ok((dx, dy))
+        } else {
+            let magnitude = signed_from_magnitude(first >> 4, false)?;
+            Ok(octangular_delta(first >> 1, magnitude))
+        }
+    }
+
+    /// Reads a point-list: a type byte, a vertex count, then that many g-deltas. Only
+    /// type 4 (explicit all-angle g-deltas) is decoded; other types are unsupported.
+    fn read_point_list(&mut self) -> Result<Vec<(i64, i64)>> {
+        if self.read_uint()? != 4 {
+            return Err(
+                IoError::Unsupported("OASIS point-list type other than 4 is not decoded").into(),
+            );
+        }
+        let count = self.read_count(MAX_SHAPE_VERTICES)?;
+        let mut deltas = Vec::with_capacity(count);
+        for _ in 0..count {
+            deltas.push(self.read_g_delta()?);
+        }
+        Ok(deltas)
+    }
+
+    /// Reads a `RECTANGLE` (info `SWHXYRDL`) into a [`DrawShape`], updating modal state.
+    fn read_rectangle(&mut self, m: &mut Modal) -> Result<DrawShape> {
+        let info = self.read_byte()?;
+        if bit(info, 0) {
+            m.layer = self.read_uint()?;
+        }
+        if bit(info, 1) {
+            m.datatype = self.read_uint()?;
+        }
+        if bit(info, 6) {
+            m.geom_w = self.read_uint()?;
+        }
+        if bit(info, 7) {
+            m.geom_h = m.geom_w; // square: one dimension serves for both
+        } else if bit(info, 5) {
+            m.geom_h = self.read_uint()?;
+        }
+        if bit(info, 4) {
+            m.geom_x = self.read_sint()?;
+        }
+        if bit(info, 3) {
+            m.geom_y = self.read_sint()?;
+        }
+        if bit(info, 2) {
+            return Err(repetition_unsupported());
+        }
+        let min = Point::new(clamp_dbu(m.geom_x), clamp_dbu(m.geom_y));
+        let max = Point::new(
+            clamp_dbu(m.geom_x.saturating_add(dim_i64(m.geom_w))),
+            clamp_dbu(m.geom_y.saturating_add(dim_i64(m.geom_h))),
+        );
+        Ok(DrawShape::new(
+            layer_id(m.layer, m.datatype),
+            ShapeKind::Rect(Rect::new(min, max)),
+        ))
+    }
+
+    /// Reads a `POLYGON` (info `00PXYRDL`) into a [`DrawShape`].
+    fn read_polygon(&mut self, m: &mut Modal) -> Result<DrawShape> {
+        let info = self.read_byte()?;
+        if bit(info, 0) {
+            m.layer = self.read_uint()?;
+        }
+        if bit(info, 1) {
+            m.datatype = self.read_uint()?;
+        }
+        let deltas = if bit(info, 5) {
+            self.read_point_list()?
+        } else {
+            return Err(IoError::Unsupported(
+                "OASIS polygon without an explicit point-list is not decoded",
+            )
+            .into());
+        };
+        if bit(info, 4) {
+            m.geom_x = self.read_sint()?;
+        }
+        if bit(info, 3) {
+            m.geom_y = self.read_sint()?;
+        }
+        if bit(info, 2) {
+            return Err(repetition_unsupported());
+        }
+        let vertices = accumulate_ring(m.geom_x, m.geom_y, &deltas);
+        Ok(DrawShape::new(
+            layer_id(m.layer, m.datatype),
+            ShapeKind::Polygon(Polygon::new(vertices)),
+        ))
+    }
+
+    /// Reads a `PATH` (info `EWPXYRDL`) into a [`DrawShape`].
+    fn read_path(&mut self, m: &mut Modal) -> Result<DrawShape> {
+        let info = self.read_byte()?;
+        if bit(info, 0) {
+            m.layer = self.read_uint()?;
+        }
+        if bit(info, 1) {
+            m.datatype = self.read_uint()?;
+        }
+        if bit(info, 6) {
+            m.path_half_width = self.read_uint()?;
+        }
+        let endcap = if bit(info, 7) {
+            self.read_path_extension(m.path_half_width)?
+        } else {
+            Endcap::Flat
+        };
+        let deltas = if bit(info, 5) {
+            self.read_point_list()?
+        } else {
+            return Err(IoError::Unsupported(
+                "OASIS path without an explicit point-list is not decoded",
+            )
+            .into());
+        };
+        if bit(info, 4) {
+            m.geom_x = self.read_sint()?;
+        }
+        if bit(info, 3) {
+            m.geom_y = self.read_sint()?;
+        }
+        if bit(info, 2) {
+            return Err(repetition_unsupported());
+        }
+        let points = accumulate_ring(m.geom_x, m.geom_y, &deltas);
+        let width = clamp_dbu(dim_i64(m.path_half_width).saturating_mul(2));
+        Ok(DrawShape::new(
+            layer_id(m.layer, m.datatype),
+            ShapeKind::Path(Path::new(points, width, endcap)),
+        ))
+    }
+
+    /// Reads a `PATH` extension scheme byte (`0000SSEE`) plus any explicit extensions,
+    /// mapping the start/end extensions back to a Reticle [`Endcap`].
+    fn read_path_extension(&mut self, half_width: u64) -> Result<Endcap> {
+        let scheme = self.read_byte()?;
+        let start_scheme = (scheme >> 2) & 0b11;
+        let end_scheme = scheme & 0b11;
+        let start_explicit = if start_scheme == 3 {
+            Some(self.read_sint()?)
+        } else {
+            None
+        };
+        let end_explicit = if end_scheme == 3 {
+            Some(self.read_sint()?)
+        } else {
+            None
+        };
+        let half = dim_i64(half_width);
+        let start = extension_value(start_scheme, half, start_explicit);
+        let end = extension_value(end_scheme, half, end_explicit);
+        Ok(endcap_from_extensions(start, end, half))
+    }
+
+    /// Reads a `TEXT` (info `0CNXYRTL`) into a [`Label`].
+    fn read_text(&mut self, m: &mut Modal) -> Result<Label> {
+        let info = self.read_byte()?;
+        if bit(info, 6) {
+            if bit(info, 5) {
+                // Referenced textstring by number: the writer emits text inline, so the
+                // textstring table is absent here; record an empty label text.
+                let _reference = self.read_uint()?;
+                m.text = String::new();
+            } else {
+                m.text = self.read_string()?;
+            }
+        }
+        if bit(info, 0) {
+            m.text_layer = self.read_uint()?;
+        }
+        if bit(info, 1) {
+            m.text_type = self.read_uint()?;
+        }
+        if bit(info, 4) {
+            m.text_x = self.read_sint()?;
+        }
+        if bit(info, 3) {
+            m.text_y = self.read_sint()?;
+        }
+        if bit(info, 2) {
+            return Err(repetition_unsupported());
+        }
+        Ok(Label {
+            text: m.text.clone(),
+            position: Point::new(clamp_dbu(m.text_x), clamp_dbu(m.text_y)),
+            layer: layer_id(m.text_layer, m.text_type),
+            anchor: Anchor::Center,
+        })
+    }
+
+    /// Reads a `PLACEMENT`: type 17 (`has_magnification` false, angle is a 2-bit field)
+    /// or type 18 (`has_magnification` true, magnification and angle are reals). Both
+    /// share the info layout `CNXYR..F`.
+    fn read_placement(
+        &mut self,
+        m: &mut Modal,
+        cellnames: &[String],
+        has_magnification: bool,
+    ) -> Result<Instance> {
+        let info = self.read_byte()?;
+        let mirror = bit(info, 0);
+        let name = self.read_placement_cell(m, cellnames, info)?;
+        let (magnification, angle) = if has_magnification {
+            let mag = if bit(info, 2) { self.read_real()? } else { 1.0 };
+            let angle = if bit(info, 1) { self.read_real()? } else { 0.0 };
+            (magnification_from(mag), angle)
+        } else {
+            // Type 17: bits [2:1] hold the angle as a multiple of 90 degrees.
+            (Magnification::UNITY, f64::from((info >> 1) & 0b11) * 90.0)
+        };
+        if bit(info, 5) {
+            m.place_x = self.read_sint()?;
+        }
+        if bit(info, 4) {
+            m.place_y = self.read_sint()?;
+        }
+        if bit(info, 3) {
+            return Err(repetition_unsupported());
+        }
+        Ok(Instance {
+            cell: name,
+            transform: Transform {
+                translation: Point::new(clamp_dbu(m.place_x), clamp_dbu(m.place_y)),
+                orientation: orientation_from(angle, mirror),
+                magnification,
+            },
+        })
+    }
+
+    /// Resolves the placed cell name from a `PLACEMENT` info byte: by reference number
+    /// (`N` set), by inline name (`C` set, `N` clear), or from the modal cell (`C` clear).
+    fn read_placement_cell(
+        &mut self,
+        m: &mut Modal,
+        cellnames: &[String],
+        info: u8,
+    ) -> Result<String> {
+        if bit(info, 7) {
+            if bit(info, 6) {
+                let idx = self.read_uint()?;
+                m.place_cell = Some(idx);
+                cellname_at(cellnames, idx)
+            } else {
+                self.read_string()
+            }
+        } else {
+            match m.place_cell {
+                Some(idx) => cellname_at(cellnames, idx),
+                None => Err(IoError::Malformed("OASIS placement has no cell reference").into()),
+            }
+        }
     }
 }
 
