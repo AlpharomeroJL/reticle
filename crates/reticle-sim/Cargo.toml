@@ -12,3 +12,9 @@ categories = ["science", "simulation"]
 
 [lints]
 workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }

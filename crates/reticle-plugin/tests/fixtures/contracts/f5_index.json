@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "manifest": {
+        "id": "dev.reticle.metal-fill",
+        "version": "0.1.0",
+        "api_version": 0,
+        "name": "Metal Fill",
+        "entry": "run",
+        "permissions": ["read_document", "stage_edit"]
+      },
+      "wasm_sha256": "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c5b4a39281706f5e4d3c2b1a0",
+      "source": "plugins/metal-fill"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "analysis": "transient",
+  "time_fs": [0, 500000, 1000000, 2000000, 3000000],
+  "probes": [
+    {
+      "id": "out",
+      "node": "n_out",
+      "quantity": "voltage",
+      "samples_nano": [0, 393469340, 632120559, 864664717, 950212932]
+    }
+  ],
+  "bounds": {
+    "t_min_fs": 0,
+    "t_max_fs": 3000000,
+    "y_min_nano": 0,
+    "y_max_nano": 950212932
+  }
+}
