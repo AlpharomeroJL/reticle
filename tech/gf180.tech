@@ -1,0 +1,97 @@
+# GlobalFoundries GF180MCU technology file for Reticle.
+#
+# GF180MCU is GlobalFoundries' open 180 nm mixed-signal/RF process. This file is
+# transcribed from the open-source GF180MCU PDK, License Apache-2.0 (repo LICENSE at
+# foss-eda-tools.googlesource.com/globalfoundries-pdk/libs/gf180mcu_fd_pr). Attribution:
+# GlobalFoundries / Google open-source GF180MCU PDK contributors.
+#
+# VOLTAGE VARIANT: this file ships the 3.3V standard rule flavor ONLY (GF180MCU's FEOL
+# rules split by voltage domain, ids suffixed `_3.3V` vs `_5V`/`_6V`; every FEOL value
+# below is the `_3.3V` variant, never mixed with a 5V/6V number). The BEOL rules used
+# here (Metal1, Metal2, Contact, Via1) carry no voltage suffix in the source at all --
+# confirmed by inspecting metal1.drc/metal2.drc/contact.drc/via1.drc, which apply
+# uniformly across voltage domains -- so there is no 5V variant to accidentally mix in
+# for those.
+#
+# Sources:
+#   Layers (GDS layer:datatype; drawing purpose = datatype 0). AUTHORITATIVE: each
+#   layer's own `polygons(<gds>, <datatype>)` line in the KLayout DRC rule decks:
+#     gf180mcu_fd_pr/rules/klayout/drc/rule_decks/{nwell,comp,poly2,pplus,nplus,
+#       contact,metal1,via1,metal2}.drc
+#     (foss-eda-tools.googlesource.com/globalfoundries-pdk/libs/gf180mcu_fd_pr/+/
+#      refs/heads/main/rules/klayout/drc/rule_decks/)
+#   Cross-checked (not primary) against the Design Rule Manual's mask layer numbering
+#   table, ch 4.3: gf180mcu-pdk.readthedocs.io/en/latest/physical_verification/
+#     design_manual/drm_04_3.html -- both sources agree on all nine layer numbers.
+#   dbu (1 dbu = 1 nm, i.e. 0.001 um): GF180MCU's public rule decks do not ship a
+#     KLayout .lyt with an explicit <dbu> tag (unlike the sg13g2 source repo), so this
+#     is a documented convention, not a pinned citation: every rule value in the decks
+#     (including area values like DF.9_3.3V = 0.2025 um^2 and M1.3 = 0.1444 um^2)
+#     resolves to an exact integer at a 1 nm grid, and 1000 matches the dbu_per_micron
+#     already used by tech/sky130.tech and tech/ihp-sg13g2.tech in this repo.
+#   DRC subset rules (see tech/gf180-drc-subset.toml for the cited rule ids and the
+#   exact source line for each value):
+#     gf180mcu_fd_pr/rules/klayout/drc/rule_decks/{poly2,comp,metal1,metal2,contact,
+#       via1}.drc
+#
+# This is a SUBSET sufficient for the digital routing stack (Poly2/COMP and the
+# Contact/Metal1/Via1/Metal2 the Reticle generators draw against) plus the well and
+# implant layers (Nwell/Pplus/Nplus) for the layer table. It is not a complete GF180MCU
+# layer map, and the DRC rules carried here are the subset in tech/gf180-drc-subset.toml,
+# not tape-out clean.
+#
+# STACK DISCLAIMER: the `stack` block below is a schematic z-ordering for the 3D
+# viewer only (fabrication order and relative height, in the same illustrative spirit
+# as ihp-sg13g2.tech's "approximate substrate features"). Unlike the layer and rule
+# tables above, these z_bottom/thickness numbers are NOT traced to a pinned GF180MCU
+# cross-section source -- no public BEOL thickness table was found in the cited DRC
+# decks or DRM (they define planar design rules, not z-height data), and GF180MCU's
+# open rule-deck repo ships no 2.5-D stack file the way sg13g2's IHP-Open-PDK does.
+# Treat every stack value here as a display placeholder, never as process data.
+
+technology gf180
+dbu_per_micron 1000
+
+# --- Drawing layers (layer datatype name RRGGBBAA) ---
+layer 21 0 Nwell   A0785060
+layer 22 0 COMP    3CB37190
+layer 30 0 Poly2   CC3333A0
+layer 31 0 Pplus   E8B04870
+layer 32 0 Nplus   4A90D270
+layer 33 0 Contact 60606080
+layer 34 0 Metal1  3A6FD490
+layer 35 0 Via1    24478A80
+layer 36 0 Metal2  C23A9E90
+
+# --- Physical stack (nanometers: z_bottom thickness) -- SCHEMATIC, see disclaimer above.
+# COMP/Poly2 are approximate substrate features (silicon surface at z = 0). Nwell/Pplus/
+# Nplus are implant/well masks with no single physical slab in this simplified rendering
+# and are intentionally left out of the stack (they still have `layer` entries above).
+stack 22 0 0    400
+stack 30 0 400  150
+stack 33 0 400  650
+stack 34 0 1050 500
+stack 35 0 1550 600
+stack 36 0 2150 530
+
+# --- DRC subset rules (kind layer datatype [olayer odatatype] value_dbu) ---
+# Poly2 width (PL.1_3.3V, poly2.drc).
+rule width 30 0 180
+# COMP width (DF.1a_3.3V, comp.drc).
+rule width 22 0 220
+# Metal1 width/spacing (M1.1, M1.2a, metal1.drc).
+rule width   34 0 230
+rule spacing 34 0 230
+# Metal2 width/spacing (M2.1, M2.2a, metal2.drc).
+rule width   36 0 280
+rule spacing 36 0 280
+# Contact size/spacing (CO.1 exact min=max encoded as a width floor, CO.2a, contact.drc).
+rule width   33 0 220
+rule spacing 33 0 250
+# Via1 size/spacing (V1.1 exact min=max encoded as a width floor, V1.2a, via1.drc).
+rule width   35 0 260
+rule spacing 35 0 260
+# Via1 enclosed by Metal1 (V1.3a, via1.drc: `via1.not(metal1)`, zero-tolerance full
+# containment -- the source has no numeric margin beyond exact containment, so 0 is the
+# sourced value, not a placeholder).
+rule enclosure 35 0 34 0 0

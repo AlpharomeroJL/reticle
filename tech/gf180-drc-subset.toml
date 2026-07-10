@@ -1,0 +1,124 @@
+# GlobalFoundries GF180MCU DRC rule subset for Reticle.
+#
+# A SUBSET of the GF180MCU design rules for the digital routing stack. Passing this
+# deck is NOT tape-out clean; it covers min width for Poly2 and COMP, min width/spacing
+# for Metal1 and Metal2, size/spacing for Contact, and size/spacing/Metal1-enclosure for
+# Via1. It deliberately omits everything else in the process: the well/space/overlap
+# rules around Nwell/Pplus/Nplus (COMP-to-well spacing, LVPWELL/DNWELL rules, BJT/ESD/
+# MOSCAP variants), the array-conditional and wide-feature spacing variants (CO.2b,
+# M1.2b, M2.2b, V1.2b, which the reticle-drc engine cannot express as array/width-
+# conditional), the Poly2/COMP endcap and enclosure-of-contact rules (PL.3a, PL.4,
+# CO.3, CO.4, CO.5-8), the min-area rules (DF.9, M1.3, M2.3), and Via1's Metal2-side
+# enclosure (V1.4a, sourced but out of this subset's scope -- see gf180 lane RESULT.md
+# Parked section).
+#
+# VOLTAGE VARIANT: 3.3V standard flavor only (rule ids suffixed `_3.3V` in the FEOL
+# source below). The BEOL rules (M1.*, M2.*, CO.*, V1.*) carry no voltage suffix in
+# their source files at all -- confirmed by inspection, they apply uniformly across
+# GF180MCU's 3.3V/5V/6V domains -- so there is no 5V variant of those to mix in.
+#
+# Source: the open-source GF180MCU PDK KLayout DRC rule decks (gf180mcu_fd_pr,
+#   branch main): foss-eda-tools.googlesource.com/globalfoundries-pdk/libs/
+#   gf180mcu_fd_pr/+/refs/heads/main/rules/klayout/drc/rule_decks/ . Rule ids (e.g.
+#   "M1.1") are quoted verbatim from those files. License: Apache-2.0 (repo LICENSE).
+#   Poly2:   .../rule_decks/poly2.drc
+#   COMP:    .../rule_decks/comp.drc
+#   Metal1:  .../rule_decks/metal1.drc
+#   Metal2:  .../rule_decks/metal2.drc
+#   Contact: .../rule_decks/contact.drc
+#   Via1:    .../rule_decks/via1.drc
+#   Layer GDS map: the `polygons(<gds>, <datatype>)` line in each deck above; cross-
+#     checked against the GF180MCU Design Rule Manual ch 4.3 mask layer numbering table
+#     (gf180mcu-pdk.readthedocs.io/en/latest/physical_verification/design_manual/
+#      drm_04_3.html).
+#   dbu: not pinned to a source .lyt (none published for this PDK); 1000 is the
+#     documented convention matching tech/sky130-drc-subset.toml and
+#     tech/sg13g2-drc-subset.toml -- see tech/gf180.tech's header for detail.
+#
+# Values are in database units (1 dbu = 1 nm; dbu_per_micron 1000 per tech/gf180.tech),
+# so a 0.18 um rule is 180. `layer`/`other_layer` are [gds_layer, datatype]; drawing
+# purpose is datatype 0. `kind` is one of: width, spacing, enclosure.
+
+# --- Poly2 (30/0) ---
+[[rule]]
+id = "PL.1_3.3V"
+kind = "width"
+layer = [30, 0]
+value_dbu = 180
+description = "Min Poly2 interconnect width, outside PLFUSE, 3.3V (0.18 um)"
+
+# --- COMP (22/0) ---
+[[rule]]
+id = "DF.1a_3.3V"
+kind = "width"
+layer = [22, 0]
+value_dbu = 220
+description = "Min COMP width, 3.3V (0.22 um)"
+
+# --- Metal1 (34/0) ---
+[[rule]]
+id = "M1.1"
+kind = "width"
+layer = [34, 0]
+value_dbu = 230
+description = "Min Metal1 width (0.23 um)"
+
+[[rule]]
+id = "M1.2a"
+kind = "spacing"
+layer = [34, 0]
+value_dbu = 230
+description = "Min Metal1 spacing to Metal1 (0.23 um)"
+
+# --- Metal2 (36/0) ---
+[[rule]]
+id = "M2.1"
+kind = "width"
+layer = [36, 0]
+value_dbu = 280
+description = "Min Metal2 width (0.28 um)"
+
+[[rule]]
+id = "M2.2a"
+kind = "spacing"
+layer = [36, 0]
+value_dbu = 280
+description = "Min Metal2 spacing to Metal2 (0.28 um)"
+
+# --- Contact (33/0): Poly2/COMP to Metal1 cut ---
+[[rule]]
+id = "CO.1"
+kind = "width"
+layer = [33, 0]
+value_dbu = 220
+description = "Exact Contact size, min encoded as a width floor (0.22 um)"
+
+[[rule]]
+id = "CO.2a"
+kind = "spacing"
+layer = [33, 0]
+value_dbu = 250
+description = "Min Contact spacing to Contact (0.25 um)"
+
+# --- Via1 (35/0): bridges Metal1 and Metal2 ---
+[[rule]]
+id = "V1.1"
+kind = "width"
+layer = [35, 0]
+value_dbu = 260
+description = "Exact Via1 size, min encoded as a width floor (0.26 um)"
+
+[[rule]]
+id = "V1.2a"
+kind = "spacing"
+layer = [35, 0]
+value_dbu = 260
+description = "Min Via1 spacing to Via1 (0.26 um)"
+
+[[rule]]
+id = "V1.3a"
+kind = "enclosure"
+layer = [35, 0]
+other_layer = [34, 0]
+value_dbu = 0
+description = "Via1 fully enclosed by Metal1, zero-margin containment (source: via1.not(metal1), no numeric margin beyond exact containment)"
