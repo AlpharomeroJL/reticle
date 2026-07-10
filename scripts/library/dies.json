@@ -1,0 +1,26 @@
+[
+  {
+    "id": "sky130.inv-1",
+    "name": "SkyWater sky130_fd_sc_hd inverter (inv_1)",
+    "technology": "sky130",
+    "repo": "google/skywater-pdk-libs-sky130_fd_sc_hd",
+    "commit": "ac7fb61f06e6470b94e8afdf7c25268f62fbd7b1",
+    "url": "https://github.com/google/skywater-pdk-libs-sky130_fd_sc_hd",
+    "landmark_cell": "sky130_fd_sc_hd__inv_1",
+    "landmark_label": "Full cell",
+    "source_gds": "crates/reticle-io/tests/corpus/sky130/sky130_fd_sc_hd__inv_1.gds",
+    "spdx": "Apache-2.0"
+  },
+  {
+    "id": "demo.unverified-fixture",
+    "name": "Unverified demo fixture (excluded-path proof)",
+    "technology": "demo",
+    "repo": "in-repo synthetic fixture (xtask gen-layout)",
+    "commit": "n/a",
+    "url": "n/a (generated in-repo by `xtask gen-layout`; not third-party content)",
+    "landmark_cell": "",
+    "landmark_label": "",
+    "source_gds": null,
+    "spdx": null
+  }
+]

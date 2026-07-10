@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "dies": [
+    {
+      "id": "demo.unverified-fixture",
+      "name": "Unverified demo fixture (excluded-path proof)",
+      "technology": "demo",
+      "width_dbu": 350,
+      "height_dbu": 350,
+      "source": {
+        "repo": "in-repo synthetic fixture (xtask gen-layout)",
+        "commit": "n/a",
+        "url": "n/a (generated in-repo by `xtask gen-layout`; not third-party content)"
+      },
+      "license": {
+        "verdict": "excluded",
+        "reason": "manifest has no SPDX-License-Identifier line"
+      },
+      "streaming": null,
+      "landmarks": [],
+      "provenance": {
+        "fetched_utc": "2026-07-10T10:16:43Z",
+        "converter": "reticle convert 8.1.0",
+        "notice_path": "library/demo.unverified-fixture.rtla.NOTICE"
+      }
+    },
+    {
+      "id": "sky130.inv-1",
+      "name": "SkyWater sky130_fd_sc_hd inverter (inv_1)",
+      "technology": "sky130",
+      "width_dbu": 1860,
+      "height_dbu": 3200,
+      "source": {
+        "repo": "google/skywater-pdk-libs-sky130_fd_sc_hd",
+        "commit": "ac7fb61f06e6470b94e8afdf7c25268f62fbd7b1",
+        "url": "https://github.com/google/skywater-pdk-libs-sky130_fd_sc_hd"
+      },
+      "license": {
+        "verdict": "verified",
+        "spdx": "Apache-2.0",
+        "text_sha256": "0b22b905e1b264c16cc504c5663002a49be32b0577baca034fb00df0eb4ed3cf"
+      },
+      "streaming": {
+        "archive_key": "74a46ee5d3/sky130.inv-1.rtla",
+        "tile_count": 5,
+        "total_bytes": 2008
+      },
+      "landmarks": [
+        {
+          "label": "Full cell",
+          "cell": "sky130_fd_sc_hd__inv_1",
+          "view": {
+            "x_dbu": 690,
+            "y_dbu": 1360,
+            "zoom_milli": 250
+          },
+          "layers": []
+        }
+      ],
+      "provenance": {
+        "fetched_utc": "2026-07-10T10:16:43Z",
+        "converter": "reticle convert 8.1.0",
+        "notice_path": "library/sky130.inv-1.rtla.NOTICE"
+      }
+    }
+  ]
+}
