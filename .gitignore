@@ -54,6 +54,9 @@ Thumbs.db
 
 # Local tooling/config and the internal build specification (not shipped).
 /.claude/
+# Local-only agent instructions + skill pack (campaign machinery; never tracked).
+/CLAUDE.md
+/AGENTS.md
 /.mcp.json
 /tools/
 /reticle-autonomous-build-plan.md
