@@ -1,0 +1,14 @@
+[package]
+name = "reticle-sim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Bounded circuit simulation (transient and operating point) producing waveform records for extracted small circuits."
+keywords = ["eda", "spice", "simulation", "waveform"]
+categories = ["science", "simulation"]
+
+[lints]
+workspace = true

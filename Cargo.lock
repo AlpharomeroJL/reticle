@@ -4422,6 +4422,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "reticle-plugin"
+version = "8.1.0"
+
+[[package]]
 name = "reticle-proto"
 version = "8.1.0"
 dependencies = [
@@ -4499,6 +4503,10 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
 ]
+
+[[package]]
+name = "reticle-sim"
+version = "8.1.0"
 
 [[package]]
 name = "reticle-sync"

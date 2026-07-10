@@ -25,6 +25,8 @@ members = [
     "crates/reticle-metrology",
     "crates/reticle-diff",
     "crates/reticle-gen",
+    "crates/reticle-sim",
+    "crates/reticle-plugin",
     "crates/reticle-sync",
     "crates/reticle-server",
     "crates/reticle-relay-conformance",

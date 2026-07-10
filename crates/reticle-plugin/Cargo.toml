@@ -1,0 +1,14 @@
+[package]
+name = "reticle-plugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Sandboxed WebAssembly plugin host and manifest for Reticle: fuel and memory limited, host functions over the command and undo machinery."
+keywords = ["eda", "wasm", "plugin", "sandbox"]
+categories = ["wasm", "science"]
+
+[lints]
+workspace = true
