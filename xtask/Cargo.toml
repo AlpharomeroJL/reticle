@@ -34,3 +34,22 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 # and assembles GIFs with the installed `gifski` CLI.
 serde_json = "1.0.150"
 # `perf-check` parses the committed baseline and Criterion's `estimates.json`.
+# --- lane pipeline-manifest: library-manifest subcommand deps ---
+# `reticle-index` is consumed read-only for the F1 `GalleryManifest` types (frozen,
+# ADR 0101) and to read a built `.rtla` archive's own header back (world bbox, pyramid
+# levels) so the manifest's geometry is measured, never guessed.
+reticle-index = { workspace = true }
+serde = { workspace = true }
+# Drives `reticle_index::TileSource::header`'s `async fn` from synchronous xtask code;
+# same version and role as `reticle-index`'s own dev-dependency (native mmap reads
+# complete immediately, so no real async runtime is needed).
+pollster = "0.4.0"
+# SHA-256 for the F1 manifest's `License::Verified::text_sha256` and the content-hash
+# archive key. Pure Rust (RustCrypto); `digest 0.10` is already resolved in the
+# lockfile via other crates, so this adds a thin, well-audited leaf.
+sha2 = "0.10"
+# RFC 3339 `fetched_utc` timestamps. Already in the tree transitively via `reticle-io`
+# (which depends on it directly for GDS date stamping), so this is a zero-new-crate,
+# version-matched addition.
+chrono = "0.4.45"
+# --- end lane pipeline-manifest ---

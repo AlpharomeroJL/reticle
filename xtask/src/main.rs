@@ -10,6 +10,9 @@
 //!   transcript into `examples/tapeout/` (Lane 4C).
 //! - `verify-licenses <dir>`, verify a redistribution license for every `.rtla`
 //!   archive in a staged content directory and exclude any it cannot verify.
+//! - `library-manifest <dir> <dies.json> <out.json>`, build the F1 gallery manifest
+//!   (ADR 0101) for a staged library directory from its CHECKED license verdicts and
+//!   its archives' own real geometry (`pipeline-manifest` lane).
 //! - `bundle-size`, measure the built web bundle (raw and gzip) against the
 //!   ledger in `docs/design/bundle-ledger.md`.
 
@@ -36,10 +39,13 @@ fn main() -> ExitCode {
         "perf-check" => perf::perf_check(),
         "tapeout-example" => tapeout::cmd_tapeout_example(args.get(1).map(String::as_str)),
         "verify-licenses" => verify_licenses::cmd_verify_licenses(args.get(1).map(String::as_str)),
+        // --- lane pipeline-manifest: library-manifest subcommand ---
+        "library-manifest" => verify_licenses::cmd_library_manifest(&args[1..]),
+        // --- end lane pipeline-manifest ---
         "bundle-size" => bundle::cmd_bundle_size(&args[1..]),
         "" => {
             eprintln!(
-                "usage: xtask <gen-layout|capture-media [asset]|capture-ui [name]|perf-check|tapeout-example [out-dir]|verify-licenses <dir>|bundle-size> [options]"
+                "usage: xtask <gen-layout|capture-media [asset]|capture-ui [name]|perf-check|tapeout-example [out-dir]|verify-licenses <dir>|library-manifest <dir> <dies.json> <out.json>|bundle-size> [options]"
             );
             ExitCode::FAILURE
         }
