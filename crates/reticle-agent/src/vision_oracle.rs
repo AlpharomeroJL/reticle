@@ -67,6 +67,15 @@ pub const ENV_VISION_MODEL: &str = "RETICLE_VISION_MODEL";
 /// keyed OpenAI-compatible host).
 pub const ENV_VISION_API_KEY: &str = "RETICLE_VISION_API_KEY";
 
+/// Overall timeout for one vision-model request.
+///
+/// A best-effort second oracle must never hang a gate: a model that is present (so
+/// [`availability`](VisionOracle::availability) passes) but does not answer within this
+/// bound becomes an honest [`VisionOutcome::Skipped`], exactly as a missing model does.
+/// Generous enough for a real `llava` inference including a first-request model load on a
+/// reasonable host; short enough that a stalled local server cannot block `just ci`.
+const VISION_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// A vision model's verdict on one rendered layout: whether it matches the asked intent,
 /// plus the model's own short rationale (kept verbatim for logs and the RESULT record).
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -167,7 +176,9 @@ impl VisionOracle {
             base_url,
             model,
             key,
-            transport: Box::new(super::model::openai_ureq_transport()),
+            transport: Box::new(super::model::openai_ureq_transport_with_timeout(
+                VISION_REQUEST_TIMEOUT,
+            )),
         }
     }
 

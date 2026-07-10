@@ -368,6 +368,59 @@ pub(crate) fn openai_ureq_transport() -> impl HttpTransport {
     OpenAiUreqTransport
 }
 
+/// An OpenAI-compatible transport with a bounded overall timeout, for the vision oracle.
+///
+/// The proposal backends deliberately run without a global timeout (a real model
+/// completion can legitimately take a while). The vision oracle is a best-effort second
+/// opinion that must NEVER hang a gate: a model that is present but does not answer within
+/// the bound becomes a transport error, which the oracle turns into an honest
+/// [`VisionOutcome::Skipped`](crate::vision_oracle::VisionOutcome::Skipped). This transport
+/// pins the whole request (connect, send, receive) under `timeout` so a stalled local
+/// server can no longer block `cargo nextest` indefinitely.
+struct OpenAiUreqTimeoutTransport {
+    agent: ureq::Agent,
+}
+
+impl HttpTransport for OpenAiUreqTimeoutTransport {
+    fn post_json(
+        &self,
+        url: &str,
+        api_key: &str,
+        body: &serde_json::Value,
+    ) -> Result<String, String> {
+        let mut request = self
+            .agent
+            .post(url)
+            .header("content-type", "application/json");
+        if !api_key.is_empty() {
+            request = request.header("authorization", &format!("Bearer {api_key}"));
+        }
+        match request.send_json(body) {
+            Ok(mut resp) => resp
+                .body_mut()
+                .read_to_string()
+                .map_err(|e| format!("reading response body: {e}")),
+            Err(ureq::Error::StatusCode(code)) => {
+                Err(format!("OpenAI-compatible endpoint returned HTTP {code}"))
+            }
+            Err(e) => Err(format!("HTTP request failed: {e}")),
+        }
+    }
+}
+
+/// An OpenAI-compatible transport whose whole request is bounded by `timeout`, for the
+/// vision oracle (see [`OpenAiUreqTimeoutTransport`]).
+pub(crate) fn openai_ureq_transport_with_timeout(
+    timeout: std::time::Duration,
+) -> impl HttpTransport {
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .build();
+    OpenAiUreqTimeoutTransport {
+        agent: ureq::Agent::new_with_config(config),
+    }
+}
+
 /// The tool name the model calls to return its command batch.
 const EMIT_COMMANDS: &str = "emit_commands";
 
