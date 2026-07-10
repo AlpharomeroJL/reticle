@@ -487,6 +487,108 @@ pub fn minted_room_id(base: &str, seed: u64) -> String {
     room_id(&format!("{base}-{suffix}"))
 }
 
+/// The `?view=` value that opens the deployed bundle into the design-review view.
+///
+/// A review link is a page URL a reviewer opens in a browser; the bundle reads the
+/// query, joins the named room, and opens the review panel (the design-review
+/// workflow over the collaboration core). It is a distinct value from
+/// [`VIEWER_VIEW`] (a read-only spectator) and from the start-view keywords
+/// (ADR 0026), so the existing [`parse_viewer_query`] and [`parse_permalink`] leave
+/// a review link untouched.
+pub const REVIEW_VIEW: &str = "review";
+
+/// The room and relay recovered from a design-review page's query string.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ReviewTarget {
+    /// The relay room the review session joins.
+    pub room: String,
+    /// The relay host the review session connects to (as the sharer specified it).
+    pub relay: String,
+}
+
+/// Composes the design-review page link for `room` on `relay`, hosted at page
+/// origin `page`.
+///
+/// Mirrors [`viewer_link`] but marks the page `view=review` so the bundle opens the
+/// review panel joined to the shared room. An empty `page` yields a relative `?...`
+/// query (resolving against the loaded bundle); an empty `relay` falls back to
+/// [`DEFAULT_SERVER`]. The inverse is [`parse_review_query`], and the two round-trip.
+#[must_use]
+pub fn review_link(page: &str, relay: &str, room: &str) -> String {
+    let room = room_id(room);
+    let relay_spec = {
+        let trimmed = relay.trim();
+        if trimmed.is_empty() {
+            DEFAULT_SERVER
+        } else {
+            trimmed
+        }
+    };
+    let query = format!(
+        "view={REVIEW_VIEW}&room={room}&relay={}",
+        encode_query_component(relay_spec)
+    );
+    let base = page.trim().trim_end_matches('/');
+    if base.is_empty() {
+        format!("?{query}")
+    } else {
+        format!("{base}/?{query}")
+    }
+}
+
+/// Parses a design-review page's query string into a [`ReviewTarget`], or `None`
+/// if it is not a review link.
+///
+/// Returns `Some` only when `view=review` is present with a non-empty `room`; a
+/// missing or empty `relay` falls back to [`DEFAULT_SERVER`] so a link that omits
+/// it still resolves. The inverse of [`review_link`]; a leading `?` is tolerated so
+/// it can be fed the browser's `location.search` directly.
+#[must_use]
+pub fn parse_review_query(query: &str) -> Option<ReviewTarget> {
+    let query = query.trim_start_matches('?');
+    let mut view = None;
+    let mut room = None;
+    let mut relay = None;
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let value = decode_query_component(value);
+        match key {
+            "view" => view = Some(value),
+            "room" => room = Some(value),
+            "relay" => relay = Some(value),
+            _ => {}
+        }
+    }
+    if view.as_deref() != Some(REVIEW_VIEW) {
+        return None;
+    }
+    // A `room` key must be present; its value sanitizes through `room_id` (an empty
+    // or all-junk value becomes the fallback room). No `room` key at all is not a
+    // review target.
+    let room = room_id(&room?);
+    let relay = relay
+        .map(|r| r.trim().to_owned())
+        .filter(|r| !r.is_empty())
+        .unwrap_or_else(|| DEFAULT_SERVER.to_owned());
+    Some(ReviewTarget { room, relay })
+}
+
+/// Mints a fresh review link for a newly-named room: [`minted_room_id`] threaded
+/// through [`review_link`].
+///
+/// This is the one-click "share for review" primitive: it names a room after the
+/// design (`base`) with a short seed-derived suffix so the room is recognizable yet
+/// unlikely to collide, then composes the review page link for it. Deterministic in
+/// `(page, relay, base, seed)` so a test can pin the seed and assert the exact link;
+/// the caller supplies real entropy (the frame clock) at runtime.
+#[must_use]
+pub fn minted_review_link(page: &str, relay: &str, base: &str, seed: u64) -> String {
+    review_link(page, relay, &minted_room_id(base, seed))
+}
+
 /// Whether the page query requests the e2e edit-script mode (`?e2e-edit=1`).
 ///
 /// When this and `?share=1` are both set, the publisher-on-boot places one scripted
@@ -1016,5 +1118,63 @@ mod tests {
             },
         );
         assert_eq!(cam_only, "?view=0,0,1");
+    }
+
+    #[test]
+    fn review_link_carries_view_room_and_relay() {
+        // `view=review` marks the review page; the room is sanitized and the relay is
+        // kept verbatim (its colon is legal in a query value).
+        let link = review_link("https://reticle.example", "relay.lab:9000", "CHIP_TOP");
+        assert_eq!(
+            link,
+            "https://reticle.example/?view=review&room=chip_top&relay=relay.lab:9000"
+        );
+    }
+
+    #[test]
+    fn review_link_with_empty_page_is_a_relative_query_and_defaults_relay() {
+        let link = review_link("", "", "top");
+        assert_eq!(link, "?view=review&room=top&relay=127.0.0.1:3030");
+    }
+
+    #[test]
+    fn parse_review_query_round_trips_review_link() {
+        let link = review_link("https://reticle.example", "relay.lab:9000", "CHIP_TOP");
+        let query = link.split_once('?').expect("link has a query").1;
+        let target = parse_review_query(query).expect("a review query");
+        assert_eq!(target.room, "chip_top");
+        assert_eq!(target.relay, "relay.lab:9000");
+    }
+
+    #[test]
+    fn parse_review_query_rejects_non_review_links() {
+        // Viewer/editor pages and a review view with no room are not review targets.
+        assert!(parse_review_query("view=viewer&room=top").is_none());
+        assert!(parse_review_query("view=review").is_none());
+        assert!(parse_review_query("room=top&relay=r:1").is_none());
+        // And a review link is never mistaken for a viewer link (the two views are
+        // disjoint), so the fence between review and read-only viewer holds.
+        let review = review_link("", "r:1", "top");
+        assert!(parse_viewer_query(review.trim_start_matches('?')).is_none());
+    }
+
+    #[test]
+    fn minted_review_link_is_deterministic_and_round_trips() {
+        let a = minted_review_link("https://reticle.example", "relay.lab:9000", "CHIP_TOP", 42);
+        // Deterministic in (page, relay, base, seed).
+        assert_eq!(
+            a,
+            minted_review_link("https://reticle.example", "relay.lab:9000", "CHIP_TOP", 42)
+        );
+        // The minted room round-trips back out of the link.
+        let query = a.split_once('?').expect("a query").1;
+        let target = parse_review_query(query).expect("a review target");
+        assert_eq!(target.room, minted_room_id("CHIP_TOP", 42));
+        assert_eq!(target.relay, "relay.lab:9000");
+        // A different seed mints a different link.
+        assert_ne!(
+            a,
+            minted_review_link("https://reticle.example", "relay.lab:9000", "CHIP_TOP", 43)
+        );
     }
 }

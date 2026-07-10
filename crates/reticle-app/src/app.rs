@@ -395,6 +395,11 @@ pub struct App {
     comment_pins: crate::comment_pins::CommentPins,
     /// The in-progress comment body typed in the comment panel, before it is added.
     comment_draft: String,
+    // --- lane review: review panel ---
+    /// The design-review panel: per-thread review verdicts and the approve action
+    /// (see [`crate::review_panel`]); appends its verdict as an ordinary comment.
+    review: crate::review_panel::ReviewPanel,
+    // --- end lane review ---
     /// DRC-as-you-type: the incremental checker re-run on every edit so violations are
     /// underlined the moment geometry is drawn (see [`crate::live_drc`]).
     live_drc: crate::live_drc::LiveDrc,
@@ -1114,6 +1119,9 @@ impl App {
             diff_overlay: crate::diff_overlay::DiffOverlay::new(),
             comment_pins: crate::comment_pins::CommentPins::new(),
             comment_draft: String::new(),
+            // --- lane review: review panel ---
+            review: crate::review_panel::ReviewPanel::new(),
+            // --- end lane review ---
             live_drc: crate::live_drc::LiveDrc::new(),
             live_drc_on: false,
             live_pending: crate::history::Dirty::None,
@@ -12530,6 +12538,17 @@ impl eframe::App for App {
         self.open_url_dialog(&ctx);
         self.convert_dialog(&ctx);
         self.share_dialog(&ctx);
+        // --- lane review: review panel ---
+        let review_comp = self.comp_ctx();
+        if let Some(c) = self.review.show(
+            &ctx,
+            review_comp,
+            self.comment_pins.comments(),
+            (ctx.input(|i| i.time) * 1000.0) as i64,
+        ) {
+            self.comment_pins.add(c);
+        }
+        // --- end lane review ---
         // Copy any text a menu/dialog Copy button staged this frame, after the dialogs
         // render (the early per-frame flush only catches shortcut-staged copies).
         if let Some(text) = self.pending_clipboard.take() {
