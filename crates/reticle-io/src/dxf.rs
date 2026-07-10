@@ -170,7 +170,7 @@ pub const MAX_ARC_SEGMENTS: usize = 2_048;
 /// The database resolution recorded for every DXF import. DXF carries no
 /// intrinsic scale (see the [module docs](self)); this is a conventional
 /// default, not a conversion.
-const DEFAULT_DBU_PER_MICRON: i64 = 1_000;
+pub const DEFAULT_DBU_PER_MICRON: i64 = 1_000;
 
 /// The fixed [`LayerId`] every layer name past [`MAX_LAYERS`] folds onto.
 /// Chosen at the top of the `u16` range so it can never collide with a
