@@ -31,6 +31,8 @@
 //! the richer [`IoError`], which lowers onto [`reticle_model::ModelError`] at the
 //! trait boundary while preserving diagnostic detail up to that point.
 
+pub mod cif;
+pub mod dxf;
 pub mod error;
 pub mod gds;
 pub mod gds_stream;
