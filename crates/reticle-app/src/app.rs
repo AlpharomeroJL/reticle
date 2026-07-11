@@ -2919,12 +2919,31 @@ impl App {
         self.palette_focus_pending = open;
     }
 
-    /// Finishes the first-run tour so a snapshot shows the steady editor rather
-    /// than environment-dependent onboarding chrome. A one-line state hook for
-    /// the visual regression suite (`tests/ui_snapshots.rs`).
+    /// Suppresses every first-run onboarding surface so a snapshot shows the steady
+    /// editor rather than environment-dependent onboarding chrome: the tour, the
+    /// onboarding checklist card, and the first-run GPU capability card (whose text
+    /// names the live graphics adapter, which varies by host). A state hook for the
+    /// visual regression suite (`tests/ui_snapshots.rs`); a no-op on the Start
+    /// screen and in a viewer session, where onboarding does not draw.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn suppress_onboarding_for_snapshot(&mut self) {
         self.tour.finish();
+        self.checklist.dismiss();
+        self.gpu_card_dismissed = true;
+    }
+
+    /// Dismisses the Start screen so a snapshot captures the editor over the
+    /// already-loaded demo document rather than the first-run gallery. [`App::new`]
+    /// greets a visitor with the Start screen (`start_screen == true`) atop the
+    /// loaded demo document, so the visual-regression suite calls this to reach the
+    /// editor and palette surfaces (the palette does not draw while the Start screen
+    /// is up). A one-line state hook for the snapshot suite
+    /// (`tests/ui_snapshots.rs`), mirroring [`suppress_onboarding_for_snapshot`].
+    ///
+    /// [`suppress_onboarding_for_snapshot`]: Self::suppress_onboarding_for_snapshot
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn dismiss_start_screen_for_snapshot(&mut self) {
+        self.start_screen = false;
     }
 
     /// Arms a scripted demo run (native launcher only), writing captured frames under

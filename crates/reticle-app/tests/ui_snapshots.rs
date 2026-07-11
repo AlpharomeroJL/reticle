@@ -190,18 +190,31 @@ fn gallery_snapshots() {
     finish(results);
 }
 
-/// Snapshot the full app: `editor-default` at each of the three window sizes,
-/// plus `palette-open` at the primary size.
+/// Snapshot the full app across its three first-contact surfaces: the Start
+/// screen (each window size), the editor over the demo document (each size), and
+/// the command palette open over that editor (primary size).
 ///
-/// `App::new` boots straight into the editor with the demo document loaded and
-/// the right column at the top of its scroll (its default), so `editor-default`
-/// is also the "right panel scrolled top" state the lane brief asked for; a
-/// separate identical capture would be redundant, and there is no clean
-/// deterministic hook to scroll the column away (recorded as ADR-W1D). The
-/// first-run tour is dismissed so the frame shows the steady editor rather than
-/// environment-dependent onboarding chrome.
+/// [`reticle_app::App::new`] greets a first-time visitor with the Start screen
+/// (the example gallery, the F1 "Open silicon library" section, and the
+/// worked-scenario chooser), with the demo document already loaded behind it. So a
+/// bare `App::new` frame is the *Start screen*, not the editor: the editor and
+/// palette captures first call
+/// [`App::dismiss_start_screen_for_snapshot`](reticle_app::App::dismiss_start_screen_for_snapshot)
+/// to reach the canvas over the loaded demo document (the palette does not draw
+/// while the Start screen is up, which is why capturing it needs the Start screen
+/// dismissed first). Every capture dismisses the first-run tour so the frame shows
+/// steady chrome rather than environment-dependent onboarding.
 ///
-/// These are canvas-bearing, so they use the wider [`canvas_options`] tolerance.
+/// Before v8.2 this test captured only `app-editor-default-*`/`app-palette-open-*`,
+/// but since v8.1 added the Start-screen greeting those names silently captured the
+/// Start screen and `palette-open` was byte-identical to `editor-default` (the
+/// palette is invisible there): the editor and palette had no visual coverage. The
+/// three explicit surfaces below restore it and keep the Start screen as its own
+/// named capture.
+///
+/// These are canvas-bearing (the editor/palette carry the layout canvas; the Start
+/// screen is pure egui chrome but shares the tolerance for uniformity), so they use
+/// the wider [`canvas_options`] tolerance.
 #[test]
 fn full_app_snapshots() {
     if !gpu_available() {
@@ -211,7 +224,9 @@ fn full_app_snapshots() {
 
     let mut results = SnapshotResults::new();
 
-    // editor-default at each size.
+    // start-screen at each size: the first-run gallery, the F1 open-silicon library
+    // section, and the worked-scenario chooser (a valuable capture in its own
+    // right; the library section only fully enters frame at the taller sizes).
     for (label, w, h) in APP_SIZES {
         let mut harness = Harness::builder()
             .with_size(Vec2::new(w, h))
@@ -221,11 +236,28 @@ fn full_app_snapshots() {
         harness.run_steps(APP_SETTLE_FRAMES);
         results.add(
             harness
+                .try_snapshot_options(format!("app-start-screen-{label}"), &canvas_options(w, h)),
+        );
+    }
+
+    // editor-default at each size: the editor over the loaded demo document, with
+    // the Start screen dismissed so the canvas (not the gallery) is captured.
+    for (label, w, h) in APP_SIZES {
+        let mut harness = Harness::builder()
+            .with_size(Vec2::new(w, h))
+            .wgpu()
+            .build_eframe(|_cc| reticle_app::App::new());
+        harness.state_mut().suppress_onboarding_for_snapshot();
+        harness.state_mut().dismiss_start_screen_for_snapshot();
+        harness.run_steps(APP_SETTLE_FRAMES);
+        results.add(
+            harness
                 .try_snapshot_options(format!("app-editor-default-{label}"), &canvas_options(w, h)),
         );
     }
 
-    // palette-open at the primary size.
+    // palette-open at the primary size: the command palette over the editor (which
+    // only draws once the Start screen is dismissed).
     {
         let (label, w, h) = APP_PRIMARY;
         let mut harness = Harness::builder()
@@ -233,6 +265,7 @@ fn full_app_snapshots() {
             .wgpu()
             .build_eframe(|_cc| reticle_app::App::new());
         harness.state_mut().suppress_onboarding_for_snapshot();
+        harness.state_mut().dismiss_start_screen_for_snapshot();
         harness.state_mut().set_palette_open(true);
         harness.run_steps(APP_SETTLE_FRAMES);
         results.add(
