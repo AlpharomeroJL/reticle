@@ -97,8 +97,8 @@ pub(super) fn build_engine(host: &SharedHost, limits: SandboxLimits) -> Engine {
 /// references its parameters as plain variables (mirroring the leading `let` block of a
 /// hand-written generator script).
 ///
-/// Callers pass the [`effective_params`] object, in which every schema field already carries
-/// its provided-or-default value, so each declared parameter is always bound. Only schema
+/// Callers pass the `PCellDef::effective_params` object, in which every schema field already
+/// carries its provided-or-default value, so each declared parameter is always bound. Only schema
 /// fields drive the script (and only schema fields form the parameter-hash identity), so an
 /// unrelated key neither introduces a script variable nor changes the identity.
 pub(super) fn inject_params(scope: &mut Scope, def: &PCellDef, params: &Value) {
