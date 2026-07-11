@@ -95,6 +95,11 @@
 // can open straight into a playing theater (ADR 0026).
 pub mod agent_history;
 pub mod agent_panel;
+// The real plan/approve/execute agent runner is native-only: `reticle-agent`'s
+// propose-verify-correct loop uses blocking HTTP and filesystem artifact writes that do
+// not build for wasm32, so the web build keeps the model-free scripted preview (ADR 0026).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod agent_runner;
 pub mod app;
 pub mod archive;
 pub mod camera;

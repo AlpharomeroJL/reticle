@@ -376,6 +376,25 @@ pub struct App {
     replay_path: String,
     /// The last theater load error, shown under the load row (empty when none).
     replay_error: String,
+    // --- lane agent-panel: replay-scoped DRC view + theater controls ---
+    /// The replay theater's OWN DRC view, separate from the document's
+    /// [`drc`](Self::drc). A transcript replay installs each `run_drc` record's
+    /// violations here (see [`apply_replay_overlay`](Self::apply_replay_overlay)),
+    /// so stepping a replay drives the theater's overlay and readouts without ever
+    /// mutating the live design's DRC state. This is the M3 replay-DRC-view split:
+    /// the scripted demo and a replay must never make the document read as verified.
+    replay_drc: DrcResults,
+    /// Whether the docked replay theater is minimized to a slim title strip (the
+    /// transport, readouts, and preview hidden). Docked, never floating (ADR 0026);
+    /// this is a collapse, not a move.
+    replay_minimized: bool,
+    /// The native plan/approve/execute agent runner (item 3): detects the configured
+    /// model, stages a plan, runs the propose-verify-correct loop on a worker thread, and
+    /// hands the resulting transcript to the theater. Absent on wasm, where the panel
+    /// keeps the model-free scripted preview.
+    #[cfg(not(target_arch = "wasm32"))]
+    agent_runner: crate::agent_runner::AgentRunner,
+    // --- end lane agent-panel ---
     /// Where the theater reads transcripts from: the filesystem on native, a
     /// bundled transcript on wasm. Boxed so the field type is the same on both.
     store: Box<dyn crate::store::SessionStore>,
@@ -1137,6 +1156,12 @@ impl App {
             replay_open: false,
             replay_path: String::new(),
             replay_error: String::new(),
+            // --- lane agent-panel: replay-scoped DRC view + theater controls ---
+            replay_drc: DrcResults::new(),
+            replay_minimized: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            agent_runner: crate::agent_runner::AgentRunner::new(),
+            // --- end lane agent-panel ---
             store: Box::new(crate::store::default_store()),
             agent_history: crate::agent_history::HistoryBrowser::new(),
             drc: DrcResults::new(),
@@ -3896,6 +3921,12 @@ impl App {
             // --- end lane trace-ui ---
             // lane nl-edit: run the parsed instruction from the input bar.
             AppOp::NlEditSubmit => self.nl_edit_submit(),
+            // --- lane agent-panel: real agent commands (item 3) ---
+            AppOp::AgentPlan => self.agent_cmd_plan(),
+            AppOp::AgentApprove | AppOp::AgentApproveStep => self.agent_cmd_approve(),
+            AppOp::AgentStop => self.agent_cmd_stop(),
+            AppOp::AgentReplay => self.agent_cmd_replay(),
+            // --- end lane agent-panel ---
         }
     }
 
@@ -5061,28 +5092,114 @@ impl App {
             return;
         }
         let cctx = self.ui_ctx();
-        egui::Panel::bottom("replay_theater")
-            .resizable(true)
-            // Compact by default so the main canvas stays the hero (the packet's
-            // "must not open half-screen"): a slim docked strip carrying the load row,
-            // transport, and readouts, plus a small live preview. The size range caps
-            // the panel well under half the viewport; the user can drag within it.
-            // Docked, never floating (ADR 0026).
-            .default_size(196.0)
-            .size_range(egui::Rangef::new(150.0, 248.0))
-            .show(ui, |ui| {
-                let close = view_panel_header(ui, cctx, "Replay theater");
+        // A slim docked bottom strip; docked, never floating (ADR 0026). Minimized
+        // collapses to just the title row so the canvas is fully the hero; expanded
+        // shows the load row, transport, scrub slider, readouts, and a small preview.
+        // The size range caps the panel well under half the viewport either way; the
+        // user can drag within the expanded range. Minimize is a collapse, not a move.
+        let minimized = self.replay_minimized;
+        let panel = egui::Panel::bottom("replay_theater").resizable(!minimized);
+        let panel = if minimized {
+            panel
+                .default_size(38.0)
+                .size_range(egui::Rangef::new(32.0, 46.0))
+        } else {
+            panel
+                .default_size(226.0)
+                .size_range(egui::Rangef::new(176.0, 286.0))
+        };
+        panel.show(ui, |ui| {
+            let (minimize_toggled, close) = self.replay_theater_header(ui, cctx);
+            if minimize_toggled {
+                self.replay_minimized = !self.replay_minimized;
+            }
+            if !self.replay_minimized {
                 self.replay_load_row(ui);
                 ui.separator();
                 self.replay_transport_row(ui);
+                self.replay_scrub_row(ui);
                 ui.separator();
                 self.replay_readouts(ui);
                 ui.separator();
                 self.replay_canvas(ui);
-                if close {
-                    self.replay_open = false;
+            }
+            if close {
+                self.replay_open = false;
+            }
+        });
+    }
+
+    /// The theater's title row: the title on the left, a minimize/restore toggle and
+    /// a close button on the right. Docked, never floating (ADR 0026): the toggle
+    /// collapses the strip in place, it does not move it. Returns
+    /// `(minimize_toggled, close)` for the caller to apply after the borrow ends.
+    fn replay_theater_header(
+        &self,
+        ui: &mut egui::Ui,
+        ctx: theme::components::Ctx,
+    ) -> (bool, bool) {
+        use theme::components::IconButton;
+        let mut minimize_toggled = false;
+        let mut close = false;
+        ui.horizontal(|ui| {
+            ui.strong("Replay theater");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if IconButton::new(crate::theme::icons::X, "Close panel")
+                    .hint("Close the replay theater")
+                    .show(ui, ctx)
+                    .clicked()
+                {
+                    close = true;
+                }
+                let (icon, label, hint) = if self.replay_minimized {
+                    (
+                        crate::theme::icons::CHEVRON_UP,
+                        "Restore theater",
+                        "Restore the replay theater",
+                    )
+                } else {
+                    (
+                        crate::theme::icons::CHEVRON_DOWN,
+                        "Minimize theater",
+                        "Minimize to the title strip",
+                    )
+                };
+                if IconButton::new(icon, label)
+                    .hint(hint)
+                    .show(ui, ctx)
+                    .clicked()
+                {
+                    minimize_toggled = true;
                 }
             });
+        });
+        ui.separator();
+        (minimize_toggled, close)
+    }
+
+    /// The theater's scrub slider: drag anywhere in the transcript to jump there.
+    /// Seeking replays deterministically from scratch (see
+    /// [`ReplayTheater::seek`](crate::replay::ReplayTheater::seek)), so the readouts
+    /// and the replay's own DRC overlay follow the playhead exactly. Grabbing the
+    /// slider pauses playback so the playhead stays where it is placed. Disabled with
+    /// nothing loaded.
+    fn replay_scrub_row(&mut self, ui: &mut egui::Ui) {
+        let (done, total) = self.replay.progress();
+        let loaded = self.replay.is_loaded();
+        let mut pos = done;
+        let changed = ui
+            .add_enabled(
+                loaded,
+                egui::Slider::new(&mut pos, 0..=total.max(1))
+                    .text("Scrub")
+                    .integer(),
+            )
+            .changed();
+        if changed && loaded && pos != done {
+            self.replay.pause();
+            let update = self.replay.seek(pos);
+            self.apply_replay_overlay(update);
+        }
     }
 
     /// The component-library context for this frame: the shipped dark palette at
@@ -8067,21 +8184,31 @@ impl App {
     fn agent_section(&mut self, ui: &mut egui::Ui) {
         use crate::agent_panel::RunState;
 
-        // Honesty (v8.1 post-tag): this panel is a scripted demonstration, not a live
-        // agent. It narrates a fixed propose-verify-correct script on a built-in demo
-        // cell and does not read or edit the open design or its DRC. The real
-        // plan/approve/execute agent is planned for a later release. Label it plainly so
-        // the Run control never reads as "fix my layout".
+        // Honesty banner: the panel narrates a model-free scripted demo unless a real
+        // model is configured on native, in which case the plan/approve/execute controls
+        // below run a genuine propose-verify-correct loop against it. The banner tracks
+        // whichever path is active and never claims a live model when there is none.
+        let live_backend = self.agent_live_backend_name();
+        let (banner_color, banner_hover) = if live_backend.is_some() {
+            (
+                DARK.accent,
+                "This runs a real propose-verify-correct loop against the configured model on native. Review the staged plan before approving; the run's transcript opens in the replay theater.",
+            )
+        } else {
+            (
+                DARK.warning,
+                "A plan/approve/execute agent runs on native when a model is configured (ANTHROPIC_API_KEY, or a local Ollama via RETICLE_MODEL_NAME). This panel narrates a fixed scripted run for illustration; it never touches your open document or its DRC results.",
+            )
+        };
         ui.colored_label(
-            DARK.warning,
+            banner_color,
             format!(
-                "{} Preview: scripted demo on a built-in cell; it does not read or edit your design.",
-                crate::theme::icons::TRIANGLE_ALERT
+                "{} {}",
+                crate::theme::icons::TRIANGLE_ALERT,
+                agent_banner(live_backend)
             ),
         )
-        .on_hover_text(
-            "A plan/approve/execute agent is planned for a later release. This panel narrates a fixed scripted run for illustration; it never touches your open document or its DRC results.",
-        );
+        .on_hover_text(banner_hover);
 
         ui.horizontal(|ui| {
             ui.label("Prompt:");
@@ -8102,21 +8229,26 @@ impl App {
                 }
             });
         }
+        // The real plan/approve/execute controls when a model is configured (native);
+        // otherwise the model-free scripted Run/Stop. The replay buttons are shared.
+        let handled_real = self.agent_real_controls(ui);
         ui.horizontal(|ui| {
-            let running = self.agent.is_running();
-            if ui.add_enabled(!running, egui::Button::new("Run")).clicked() {
-                self.agent.start();
-                self.status.set("Agent run started");
-            }
-            if ui.add_enabled(running, egui::Button::new("Stop")).clicked() {
-                self.agent.stop();
-                self.status.set("Agent run stopped");
+            if !handled_real {
+                let running = self.agent.is_running();
+                if ui.add_enabled(!running, egui::Button::new("Run")).clicked() {
+                    self.agent.start();
+                    self.status.set("Agent run started");
+                }
+                if ui.add_enabled(running, egui::Button::new("Stop")).clicked() {
+                    self.agent.stop();
+                    self.status.set("Agent run stopped");
+                }
             }
             if ui.button("Replay theater").clicked() {
                 self.replay_open = !self.replay_open;
             }
-            // Hand the finished (or stopped) run's transcript to the theater.
-            let replayable = !running && self.agent.transcript().is_some();
+            // Hand the finished (or stopped) scripted run's transcript to the theater.
+            let replayable = !self.agent.is_running() && self.agent.transcript().is_some();
             if ui
                 .add_enabled(replayable, egui::Button::new("Replay this run"))
                 .clicked()
@@ -8124,39 +8256,177 @@ impl App {
             {
                 self.replay.load_transcript(transcript);
                 self.replay_open = true;
-                self.drc.clear();
+                // Reset the theater's own DRC view; the document's stays untouched (M3).
+                self.replay_drc.clear();
             }
         });
-        if let Some(status) = self.agent.latest_status() {
-            let (done, total) = self.agent.progress();
-            ui.label(format!(
-                "iter {} | {} | {} violation(s) | step {done}/{total}",
-                status.iteration, status.step, status.violations
-            ));
-        } else {
-            ui.label(match self.agent.state() {
-                RunState::Idle => "Idle: enter a prompt and press Run",
-                RunState::Running => "Starting...",
-                RunState::Stopped => "Stopped",
-            });
+        // The scripted preview's status line and narration ring. Hidden when the real
+        // controls are active (the runner shows its own status and the run opens in the
+        // theater), so the panel never says "press Run" when there is a Plan button.
+        if !handled_real {
+            if let Some(status) = self.agent.latest_status() {
+                let (done, total) = self.agent.progress();
+                ui.label(format!(
+                    "iter {} | {} | {} violation(s) | step {done}/{total}",
+                    status.iteration, status.step, status.violations
+                ));
+            } else {
+                ui.label(match self.agent.state() {
+                    RunState::Idle => "Idle: enter a prompt and press Run",
+                    RunState::Running => "Starting...",
+                    RunState::Stopped => "Stopped",
+                });
+            }
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .max_height(140.0)
+                .auto_shrink([false, false])
+                .stick_to_bottom(true)
+                .id_salt("agent_narration")
+                .show(ui, |ui| {
+                    if self.agent.narration().is_empty() {
+                        ui.label("No run yet");
+                    }
+                    for line in self.agent.narration() {
+                        ui.monospace(line);
+                    }
+                });
         }
-        ui.separator();
-        egui::ScrollArea::vertical()
-            .max_height(140.0)
-            .auto_shrink([false, false])
-            .stick_to_bottom(true)
-            .id_salt("agent_narration")
-            .show(ui, |ui| {
-                if self.agent.narration().is_empty() {
-                    ui.label("No run yet");
-                }
-                for line in self.agent.narration() {
-                    ui.monospace(line);
-                }
-            });
         self.agent_plan_section(ui);
         self.agent_conversation(ui);
         self.agent_history_section(ui);
+    }
+
+    // --- lane agent-panel: real native agent controls (item 3) ---
+
+    /// The display name of the live backend the panel would drive, or `None` for the
+    /// model-free scripted preview. Always `None` on wasm (the browser never runs a live
+    /// model); on native it reflects the runner's detected backend.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn agent_live_backend_name(&self) -> Option<&'static str> {
+        self.agent_runner
+            .backend()
+            .map(crate::agent_runner::AgentBackend::display_name)
+    }
+
+    /// On wasm there is no live model: the panel is always the scripted preview.
+    #[cfg(target_arch = "wasm32")]
+    fn agent_live_backend_name(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Renders the real plan/approve/execute controls when a model is configured, driving
+    /// [`crate::agent_runner::AgentRunner`]. Returns whether it took over the control row
+    /// (so the caller skips the scripted Run/Stop). Always `false` on wasm and on native
+    /// with no backend, where the panel keeps the scripted preview.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn agent_real_controls(&mut self, ui: &mut egui::Ui) -> bool {
+        use crate::agent_runner::Phase;
+        if self.agent_runner.backend().is_none() {
+            return false;
+        }
+        let phase = self.agent_runner.phase();
+        ui.horizontal(|ui| {
+            let can_plan = matches!(phase, Phase::Idle | Phase::Done | Phase::Failed);
+            if ui
+                .add_enabled(can_plan, egui::Button::new("Plan"))
+                .on_hover_text("Stage a run for this prompt to review before approving")
+                .clicked()
+            {
+                let prompt = self.agent.prompt.clone();
+                self.agent_runner.plan_run(&prompt);
+            }
+            if ui
+                .add_enabled(phase == Phase::Planned, egui::Button::new("Approve & run"))
+                .on_hover_text("Execute the staged plan against the live model")
+                .clicked()
+            {
+                let prompt = self.agent.prompt.clone();
+                self.agent_runner.approve(&prompt);
+            }
+            let can_stop = self.agent_runner.is_running() || phase == Phase::Planned;
+            if ui
+                .add_enabled(can_stop, egui::Button::new("Stop"))
+                .clicked()
+            {
+                self.agent_runner.stop();
+            }
+        });
+        if !self.agent_runner.plan().is_empty() {
+            ui.label(self.agent_runner.plan());
+        }
+        if !self.agent_runner.status().is_empty() {
+            ui.colored_label(DARK.text_weak, self.agent_runner.status());
+        }
+        true
+    }
+
+    /// On wasm the panel is always the scripted preview, so there are no real controls.
+    #[cfg(target_arch = "wasm32")]
+    fn agent_real_controls(&mut self, _ui: &mut egui::Ui) -> bool {
+        false
+    }
+
+    /// Command `agent.plan`: reveal the agent panel and begin a run. On native with a
+    /// configured model this stages a real plan (review, then Approve to execute); on wasm
+    /// or with no model it starts the model-free scripted preview.
+    fn agent_cmd_plan(&mut self) {
+        self.inspector.reveal("agent");
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.agent_runner.backend().is_some() {
+            let prompt = self.agent.prompt.clone();
+            self.agent_runner.plan_run(&prompt);
+            self.status.set("Agent: plan staged for review");
+            return;
+        }
+        self.agent.start();
+        self.status.set("Agent run started");
+    }
+
+    /// Command `agent.approve` / `agent.approve_step`: approve the staged plan and execute
+    /// it against the live model (native). The interactive loop approves the whole staged
+    /// run, not one step at a time, so both commands drive the same execute. A no-op with
+    /// no configured model or no staged plan (the status explains what to do).
+    fn agent_cmd_approve(&mut self) {
+        self.inspector.reveal("agent");
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use crate::agent_runner::Phase;
+            if self.agent_runner.backend().is_some() {
+                if self.agent_runner.phase() == Phase::Planned {
+                    let prompt = self.agent.prompt.clone();
+                    self.agent_runner.approve(&prompt);
+                    self.status
+                        .set("Agent: approved; running against the live model");
+                } else {
+                    self.status.set("Agent: Plan a run first, then Approve");
+                }
+                return;
+            }
+        }
+        self.status
+            .set("Approve applies to the native live agent; configure a model to enable it");
+    }
+
+    /// Command `agent.stop`: stop the run. Stops both the native real runner and the
+    /// scripted preview, so the one control halts whichever path is active.
+    fn agent_cmd_stop(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.agent_runner.stop();
+        self.agent.stop();
+        self.status.set("Agent stopped");
+    }
+
+    /// Command `agent.replay`: open the last run in the replay theater. Loads the finished
+    /// scripted run's transcript when there is one; otherwise just opens the theater (a
+    /// real native run already opens itself there on completion).
+    fn agent_cmd_replay(&mut self) {
+        if let Some(transcript) = self.agent.transcript().cloned() {
+            self.replay.load_transcript(transcript);
+            self.replay_drc.clear();
+        }
+        self.replay_open = true;
+        self.status.set("Replay theater opened");
     }
 
     /// Draws the agent's plan: the stated per-iteration intent (goal, intended
@@ -8306,7 +8576,7 @@ impl App {
             Ok(Some((records, hash))) => {
                 self.replay.load(records, hash);
                 self.replay_open = true;
-                self.drc.clear();
+                self.replay_drc.clear();
                 self.agent_history.error.clear();
                 let (_, total) = self.replay.progress();
                 self.status
@@ -8318,28 +8588,10 @@ impl App {
                     self.replay.load(records, hash);
                 }
                 self.replay_open = true;
-                self.drc.clear();
+                self.replay_drc.clear();
                 self.status.set("History: playing bundled demo");
             }
             Err(message) => self.agent_history.error = message,
-        }
-    }
-
-    /// Installs a verify step's violation list into the DRC panel and overlay.
-    ///
-    /// Called whenever a running agent feed (or the replay theater) crosses a
-    /// `run_drc` record: the list parsed from the recorded response replaces the
-    /// panel's stored violations, so the markers on the canvas track the
-    /// agent's propose-verify-correct loop in real time.
-    fn apply_agent_drc_update(&mut self, violations: Vec<reticle_model::Violation>) {
-        let n = violations.len();
-        self.drc.set_violations(violations);
-        self.drc_ran_revision = Some(self.history.revision());
-        if n == 0 {
-            self.status.set("Agent verify: DRC clean");
-        } else {
-            self.status.set(format!("Agent verify: {n} violation(s)"));
-            self.inspector.reveal("drc");
         }
     }
 
@@ -8350,8 +8602,9 @@ impl App {
     /// The preview runs a fixed script on a built-in demo cell (see
     /// [`crate::agent_panel`]); it deliberately does NOT write the result into the
     /// document's DRC panel or overlay. Those track the user's real design, and a
-    /// scripted demo must never make them read as verified. (Giving a replay its own
-    /// DRC view, separate from the document's, is the v8.2 theater redesign.)
+    /// scripted demo must never make them read as verified. A transcript replay is
+    /// held to the same rule through its own [`replay_drc`](Self::replay_drc) view
+    /// (the M3 replay-DRC-view split), so neither path can touch the live document.
     fn apply_agent_run_verify(&mut self, violations: &[reticle_model::Violation]) {
         let n = violations.len();
         if n == 0 {
@@ -8362,13 +8615,19 @@ impl App {
         }
     }
 
-    /// Applies a theater seek/step result to the DRC overlay: install the list
-    /// the new position implies, or clear the markers when no verify has run
-    /// yet at that point of the transcript.
+    /// Applies a theater seek/step result to the replay's OWN DRC view
+    /// ([`replay_drc`](Self::replay_drc)): install the violation list the new
+    /// position implies, or clear it when no verify has run yet at that point of
+    /// the transcript.
+    ///
+    /// This deliberately never touches the document's [`drc`](Self::drc),
+    /// `drc_ran_revision`, the status line, or the Inspector: stepping a replay must
+    /// not mutate the live design's DRC state (the M3 fix). The theater's own canvas
+    /// markers and readouts render `replay_drc`, so the replay is fully self-contained.
     fn apply_replay_overlay(&mut self, update: Option<Vec<reticle_model::Violation>>) {
         match update {
-            Some(v) => self.apply_agent_drc_update(v),
-            None => self.drc.clear(),
+            Some(v) => self.replay_drc.set_violations(v),
+            None => self.replay_drc.clear(),
         }
     }
 
@@ -8384,7 +8643,7 @@ impl App {
             Ok(Some((records, hash))) => {
                 self.replay.load(records, hash);
                 self.replay_error.clear();
-                self.drc.clear();
+                self.replay_drc.clear();
                 let (_, total) = self.replay.progress();
                 self.status.set(format!("Replay: loaded {total} record(s)"));
             }
@@ -8855,7 +9114,7 @@ impl App {
                 let (transcript, _) = crate::agent_panel::scripted_run("replay theater demo");
                 self.replay.load_transcript(transcript);
                 self.replay_error.clear();
-                self.drc.clear();
+                self.replay_drc.clear();
             }
         });
         if !self.replay_error.is_empty() {
@@ -8905,7 +9164,7 @@ impl App {
                 .clicked()
                 && let Some(update) = self.replay.step_forward()
             {
-                self.apply_agent_drc_update(update);
+                self.apply_replay_overlay(Some(update));
             }
             let mut speed = self.replay.speed();
             egui::ComboBox::from_id_salt("replay_speed")
@@ -8937,12 +9196,9 @@ impl App {
                 HashCheck::Match => "hash: match",
                 HashCheck::Mismatch => "hash: MISMATCH",
             });
-            if self.replay.has_verified() {
+            if self.replay_drc.has_run() {
                 ui.separator();
-                ui.label(format!(
-                    "{} violation(s)",
-                    self.replay.last_violations().len()
-                ));
+                ui.label(format!("{} violation(s)", self.replay_drc.len()));
             }
         });
         if let Some(record) = self.replay.current_record() {
@@ -9023,9 +9279,10 @@ impl App {
                 }
             }
         }
-        // The last verify's markers, in the DRC overlay's alarm red.
+        // The replay's own DRC markers (from its `replay_drc` view, never the
+        // document's), in the DRC overlay's alarm red.
         let marker = Stroke::new(2.0, CANVAS.drc_violation);
-        for v in self.replay.last_violations() {
+        for v in self.replay_drc.violations() {
             let e =
                 EguiRect::from_two_pos(to_pos(v.location.min), to_pos(v.location.max)).expand(2.0);
             painter.rect_stroke(e, 0.0, marker, StrokeKind::Middle);
@@ -12901,10 +13158,26 @@ impl eframe::App for App {
         }
 
         // Advance replay-theater playback the same way; a playing transcript
-        // updates the theater canvas and the DRC overlay as it crosses
-        // verifies.
+        // updates the theater's own canvas and DRC view (never the document's) as
+        // it crosses verifies.
         if let Some(update) = self.replay.tick(dt) {
-            self.apply_agent_drc_update(update);
+            self.apply_replay_overlay(Some(update));
+        }
+
+        // Poll the native real agent: when a run finishes on its worker thread, open its
+        // transcript in the replay theater, so a real run flows straight into a faithful
+        // replay. Keep the frame loop awake while a run is in flight so its completion is
+        // noticed promptly. Native-only; the web build never runs a live model.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if self.agent_runner.is_running() {
+                ctx.request_repaint();
+            }
+            if let Some(transcript) = self.agent_runner.poll()
+                && let Some(path) = transcript.to_str()
+            {
+                self.load_history_entry(path);
+            }
         }
 
         // Feed the previous frame's edits to DRC-as-you-type before drawing, so the
@@ -13362,6 +13635,24 @@ fn platform_label() -> &'static str {
     }
 }
 
+/// The honest agent-panel banner for the active path.
+///
+/// `None` is the model-free scripted preview (the web build, or native with no model
+/// configured); `Some(name)` is a live native agent on the named backend. The preview
+/// text never claims a live model or that it edits the design; the live text names the
+/// backend and states that it executes the prompt against a real model. This is the
+/// reticle-claims honesty seam for the panel: the banner must match whichever path is
+/// actually active.
+fn agent_banner(live_backend: Option<&str>) -> String {
+    match live_backend {
+        None => "Preview: scripted demo on a built-in cell; it does not read or edit your design."
+            .to_owned(),
+        Some(name) => format!(
+            "Live agent ({name}, native): plans, then executes your prompt against a real model. Review the plan before approving."
+        ),
+    }
+}
+
 /// Draws a managed view-panel header row: the panel title on the left and a close
 /// [`components::IconButton`] on the right. Returns whether the close affordance
 /// was clicked this frame. Shared by the 3D-stack and Cross-section hosts (ADR 0096).
@@ -13655,35 +13946,198 @@ mod tests {
         );
     }
 
-    /// The replay theater re-executes a transcript against a live session, and
-    /// its verify records drive the shared DRC overlay through the same path
-    /// the agent run uses; rewinding clears the overlay again.
+    /// M3: a transcript replay drives the theater's OWN DRC view (`replay_drc`)
+    /// and never the live document's DRC state. Stepping a replay with a real
+    /// document DRC result present must leave that result byte-for-byte intact.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn replay_theater_replays_and_drives_the_overlay() {
+    fn stepping_a_replay_drives_its_own_view_not_the_document_drc() {
+        use reticle_geometry::{LayerId, Point, Rect};
+        use reticle_model::{RuleKind, Violation};
+
         let mut app = App::new();
+
+        // Give the live document a distinctive DRC state so any clobber is visible.
+        let sentinel = Violation {
+            rule: "document_sentinel_rule".to_owned(),
+            kind: RuleKind::Width,
+            layer: LayerId::new(9, 9),
+            other_layer: None,
+            measured: 1,
+            required: 2,
+            location: Rect::new(Point::new(0, 0), Point::new(1, 1)),
+            message: "the user's own DRC run".to_owned(),
+        };
+        app.drc.set_violations(vec![sentinel]);
+        let doc_revision_before = app.drc_ran_revision;
+
         let (transcript, _) = crate::agent_panel::scripted_run("theater glue");
         let total = transcript.records.len();
         app.replay.load_transcript(transcript);
+        app.replay_drc.clear(); // load resets the theater's own view, not the document's
         assert!(app.replay.is_loaded());
-        // Step to just past the first verify, applying overlay updates the way
-        // the transport buttons do.
+        assert_eq!(
+            app.drc.len(),
+            1,
+            "loading a replay left the document DRC alone"
+        );
+
+        // Step to just past the first verify, applying the overlay the way the
+        // transport buttons do.
         let mut first_flagged = None;
         while first_flagged.is_none() && !app.replay.at_end() {
             if let Some(update) = app.replay.step_forward() {
                 first_flagged = Some(update.clone());
-                app.apply_agent_drc_update(update);
+                app.apply_replay_overlay(Some(update));
             }
         }
         let flagged = first_flagged.expect("the script verifies");
         assert!(!flagged.is_empty(), "first verify flags the thin wire");
-        assert_eq!(app.drc.len(), flagged.len());
+
+        // The replay's OWN view took the violations.
+        assert!(app.replay_drc.has_run());
+        assert_eq!(app.replay_drc.len(), flagged.len());
         assert!(app.replay.shape_count() >= 1);
-        // Restarting clears the overlay: no verify crossed at position 0.
+
+        // The document DRC is completely untouched: same list, same rule, same
+        // ran-revision. Stepping the replay did not mutate the live design's state.
+        assert_eq!(app.drc.len(), 1, "document DRC count unchanged");
+        assert_eq!(
+            app.drc.violations()[0].rule,
+            "document_sentinel_rule",
+            "the user's own DRC violations are intact"
+        );
+        assert_eq!(
+            app.drc_ran_revision, doc_revision_before,
+            "stepping a replay never re-stamps the document's DRC revision"
+        );
+
+        // Rewinding clears the replay view (no verify crossed at position 0) and
+        // still leaves the document DRC alone.
         let update = app.replay.seek(0);
         app.apply_replay_overlay(update);
-        assert!(!app.drc.has_run());
+        assert!(
+            !app.replay_drc.has_run(),
+            "replay view cleared at the start"
+        );
+        assert_eq!(app.drc.len(), 1, "document DRC still intact after rewind");
         assert_eq!(app.replay.progress(), (0, total));
+    }
+
+    /// Item 2 (scrub slider): scrubbing seeks to a position and the readout source
+    /// (`replay.progress`) and the replay's own DRC overlay follow the playhead. This
+    /// is exactly what `replay_scrub_row` does on a slider change, minus the widget.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn scrubbing_seeks_and_the_replay_view_follows() {
+        let (transcript, _) = crate::agent_panel::scripted_run("scrub me");
+        let total = transcript.records.len();
+        let mut app = App::new();
+        app.replay.load_transcript(transcript);
+        app.replay_drc.clear();
+
+        // Scrub to the end: progress reaches the end and the replay view reflects the
+        // final, clean verify.
+        let update = app.replay.seek(total);
+        app.apply_replay_overlay(update);
+        assert_eq!(
+            app.replay.progress(),
+            (total, total),
+            "scrub reached the end"
+        );
+        assert!(
+            app.replay_drc.has_run(),
+            "the final verify populated the view"
+        );
+        assert_eq!(app.replay_drc.len(), 0, "the corrected run is clean");
+
+        // Scrub to an arbitrary mid position: the progress readout follows exactly.
+        let mid = total / 2;
+        let update = app.replay.seek(mid);
+        app.apply_replay_overlay(update);
+        assert_eq!(
+            app.replay.progress().0,
+            mid,
+            "scrub lands on the mid position"
+        );
+
+        // Scrub back to the very start: the view clears (no verify crossed at 0).
+        let update = app.replay.seek(0);
+        app.apply_replay_overlay(update);
+        assert_eq!(
+            app.replay.progress(),
+            (0, total),
+            "scrub returned to the start"
+        );
+        assert!(
+            !app.replay_drc.has_run(),
+            "the overlay cleared at the start"
+        );
+    }
+
+    /// Item 2 (minimize): the docked theater lays out in both the expanded and the
+    /// minimized state without panicking, and minimizing hides the body while keeping
+    /// the theater open (a collapse, not a close or a move; ADR 0026).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn theater_renders_minimized_and_expanded_without_panicking() {
+        let mut app = App::new();
+        let (transcript, _) = crate::agent_panel::scripted_run("render both states");
+        app.replay.load_transcript(transcript);
+        app.replay_open = true;
+
+        // Expanded: the full strip lays out (header, load, transport, scrub, readouts,
+        // preview).
+        assert!(!app.replay_minimized, "opens expanded");
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        egui::Window::new("theater test").show(&ctx, |ui| {
+            app.show_replay_panel(ui);
+        });
+        let _ = ctx.end_pass();
+
+        // Minimized: only the title strip renders; the theater stays open.
+        app.replay_minimized = true;
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        egui::Window::new("theater test").show(&ctx, |ui| {
+            app.show_replay_panel(ui);
+        });
+        let _ = ctx.end_pass();
+        assert!(app.replay_minimized, "stays minimized");
+        assert!(app.replay_open, "minimize does not close the theater");
+    }
+
+    /// Item 3 (honesty label): the banner matches whichever path is active and never
+    /// claims a live model when there is none (reticle-claims).
+    #[test]
+    fn agent_banner_matches_the_active_path() {
+        // The scripted-preview banner never claims a live model or that it edits the design.
+        let preview = agent_banner(None);
+        assert!(
+            preview.contains("scripted"),
+            "preview names the scripted demo"
+        );
+        assert!(
+            !preview.to_lowercase().contains("live"),
+            "the preview must never claim to be a live agent"
+        );
+        assert!(
+            preview.contains("does not read or edit"),
+            "the preview is honest that it does not touch the design"
+        );
+        // The live banner names the backend and says it runs a real model.
+        let live = agent_banner(Some("Anthropic"));
+        assert!(
+            live.contains("Live agent"),
+            "the live banner is labeled live"
+        );
+        assert!(
+            live.contains("Anthropic"),
+            "the live banner names the backend"
+        );
+        assert!(live.contains("real model"));
+        assert_ne!(preview, live, "the two paths read differently");
     }
 
     /// Loading a history entry through the store drives the replay theater: on
