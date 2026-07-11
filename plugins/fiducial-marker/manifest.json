@@ -1,0 +1,8 @@
+{
+  "id": "dev.reticle.fiducial-marker",
+  "version": "0.1.0",
+  "api_version": 0,
+  "name": "Fiducial Marker",
+  "entry": "run",
+  "permissions": ["read_document", "stage_edit"]
+}
