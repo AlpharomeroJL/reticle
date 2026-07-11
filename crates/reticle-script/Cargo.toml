@@ -18,5 +18,10 @@ reticle-geometry = { workspace = true }
 reticle-model = { workspace = true }
 reticle-io = { workspace = true }
 reticle-drc = { workspace = true }
+# Phase 2 (ADR 0107): the sandboxed PCell producer consumes reticle-gen's PCellDef and
+# ProduceMeta. This is the first script -> gen edge; it is acyclic (reticle-gen does not
+# depend on reticle-script). serde_json moves the untyped PCell parameters.
+reticle-gen = { workspace = true }
+serde_json = { workspace = true }
 rhai = "1.25.1"
 # Wave 3 wires `rhai` and the plugin loader.

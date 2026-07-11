@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// The full parameter schema for one generator.
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub struct ParamSchema {
     /// The generator id this schema belongs to (matches the registry key).
     pub generator_id: String,

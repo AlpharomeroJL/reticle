@@ -76,6 +76,9 @@ mod gf180;
 // --- end lane retarget ---
 mod guard_ring;
 mod pad_ring;
+// --- phase2 scaffold: user PCell engine (ADR 0107) ---
+mod pcell;
+// --- end phase2 scaffold ---
 mod produce;
 mod registry;
 mod schema;
@@ -91,6 +94,9 @@ pub use generator::{ErasedGenerator, GenOutput, GenParams, Generator};
 pub use gentech::{Conductor, Cut, GenTech, Residue, derive_gentech};
 pub use guard_ring::{GuardRing, GuardRingParams, RingLayer};
 pub use pad_ring::{PadRing, PadRingParams};
+// --- phase2 scaffold: user PCell engine (ADR 0107) ---
+pub use pcell::{CacheStats, PCellCache, PCellDef, PCellRegistry, param_hash};
+// --- end phase2 scaffold ---
 pub use produce::{ProduceMeta, canonical_params_json};
 pub use registry::{GeneratorInfo, Registry};
 pub use schema::{FieldSchema, FieldType, ParamSchema};

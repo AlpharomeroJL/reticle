@@ -1,0 +1,7 @@
+# Clippy configuration.
+#
+# Domain terms that read as mixed-case identifiers to `clippy::doc_markdown` but are plain
+# English in Reticle's docs, so they need not be wrapped in backticks. `".."` keeps clippy's
+# built-in list (GraphQL, OAuth, ...) and adds ours. Introduced with the Phase 2 PCell engine
+# (ADR 0107): "PCell"/"PCells" appear throughout that subsystem's prose.
+doc-valid-idents = ["PCell", "PCells", ".."]

@@ -12,8 +12,10 @@
 //! `generator_id + "\n" + engine_version + "\n" + canonical_params_json(params)`, rendered
 //! lowercase hex. This module ships the deterministic input ([`canonical_params_json`], a
 //! sorted-key compact JSON so two parameter sets that differ only in key order hash the
-//! same); the `pcell-params` lane (Phase 2) applies the hash itself, so this crate gains no
-//! hash dependency before it needs one. The hash keys the instance cache and is the
+//! same); the hash itself is applied by
+//! [`param_hash`](crate::param_hash) in the PCell module (the Phase-2 scaffolding
+//! front-loaded that primitive so every PCell lane keys on one tested implementation; ADR
+//! 0107). The hash keys the instance cache and is the
 //! regenerate identity: same generator, engine, and params means the same hash.
 
 use serde::{Deserialize, Serialize};

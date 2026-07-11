@@ -63,12 +63,18 @@
 mod api;
 mod error;
 mod host;
+// --- phase2 scaffold: sandboxed PCell producer (ADR 0107) ---
+mod pcell;
+// --- end phase2 scaffold ---
 
 use std::path::Path;
 
 use rhai::Engine;
 
 pub use error::{Result, ScriptError};
+// --- phase2 scaffold: sandboxed PCell producer (ADR 0107) ---
+pub use pcell::{ProduceError, SandboxLimits, produce};
+// --- end phase2 scaffold ---
 
 use host::{SharedHost, shared_host};
 

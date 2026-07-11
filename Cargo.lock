@@ -4341,6 +4341,7 @@ dependencies = [
  "reticle-model",
  "serde",
  "serde_json",
+ "sha2",
  "toml 1.1.2+spec-1.1.0",
 ]
 
@@ -4489,10 +4490,12 @@ name = "reticle-script"
 version = "8.1.0"
 dependencies = [
  "reticle-drc",
+ "reticle-gen",
  "reticle-geometry",
  "reticle-io",
  "reticle-model",
  "rhai",
+ "serde_json",
 ]
 
 [[package]]

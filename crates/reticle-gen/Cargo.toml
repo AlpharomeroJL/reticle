@@ -19,6 +19,9 @@ reticle-model = { workspace = true }
 reticle-drc = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# The PCell parameter-hash primitive (Phase 2, ADR 0107). Already vendored transitively;
+# pure Rust and wasm32-clean, so it keeps this crate's browser build intact.
+sha2 = "0.10"
 
 [dev-dependencies]
 proptest = "1.11.0"
