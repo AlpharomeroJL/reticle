@@ -1,0 +1,8 @@
+# Tier-3 PCell params: instantiate the bench.box_pad PCell (crates/reticle-bench's
+# pcell_box checker, over reticle_gen::PCellDef) with width stated and margin left to
+# the schema default (20 dbu), exercising PCellDef::effective_params' defaulting.
+id = "t3_pcell_box_pad_default_margin"
+tier = 3
+prompt = "Create a cell named top and instantiate the box_pad PCell with width=400 on outer layer met1 (68/20) and inner layer li1 (67/20), leaving margin at its schema default: an outer 400x400 square at the origin, and a concentric inner square inset by the default margin (20 dbu) on every side."
+technology = "sky130.tech"
+checker = "pcell_box:outer=68/20,inner=67/20,width=400"

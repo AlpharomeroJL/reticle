@@ -1,0 +1,8 @@
+# Tier-4 multi-step edit: a 4-via chain where one via starts stranded off both metal
+# straps; proved by a MockModel script whose correction is a transform_shapes move
+# (repositioning the misplaced via) rather than a delete-and-redraw.
+id = "t4_multistep_reposition_via"
+tier = 4
+prompt = "Create a cell named top with a met1 (68/20) strap and a met2 (69/20) strap of the same footprint, stitched together by at least 4 via1 (68/44) cuts that all land within both straps so they share a single continuous net."
+technology = "sky130.tech"
+checker = "via_chain:via=68/44,vias=4"

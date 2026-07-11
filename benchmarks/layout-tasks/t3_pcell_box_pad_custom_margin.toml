@@ -1,0 +1,9 @@
+# Tier-3 PCell params: instantiate the bench.box_pad PCell with BOTH width and an
+# explicit margin override (50 dbu, not the schema default of 20), exercising the
+# other half of PCellDef::effective_params' defaulting: a stated field wins over the
+# schema default.
+id = "t3_pcell_box_pad_custom_margin"
+tier = 3
+prompt = "Create a cell named top and instantiate the box_pad PCell with width=600 and an explicit margin=50 on outer layer met2 (69/20) and inner layer met1 (68/20): an outer 600x600 square at the origin, and a concentric inner square inset by 50 dbu on every side (not the schema default of 20)."
+technology = "sky130.tech"
+checker = "pcell_box:outer=69/20,inner=68/20,width=600,margin=50"

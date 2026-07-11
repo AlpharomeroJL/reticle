@@ -218,9 +218,10 @@ impl CheckerRegistry {
     ///   checker name (typically `intent`), regardless of the name.
     /// - A task whose checker string names a geometric checker
     ///   (`shape_count`, `layer_area`, `boolean_result`, `array_pitch`, `contact_stack`,
-    ///   `via_chain`, `comb`, `guard_ring`, `compound_cell`, `generator`) with parameters
-    ///   after a `:` gets that checker, built from the parsed parameters, bound under the
-    ///   full string.
+    ///   `via_chain`, `comb`, `guard_ring`, `compound_cell`, `generator`), a net-trace
+    ///   checker (`net_trace_connected`, `net_trace_extent`, `net_trace_isolated`), or
+    ///   the PCell-params checker (`pcell_box`), with parameters after a `:`, gets that
+    ///   checker, built from the parsed parameters, bound under the full string.
     /// - A parameterized `rect_present:layer=L/D` gets a [`RectPresent`] on that layer.
     ///
     /// Anything else is left to the default checkers (`rect_present`, `drc_clean`).
@@ -228,8 +229,8 @@ impl CheckerRegistry {
     /// # Errors
     ///
     /// Returns an error if the task carries an `intent` that does not parse, or if its
-    /// checker string names a geometric checker whose parameters are missing or
-    /// malformed.
+    /// checker string names a geometric, net-trace, or PCell checker whose parameters
+    /// are missing or malformed.
     pub fn for_task(task: &BenchTask) -> Result<Self, String> {
         let mut registry = Self::default();
 
@@ -240,9 +241,10 @@ impl CheckerRegistry {
             return Ok(registry);
         }
 
-        // Otherwise try to compile a parameterized checker from the checker string.
+        // Otherwise try to compile a parameterized checker from the checker string,
+        // trying each family in turn: geometric, then net-trace, then PCell-params.
         let parsed = crate::params::ParsedChecker::parse(&task.checker);
-        if let Some(checker) = crate::geom_checkers::build(&parsed).map_err(|e| e.to_string())? {
+        if let Some(checker) = builtin_checker_family(&parsed)? {
             registry = registry.with(task.checker.clone(), checker);
         } else if parsed.name() == "rect_present" && parsed.has("layer") {
             // A layer-parameterized rect_present, bound under the full string.
@@ -254,6 +256,33 @@ impl CheckerRegistry {
         }
         Ok(registry)
     }
+}
+
+/// Tries each parameterized-checker family in turn against `parsed`: the geometric
+/// checkers ([`crate::geom_checkers::build`]), then the net-trace checkers
+/// ([`crate::net_checkers::build`]), then the PCell-params checker
+/// ([`crate::pcell_checkers::build`]). Returns the first family's checker, or
+/// `Ok(None)` if no family recognizes `parsed`'s name (the caller falls through to
+/// `rect_present`/the default registry).
+///
+/// # Errors
+///
+/// Returns the first family's [`crate::params::ParamError`] (as its message) if a
+/// family recognizes the checker name but a required parameter is missing or
+/// malformed.
+fn builtin_checker_family(
+    parsed: &crate::params::ParsedChecker,
+) -> Result<Option<Box<dyn Checker>>, String> {
+    if let Some(checker) = crate::geom_checkers::build(parsed).map_err(|e| e.to_string())? {
+        return Ok(Some(checker));
+    }
+    if let Some(checker) = crate::net_checkers::build(parsed).map_err(|e| e.to_string())? {
+        return Ok(Some(checker));
+    }
+    if let Some(checker) = crate::pcell_checkers::build(parsed).map_err(|e| e.to_string())? {
+        return Ok(Some(checker));
+    }
+    Ok(None)
 }
 
 #[cfg(test)]

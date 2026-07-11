@@ -1,0 +1,7 @@
+# Tier-3 net-trace: two probe points must resolve to the same net. Exercises the F3
+# trace-query API (net_at_point/net_extent) rather than the intent checker.
+id = "t3_net_trace_connected_met1"
+tier = 3
+prompt = "Create a cell named top and draw met1 (layer 68, datatype 20) geometry that electrically connects the point (50, 100) to the point (950, 100), for example two overlapping rectangles whose union spans that range, joined into a single net of at least 2 shapes."
+technology = "sky130.tech"
+checker = "net_trace_connected:a=50/100,b=950/100,min_shapes=2"

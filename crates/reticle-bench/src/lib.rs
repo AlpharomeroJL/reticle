@@ -13,6 +13,11 @@
 //!   [`LayerArea`], [`ContactStack`], [`ViaChain`], [`Comb`], [`GuardRing`],
 //!   [`CompoundCell`]) whose parameters are carried in the task's `checker` string
 //!   and parsed by [`params`].
+//! - [`net_checkers`]: F3 trace-query checkers ([`NetTraceConnected`],
+//!   [`NetTraceExtent`], [`NetTraceIsolated`]) built on
+//!   [`reticle_extract::net_at_point`]/[`reticle_extract::net_extent`].
+//! - [`pcell_checkers`]: [`PcellBoxPad`], a Phase 2 user-PCell parameter checker
+//!   built on [`reticle_gen::PCellDef`]'s schema defaulting and identity hashing.
 //! - [`runner`]: [`run_task`], which drives a session through the loop and records a
 //!   [`ResultRecord`] with a deterministic (step-counted) wall time.
 //! - [`results`]: write records as JSON and render a Markdown [`Summary`].
@@ -32,7 +37,9 @@ pub mod leaderboard;
 pub mod loader;
 pub mod mining;
 pub mod model;
+pub mod net_checkers;
 pub mod params;
+pub mod pcell_checkers;
 pub mod results;
 pub mod runner;
 
@@ -46,7 +53,9 @@ pub use leaderboard::{
 };
 pub use loader::{LoadError, load_manifest, load_suite, load_task};
 pub use model::{Context, MockModel, ModelClient};
+pub use net_checkers::{NetTraceConnected, NetTraceExtent, NetTraceIsolated};
 pub use params::{ParamError, ParsedChecker};
+pub use pcell_checkers::PcellBoxPad;
 pub use results::{Summary, TierStats, WriteError, summarize, write_records};
 pub use runner::{RunError, RunOptions, run_task};
 pub use schema::{BenchTask, ResultRecord, SuiteManifest, Tier};

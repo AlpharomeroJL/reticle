@@ -32,7 +32,28 @@
 # via1 chain. Each is proved solvable and graded by a deterministic MockModel script in
 # `crates/reticle-bench/tests/new_tasks_freeze.rs`, which also pins the frozen output
 # (result records and the rendered leaderboard) byte-for-byte across two runs.
-version = "0.6.0"
+#
+# v0.7.0 adds 7 Phase-3 depth tasks across three new checker families (see
+# `docs/decisions/0113-phase3-benchmark-tasks.md`):
+#
+# - **Net-trace queries** (3, tier 3): `net_trace_connected`, `net_trace_extent`, and
+#   `net_trace_isolated` (`crates/reticle-bench/src/net_checkers.rs`) exercise the F3
+#   trace-query API (`reticle_extract::net_at_point`/`net_extent`) the way a
+#   click-to-trace UI calls it, rather than re-deriving connectivity the way the
+#   `intent` checker does.
+# - **PCell params** (2, tier 3): `pcell_box` (`crates/reticle-bench/src/pcell_checkers.rs`)
+#   exercises the Phase 2 user-PCell API (`reticle_gen::PCellDef::effective_params`,
+#   `effective_param_hash`, `validate_params`) for a fixed `bench.box_pad` PCell, once
+#   with a parameter left to its schema default and once with an explicit override.
+# - **Multi-step edits** (2, tier 4): 3-iteration and 2-iteration MockModel scripts
+#   that converge by editing existing shapes (`offset_shapes`, `transform_shapes`)
+#   rather than the delete-and-redraw pattern every earlier correction script used,
+#   graded by the existing `contact_stack`/`via_chain` checkers.
+#
+# SPICE/netlist export was investigated and ledgered rather than built into a task: no
+# writer exists yet anywhere in the workspace (only the F-contract fixture and a
+# reserved, non-dispatched command id), so there is nothing a checker could exercise.
+version = "0.7.0"
 tasks = [
     "t1_place_met1_rect",
     "t1_drc_clean_met1",
@@ -122,4 +143,11 @@ tasks = [
     "t3_contact_stack_via2_enc",
     "t3_bool_xor_met2",
     "t3_via_chain_via1_6",
+    "t3_net_trace_connected_met1",
+    "t3_net_trace_extent_met2",
+    "t3_net_trace_isolated_met1",
+    "t3_pcell_box_pad_default_margin",
+    "t3_pcell_box_pad_custom_margin",
+    "t4_multistep_grow_enclosure",
+    "t4_multistep_reposition_via",
 ]

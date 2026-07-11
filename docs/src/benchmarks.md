@@ -52,6 +52,39 @@ Version 0.4.0 adds 12 tasks that exercise the Wave-3 command surface
 The `refinement` field is additive on `BenchTask` (`#[serde(default)]`), so task TOML
 written before it existed still parses unchanged.
 
+<!-- --- lane bench-2: v0.7.0 Phase-3 depth tasks --- -->
+### Phase-3 depth task families (v0.7.0)
+
+Version 0.7.0 adds 7 tasks across three checker families, exercising Phase 2/3
+capability that no earlier wave reached:
+
+- **Net-trace queries** (3, tier 3): `net_trace_connected`, `net_trace_extent`, and
+  `net_trace_isolated` are built directly on the F3 trace-query API
+  (`reticle_extract::net_at_point`/`net_extent`) rather than re-deriving connectivity
+  the way the `intent` checker does, so they exercise the same click-a-point,
+  read-the-net sequence a trace UI runs: two probe points must resolve to the same
+  net (`connected`), the net under one probe must span a minimum bounding box
+  (`extent`), or two probes must resolve to different nets (`isolated`).
+- **PCell params** (2, tier 3): `pcell_box` exercises the Phase 2 user-PCell API
+  (`reticle_gen::PCellDef::effective_params`/`effective_param_hash`/`validate_params`)
+  for a fixed `bench.box_pad` PCell definition, one task leaving a parameter to the
+  PCell's schema default and one overriding it explicitly. The checker resolves
+  parameters through the real `PCellDef` methods; the reference geometry itself is a
+  Rust-native port of the PCell's script (`reticle-bench` does not depend on
+  `reticle-script`, the sandboxed producer, so it cannot run the script directly). See
+  `docs/decisions/0113-phase3-benchmark-tasks.md`.
+- **Multi-step edits** (2, tier 4): `t4_multistep_grow_enclosure` and
+  `t4_multistep_reposition_via` reuse the existing `contact_stack`/`via_chain`
+  checkers but require a genuinely multi-iteration scripted solution that edits
+  previously placed shapes in place (`offset_shapes`, `transform_shapes`) rather than
+  the delete-and-redraw pattern every earlier correction script used.
+
+SPICE/netlist export (the fourth Phase-3 depth area named in the campaign brief) was
+investigated and ledgered rather than built into a task: no writer exists anywhere in
+the workspace yet, only a committed exchange-format fixture and a reserved,
+non-dispatched command id, so there is nothing yet for a checker to exercise.
+<!-- --- end lane bench-2 --- -->
+
 ## The propose-verify-correct loop
 
 A run drives each task through the same loop the `reticle-agent` harness uses:
