@@ -468,6 +468,12 @@ pub struct App {
     /// PCells and their F2 provenance (see [`crate::pcell_panel`]).
     pcell: crate::pcell_panel::PCellPanelState,
     // --- end lane pcell-inspect ---
+    // --- lane plugin-ui: plugin manager panel (ADR 0116/0120) ---
+    /// The Plugin Manager panel state: the browsable F5 index, the selection,
+    /// and (native only, in effect) each entry's installed bytes, enabled flag,
+    /// and last run outcome (see [`crate::plugin_panel`]).
+    plugins: crate::plugin_panel::PluginPanelState,
+    // --- end lane plugin-ui ---
     /// The search / selection-depth panel: filter query bar, saved selection
     /// sets, select-similar, and the cell/instance outline tree.
     search: SearchState,
@@ -1248,6 +1254,9 @@ impl App {
             // --- lane pcell-inspect: PCell inspector panel ---
             pcell: crate::pcell_panel::PCellPanelState::new(),
             // --- end lane pcell-inspect ---
+            // --- lane plugin-ui: plugin manager panel ---
+            plugins: crate::plugin_panel::PluginPanelState::new(),
+            // --- end lane plugin-ui ---
             search: SearchState {
                 outline,
                 ..SearchState::default()
@@ -4067,6 +4076,12 @@ impl App {
                 self.status
                     .set(format!("Embed mode {}", on_off(self.is_embedded())));
             } // --- end lane embed ---
+            // --- lane plugin-ui: plugin manager panel (ADR 0116/0120) ---
+            AppOp::PluginBrowse => self.plugin_browse(),
+            AppOp::PluginInstall => self.plugin_install(),
+            AppOp::PluginEnable => self.plugin_enable(),
+            AppOp::PluginDisable => self.plugin_disable(),
+            // --- end lane plugin-ui ---
         }
     }
 
@@ -5664,6 +5679,9 @@ impl App {
                 // --- lane waveform-ui: waveform panel ---
                 self.inspector_section(ui, ctx, "waveform", "Waveform", Self::waveform_section);
                 // --- end lane waveform-ui ---
+                // --- lane plugin-ui: plugin manager panel ---
+                self.inspector_section(ui, ctx, "plugins", "Plugins", Self::plugin_section);
+                // --- end lane plugin-ui ---
             }
             PanelGroup::Settings => {
                 self.inspector_section(ui, ctx, "operations", "Operations", Self::ops_panel);
@@ -8010,6 +8028,210 @@ impl App {
         );
     }
     // --- end lane pcell-inspect ---
+
+    // --- lane plugin-ui: plugin manager panel (ADR 0116/0120) ---
+    /// Draws the Plugin Manager Inspector section: browse and preview the F5
+    /// index (every build), plus, natively, install/enable/disable controls and
+    /// the last run's outcome.
+    ///
+    /// The browser build shows [`crate::plugin_panel::BROWSER_DISCLAIMER`]
+    /// instead of controls it cannot fulfil (ADR 0115/0116/0120): the wasm
+    /// plugin runtime does not exist in this build (`reticle_plugin::host` is
+    /// `cfg(not(wasm32))`), so this never offers an Install/Enable button the
+    /// web build cannot honor.
+    fn plugin_section(&mut self, ui: &mut egui::Ui) {
+        let count = self.plugins.entries().len();
+        if count == 0 {
+            ui.label("No plugins in the index.");
+            return;
+        }
+        egui::ComboBox::from_id_salt("plugin_pick")
+            .selected_text(self.plugins.selected_entry().manifest.name.as_str())
+            .show_ui(ui, |ui| {
+                for i in 0..count {
+                    let is_sel = self.plugins.selected() == i;
+                    let name = self.plugins.entries()[i].manifest.name.clone();
+                    if ui.selectable_label(is_sel, name).clicked() {
+                        self.plugins.select(i);
+                    }
+                }
+            });
+
+        let entry = self.plugins.selected_entry();
+        ui.monospace(format!("{:<12}{}", "id:", entry.manifest.id));
+        ui.monospace(format!("{:<12}{}", "version:", entry.manifest.version));
+        ui.monospace(format!("{:<12}{}", "source:", entry.source));
+        let perms = entry
+            .manifest
+            .permissions
+            .iter()
+            .map(|p| format!("{p:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        ui.monospace(format!(
+            "{:<12}{}",
+            "permissions:",
+            if perms.is_empty() {
+                "-".to_owned()
+            } else {
+                perms
+            }
+        ));
+
+        ui.separator();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let selected = self.plugins.selected();
+            ui.horizontal(|ui| {
+                if ui.button("Install...").clicked() {
+                    self.plugin_install();
+                }
+                ui.label(if self.plugins.is_installed(selected) {
+                    "Installed"
+                } else {
+                    "Not installed"
+                });
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Enable && run").clicked() {
+                    self.plugin_enable();
+                }
+                if ui.button("Disable").clicked() {
+                    self.plugin_disable();
+                }
+                ui.label(if self.plugins.is_enabled(selected) {
+                    "Enabled"
+                } else {
+                    "Disabled"
+                });
+            });
+            if let Some(outcome) = self.plugins.last_run(selected) {
+                ui.separator();
+                ui.label("Last run");
+                match outcome {
+                    crate::plugin_panel::RunSummary::Ran { .. } => {
+                        ui.monospace(outcome.to_string());
+                    }
+                    crate::plugin_panel::RunSummary::Failed(_) => {
+                        ui.colored_label(DARK.danger, outcome.to_string());
+                    }
+                }
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        ui.colored_label(DARK.warning, crate::plugin_panel::BROWSER_DISCLAIMER);
+    }
+
+    /// Reveals the Inspector's Plugins section (`plugin.browse`), the same shape
+    /// as `pcell_edit_params`.
+    fn plugin_browse(&mut self) {
+        self.inspector.reveal("plugins");
+    }
+
+    /// Opens a native file picker for a plugin's compiled wasm binary and
+    /// installs it for the selected index entry this session (`plugin.install`;
+    /// no persistence yet, a follow-on -- see `crate::plugin_panel`).
+    ///
+    /// `plugin.install` is [`Scope::NativeOnly`](crate::commands::Scope::NativeOnly)
+    /// (hidden from the web palette/menu, mirroring `xschem_import_probe`):
+    /// there is nothing to install in the browser build, which never runs a
+    /// plugin (ADR 0115/0116/0120).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn plugin_install(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("wasm plugin", &["wasm"])
+            .pick_file()
+        else {
+            return;
+        };
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                let len = bytes.len();
+                self.plugins.install_selected(bytes);
+                self.status.set(format!(
+                    "Installed {len} byte(s) for {}",
+                    self.plugins.selected_entry().manifest.id
+                ));
+            }
+            Err(e) => self.report_error(
+                "Plugin install failed",
+                format!("Could not read {}: {e}", path.display()),
+            ),
+        }
+    }
+
+    /// Web stub: hidden from the palette/menu ([`Scope::NativeOnly`]), but still
+    /// a real, compilable arm (reachable directly, for example from a test),
+    /// matching `xschem_import_probe`'s wasm arm.
+    #[cfg(target_arch = "wasm32")]
+    fn plugin_install(&mut self) {
+        self.status.set(crate::plugin_panel::BROWSER_DISCLAIMER);
+    }
+
+    /// Enables the selected plugin and, natively, actually RUNS it through the
+    /// merged sandboxed host (`plugin.enable`; ADR 0116/0120): funnels every
+    /// staged edit through the undo-integrated document as one logical step.
+    ///
+    /// [`reticle_plugin::Host::run`] needs a raw `&mut EditableDocument` to
+    /// replay staged edits into during the run; handing it
+    /// [`crate::history::History`]'s own private one directly would apply edits
+    /// it never grouped, desyncing its undo/redo bookkeeping from the
+    /// document's real undo stack (see
+    /// [`PluginPanelState::run_selected`](crate::plugin_panel::PluginPanelState::run_selected)'s
+    /// doc for the full reasoning). So this runs the plugin against a scratch
+    /// document cloned from the live one, then re-applies the SAME staged edits
+    /// for real through
+    /// [`History::apply_group`](crate::history::History::apply_group): one
+    /// undoable step, exactly as a boolean op's multi-edit batch lands.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn plugin_enable(&mut self) {
+        self.plugins.enable_selected();
+        let mut scratch = reticle_model::EditableDocument::new(self.history.document().clone());
+        if let Some(outcome) = self.plugins.run_selected(&mut scratch)
+            && let Err(e) = self.history.apply_group(outcome.staged)
+        {
+            // The scratch run above and this real apply both start from the
+            // same document snapshot, so they should never diverge; if they
+            // somehow do, this overwrites the recorded summary with the
+            // failure that actually matters: the one against the real,
+            // undo-tracked document.
+            self.plugins
+                .record_run(crate::plugin_panel::RunSummary::Failed(format!(
+                    "funnel rejected the real apply: {e}"
+                )));
+            self.report_error("Plugin edit funnel rejected", e.to_string());
+        }
+        let id = self.plugins.selected_entry().manifest.id.clone();
+        let summary = self
+            .plugins
+            .last_run(self.plugins.selected())
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        self.status.set(format!("{id}: {summary}"));
+    }
+
+    /// Web stub: enabling here is a real, local flag flip (useful bookkeeping
+    /// while browsing), but the actual run is native-only; this states the
+    /// boundary honestly rather than silently doing nothing (`plugin.enable`,
+    /// ADR 0120).
+    #[cfg(target_arch = "wasm32")]
+    fn plugin_enable(&mut self) {
+        self.plugins.enable_selected();
+        self.status.set(crate::plugin_panel::BROWSER_DISCLAIMER);
+    }
+
+    /// Disables the selected plugin (`plugin.disable`): keeps any installed
+    /// bytes so re-enabling does not require reinstalling. Identical on every
+    /// build; there is nothing native-only about clearing a flag.
+    fn plugin_disable(&mut self) {
+        self.plugins.disable_selected();
+        self.status.set(format!(
+            "Disabled {}",
+            self.plugins.selected_entry().manifest.id
+        ));
+    }
+    // --- end lane plugin-ui ---
 
     /// The live array-preview shapes for the current selection and array parameters,
     /// or an empty list when preview is off, nothing is selected, or the count is
@@ -15781,6 +16003,147 @@ mod tests {
         );
     }
     // --- end lane pcell-inspect ---
+
+    // --- lane plugin-ui: plugin manager panel (ADR 0116/0120) ---
+    /// Builds a minimal, hand-authored v0 plugin (WAT source, compiled to
+    /// binary wasm by the `wat` crate; the host itself accepts binary wasm
+    /// only, ADR 0116) that stages exactly one `AddShape` record targeting
+    /// `cell`. The byte layout is built with the same `to_le_bytes` encoding
+    /// `reticle_plugin::host`'s own `decode_edit_v0` decodes (see its module
+    /// docs and unit tests), so there is no hand-transcribed byte literal to
+    /// get wrong.
+    fn test_add_shape_plugin_wasm(
+        cell: &str,
+        layer: u16,
+        datatype: u16,
+        x0: i32,
+        y0: i32,
+        x1: i32,
+        y1: i32,
+    ) -> Vec<u8> {
+        let mut record = vec![0x01u8]; // v0 OP_ADD_SHAPE
+        let name_len = u16::try_from(cell.len()).expect("test cell name fits in u16");
+        record.extend_from_slice(&name_len.to_le_bytes());
+        record.extend_from_slice(cell.as_bytes());
+        record.extend_from_slice(&layer.to_le_bytes());
+        record.extend_from_slice(&datatype.to_le_bytes());
+        record.extend_from_slice(&x0.to_le_bytes());
+        record.extend_from_slice(&y0.to_le_bytes());
+        record.extend_from_slice(&x1.to_le_bytes());
+        record.extend_from_slice(&y1.to_le_bytes());
+        let escaped = record.iter().fold(String::new(), |mut acc, b| {
+            use std::fmt::Write as _;
+            let _ = write!(acc, "\\{b:02x}");
+            acc
+        });
+        let len = record.len();
+        let wat = format!(
+            r#"(module
+  (import "reticle" "stage_edit" (func $stage_edit (param i32 i32) (result i32)))
+  (memory (export "memory") 1)
+  (data (i32.const 0) "{escaped}")
+  (func (export "run")
+    (drop (call $stage_edit (i32.const 0) (i32.const {len})))
+  )
+)"#
+        );
+        wat::parse_str(&wat).expect("generated v0 test plugin WAT compiles")
+    }
+
+    /// The Plugin Manager section renders headlessly without panicking: the
+    /// index picker, the provenance readout, and the native controls (or the
+    /// browser disclaimer) all build inside a real egui pass, mirroring
+    /// `pcell_section_renders_without_panic` above.
+    #[test]
+    fn plugin_section_renders_without_panic() {
+        let mut app = App::new();
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        egui::Window::new("plugin test").show(&ctx, |ui| {
+            app.plugin_section(ui);
+        });
+        let _ = ctx.end_pass();
+        assert!(!app.plugins.entries().is_empty());
+    }
+
+    /// `plugin.browse` reveals the Inspector's Plugins section (Automate
+    /// group), the same effect as `pcell.edit_params`.
+    #[test]
+    fn plugin_browse_command_reveals_the_section() {
+        use crate::inspector_layout::PanelGroup;
+        let mut app = App::new();
+        app.inspector.group = PanelGroup::Inspect;
+        app.inspector.collapsed = true;
+        app.inspector.set_open("plugins", false);
+        app.dispatch(CommandId("plugin.browse"));
+        assert_eq!(app.inspector.group, PanelGroup::Automate);
+        assert!(!app.inspector.collapsed);
+        assert!(app.inspector.is_open("plugins"));
+    }
+
+    /// The native run path end to end: installing a hand-authored plugin then
+    /// dispatching `plugin.enable` actually calls `reticle_plugin::Host::run`
+    /// and funnels its staged `AddShape` through `History::apply_group`, so the
+    /// real document gains a shape and its revision counter bumps by exactly
+    /// one (one funneled edit, one undo step).
+    #[test]
+    fn plugin_enable_runs_the_real_host_and_bumps_the_document_revision() {
+        let mut app = App::new();
+        let wasm = test_add_shape_plugin_wasm(crate::demo::TOP_CELL, 1, 0, 0, 0, 50, 50);
+        app.plugins.install_selected(wasm);
+        let before_rev = app.history.revision();
+        let before_shapes = app
+            .history
+            .document()
+            .cell(crate::demo::TOP_CELL)
+            .expect("demo top cell exists")
+            .shapes
+            .len();
+
+        app.dispatch(CommandId("plugin.enable"));
+
+        assert_eq!(
+            app.history.revision(),
+            before_rev + 1,
+            "the funneled edit bumped the document revision"
+        );
+        assert_eq!(
+            app.history
+                .document()
+                .cell(crate::demo::TOP_CELL)
+                .expect("demo top cell exists")
+                .shapes
+                .len(),
+            before_shapes + 1,
+            "the plugin's staged AddShape landed on the real, undo-tracked document"
+        );
+        assert!(app.history.can_undo(), "the run landed as an undoable step");
+        assert!(
+            app.status.text.contains("staged 1"),
+            "status reports the real run outcome, got {:?}",
+            app.status.text
+        );
+    }
+
+    /// Enabling with nothing installed is a clean, honest status message, never
+    /// a panic, and never touches the document.
+    #[test]
+    fn plugin_enable_without_an_installed_plugin_is_a_clean_status_not_a_panic() {
+        let mut app = App::new();
+        let before_rev = app.history.revision();
+        app.dispatch(CommandId("plugin.enable"));
+        assert_eq!(
+            app.history.revision(),
+            before_rev,
+            "nothing installed, nothing to run, nothing changed"
+        );
+        assert!(
+            app.status.text.contains("no plugin installed"),
+            "status names the honest reason, got {:?}",
+            app.status.text
+        );
+    }
+    // --- end lane plugin-ui ---
 
     /// The Share section renders headlessly without panicking, including the one-click
     /// Share and Copy-permalink buttons added this lane. It does not click them (that

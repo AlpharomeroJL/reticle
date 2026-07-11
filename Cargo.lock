@@ -4219,6 +4219,7 @@ dependencies = [
  "reticle-index",
  "reticle-io",
  "reticle-model",
+ "reticle-plugin",
  "reticle-render",
  "reticle-script",
  "reticle-sim",
@@ -4228,6 +4229,7 @@ dependencies = [
  "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wat",
  "web-sys",
 ]
 

@@ -242,6 +242,22 @@ pub enum AppOp {
     /// exists (the "Open in Reticle" corner link `App::embed_canvas` draws).
     ToggleEmbed,
     // --- end lane embed ---
+    // --- lane plugin-ui: plugin manager panel (ADR 0116/0120) ---
+    /// Reveals the Inspector's Plugins section (`plugin.browse`).
+    PluginBrowse,
+    /// Native: picks a wasm file from disk and installs it for the selected F5
+    /// index entry this session. Web: not runnable here (`plugin.install`); see
+    /// `crate::plugin_panel::BROWSER_DISCLAIMER`.
+    PluginInstall,
+    /// Native: enables the selected entry and RUNS it through the merged
+    /// sandboxed host, funneling staged edits through the undo-tracked document.
+    /// Web: marks it enabled locally only (`plugin.enable`); see
+    /// `crate::plugin_panel::BROWSER_DISCLAIMER`.
+    PluginEnable,
+    /// Disables the selected entry, keeping any installed bytes (`plugin.disable`).
+    /// Identical on every build; there is nothing native-only about a flag flip.
+    PluginDisable,
+    // --- end lane plugin-ui ---
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -1240,6 +1256,54 @@ static REGISTRY: &[CommandSpec] = &[
         scope: Scope::Global,
     },
     // --- end lane embed ---
+    // --- lane plugin-ui: plugin manager panel (moved from RESERVED_CAMPAIGN_IDS;
+    // ids and labels unchanged from the F6 contract, ADR 0106/0116/0120) ---
+    CommandSpec {
+        id: CommandId("plugin.browse"),
+        label: "Browse plugins",
+        category: "Plugins",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::PluginBrowse),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("plugin.install"),
+        label: "Install plugin",
+        category: "Plugins",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::PluginInstall),
+        // Native-only, mirroring `xschem.import_probe` exactly: installing a
+        // plugin means picking a wasm file from disk, and there is nothing to
+        // install in a browser build that can never run one (ADR 0115/0116).
+        scope: Scope::NativeOnly,
+    },
+    CommandSpec {
+        id: CommandId("plugin.enable"),
+        label: "Enable plugin",
+        category: "Plugins",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::PluginEnable),
+        // Global, mirroring `pcell.regenerate`: reachable everywhere, but the web
+        // arm shows an honest disclaimer instead of a live run (ADR 0120).
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("plugin.disable"),
+        label: "Disable plugin",
+        category: "Plugins",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::PluginDisable),
+        scope: Scope::Global,
+    },
+    // --- end lane plugin-ui ---
 ];
 
 /// The full command registry.
@@ -1432,10 +1496,9 @@ static RESERVED_CAMPAIGN_IDS: &[ReservedId] = &[
     // (classroom, ADR 0111) all shipped: moved into REGISTRY above, out of this
     // reserved table per the ADR 0106 disjointness rule.
     // Phase 4: Reach.
-    ("plugin.browse", "Browse plugins", "plugin-ui", None, None),
-    ("plugin.install", "Install plugin", "plugin-ui", None, None),
-    ("plugin.enable", "Enable plugin", "plugin-ui", None, None),
-    ("plugin.disable", "Disable plugin", "plugin-ui", None, None),
+    // plugin.browse / plugin.install / plugin.enable / plugin.disable
+    // (plugin-ui, ADR 0120) shipped: moved into REGISTRY above, out of this
+    // reserved table per the ADR 0106 disjointness rule.
     (
         "underlay.load",
         "Load die-photo underlay...",

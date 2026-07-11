@@ -144,6 +144,9 @@ pub mod ops;
 pub mod outline;
 pub mod overlay;
 pub mod pcell_panel;
+// --- lane plugin-ui: plugin manager Inspector panel (ADR 0116/0120) ---
+pub mod plugin_panel;
+// --- end lane plugin-ui ---
 pub mod productivity;
 pub mod qr;
 pub mod query;
