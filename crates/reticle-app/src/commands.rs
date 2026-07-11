@@ -204,6 +204,14 @@ pub enum AppOp {
     /// Open the last agent run in the replay theater (`agent.replay`).
     AgentReplay,
     // --- end lane agent-panel ---
+    // --- lane waveform-ui: waveform panel (F4 consumer; ADR 0110) ---
+    /// Loads the fixture-first waveform set and reveals the Waveform section
+    /// (`waveform.run_oracle`); a live solver replaces the fixture load at Gate 3
+    /// (a separate lane's deliverable, route still open).
+    WaveformRunOracle,
+    /// Exports the loaded set to CSV (`waveform.export_csv`).
+    WaveformExportCsv,
+    // --- end lane waveform-ui ---
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -1108,6 +1116,30 @@ static REGISTRY: &[CommandSpec] = &[
         scope: Scope::Global,
     },
     // --- end lane agent-panel ---
+    // --- lane waveform-ui: waveform panel (F4 consumer; ADR 0110) ---
+    // Moved from RESERVED_CAMPAIGN_IDS (ids and labels unchanged, ADR 0106); no
+    // default chord assigned, matching the reserved table's `chord: None`.
+    CommandSpec {
+        id: CommandId("waveform.run_oracle"),
+        label: "Run simulation oracle",
+        category: "Waveform",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::WaveformRunOracle),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("waveform.export_csv"),
+        label: "Export waveforms CSV...",
+        category: "Waveform",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::WaveformExportCsv),
+        scope: Scope::Global,
+    },
+    // --- end lane waveform-ui ---
 ];
 
 /// The full command registry.
@@ -1294,20 +1326,8 @@ static RESERVED_CAMPAIGN_IDS: &[ReservedId] = &[
     ),
     ("snapshot.open", "Open snapshot", "snapshots", None, None),
     // Phase 3: Depth.
-    (
-        "waveform.run_oracle",
-        "Run simulation oracle",
-        "waveform-ui",
-        None,
-        None,
-    ),
-    (
-        "waveform.export_csv",
-        "Export waveforms CSV...",
-        "waveform-ui",
-        None,
-        None,
-    ),
+    // waveform.run_oracle and waveform.export_csv shipped (moved into REGISTRY
+    // below by the waveform-ui lane; ADR 0110).
     (
         "file.export_spice",
         "Export SPICE netlist...",

@@ -169,6 +169,9 @@ pub mod view3d;
 pub mod viewer;
 pub mod viewexport;
 pub mod viewports;
+// --- lane waveform-ui: F4 waveform-viewer Inspector panel (ADR 0110) ---
+pub mod waveform_panel;
+// --- end lane waveform-ui ---
 pub mod webopen;
 pub mod xsection;
 

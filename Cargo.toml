@@ -78,6 +78,9 @@ reticle-route = { path = "crates/reticle-route", version = "8.0.0" }
 reticle-extract = { path = "crates/reticle-extract", version = "8.0.0" }
 reticle-diff = { path = "crates/reticle-diff", version = "8.0.0" }
 reticle-gen = { path = "crates/reticle-gen", version = "8.0.0" }
+# Promoted from a bare workspace member (Phase 0 scaffold) by its first consumer,
+# the waveform-ui lane (`crates/reticle-app/src/waveform_panel.rs`, ADR 0110).
+reticle-sim = { path = "crates/reticle-sim", version = "8.0.0" }
 reticle-sync = { path = "crates/reticle-sync", version = "8.0.0" }
 reticle-server = { path = "crates/reticle-server", version = "8.0.0" }
 reticle-script = { path = "crates/reticle-script", version = "8.0.0" }
