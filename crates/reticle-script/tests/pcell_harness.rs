@@ -415,10 +415,10 @@ fn shape_output_cap_boundary_is_exact() {
 /// cells) is trivially within any reasonable cap.
 ///
 /// This test encodes the invariant the sandbox *should* hold (over-cap instance/array output
-/// is rejected, matching how over-cap shape output already is, proven above) and currently
-/// fails against the merged producer: `produce` returns `Ok` with 20,000 stored instances and
-/// 20,000 stored arrays despite `max_shapes = 10` / `max_cells = 10`. Do not delete or weaken
-/// this test if it starts passing -- that means the gap was closed.
+/// is rejected, matching how over-cap shape output already is, proven above). It was RED until
+/// `over_output_caps` was fixed to count instance and array placement records alongside shapes
+/// (commit 009fc2b); it now passes and stands as the regression guard for that fix. Do not
+/// delete or weaken it.
 #[test]
 fn instance_and_array_output_is_not_bounded_by_max_shapes_or_max_cells() {
     let script = r#"
@@ -582,8 +582,12 @@ fn produce_cached(
     tech: &Technology,
     limits: SandboxLimits,
 ) -> Result<Cell, ProduceError> {
-    let raw_hash = def.param_hash(params);
-    if let Some(cell) = cache.get(&raw_hash) {
+    // Key the lookup by the SAME effective (schema-defaulted) hash `produce` stamps as the
+    // insert key, so a repeat call that omits a defaulted field still hits. `PCellDef::param_hash`
+    // over the raw params would miss whenever a default was omitted (the pcell-harness finding
+    // that added `effective_param_hash`, closed in commit 009fc2b).
+    let key = def.effective_param_hash(params);
+    if let Some(cell) = cache.get(&key) {
         return Ok(cell);
     }
     let (cell, meta) = produce(def, params, tech, limits)?;
@@ -707,24 +711,19 @@ fn eviction_under_capacity_pressure_never_corrupts_recomputed_geometry() {
     }
 }
 
-/// FINDING (integration seam, not a `pcell-produce` sandbox defect; see RESULT.md):
-/// `produce`'s stamped `param_hash` (the cache-insert key) is over the EFFECTIVE,
-/// schema-defaulted params, but there is no public API anywhere in `reticle_gen` to compute
-/// that same effective hash BEFORE calling `produce` -- `PCellDef::param_hash` only hashes
-/// whatever raw value it is given, and the defaulting logic (`sandbox::effective_params`) is
-/// private to `reticle_script`. So the only hash a cache-aware caller can pre-compute for a
-/// lookup is over the RAW params they were handed.
+/// FINDING (integration seam), CLOSED in commit 009fc2b: `produce`'s stamped `param_hash` (the
+/// cache-insert key) is over the EFFECTIVE, schema-defaulted params. Originally there was no
+/// public API to compute that same effective hash before calling `produce`, so a cache-aware
+/// caller that omitted a defaulted field looked up by the RAW hash and never hit. The fix added
+/// `PCellDef::effective_param_hash` (in `reticle_gen`, where `param_hash` lives), and
+/// `produce_cached` above keys its lookup by it.
 ///
-/// This test calls `produce_cached` with the exact same (def, params) TWICE -- literally the
-/// scenario the brief requires a hit for -- but the params happen to omit a defaulted field.
-/// The first call misses (empty cache) as expected; the SECOND, IDENTICAL call also misses,
-/// because the first call's insert key (the effective hash) differs from the raw hash both
-/// calls look up by. A caller who consistently omits a defaulted field therefore never
-/// benefits from the cache at all, even calling with byte-identical input twice. Nothing is
-/// corrupted (both calls still produce byte-identical, correct geometry, checked below) --
-/// this is a missed-hit / cache-defeat gap, not a wrong-answer bug. Reported for whichever
-/// lane owns `PCellDef` (a public effective-params accessor would let a caller key the cache
-/// correctly without calling `produce` first), not `pcell-produce`.
+/// This test calls `produce_cached` with the exact same (def, params) TWICE -- the scenario a
+/// cache must serve -- with params that omit a defaulted field. The first call misses (empty
+/// cache); the SECOND, IDENTICAL call now HITS, because the lookup key (the effective hash) is
+/// the same key the first call inserted under. Both calls still produce byte-identical geometry
+/// (checked below); the test now guards that a defaulted-field omission does not defeat the
+/// cache.
 #[test]
 fn raw_param_keyed_caching_never_hits_when_a_defaulted_field_is_omitted() {
     let def = frame_def();
