@@ -76,4 +76,5 @@
   - [Archive hosting](archive-hosting.md)
   - [Install and offline (PWA)](pwa.md)
   - [Embedding Reticle](embedding.md)
+  - [Desktop (Tauri)](desktop.md)
 - [Contributing](contributing.md)

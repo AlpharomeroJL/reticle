@@ -1,0 +1,56 @@
+# The Reticle desktop shell (ADR 0119): a Tauri window on the system webview
+# (WebView2 on Windows) that loads the offline Trunk-built web bundle, and the
+# native-only home for rhai PCell produce (and, on the roadmap, the real agent).
+#
+# WORKSPACE-EXCLUDED (see the root Cargo.toml's `[workspace].exclude`), exactly
+# like `crates/reticle-py` (ADR 0087): Tauri/wry/webview2 are a heavy
+# dependency chain coupled to the system webview, and must never enter
+# `just ci`, `just wasm-build`, or `cargo nextest run --workspace`. Because it
+# is excluded
+# it cannot use `.workspace = true` inheritance, so package fields are set here
+# and the internal crates are referenced by relative path (no version pin
+# needed for in-tree path dependencies). It has its own Cargo.lock, committed
+# for reproducibility, matching the reticle-py precedent.
+[package]
+name = "reticle-desktop"
+version = "8.2.0"
+edition = "2024"
+rust-version = "1.94"
+authors = ["Josef Long <Josefdean@protonmail.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AlpharomeroJL/reticle"
+description = "Reticle desktop shell: Tauri wraps the offline web bundle in a native window and is the native-only home for rhai PCell produce and the real agent."
+publish = false
+build = "build.rs"
+
+# No [lib]/[[bin]] section: a plain `src/main.rs` with the package's own name is
+# cargo's default binary target, which is all a desktop-only (non-mobile) Tauri
+# app needs.
+
+[dependencies]
+# The webview shell itself. Default features (wry, compression, dynamic-acl,
+# common-controls-v6, x11, dbus) are the standard desktop set; "devtools"
+# additionally lets the orchestrator open the webview's dev tools (F12 /
+# right-click) while driving the Gate-4 GUI proof.
+tauri = { version = "2", features = ["devtools"] }
+# Builds the bundled produce fixture's parameters and reads its result.
+serde_json = "1.0.150"
+
+# The native-only home this crate exists for (ADR 0115, ADR 0119). Path
+# dependencies into the same tree; no version pin, matching reticle-py.
+reticle-gen = { path = "../crates/reticle-gen" }
+reticle-model = { path = "../crates/reticle-model" }
+reticle-script = { path = "../crates/reticle-script" }
+# Declared for the same native-only-home role as reticle-script above (the
+# brief's contract: `cargo tree` must show both reachable). NOT yet wired to a
+# menu action in this lane: the real agent's live run mode needs a reachable
+# model backend (network, or a local server), which is out of scope for the
+# network-disabled offline proof this lane targets (live PCell produce is the
+# proof). Wiring an agent action is follow-on work; see RESULT.md.
+reticle-agent = { path = "../crates/reticle-agent" }
+
+[build-dependencies]
+# Reads tauri.conf.json, embeds the icon as a Windows resource, and wires the
+# ACL/capabilities pipeline (empty here: this app registers no invoke_handler
+# commands, so no capabilities file is needed -- see docs/decisions/0119).
+tauri-build = "2"
