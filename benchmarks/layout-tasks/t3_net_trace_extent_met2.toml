@@ -1,0 +1,8 @@
+# Tier-3 net-trace: the net under a probe point must have a net_extent bounding box
+# at least as wide and tall as required, distinct from raw per-shape layer_area since
+# it only counts shapes electrically connected to the probe.
+id = "t3_net_trace_extent_met2"
+tier = 3
+prompt = "Create a cell named top and draw met2 (layer 69, datatype 20) geometry, connected into a single net, that covers the point (50, 100) and whose net spans at least 1500 dbu in x and at least 200 dbu in y."
+technology = "sky130.tech"
+checker = "net_trace_extent:probe=50/100,min_width=1500,min_height=200"

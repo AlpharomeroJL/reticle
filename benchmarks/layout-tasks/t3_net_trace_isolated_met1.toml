@@ -1,0 +1,7 @@
+# Tier-3 net-trace: two probe points must resolve to DIFFERENT nets, the complement
+# of t3_net_trace_connected_met1 (proves isolation rather than connection).
+id = "t3_net_trace_isolated_met1"
+tier = 3
+prompt = "Create a cell named top and draw two separate met1 (layer 68, datatype 20) rectangles that must not touch or overlap: one covering the point (50, 50) and another covering the point (950, 50), each left on its own net."
+technology = "sky130.tech"
+checker = "net_trace_isolated:a=50/50,b=950/50"

@@ -33,11 +33,11 @@ fn load() -> (reticle_bench::SuiteManifest, Vec<BenchTask>) {
 #[test]
 fn suite_loads_and_is_versioned() {
     let (manifest, tasks) = load();
-    assert_eq!(manifest.version, "0.6.0", "suite version bumped to 0.6.0");
-    // 83 (v0.5.0) + 5 v0.6.0 coverage tasks (shape-count range, layer-area window,
-    // via2 contact stack, XOR boolean, six-via chain).
-    assert_eq!(manifest.tasks.len(), 88, "manifest lists every task");
-    assert_eq!(tasks.len(), 88, "every listed task loaded");
+    assert_eq!(manifest.version, "0.7.0", "suite version bumped to 0.7.0");
+    // 88 (v0.6.0) + 7 v0.7.0 Phase-3 depth tasks (3 net-trace, 2 PCell-params, 2
+    // multi-step edits).
+    assert_eq!(manifest.tasks.len(), 95, "manifest lists every task");
+    assert_eq!(tasks.len(), 95, "every listed task loaded");
 }
 
 #[test]

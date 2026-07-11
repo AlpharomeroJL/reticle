@@ -1,0 +1,9 @@
+# Tier-4 multi-step edit: a via1 contact must end up enclosed by 60 dbu on every
+# side. Proved by a 3-iteration MockModel script that grows the conductors with two
+# successive offset_shapes edits (not a delete-and-redraw), converging exactly at the
+# iteration bound most other tasks never approach.
+id = "t4_multistep_grow_enclosure"
+tier = 4
+prompt = "Create a cell named top with a via1 (layer 68, datatype 44) contact bridging a met1 (68/20) pad and a met2 (69/20) pad, with both pads enclosing the via by at least 60 dbu on every side."
+technology = "sky130.tech"
+checker = "contact_stack:via=68/44,min_enclosure=60"
