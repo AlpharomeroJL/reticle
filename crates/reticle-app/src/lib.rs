@@ -176,6 +176,9 @@ pub mod viewports;
 pub mod waveform_panel;
 // --- end lane waveform-ui ---
 pub mod webopen;
+// --- lane xschem: SPICE export + xschem probe-list import (ADR 0112) ---
+mod xschem;
+// --- end lane xschem ---
 pub mod xsection;
 
 pub use app::{App, StartView};

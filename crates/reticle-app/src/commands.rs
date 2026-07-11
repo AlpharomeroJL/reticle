@@ -229,6 +229,13 @@ pub enum AppOp {
     /// "Unlock" button targets a specific student directly.
     ClassroomUnlockStudent,
     // --- end lane classroom ---
+    // --- lane xschem: SPICE export + probe import (ADR 0112) ---
+    /// Exports the open design's extracted devices as a SPICE subcircuit
+    /// (`file.export_spice`).
+    ExportSpice,
+    /// Imports an xschem-style probe list, native only (`xschem.import_probe`).
+    ImportXschemProbe,
+    // --- end lane xschem ---
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -1191,6 +1198,29 @@ static REGISTRY: &[CommandSpec] = &[
         scope: Scope::Global,
     },
     // --- end lane classroom ---
+    // --- lane xschem: SPICE export + probe import (moved from
+    // RESERVED_CAMPAIGN_IDS; ids and labels unchanged, ADR 0106) ---
+    CommandSpec {
+        id: CommandId("file.export_spice"),
+        label: "Export SPICE netlist...",
+        category: "File",
+        menu_path: Some(&["File", "Export"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::ExportSpice),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("xschem.import_probe"),
+        label: "Import xschem probe...",
+        category: "Xschem",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::ImportXschemProbe),
+        scope: Scope::NativeOnly,
+    },
+    // --- end lane xschem ---
 ];
 
 /// The full command registry.
@@ -1377,25 +1407,11 @@ static RESERVED_CAMPAIGN_IDS: &[ReservedId] = &[
     ),
     ("snapshot.open", "Open snapshot", "snapshots", None, None),
     // Phase 3: Depth.
-    // waveform.run_oracle and waveform.export_csv shipped (moved into REGISTRY
-    // below by the waveform-ui lane; ADR 0110).
-    (
-        "file.export_spice",
-        "Export SPICE netlist...",
-        "xschem",
-        Some(&["File", "Export"]),
-        None,
-    ),
-    (
-        "xschem.import_probe",
-        "Import xschem probe...",
-        "xschem",
-        None,
-        None,
-    ),
-    // classroom.bring_everyone / classroom.follow / classroom.unlock_student shipped
-    // in REGISTRY above (lane classroom, ADR 0111); moved out of this reserved
-    // table per the ADR 0106 disjointness rule.
+    // waveform.run_oracle / waveform.export_csv (waveform-ui, ADR 0110),
+    // file.export_spice / xschem.import_probe (xschem, ADR 0112), and
+    // classroom.bring_everyone / classroom.follow / classroom.unlock_student
+    // (classroom, ADR 0111) all shipped: moved into REGISTRY above, out of this
+    // reserved table per the ADR 0106 disjointness rule.
     // Phase 4: Reach.
     ("plugin.browse", "Browse plugins", "plugin-ui", None, None),
     ("plugin.install", "Install plugin", "plugin-ui", None, None),
