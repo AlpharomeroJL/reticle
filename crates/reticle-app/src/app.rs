@@ -9935,14 +9935,34 @@ impl App {
         Ok(format!("Exported {}", path.display()))
     }
 
-    /// Web stub: report the generated size rather than writing to a filesystem.
+    /// The format label for a wasm export status message, derived from the file
+    /// name's extension (`"reticle-metrology.csv"` -> `"CSV"`), so the stub below
+    /// names the format actually exported rather than a hardcoded one. Falls back to
+    /// `"text"` when the name has no extension. Compiled for wasm (its only caller)
+    /// and for tests.
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn export_format_label(name: &str) -> String {
+        std::path::Path::new(name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map_or_else(|| "text".to_owned(), str::to_ascii_uppercase)
+    }
+
+    /// Web stub: report the generated size rather than writing to a filesystem. The
+    /// status names the exported format (from the file extension via
+    /// [`export_format_label`](Self::export_format_label)), so a CSV or SPICE export
+    /// no longer misreports itself as SVG.
     #[cfg(target_arch = "wasm32")]
     #[allow(clippy::unused_self)]
     // Always `Ok` on wasm, but the native version genuinely returns `Result`, so the
     // signature must match across cfg.
     #[allow(clippy::unnecessary_wraps)]
-    fn write_export_text(&self, _name: &str, text: &str) -> std::io::Result<String> {
-        Ok(format!("Generated {} bytes of SVG", text.len()))
+    fn write_export_text(&self, name: &str, text: &str) -> std::io::Result<String> {
+        Ok(format!(
+            "Generated {} bytes of {}",
+            text.len(),
+            Self::export_format_label(name)
+        ))
     }
 
     /// Exports `shapes` to PNG, choosing the GPU or the pure rasterizer path.
@@ -16062,6 +16082,20 @@ mod tests {
         let set = app.waveform.set().expect("fixture loaded");
         assert!(set.is_well_formed());
         assert_eq!(set.analysis, reticle_sim::AnalysisKind::Transient);
+    }
+
+    /// The wasm export status names the format actually exported, derived from the
+    /// file extension, not a hardcoded "SVG": regression for `export_metrology`
+    /// (CSV), `waveform_export_csv` (CSV), and `xschem_export_spice` (SPICE) all
+    /// reporting themselves as SVG. Tests the shared label helper directly, since
+    /// the wasm `write_export_text` stub is compiled out on the native test target.
+    #[test]
+    fn export_format_label_names_the_exported_format() {
+        assert_eq!(App::export_format_label("reticle-export.svg"), "SVG");
+        assert_eq!(App::export_format_label("reticle-metrology.csv"), "CSV");
+        assert_eq!(App::export_format_label("waveforms.csv"), "CSV");
+        assert_eq!(App::export_format_label("reticle-export.spice"), "SPICE");
+        assert_eq!(App::export_format_label("noext"), "text");
     }
 
     /// `waveform.export_csv` reports an honest status instead of exporting when
