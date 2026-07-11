@@ -1,3 +1,19 @@
 {
-  "entries": []
+  "entries": [
+    {
+      "manifest": {
+        "id": "dev.reticle.fiducial-marker",
+        "version": "0.1.0",
+        "api_version": 0,
+        "name": "Fiducial Marker",
+        "entry": "run",
+        "permissions": [
+          "read_document",
+          "stage_edit"
+        ]
+      },
+      "wasm_sha256": "ead8bd027ac3b656442e6fe56605fe328f2eab3bec52bf36a27aacce7ceff177",
+      "source": "plugins/fiducial-marker"
+    }
+  ]
 }
