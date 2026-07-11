@@ -4214,6 +4214,7 @@ dependencies = [
  "reticle-io",
  "reticle-model",
  "reticle-render",
+ "reticle-script",
  "reticle-sim",
  "reticle-sync",
  "rfd",
