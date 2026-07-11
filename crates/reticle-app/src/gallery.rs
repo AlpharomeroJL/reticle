@@ -729,7 +729,7 @@ mod tests {
     fn parse_manifest_rejects_invalid_json_and_manifests_failing_validate() {
         assert!(
             parse_manifest("not json").is_none(),
-            "unparseable JSON falls back to None"
+            "unparsable JSON falls back to None"
         );
         // Valid JSON, but an excluded die may never carry a streaming archive
         // (GalleryManifest::validate's invariant).

@@ -55,14 +55,14 @@ fn bundled_manifest_yields_the_real_verified_die_and_the_excluded_ledger_row() {
 /// of the Start screen this test has no access to) are left completely untouched.
 #[test]
 fn a_broken_manifest_falls_back_to_no_section_without_panicking() {
-    let unparseable = "{ this is not valid json";
-    assert!(gallery::parse_manifest(unparseable).is_none());
+    let unparsable = "{ this is not valid json";
+    assert!(gallery::parse_manifest(unparsable).is_none());
 
     let ctx = egui::Context::default();
     ctx.begin_pass(egui::RawInput::default());
     let mut clicked = None;
     egui::Window::new("broken manifest fallback test").show(&ctx, |ui| {
-        if let Some(manifest) = gallery::parse_manifest(unparseable) {
+        if let Some(manifest) = gallery::parse_manifest(unparsable) {
             clicked = gallery::show(ui, Ctx::dark(Density::default()), &manifest, "");
         }
     });
