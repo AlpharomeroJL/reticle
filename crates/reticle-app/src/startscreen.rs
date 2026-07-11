@@ -29,16 +29,18 @@
 //! embedded design opens cleanly through the seam, what top cell it frames) is proven
 //! in plain code by the tests at the bottom of the file.
 //!
-//! # A newer, data-driven gallery lives alongside this one
+//! # A newer, data-driven gallery renders below this one
 //!
 //! The [`ExampleChip`]s and [`GALLERY`] above are Wave 1's compiled-in, editorial
 //! gallery: a fixed Rust list, extended only by a code change. [`crate::gallery`] is
 //! the F1 contract's generic successor (Phase 1): it renders one card per die in a
 //! [`GalleryManifest`](reticle_index::gallery_manifest::GalleryManifest), so a new
 //! die reaches the Start screen by a manifest entry, not a code change. The two are
-//! independent; this module is untouched by that work. `crate::gallery`'s own module
-//! doc covers why its fixture-sourced cards are not yet wired into the unconditional
-//! Start-screen path.
+//! independent; this module is untouched by that work. `crate::app`'s Start screen
+//! draws [`crate::gallery`]'s "Open silicon library" section as a separate section
+//! below this module's gallery, from the real committed
+//! `library/gallery-manifest.json`; `crate::gallery`'s own module doc covers the
+//! compile-time load, the parse/validate fallback, and the in-session open action.
 
 use crate::open::{DocFormat, OpenError, OpenOutcome, open_document_bytes};
 
