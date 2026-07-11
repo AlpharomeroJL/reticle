@@ -95,17 +95,38 @@ pub(super) fn build_engine(host: &SharedHost, limits: SandboxLimits) -> Engine {
 
 /// Injects each schema field's value into `scope` under the field's name, so the script
 /// references its parameters as plain variables (mirroring the leading `let` block of a
-/// hand-written generator script). A field absent from `params` falls back to its schema
-/// default, so every declared parameter is always bound.
+/// hand-written generator script).
 ///
-/// Only schema fields are injected: an unrelated key in `params` cannot introduce a variable
-/// into the script scope (it still participates in the parameter hash identity, which is
-/// correct).
+/// Callers pass the [`effective_params`] object, in which every schema field already carries
+/// its provided-or-default value, so each declared parameter is always bound. Only schema
+/// fields drive the script (and only schema fields form the parameter-hash identity), so an
+/// unrelated key neither introduces a script variable nor changes the identity.
 pub(super) fn inject_params(scope: &mut Scope, def: &PCellDef, params: &Value) {
     for field in &def.schema.fields {
         let value = params.get(&field.name).unwrap_or(&field.default);
         scope.push_dynamic(field.name.clone(), json_to_dynamic(value, 0));
     }
+}
+
+/// The effective parameter object for a produce: each schema field's provided value, or its
+/// schema default when the caller omitted it.
+///
+/// This single object is what the producer validates, injects, and hashes, so a PCell's
+/// content identity ([`PCellDef::param_hash`]) and its geometry are complete and stable no
+/// matter which defaulted params the caller left out: `produce(def, {})` and
+/// `produce(def, <all-defaults-spelled-out>)` are the same produce with the same identity.
+/// Only schema fields appear, so a non-schema key (which cannot drive the geometry) does not
+/// perturb the identity either.
+pub(super) fn effective_params(def: &PCellDef, params: &Value) -> Value {
+    let mut map = serde_json::Map::with_capacity(def.schema.fields.len());
+    for field in &def.schema.fields {
+        let value = params
+            .get(&field.name)
+            .cloned()
+            .unwrap_or_else(|| field.default.clone());
+        map.insert(field.name.clone(), value);
+    }
+    Value::Object(map)
 }
 
 /// Whether `params` nests deeper than [`MAX_PARAM_DEPTH`].

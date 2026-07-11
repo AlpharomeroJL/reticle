@@ -134,19 +134,24 @@ pub fn produce(
     tech: &Technology,
     limits: SandboxLimits,
 ) -> Result<(Cell, ProduceMeta), ProduceError> {
-    // 1. Validate parameters against the schema before any script runs.
-    def.validate_params(params)
-        .map_err(|e| ProduceError::InvalidParams(e.to_string()))?;
-
-    // 1b. Reject a pathologically deep parameter set before anything recurses over it (scope
-    //     injection here, or the param-hash canonicalization on the success path). A hand-built
-    //     deeply nested value can overflow the stack, so this is a hard boundary check.
+    // 1. Reject a pathologically deep parameter set before anything recurses over it (scope
+    //    injection, or the param-hash canonicalization on the success path). A hand-built deeply
+    //    nested value can overflow the stack, so this is a hard boundary check on the raw input.
     if sandbox::exceeds_param_depth(params) {
         return Err(ProduceError::InvalidParams(format!(
             "parameter nesting exceeds the maximum depth of {}",
             sandbox::MAX_PARAM_DEPTH
         )));
     }
+
+    // 2. Resolve the effective parameters (each schema field's provided value or its default),
+    //    then validate THOSE against the schema. Validating the effective set is what lets a
+    //    caller omit a defaulted parameter: the schema default fills in, and the same complete
+    //    object drives injection and the content-identity hash below, so an omitted default and
+    //    a spelled-out default are one produce.
+    let effective = sandbox::effective_params(def, params);
+    def.validate_params(&effective)
+        .map_err(|e| ProduceError::InvalidParams(e.to_string()))?;
 
     // 2. Cheap pre-parse guard: reject a pathologically large script source before the parser
     //    runs (parse cost is not covered by the runtime operation cap).
@@ -164,9 +169,9 @@ pub fn produce(
     host.borrow_mut().set_technology(tech.clone());
     let engine = sandbox::build_engine(&host, limits);
 
-    // 4. Inject each schema parameter as a scope variable, then run the script.
+    // 4. Inject each effective parameter as a scope variable, then run the script.
     let mut scope = Scope::new();
-    sandbox::inject_params(&mut scope, def, params);
+    sandbox::inject_params(&mut scope, def, &effective);
     engine
         .run_with_scope(&mut scope, &def.script)
         .map_err(|e| sandbox::classify_run_error(*e))?;
@@ -178,7 +183,8 @@ pub fn produce(
         return Err(ProduceError::LimitExceeded(msg));
     }
 
-    // 6. Extract the produced top cell and stamp its F2 provenance.
+    // 6. Extract the produced top cell and stamp its F2 provenance over the effective params,
+    //    so the content identity matches the geometry the defaults actually produced.
     let cell = sandbox::extract_top_cell(&doc)?;
-    Ok((cell, def.produce_meta(params)))
+    Ok((cell, def.produce_meta(&effective)))
 }
