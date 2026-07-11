@@ -1,0 +1,5 @@
+id = "t3_contact_stack_via2_enc"
+tier = 3
+prompt = "Create a cell named top. Stack a met2 (69/20) plane and a met3 (70/20) plane over the same area and drop a via2 (69/44) cut where they overlap, enclosed by at least 40 dbu of each metal on every side, so the cut connects met2 up to met3."
+technology = "sky130.tech"
+checker = "contact_stack:via=69/44,min_enclosure=40"

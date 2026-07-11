@@ -1,0 +1,5 @@
+id = "t2_shape_count_range_li1"
+tier = 2
+prompt = "Create a cell named top and place between two and four li1 (67/20) rectangles, inclusive, so the li1 shape count lands in the range [2, 4]. Fewer than two or more than four fails."
+technology = "sky130.tech"
+checker = "shape_count:layer=67/20,min=2,max=4"

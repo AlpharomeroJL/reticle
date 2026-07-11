@@ -289,7 +289,7 @@ mod replay_determinism_tests {
     use super::{resolve_technology, scripts};
     use reticle_agent_api::verify_replay;
     use reticle_bench::runner::run_task_with_transcript;
-    use reticle_bench::{CheckerRegistry, RunOptions, load_suite};
+    use reticle_bench::{CheckerRegistry, ResultRecord, RunOptions, load_suite, run_task};
     use std::path::{Path, PathBuf};
 
     /// The workspace-root suite directory (tests run with the crate dir as CWD).
@@ -339,6 +339,51 @@ mod replay_determinism_tests {
         assert_eq!(
             first, second,
             "the benchmark suite is not bit-for-bit deterministic across two runs"
+        );
+    }
+
+    /// Runs the whole committed suite once against the deterministic mock and returns the
+    /// result records in suite order (the frozen output the leaderboard is built from).
+    fn run_all_records() -> Vec<ResultRecord> {
+        let suite = suite_dir();
+        let (manifest, tasks) = load_suite(&suite).expect("load the suite");
+        let mut model = scripts::sample_mock();
+        let mut records = Vec::with_capacity(tasks.len());
+        for task in &tasks {
+            let technology = resolve_technology(&suite, task).expect("resolve technology");
+            let registry = CheckerRegistry::for_task(task).expect("build the checker registry");
+            let record = run_task(
+                task,
+                &mut model,
+                &registry,
+                &technology,
+                &manifest.version,
+                RunOptions::default(),
+            )
+            .expect("run the task");
+            records.push(record);
+        }
+        records
+    }
+
+    #[test]
+    fn every_result_record_is_byte_identical_across_two_runs() {
+        // The freeze property at the record level: running the whole suite against the
+        // MockModel twice must serialize to the same bytes. `wall_ms` is a monotonic step
+        // count rather than a clock, and the run order is the manifest order, so nothing
+        // time- or hash-order-dependent leaks into the records.
+        let first = run_all_records();
+        assert!(
+            first.len() >= 60,
+            "the full suite ran (got {} records)",
+            first.len()
+        );
+        let second = run_all_records();
+        let json_first = serde_json::to_string_pretty(&first).expect("serialize run 1");
+        let json_second = serde_json::to_string_pretty(&second).expect("serialize run 2");
+        assert_eq!(
+            json_first, json_second,
+            "the same suite and MockModel must yield byte-identical result records twice"
         );
     }
 }
