@@ -164,6 +164,18 @@ pub enum AppOp {
     ShareDialog,
     /// Copy the read-only viewer link to the clipboard (`share.copy_viewer_link`).
     CopyViewerLink,
+    // --- lane trace-ui: net-trace panel (F3 consumer; ADR 0103) ---
+    /// Loads the net-at-point readout (fixture stand-in until Gate 2; `trace.at_point`).
+    TraceAtPoint,
+    /// Loads the net-extent readout (fixture stand-in until Gate 2; `trace.net_extent`).
+    TraceNetExtent,
+    /// Loads the shorts/opens report (fixture stand-in until Gate 2; `trace.shorts_opens`).
+    TraceShortsOpens,
+    /// Advances the shorts/opens navigator to the next row (`trace.next`).
+    TraceNext,
+    /// Moves the shorts/opens navigator to the previous row (`trace.prev`).
+    TracePrev,
+    // --- end lane trace-ui ---
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -921,6 +933,60 @@ static REGISTRY: &[CommandSpec] = &[
         run: RunAs::App(AppOp::CopyViewerLink),
         scope: Scope::Global,
     },
+    // --- lane trace-ui: net-trace panel (F3 consumer; ADR 0103) ---
+    // Moved from RESERVED_CAMPAIGN_IDS (ids and labels unchanged, ADR 0106); no
+    // default chord assigned, matching the reserved table's `chord: None`.
+    CommandSpec {
+        id: CommandId("trace.at_point"),
+        label: "Trace net at point",
+        category: "Trace",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::TraceAtPoint),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("trace.net_extent"),
+        label: "Show net extent",
+        category: "Trace",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::TraceNetExtent),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("trace.shorts_opens"),
+        label: "Shorts and opens list",
+        category: "Trace",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::TraceShortsOpens),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("trace.next"),
+        label: "Next trace result",
+        category: "Trace",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::TraceNext),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("trace.prev"),
+        label: "Previous trace result",
+        category: "Trace",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::TracePrev),
+        scope: Scope::Global,
+    },
+    // --- end lane trace-ui ---
 ];
 
 /// The full command registry.
@@ -1142,35 +1208,6 @@ static RESERVED_CAMPAIGN_IDS: &[ReservedId] = &[
         "pcell.regenerate",
         "Regenerate PCell",
         "pcell-inspect",
-        None,
-        None,
-    ),
-    (
-        "trace.at_point",
-        "Trace net at point",
-        "trace-ui",
-        None,
-        None,
-    ),
-    (
-        "trace.net_extent",
-        "Show net extent",
-        "trace-ui",
-        None,
-        None,
-    ),
-    (
-        "trace.shorts_opens",
-        "Shorts and opens list",
-        "trace-ui",
-        None,
-        None,
-    ),
-    ("trace.next", "Next trace result", "trace-ui", None, None),
-    (
-        "trace.prev",
-        "Previous trace result",
-        "trace-ui",
         None,
         None,
     ),
