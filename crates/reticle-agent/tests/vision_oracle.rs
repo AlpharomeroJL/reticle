@@ -81,7 +81,9 @@ fn authoritative_pass(session: &Session) -> bool {
 fn second_oracle_agreement_runs_or_skips_honestly() {
     let oracle = VisionOracle::from_env();
 
-    // Adapter gate: no `ollama` CLI or the model is not pulled -> honest skip.
+    // Adapter gate: server down/unreachable or the model not pulled -> honest skip. The
+    // probe is a bounded HTTP call (never an unbounded CLI subprocess, which once hung a
+    // gate for 25 minutes via Windows Ollama auto-start pipe inheritance).
     if let Err(reason) = oracle.availability() {
         eprintln!("vision second-oracle SKIPPED (honest not-run): {reason}");
         return;

@@ -91,5 +91,5 @@ pub use run::{
 };
 pub use vision_oracle::{
     AgreementTally, DEFAULT_VISION_BASE_URL, DEFAULT_VISION_MODEL, VisionOracle, VisionOutcome,
-    VisionVerdict, caught_by_any_oracle, ollama_available, oracles_agree, vision_model_present,
+    VisionVerdict, caught_by_any_oracle, oracles_agree,
 };

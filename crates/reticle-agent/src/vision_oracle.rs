@@ -67,7 +67,9 @@ pub const ENV_VISION_MODEL: &str = "RETICLE_VISION_MODEL";
 /// keyed OpenAI-compatible host).
 pub const ENV_VISION_API_KEY: &str = "RETICLE_VISION_API_KEY";
 
-/// Overall timeout for one vision-model request.
+/// Overall timeout for one vision-model request, including the
+/// [`availability`](VisionOracle::availability) probe (every HTTP call this oracle makes
+/// goes through the same bounded transport; nothing here ever spawns a subprocess).
 ///
 /// A best-effort second oracle must never hang a gate: a model that is present (so
 /// [`availability`](VisionOracle::availability) passes) but does not answer within this
@@ -219,27 +221,39 @@ impl VisionOracle {
 
     /// Whether this oracle can run on this host, or a printable reason it cannot.
     ///
-    /// Probes the same way the container oracles do (a cheap CLI check, no network): the
-    /// `ollama` binary must be on the path and the configured model must already be pulled
-    /// (`ollama list` lists it). Returns `Ok(())` when both hold, otherwise `Err(reason)`
-    /// so a caller can print an honest skip and continue. This does not attempt a pull; a
-    /// lane pulls the model up front, and a missing model here is a not-run, not an error.
+    /// Probes the server's `/api/show` endpoint for the configured model through the same
+    /// timeout-bounded transport every real request uses: a running server that has the
+    /// model pulled answers 200, a missing model is a 4xx, and a down server refuses the
+    /// connection immediately. Returns `Ok(())` only in the first case, otherwise
+    /// `Err(reason)` so a caller can print an honest skip and continue. This does not
+    /// attempt a pull; a lane pulls the model up front, and a missing model here is a
+    /// not-run, not an error.
+    ///
+    /// Deliberately NOT a subprocess probe: shelling out to the `ollama` CLI is unbounded
+    /// (`Command::output` has no timeout), and on Windows a CLI invocation against a down
+    /// server auto-starts the Ollama app, whose long-lived processes inherit the CLI's
+    /// stdout pipe handles so the read never sees EOF. That exact chain hung a `just ci`
+    /// gate for 25 minutes on 2026-07-11 with the Phase-0 HTTP timeout never in play. An
+    /// HTTP probe has no subprocess, no auto-start side effect, and inherits the
+    /// transport's request timeout (`VISION_REQUEST_TIMEOUT`) as its worst case.
     ///
     /// # Errors
     ///
-    /// Returns the reason string when `ollama` is not on the path, or when the configured
-    /// model is not present locally.
+    /// Returns the reason string (key-scrubbed) when the server is unreachable, the
+    /// request times out, or the configured model is not present on it.
     pub fn availability(&self) -> Result<(), String> {
-        if !ollama_available() {
-            return Err("`ollama` CLI not found on PATH".to_owned());
+        let url = format!("{}/api/show", self.base_url.trim_end_matches('/'));
+        let body = serde_json::json!({ "model": self.model });
+        let bearer = self.key.as_ref().map_or("", ApiKey::expose);
+        match self.transport.post_json(&url, bearer, &body) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!(
+                "vision model `{}` unavailable (server down, unreachable, or model not \
+                 pulled): {}",
+                self.model,
+                self.scrub(&e)
+            )),
         }
-        if !vision_model_present(&self.model) {
-            return Err(format!(
-                "vision model `{}` not present locally (run `ollama pull {}`)",
-                self.model, self.model
-            ));
-        }
-        Ok(())
     }
 
     /// Renders `session`'s layout to a PNG and asks the model whether it matches `intent`.
@@ -334,38 +348,6 @@ fn build_prompt(intent: &str) -> String {
          geometry (filled colored shapes), or is it an empty or blank layout? Answer YES \
          if it contains shapes, NO if it is blank. Intent: {intent}."
     )
-}
-
-/// Whether the `ollama` CLI is available on the path (a `--version` that exits cleanly).
-#[must_use]
-pub fn ollama_available() -> bool {
-    std::process::Command::new("ollama")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
-/// Whether `model` is present in the local Ollama model store (via `ollama list`; no pull
-/// is attempted).
-///
-/// Matches either the exact tag (`llava:7b`) or the model family (the part before `:`), so
-/// a caller that names `llava` finds a pulled `llava:7b` and vice versa.
-#[must_use]
-pub fn vision_model_present(model: &str) -> bool {
-    let Ok(out) = std::process::Command::new("ollama").arg("list").output() else {
-        return false;
-    };
-    if !out.status.success() {
-        return false;
-    }
-    let listing = String::from_utf8_lossy(&out.stdout);
-    let family = model.split(':').next().unwrap_or(model);
-    listing.lines().any(|line| {
-        let Some(name) = line.split_whitespace().next() else {
-            return false;
-        };
-        name == model || name.split(':').next() == Some(family)
-    })
 }
 
 /// A minimal view of Ollama's `/api/generate` response: the text, or an error string.
@@ -546,8 +528,11 @@ mod tests {
         }
     }
 
-    /// A transport that captures the request body and bearer, returning a canned body.
+    /// A transport that captures the request URL, body, and bearer, returning a canned
+    /// body.
+    #[derive(Default)]
     struct Recording {
+        seen_url: Arc<Mutex<Option<String>>>,
         seen_body: Arc<Mutex<Option<serde_json::Value>>>,
         seen_bearer: Arc<Mutex<Option<String>>>,
         body: String,
@@ -556,10 +541,11 @@ mod tests {
     impl HttpTransport for Recording {
         fn post_json(
             &self,
-            _url: &str,
+            url: &str,
             api_key: &str,
             body: &serde_json::Value,
         ) -> Result<String, String> {
+            *self.seen_url.lock().unwrap() = Some(url.to_owned());
             *self.seen_body.lock().unwrap() = Some(body.clone());
             *self.seen_bearer.lock().unwrap() = Some(api_key.to_owned());
             Ok(self.body.clone())
@@ -631,6 +617,59 @@ mod tests {
     }
 
     #[test]
+    fn availability_is_ok_when_the_server_answers_for_the_model() {
+        let oracle = VisionOracle::for_test("http://localhost:11434", "llava:7b", None)
+            .with_transport(Box::new(FakeTransport {
+                body: serde_json::json!({ "modelfile": "FROM llava" }).to_string(),
+            }));
+        assert_eq!(oracle.availability(), Ok(()));
+    }
+
+    #[test]
+    fn availability_maps_transport_failure_to_a_reason_and_scrubs_the_key() {
+        // A down or unreachable server (or a missing model's 4xx) is an honest
+        // unavailability reason, never a hang: the probe rides the same bounded
+        // transport as a real request and never shells out to the `ollama` CLI.
+        let oracle = VisionOracle::for_test(
+            "http://localhost:11434",
+            "llava:7b",
+            Some(ApiKey::from_raw("sk-vision-LEAK-me")),
+        )
+        .with_transport(Box::new(LeakyErrorTransport));
+        let reason = oracle.availability().expect_err("transport failure");
+        assert!(
+            reason.contains("unavailable"),
+            "names the condition: {reason}"
+        );
+        assert!(
+            !reason.contains("sk-vision-LEAK-me"),
+            "the key must be scrubbed from the reason: {reason}"
+        );
+    }
+
+    #[test]
+    fn availability_probes_api_show_for_the_configured_model() {
+        let seen_url = Arc::new(Mutex::new(None::<String>));
+        let seen_body = Arc::new(Mutex::new(None::<serde_json::Value>));
+        let oracle = VisionOracle::for_test("http://localhost:11434/", "llava:7b", None)
+            .with_transport(Box::new(Recording {
+                seen_url: seen_url.clone(),
+                seen_body: seen_body.clone(),
+                body: "{}".to_owned(),
+                ..Default::default()
+            }));
+        assert_eq!(oracle.availability(), Ok(()));
+        // The probe hits /api/show (trailing slash on the base trimmed) and names the
+        // configured model, so a 200 really is "this server can serve this model".
+        assert_eq!(
+            seen_url.lock().unwrap().as_deref(),
+            Some("http://localhost:11434/api/show")
+        );
+        let req = seen_body.lock().unwrap().clone().expect("request captured");
+        assert_eq!(req["model"], "llava:7b");
+    }
+
+    #[test]
     fn verify_returns_ran_verdict_on_success() {
         let oracle = VisionOracle::for_test("http://localhost:11434", "llava:7b", None)
             .with_transport(Box::new(FakeTransport {
@@ -682,6 +721,7 @@ mod tests {
                 seen_body: seen_body.clone(),
                 seen_bearer: seen_bearer.clone(),
                 body: generate_body("YES"),
+                ..Default::default()
             }));
         let _ = oracle.verify(b"Man", "a met1 rectangle");
 
