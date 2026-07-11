@@ -12,6 +12,10 @@ libfuzzer-sys = "0.4"
 reticle-geometry = { path = "../crates/reticle-geometry" }
 reticle-io = { path = "../crates/reticle-io" }
 reticle-model = { path = "../crates/reticle-model" }
+# The sandboxed PCell producer over untrusted (script, params) input.
+reticle-gen = { path = "../crates/reticle-gen" }
+reticle-script = { path = "../crates/reticle-script" }
+serde_json = "1.0"
 
 [[bin]]
 name = "gds_import"
@@ -37,6 +41,13 @@ bench = false
 [[bin]]
 name = "geometry_boolean"
 path = "fuzz_targets/geometry_boolean.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pcell_produce"
+path = "fuzz_targets/pcell_produce.rs"
 test = false
 doc = false
 bench = false
