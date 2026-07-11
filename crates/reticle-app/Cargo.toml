@@ -147,6 +147,22 @@ web-sys = { version = "0.3", features = [
     # (lane 4c); `Storage` is the localStorage interface. Already in the lockfile via
     # eframe, so no new dependency.
     "Storage",
+    # --- lane underlay: browser-native image decode (ADR 0118) ---
+    # `crate::underlay::decode_via_browser` (wasm only) decodes the underlay
+    # image through the browser's own codec instead of a Rust decoder: build a
+    # `Blob` from the picked bytes, `createImageBitmap` it, draw it onto a
+    # detached canvas, and read the pixels back with `getImageData`. This
+    # keeps PNG and JPEG support in the browser without adding the `image`
+    # crate to the wasm graph (measured over budget even PNG-only; see the
+    # ADR). Already in the lockfile via `eframe`/the `web` crate, so this adds
+    # no new dependency, only feature flags on the existing one.
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "ImageBitmap",
+    "ImageData",
+    # --- end lane underlay ---
 ] }
 
 # `reticle-sync`'s live-session wire codec (`reticle_sync::frame`) frames and decodes

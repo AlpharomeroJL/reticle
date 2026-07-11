@@ -236,6 +236,19 @@ pub enum AppOp {
     /// Imports an xschem-style probe list, native only (`xschem.import_probe`).
     ImportXschemProbe,
     // --- end lane xschem ---
+    // --- lane underlay: image underlay (ADR 0118) ---
+    /// Opens the native/browser file picker for a PNG or JPEG underlay image
+    /// (`underlay.load`); native decodes through the `image` crate, the
+    /// browser through its own image codec (ADR 0118).
+    UnderlayLoad,
+    /// Resets the underlay's position to the world origin and its scale to 1
+    /// world DBU per source pixel (`underlay.align`), a deterministic
+    /// starting point for the Inspector's position/scale fields.
+    UnderlayAlign,
+    /// Steps the underlay opacity to the next preset in a fixed ladder
+    /// (`underlay.opacity`).
+    UnderlayOpacity,
+    // --- end lane underlay ---
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -1221,6 +1234,45 @@ static REGISTRY: &[CommandSpec] = &[
         scope: Scope::NativeOnly,
     },
     // --- end lane xschem ---
+    // --- lane underlay: image underlay, moved from RESERVED_CAMPAIGN_IDS
+    // (ids and labels unchanged, ADR 0106); no default chord assigned,
+    // matching the reserved table's `chord: None` (ADR 0118). PNG and JPEG
+    // both work on every target: native decodes through the `image` crate,
+    // the browser decodes through its own image codec
+    // (`crate::underlay::decode_via_browser`) rather than shipping a Rust
+    // decoder in the wasm bundle (a byte measurement found even PNG-only
+    // over budget). `Scope::Global` keeps the command reachable everywhere. ---
+    CommandSpec {
+        id: CommandId("underlay.load"),
+        label: "Load die-photo underlay...",
+        category: "File",
+        menu_path: Some(&["File"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::UnderlayLoad),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("underlay.align"),
+        label: "Align underlay",
+        category: "Underlay",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::UnderlayAlign),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("underlay.opacity"),
+        label: "Underlay opacity",
+        category: "Underlay",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::UnderlayOpacity),
+        scope: Scope::Global,
+    },
+    // --- end lane underlay ---
 ];
 
 /// The full command registry.
@@ -1413,25 +1465,13 @@ static RESERVED_CAMPAIGN_IDS: &[ReservedId] = &[
     // (classroom, ADR 0111) all shipped: moved into REGISTRY above, out of this
     // reserved table per the ADR 0106 disjointness rule.
     // Phase 4: Reach.
+    // underlay.load / underlay.align / underlay.opacity (underlay, ADR 0118)
+    // shipped: moved into REGISTRY above, out of this reserved table per the
+    // ADR 0106 disjointness rule.
     ("plugin.browse", "Browse plugins", "plugin-ui", None, None),
     ("plugin.install", "Install plugin", "plugin-ui", None, None),
     ("plugin.enable", "Enable plugin", "plugin-ui", None, None),
     ("plugin.disable", "Disable plugin", "plugin-ui", None, None),
-    (
-        "underlay.load",
-        "Load die-photo underlay...",
-        "underlay",
-        Some(&["File"]),
-        None,
-    ),
-    ("underlay.align", "Align underlay", "underlay", None, None),
-    (
-        "underlay.opacity",
-        "Underlay opacity",
-        "underlay",
-        None,
-        None,
-    ),
     ("embed.toggle", "Toggle embed mode", "embed", None, None),
 ];
 

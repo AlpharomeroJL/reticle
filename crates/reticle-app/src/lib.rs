@@ -167,6 +167,9 @@ pub mod tour;
 // --- lane trace-ui: net-trace Inspector panel (F3 consumer; ADR 0103) ---
 pub mod trace_panel;
 // --- end lane trace-ui ---
+// --- lane underlay: image underlay (die-photo/datasheet backdrop, ADR 0118) ---
+pub mod underlay;
+// --- end lane underlay ---
 pub mod usecases;
 pub mod view3d;
 pub mod viewer;
