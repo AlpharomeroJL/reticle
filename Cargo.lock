@@ -6814,6 +6814,7 @@ dependencies = [
  "reticle-index",
  "reticle-io",
  "reticle-model",
+ "reticle-plugin",
  "reticle-render",
  "reticle-route",
  "reticle-sync",

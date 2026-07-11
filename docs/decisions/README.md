@@ -106,3 +106,4 @@ superseded decision is marked and linked to its replacement.
 | [0098](0098-style-ratchet-and-bundle-gate.md) | UI style-lint ratchet (grandfathered baseline that only tightens) and the measured bundle-size ledger + 450 KB gz budget gate in xtask |
 | [0099](0099-service-worker-cache-versioning.md) | Service-worker cache versioning (bumped name purges stale) and network-first for stable-named shell assets, cache-first for the immutable hashed bundle |
 | [0100](0100-deep-zoom-precision-not-reproduced.md) | Deep-zoom "starry" not reproduced on shipped near-origin examples; floating-origin fix deferred, zoom-cycle coherence guard added, f32 far-from-origin limit documented |
+| [0121](0121-f5-plugin-index-generator.md) | The F5 static plugin index generator: reuse the real contract types, `manifest.json`, and a missing `plugins/` directory is valid, not an error |

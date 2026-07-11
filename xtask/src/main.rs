@@ -15,12 +15,20 @@
 //!   its archives' own real geometry (`pipeline-manifest` lane).
 //! - `bundle-size`, measure the built web bundle (raw and gzip) against the
 //!   ledger in `docs/design/bundle-ledger.md`.
+// --- lane plugin-manifest-index: plugin-index subcommand doc ---
+//! - `plugin-index <plugins-dir> <out.json>`, build the F5 static plugin index
+//!   (ADR 0105) from a plugins directory's manifests and committed wasm bytes
+//!   (`plugin-manifest-index` lane).
+// --- end lane plugin-manifest-index ---
 
 mod bundle;
 mod generator;
 mod media;
 mod overlay;
 mod perf;
+// --- lane plugin-manifest-index: plugin-index subcommand module ---
+mod plugin_index;
+// --- end lane plugin-manifest-index ---
 mod tapeout;
 mod ui_capture;
 mod verify_licenses;
@@ -43,9 +51,12 @@ fn main() -> ExitCode {
         "library-manifest" => verify_licenses::cmd_library_manifest(&args[1..]),
         // --- end lane pipeline-manifest ---
         "bundle-size" => bundle::cmd_bundle_size(&args[1..]),
+        // --- lane plugin-manifest-index: plugin-index subcommand dispatch ---
+        "plugin-index" => plugin_index::cmd_plugin_index(&args[1..]),
+        // --- end lane plugin-manifest-index ---
         "" => {
             eprintln!(
-                "usage: xtask <gen-layout|capture-media [asset]|capture-ui [name]|perf-check|tapeout-example [out-dir]|verify-licenses <dir>|library-manifest <dir> <dies.json> <out.json>|bundle-size> [options]"
+                "usage: xtask <gen-layout|capture-media [asset]|capture-ui [name]|perf-check|tapeout-example [out-dir]|verify-licenses <dir>|library-manifest <dir> <dies.json> <out.json>|bundle-size|plugin-index <plugins-dir> <out.json>> [options]"
             );
             ExitCode::FAILURE
         }
