@@ -128,6 +128,7 @@ pub mod measure;
 pub mod menu;
 pub mod minimap;
 pub mod netlight;
+pub mod nl_edit;
 pub mod notify;
 pub mod onboarding;
 pub mod open;

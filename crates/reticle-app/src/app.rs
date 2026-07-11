@@ -796,6 +796,18 @@ pub struct App {
     /// step so the generator tour shows the panel it is driving.
     #[cfg(not(target_arch = "wasm32"))]
     demo_focus_generate: bool,
+
+    // --- lane nl-edit: natural-language edit command bar ---
+    /// The current text in the natural-language edit command bar. Submitting it
+    /// (the `nl_edit.submit` palette command) parses it with
+    /// [`crate::nl_edit::parse`] and applies the result via
+    /// [`nl_edit_submit`](Self::nl_edit_submit), reusing the ordinary edit/undo
+    /// path so the whole feature is a thin, testable layer over the existing
+    /// document model. A plain `String` rather than a richer widget-state type:
+    /// the parser is pure text in, so the bar needs nothing more than the text
+    /// itself.
+    pub(crate) nl_edit_input: String,
+    // --- end lane nl-edit ---
 }
 
 /// The view the app opens into.
@@ -1235,6 +1247,10 @@ impl App {
             demo_focus_search: false,
             #[cfg(not(target_arch = "wasm32"))]
             demo_focus_generate: false,
+
+            // --- lane nl-edit: natural-language edit command bar ---
+            nl_edit_input: String::new(),
+            // --- end lane nl-edit ---
         }
     }
 
@@ -3849,8 +3865,57 @@ impl App {
                 self.dialogs.share_shown = !self.dialogs.share_shown;
             }
             AppOp::CopyViewerLink => self.copy_viewer_link(),
+            // lane nl-edit: run the parsed instruction from the input bar.
+            AppOp::NlEditSubmit => self.nl_edit_submit(),
         }
     }
+
+    // --- lane nl-edit: natural-language edit command bar ---
+    /// Parses [`nl_edit_input`](Self::nl_edit_input) as a natural-language edit
+    /// instruction (see [`crate::nl_edit`]) and applies it through the undo
+    /// history as one logical step, so the whole bar is a thin layer over the
+    /// same edit/undo path every other tool uses.
+    ///
+    /// A garbage or out-of-range instruction reports a clear message through
+    /// [`report_error`](Self::report_error) and leaves the document and the
+    /// input text untouched, so a typo never partially applies. A well-formed
+    /// instruction with nothing to act on (for example `delete selected` with an
+    /// empty selection) clears the input and posts a neutral status. A valid,
+    /// effective instruction clears the input, rebuilds the scene, and lands as
+    /// exactly one undo step regardless of how many shapes it touches.
+    pub(crate) fn nl_edit_submit(&mut self) {
+        let text = self.nl_edit_input.trim().to_owned();
+        let instruction = match crate::nl_edit::parse(&text) {
+            Ok(instruction) => instruction,
+            Err(e) => {
+                self.report_error("Natural-language edit failed", e.to_string());
+                return;
+            }
+        };
+        let top = self.top_cell.clone();
+        let selected_direct = self.selected_direct_shapes();
+        let selected_resolved = self.selected_scene_shapes();
+        let edits =
+            crate::nl_edit::build_edits(&instruction, &top, &selected_direct, &selected_resolved);
+        if edits.is_empty() {
+            self.nl_edit_input.clear();
+            self.status.set("Nothing to do for the current selection");
+            return;
+        }
+        let result = self.history.apply_group(edits);
+        // Rebuild regardless of outcome: `apply_group` leaves any edits already
+        // applied before a failing one in place (see its doc comment), so the
+        // scene can be stale relative to the document even on `Err`.
+        self.rebuild_scene();
+        match result {
+            Ok(()) => {
+                self.nl_edit_input.clear();
+                self.status.set("Applied natural-language edit");
+            }
+            Err(e) => self.report_error("Natural-language edit failed", e.to_string()),
+        }
+    }
+    // --- end lane nl-edit ---
 
     /// Opens the palette in an inline argument-prompt mode (goto coordinate/cell).
     fn open_palette_arg(&mut self, arg: command::PaletteArg) {

@@ -164,6 +164,12 @@ pub enum AppOp {
     ShareDialog,
     /// Copy the read-only viewer link to the clipboard (`share.copy_viewer_link`).
     CopyViewerLink,
+    // --- lane nl-edit: natural-language edit command bar ---
+    /// Parse the natural-language edit bar's current text (see
+    /// [`crate::nl_edit`]) and apply it through the undo history as one step
+    /// (`nl_edit.submit`).
+    NlEditSubmit,
+    // --- end lane nl-edit ---
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -921,6 +927,21 @@ static REGISTRY: &[CommandSpec] = &[
         run: RunAs::App(AppOp::CopyViewerLink),
         scope: Scope::Global,
     },
+    // --- lane nl-edit: natural-language edit command bar ---
+    // Palette-only (no menu row, no default chord): the bar's Enter/Run action
+    // calls `App::nl_edit_submit` directly, and this registry row makes the same
+    // action reachable and discoverable from the command palette too.
+    CommandSpec {
+        id: CommandId("nl_edit.submit"),
+        label: "Run natural-language edit",
+        category: "Edit",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::NlEditSubmit),
+        scope: Scope::Global,
+    },
+    // --- end lane nl-edit ---
 ];
 
 /// The full command registry.
@@ -1121,13 +1142,6 @@ static RESERVED_CAMPAIGN_IDS: &[ReservedId] = &[
         "agent.replay",
         "Replay agent run",
         "agent-panel",
-        None,
-        None,
-    ),
-    (
-        "nl_edit.submit",
-        "Run natural-language edit",
-        "nl-edit",
         None,
         None,
     ),
