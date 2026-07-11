@@ -48,6 +48,15 @@ reticle-diff = { workspace = true }
 # unconditional.
 reticle-gen = { workspace = true }
 
+# The PCell Inspector's real Regenerate (`crate::pcell_panel`, the `f2f3-wiring`
+# lane, Gate 3): runs a selected PCell's script through the merged sandboxed
+# producer (`reticle_script::produce`, ADR 0107/0102) rather than only predicting
+# its provenance locally. `reticle-script` is already a workspace member built by
+# `just ci` (no new external dependency enters the lockfile) and builds for
+# wasm32 through its own graph (`rhai` has no OS-specific requirement), so the
+# sandboxed regenerate works in the browser too.
+reticle-script = { workspace = true }
+
 # The agent panel and the replay theater drive the frozen agent command API
 # (`Session`, `Transcript`, `AgentCommand`). `reticle-agent-api` builds for wasm32
 # (its `render_png` command degrades to a clean error there rather than calling the

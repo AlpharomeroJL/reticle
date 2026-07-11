@@ -167,17 +167,21 @@ pub enum AppOp {
     // --- lane pcell-inspect: PCell inspector actions ---
     /// Reveal the Inspector's PCell section (`pcell.edit_params`).
     PcellEditParams,
-    /// Refresh the status-bar `param_hash` readout for the selected PCell
-    /// (`pcell.regenerate`); this lane never calls the sandboxed producer, which is
-    /// the `pcell-produce` lane's Gate 2 wiring.
+    /// Run a REAL sandboxed produce of the selected PCell and refresh the status
+    /// bar with the result (`pcell.regenerate`); see
+    /// `crate::pcell_panel::PCellPanelState::regenerate`.
     PcellRegenerate,
     // --- end lane pcell-inspect ---
     // --- lane trace-ui: net-trace panel (F3 consumer; ADR 0103) ---
-    /// Loads the net-at-point readout (fixture stand-in until Gate 2; `trace.at_point`).
+    /// Loads the net-at-point readout: a REAL query over the open document when
+    /// a shape is selected, else the fixture fallback (`trace.at_point`).
     TraceAtPoint,
-    /// Loads the net-extent readout (fixture stand-in until Gate 2; `trace.net_extent`).
+    /// Loads the net-extent readout: a REAL query over the open document when a
+    /// shape is selected, else the fixture fallback (`trace.net_extent`).
     TraceNetExtent,
-    /// Loads the shorts/opens report (fixture stand-in until Gate 2; `trace.shorts_opens`).
+    /// Loads the shorts/opens report: a REAL check over the open document's
+    /// pins when it has geometry, else the fixture fallback
+    /// (`trace.shorts_opens`).
     TraceShortsOpens,
     /// Advances the shorts/opens navigator to the next row (`trace.next`).
     TraceNext,

@@ -421,9 +421,9 @@ pub struct App {
     // --- end lane review ---
     // --- lane trace-ui: net-trace panel (F3 consumer; ADR 0103) ---
     /// The Trace Inspector section's state: net-at-point/net-extent readouts and
-    /// the shorts/opens navigator (see [`crate::trace_panel`]). Fixture-first:
-    /// populated from the committed F3 fixture until the trace-api lane's live
-    /// queries land (Gate 2).
+    /// the shorts/opens navigator (see [`crate::trace_panel`]). Populated from a
+    /// REAL query over the open document when possible (`f2f3-wiring`), else
+    /// from the committed F3 fixture.
     trace: crate::trace_panel::TracePanelState,
     // --- end lane trace-ui ---
     /// DRC-as-you-type: the incremental checker re-run on every edit so violations are
@@ -7541,10 +7541,11 @@ impl App {
     /// PCell, [`params_form`](crate::pcell_panel::PCellPanelState::params_form)
     /// renders the typed widgets from the schema, and the provenance readout below
     /// is [`PCellDef::produce_meta`](reticle_gen::PCellDef::produce_meta) computed
-    /// live from the current form values. This lane never calls
-    /// `reticle_script::pcell::produce` (the `pcell-produce` lane wires the
-    /// sandboxed regenerate at Gate 2); the Regenerate button here only refreshes
-    /// the status-bar readout of the current `param_hash`.
+    /// live from the current form values (a prediction). The Regenerate button
+    /// (`f2f3-wiring`) runs a REAL sandboxed produce
+    /// (`reticle_script::produce`) and the section then also shows that real
+    /// outcome (shape/instance/array counts and the produced `param_hash`, or the
+    /// sandbox's rejection message).
     fn pcell_section(&mut self, ui: &mut egui::Ui) {
         // Pick the PCell by title; the catalog comes straight from the panel state.
         egui::ComboBox::from_id_salt("pcell_pick")
@@ -7578,9 +7579,10 @@ impl App {
 
         ui.separator();
 
-        // F2 provenance, read-only: computed locally from the current form values,
-        // not from a produced instance (this lane does not produce; see the module
-        // doc on `crate::pcell_panel`).
+        // Predicted F2 provenance, read-only: computed locally from the current
+        // form values, not from a produced instance (see the module doc on
+        // `crate::pcell_panel`). The "Last regenerate" block below shows the REAL
+        // produced provenance once Regenerate has actually run.
         ui.label("Provenance");
         let meta = self.pcell.selected_produce_meta();
         ui.monospace(format!("{:<15}{}", "generator_id:", meta.generator_id));
@@ -7600,6 +7602,31 @@ impl App {
         if ui.button("Regenerate").clicked() {
             self.pcell_regenerate();
         }
+
+        // The last REAL sandboxed-produce outcome (`f2f3-wiring`), distinct from
+        // the always-live prediction above: `None` until Regenerate has run for
+        // these exact parameters (an edit since the last regenerate clears it, so
+        // this never shows a result that no longer matches the form).
+        if let Some(outcome) = self.pcell.selected_produce_outcome() {
+            ui.separator();
+            ui.label("Last regenerate (real sandboxed produce)");
+            match outcome {
+                crate::pcell_panel::ProduceOutcome::Produced {
+                    shape_count,
+                    instance_count,
+                    array_count,
+                    meta,
+                } => {
+                    ui.monospace(format!(
+                        "shapes: {shape_count}  instances: {instance_count}  arrays: {array_count}"
+                    ));
+                    ui.monospace(format!("param_hash: {}", meta.param_hash));
+                }
+                crate::pcell_panel::ProduceOutcome::Failed(msg) => {
+                    ui.colored_label(DARK.danger, format!("Sandbox rejected: {msg}"));
+                }
+            }
+        }
     }
 
     /// Opens the Inspector on the PCell section (`pcell.edit_params`), so the
@@ -7609,22 +7636,36 @@ impl App {
         self.inspector.reveal("pcell");
     }
 
-    /// Refreshes the status bar with the selected PCell's current `param_hash`
+    /// Runs a REAL sandboxed produce of the selected PCell over its current
+    /// parameters and refreshes the status bar with the result
     /// (`pcell.regenerate`).
     ///
-    /// This is the F2-consumer half only: it recomputes the identity a real
-    /// regenerate would key its cache lookup on, but it never calls
-    /// `reticle_script::pcell::produce` (that sandboxed run is the `pcell-produce`
-    /// lane's Gate 2 wiring). Once wired, this method becomes the one place that
-    /// dispatches to it, so the palette, a menu, and this section's button keep
-    /// sharing one effect path.
+    /// `f2f3-wiring`'s wiring: [`crate::pcell_panel::PCellPanelState::regenerate`]
+    /// runs the selected PCell's script through the merged sandboxed producer
+    /// (`reticle_script::produce`, ADR 0107/0102) against the open document's
+    /// active technology, under the sandbox's default resource limits, and
+    /// records whichever it returns. This is the one place that dispatches to
+    /// it, so the palette, a menu, and this section's button share one effect
+    /// path.
     fn pcell_regenerate(&mut self) {
-        let meta = self.pcell.selected_produce_meta();
-        let short = &meta.param_hash[..meta.param_hash.len().min(12)];
-        self.status.set(format!(
-            "PCell {} param_hash {short}... (regenerate wiring pending Gate 2)",
-            meta.generator_id
-        ));
+        let tech = self.history.document().technology().clone();
+        let outcome = self
+            .pcell
+            .regenerate(&tech, reticle_script::SandboxLimits::default());
+        match outcome {
+            crate::pcell_panel::ProduceOutcome::Produced {
+                shape_count, meta, ..
+            } => {
+                let short = &meta.param_hash[..meta.param_hash.len().min(12)];
+                self.status.set(format!(
+                    "PCell {} produced {shape_count} shape(s), param_hash {short}...",
+                    meta.generator_id
+                ));
+            }
+            crate::pcell_panel::ProduceOutcome::Failed(msg) => {
+                self.status.set(format!("PCell produce rejected: {msg}"));
+            }
+        }
     }
     // --- end lane pcell-inspect ---
 
@@ -12855,12 +12896,16 @@ impl App {
     /// Loads the net-at-point readout and reveals the Trace section
     /// (`trace.at_point`; catalog 67 event-driven expand).
     ///
-    /// A stand-in for the trace-api lane's live net-at-point query until Gate 2
-    /// (see [`crate::trace_panel`]): this is exactly the call the live lane
-    /// replaces.
+    /// Runs a REAL query (the `f2f3-wiring` hook's `live_net_at_point`) at the
+    /// selected shape's bounding-box center when the open document has geometry
+    /// and exactly one shape is selected; otherwise falls back to
+    /// [`crate::trace_panel::fixture_at_point`] (no document/selection to query
+    /// for real: an honest stand-in, not a permanent substitute).
     fn trace_query_at_point(&mut self) {
-        self.trace
-            .load_at_point(crate::trace_panel::fixture_at_point());
+        let record = self
+            .live_net_at_point()
+            .unwrap_or_else(crate::trace_panel::fixture_at_point);
+        self.trace.load_at_point(record);
         self.status.set("Trace: net at point");
         self.inspector.reveal("trace");
     }
@@ -12868,7 +12913,10 @@ impl App {
     /// Loads the net-extent readout and reveals the Trace section
     /// (`trace.net_extent`). See `trace_query_at_point`.
     fn trace_query_extent(&mut self) {
-        self.trace.load_extent(crate::trace_panel::fixture_extent());
+        let record = self
+            .live_net_extent()
+            .unwrap_or_else(crate::trace_panel::fixture_extent);
+        self.trace.load_extent(record);
         self.status.set("Trace: net extent");
         self.inspector.reveal("trace");
     }
@@ -12876,7 +12924,9 @@ impl App {
     /// Loads the shorts/opens report and reveals the Trace section
     /// (`trace.shorts_opens`). See `trace_query_at_point`.
     fn trace_query_report(&mut self) {
-        let report = crate::trace_panel::fixture_report();
+        let report = self
+            .live_shorts_opens()
+            .unwrap_or_else(crate::trace_panel::fixture_report);
         let n = report.len();
         self.trace.load_report(report);
         self.status.set(format!("Trace: {n} short/open result(s)"));
@@ -13025,6 +13075,72 @@ impl App {
         }
     }
     // --- end lane trace-ui ---
+
+    // --- lane f2f3-wiring: live produce + trace (F2 produce + F3 trace wiring
+    // over the OPEN document; ADR 0102, 0103) ---
+    /// The single selected shape's index into the flattened top-cell scene, if
+    /// exactly one shape is selected: the real data source the live trace
+    /// queries below use in place of a coordinate-entry UI
+    /// (`crate::trace_panel`'s `shape_probe_point`/`query_at_point`/`query_extent`).
+    fn traced_selection(&self) -> Option<usize> {
+        if self.selection.len() != 1 {
+            return None;
+        }
+        self.selection.iter().next()
+    }
+
+    /// Runs a REAL net-at-point query at the single selected shape's
+    /// bounding-box center (`crate::trace_panel::query_at_point`), over the open
+    /// document's current top cell at the current edit generation.
+    ///
+    /// Returns `None` (the empty-document/no-selection case
+    /// `crate::trace_panel`'s fixtures cover) when the flattened scene is empty
+    /// or the selection is not exactly one shape; `trace_query_at_point` falls
+    /// back to [`crate::trace_panel::fixture_at_point`] in that case.
+    fn live_net_at_point(&self) -> Option<reticle_extract::query::NetAtPoint> {
+        if self.scene.shapes().is_empty() {
+            return None;
+        }
+        let idx = self.traced_selection()?;
+        let shape = self.scene.shapes().get(idx)?;
+        let point = crate::trace_panel::shape_probe_point(shape);
+        Some(crate::trace_panel::query_at_point(
+            self.history.document(),
+            &self.top_cell,
+            point,
+            self.doc_generation,
+        ))
+    }
+
+    /// Runs a REAL net-extent query for the net at the selected shape, chained
+    /// off [`Self::live_net_at_point`] (`crate::trace_panel::query_extent`), or
+    /// `None` under the same fallback conditions plus a miss (the probe point
+    /// covers no net).
+    fn live_net_extent(&self) -> Option<reticle_extract::query::NetExtent> {
+        let at = self.live_net_at_point()?;
+        let name = at.net?.name;
+        crate::trace_panel::query_extent(
+            self.history.document(),
+            &self.top_cell,
+            &name,
+            self.doc_generation,
+        )
+    }
+
+    /// Runs a REAL shorts/opens check over the open document's top cell
+    /// (`crate::trace_panel::query_report`), or `None` when the flattened scene
+    /// is empty (the empty-document fixture fallback).
+    fn live_shorts_opens(&self) -> Option<reticle_extract::query::ShortsOpensReport> {
+        if self.scene.shapes().is_empty() {
+            return None;
+        }
+        Some(crate::trace_panel::query_report(
+            self.history.document(),
+            &self.top_cell,
+            self.doc_generation,
+        ))
+    }
+    // --- end lane f2f3-wiring ---
 }
 
 impl eframe::App for App {
@@ -15097,9 +15213,9 @@ mod tests {
         assert!(app.inspector.is_open("pcell"));
     }
 
-    /// `pcell.regenerate` refreshes the status bar with the current `param_hash`
-    /// without calling the sandboxed producer (this lane never calls
-    /// `reticle_script::pcell::produce`; the `pcell-produce` lane wires it at Gate 2).
+    /// `pcell.regenerate` runs the REAL sandboxed producer
+    /// (`reticle_script::produce`) over the demo PCell's default parameters and
+    /// refreshes the status bar with its stamped `param_hash`.
     #[test]
     fn pcell_regenerate_command_reports_the_hash_in_status() {
         let mut app = App::new();
@@ -15389,9 +15505,50 @@ mod tests {
     }
 
     // --- lane trace-ui: net-trace panel (F3 consumer; ADR 0103) ---
+    /// A document with a genuine short (two differently named, physically
+    /// joined pins) and a genuine open (a two-tap net whose second tap has no
+    /// matching geometry), for exercising the LIVE shorts/opens query
+    /// (`f2f3-wiring`) end to end. Mirrors `crate::trace_panel`'s own
+    /// `shorted_pins_doc` test fixture.
+    fn traced_shorts_and_opens_doc() -> reticle_model::Document {
+        let layer = LayerId::new(9, 0);
+        let mut cell = reticle_model::Cell::new("TOP");
+        cell.pins.push(reticle_model::Pin::new(
+            "NET_A",
+            Rect::new(Point::new(0, 0), Point::new(10, 10)),
+            layer,
+        ));
+        cell.pins.push(reticle_model::Pin::new(
+            "NET_B",
+            Rect::new(Point::new(20, 20), Point::new(30, 30)),
+            layer,
+        ));
+        // Two taps of the same net, neither overlapped by any shape, so the
+        // first is an unmatched terminal: a real open.
+        cell.pins.push(reticle_model::Pin::new(
+            "NET_C",
+            Rect::new(Point::new(100, 100), Point::new(110, 110)),
+            layer,
+        ));
+        cell.pins.push(reticle_model::Pin::new(
+            "NET_C",
+            Rect::new(Point::new(200, 200), Point::new(210, 210)),
+            layer,
+        ));
+        // Spans both NET_A's and NET_B's regions: a real short.
+        cell.shapes.push(DrawShape::new(
+            layer,
+            ShapeKind::Rect(Rect::new(Point::new(0, 0), Point::new(30, 30))),
+        ));
+        let mut doc = reticle_model::Document::new();
+        doc.insert_cell(cell);
+        doc.set_top_cells(vec!["TOP".to_owned()]);
+        doc
+    }
+
     /// The Trace section renders headlessly without panicking, both empty and
-    /// after each of the three fixture-stand-in queries populate it, exercising
-    /// the empty state, the readouts, and the shorts/opens navigable list.
+    /// after each of the three live-first queries populate it, exercising the
+    /// empty state, the readouts, and the shorts/opens navigable list.
     #[test]
     fn trace_section_renders_without_panic() {
         let mut app = App::new();
@@ -15403,11 +15560,20 @@ mod tests {
         let _ = ctx.end_pass();
         assert!(app.trace.is_empty(), "nothing queried yet");
 
+        // The demo document `App::new` starts with has geometry but no pins, so
+        // its own live shorts/opens query would come back clean; install one
+        // with a real short and open so the live query (not the fixture) has
+        // something to find.
+        app.install_document(traced_shorts_and_opens_doc(), "TOP".to_owned());
+
         app.trace_query_at_point();
         app.trace_query_extent();
         app.trace_query_report();
         assert!(!app.trace.is_empty());
-        assert!(app.trace.row_count() > 0, "the fixture report is not clean");
+        assert!(
+            app.trace.row_count() > 0,
+            "the live query must find the document's real short and open"
+        );
 
         ctx.begin_pass(egui::RawInput::default());
         egui::Window::new("trace test loaded").show(&ctx, |ui| {
@@ -15416,7 +15582,7 @@ mod tests {
         let _ = ctx.end_pass();
 
         // Next/prev navigate the shorts/opens list without panicking, wrapping
-        // over the fixture's two rows.
+        // over the document's real short and open (two rows).
         let first = app.trace.selected();
         app.trace_select_next();
         assert_ne!(app.trace.selected(), first, "next moves the selection");
