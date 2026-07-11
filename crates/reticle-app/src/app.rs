@@ -426,6 +426,13 @@ pub struct App {
     /// queries land (Gate 2).
     trace: crate::trace_panel::TracePanelState,
     // --- end lane trace-ui ---
+    // --- lane waveform-ui: waveform panel (F4 consumer; ADR 0110) ---
+    /// The Waveform Inspector section's state: the last-loaded F4 `WaveformSet`
+    /// and the probe list's selection (see [`crate::waveform_panel`]).
+    /// Fixture-first: populated from the committed F4 fixture until the live
+    /// solver lands (Gate 3, a separate lane's deliverable).
+    waveform: crate::waveform_panel::WaveformPanelState,
+    // --- end lane waveform-ui ---
     /// DRC-as-you-type: the incremental checker re-run on every edit so violations are
     /// underlined the moment geometry is drawn (see [`crate::live_drc`]).
     live_drc: crate::live_drc::LiveDrc,
@@ -1174,6 +1181,9 @@ impl App {
             // --- lane trace-ui: net-trace panel ---
             trace: crate::trace_panel::TracePanelState::new(),
             // --- end lane trace-ui ---
+            // --- lane waveform-ui: waveform panel ---
+            waveform: crate::waveform_panel::WaveformPanelState::new(),
+            // --- end lane waveform-ui ---
             live_drc: crate::live_drc::LiveDrc::new(),
             live_drc_on: false,
             live_pending: crate::history::Dirty::None,
@@ -3927,6 +3937,10 @@ impl App {
             AppOp::AgentStop => self.agent_cmd_stop(),
             AppOp::AgentReplay => self.agent_cmd_replay(),
             // --- end lane agent-panel ---
+            // --- lane waveform-ui: waveform panel ---
+            AppOp::WaveformRunOracle => self.waveform_run_oracle(),
+            AppOp::WaveformExportCsv => self.waveform_export_csv(),
+            // --- end lane waveform-ui ---
         }
     }
 
@@ -5345,6 +5359,9 @@ impl App {
                 // --- lane pcell-inspect: PCell inspector panel ---
                 self.inspector_section(ui, ctx, "pcell", "PCell", Self::pcell_section);
                 // --- end lane pcell-inspect ---
+                // --- lane waveform-ui: waveform panel ---
+                self.inspector_section(ui, ctx, "waveform", "Waveform", Self::waveform_section);
+                // --- end lane waveform-ui ---
             }
             PanelGroup::Settings => {
                 self.inspector_section(ui, ctx, "operations", "Operations", Self::ops_panel);
@@ -13025,6 +13042,191 @@ impl App {
         }
     }
     // --- end lane trace-ui ---
+
+    // --- lane waveform-ui: waveform panel (F4 consumer; ADR 0110) ---
+    /// Loads the fixture-first waveform set and reveals the Waveform section
+    /// (`waveform.run_oracle`).
+    ///
+    /// A stand-in for the live solver until Gate 3 (route still open; see
+    /// [`crate::waveform_panel`]): this is exactly the call a later lane
+    /// replaces. `waveform_section`'s banner names this while it is true.
+    fn waveform_run_oracle(&mut self) {
+        self.waveform
+            .load(crate::waveform_panel::fixture_transient());
+        self.status.set("Waveform: loaded fixture (RC transient)");
+        self.inspector.reveal("waveform");
+    }
+
+    /// Exports the loaded set to CSV (`waveform.export_csv`; see
+    /// [`crate::waveform_panel::to_csv`]). Reports a status message instead of
+    /// exporting when nothing has been loaded yet.
+    fn waveform_export_csv(&mut self) {
+        let Some(set) = self.waveform.set() else {
+            self.status.set("Waveform: run the oracle before exporting");
+            return;
+        };
+        let csv = crate::waveform_panel::to_csv(set);
+        match self.write_export_text("waveforms.csv", &csv) {
+            Ok(msg) => self.status.set(msg),
+            Err(e) => self.status.set(format!("Waveform CSV export failed: {e}")),
+        }
+    }
+
+    /// Draws the Waveform Inspector section: the honest fixture-first banner, the
+    /// Run-oracle/Export-CSV actions, the probe list, and (via `waveform_plot`)
+    /// the selected probe's transient polyline or the operating-point readout.
+    ///
+    /// Thin glue over [`crate::waveform_panel::WaveformPanelState`], mirroring
+    /// [`trace_section`](Self::trace_section): the pure, unit-tested
+    /// plotted-point geometry and formatting live in [`crate::waveform_panel`],
+    /// styled entirely from [`theme::components`]/[`theme::tokens`].
+    fn waveform_section(&mut self, ui: &mut egui::Ui) {
+        let ctx = self.comp_ctx();
+
+        // Honesty banner (reticle-claims seam): `waveform.run_oracle` loads the
+        // committed F4 contract fixture, never a live simulation, until the
+        // sim-engine/oracle-feasibility lanes land a real solver at Gate 3.
+        ui.colored_label(
+            ctx.tokens.warning,
+            format!(
+                "{} Fixture-first: this is the committed F4 fixture, not a live simulation.",
+                icons::TRIANGLE_ALERT
+            ),
+        )
+        .on_hover_text(
+            "waveform.run_oracle loads crates/reticle-sim/tests/fixtures/contracts/\
+             f4_rc_transient.json (an analytic RC charging transient). The bounded \
+             solver that replaces it is a separate lane's Gate-3 deliverable; which \
+             route it ships is still open.",
+        );
+
+        ui.horizontal(|ui| {
+            if components::Button::secondary("Run oracle")
+                .show(ui, ctx)
+                .clicked()
+            {
+                self.waveform_run_oracle();
+            }
+            if components::Button::secondary("Export CSV")
+                .enabled(!self.waveform.is_empty())
+                .show(ui, ctx)
+                .clicked()
+            {
+                self.waveform_export_csv();
+            }
+        });
+
+        if self.waveform.is_empty() {
+            if components::EmptyState::new(
+                "No waveform loaded",
+                "Run the oracle to load the fixture waveform.",
+            )
+            .action(components::Button::primary("Run oracle"))
+            .show(ui, ctx)
+            .is_some()
+            {
+                self.waveform_run_oracle();
+            }
+            return;
+        }
+        ui.separator();
+
+        // The probe list: click to select, which drives the plotted transient
+        // trace below (an operating point's readout always shows every probe).
+        let rows = self.waveform.probe_rows();
+        let selected = self.waveform.selected();
+        let mut row_clicked = None;
+        for (i, row) in rows.iter().enumerate() {
+            if ui.selectable_label(selected == i, row).clicked() {
+                row_clicked = Some(i);
+            }
+        }
+        if let Some(i) = row_clicked {
+            self.waveform.select(i);
+        }
+
+        ui.separator();
+        self.waveform_plot(ui, ctx);
+    }
+
+    /// Paints the selected probe's transient polyline, or every probe's
+    /// operating-point marker plus a readout list, into a fixed-height plot
+    /// strip. Split from `waveform_section` to keep each method focused (mirrors
+    /// how `trace_result_list` splits out of `trace_section`).
+    fn waveform_plot(&mut self, ui: &mut egui::Ui, ctx: theme::components::Ctx) {
+        let is_transient = self.waveform.is_transient();
+
+        if let Some(probe) = self.waveform.selected_probe() {
+            let label = if is_transient {
+                crate::waveform_panel::quantity_axis_label(probe.quantity)
+            } else {
+                "Operating point".to_owned()
+            };
+            ui.label(egui::RichText::new(label).color(ctx.tokens.text_weak));
+        }
+
+        // A fixed-height strip (matching `replay_canvas`'s `h`) so the section's
+        // total height stays deterministic regardless of `available_height`.
+        let plot_height = 140.0;
+        let size = Vec2::new(ui.available_width().max(160.0), plot_height);
+        let (response, painter) = ui.allocate_painter(size, Sense::hover());
+        let rect = response.rect;
+        painter.rect_filled(rect, 4.0, ctx.tokens.bg_input);
+        painter.rect_stroke(
+            rect,
+            4.0,
+            Stroke::new(1.0, ctx.tokens.border),
+            StrokeKind::Inside,
+        );
+
+        let to_pos = |p: crate::waveform_panel::NormPoint| {
+            Pos2::new(
+                rect.left() + p.x * rect.width(),
+                rect.bottom() - p.y * rect.height(),
+            )
+        };
+        // Resolved once, up front: the theme's HUD body font for this density
+        // (see `replay_canvas`'s `theme::apply::hud_body` use for the same
+        // custom-painted-text pattern).
+        let font = theme::apply::hud_body(self.ui_density);
+
+        if is_transient {
+            let points = self.waveform.selected_trace();
+            if points.len() < 2 {
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    "Not enough samples to plot",
+                    font,
+                    ctx.tokens.text_weak,
+                );
+            } else {
+                let pts: Vec<Pos2> = points.into_iter().map(to_pos).collect();
+                painter.add(Shape::line(pts, Stroke::new(2.0, ctx.tokens.accent)));
+            }
+            ui.label(egui::RichText::new("Time (ns)").color(ctx.tokens.text_weak));
+        } else {
+            let points = self.waveform.operating_point_points();
+            if points.is_empty() {
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    "No operating-point samples",
+                    font,
+                    ctx.tokens.text_weak,
+                );
+            } else {
+                for p in points {
+                    painter.circle_filled(to_pos(p), 4.0, ctx.tokens.accent);
+                }
+            }
+            ui.separator();
+            for row in self.waveform.operating_point_rows() {
+                ui.monospace(row);
+            }
+        }
+    }
+    // --- end lane waveform-ui ---
 }
 
 impl eframe::App for App {
@@ -15424,4 +15626,83 @@ mod tests {
         assert_eq!(app.trace.selected(), first, "prev undoes the next");
     }
     // --- end lane trace-ui ---
+
+    // --- lane waveform-ui: waveform panel (F4 consumer; ADR 0110) ---
+    /// The Waveform section renders headlessly without panicking, both empty and
+    /// after `waveform.run_oracle` populates it with the fixture, exercising the
+    /// empty state, the banner, the probe list, and the transient plot.
+    #[test]
+    fn waveform_section_renders_without_panic() {
+        let mut app = App::new();
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        egui::Window::new("waveform test empty").show(&ctx, |ui| {
+            app.waveform_section(ui);
+        });
+        let _ = ctx.end_pass();
+        assert!(app.waveform.is_empty(), "nothing loaded yet");
+
+        app.waveform_run_oracle();
+        assert!(!app.waveform.is_empty());
+
+        ctx.begin_pass(egui::RawInput::default());
+        egui::Window::new("waveform test loaded").show(&ctx, |ui| {
+            app.waveform_section(ui);
+        });
+        let _ = ctx.end_pass();
+    }
+
+    /// `waveform.run_oracle` loads the F4 fixture as a well-formed transient set
+    /// and reveals the Waveform section (Automate group), the same event-driven
+    /// expand every other fixture-first Inspector section uses (catalog 67).
+    #[test]
+    fn waveform_run_oracle_command_loads_the_fixture_and_reveals_the_section() {
+        use crate::inspector_layout::PanelGroup;
+        let mut app = App::new();
+        app.inspector.group = PanelGroup::Inspect;
+        app.inspector.collapsed = true;
+        app.inspector.set_open("waveform", false);
+
+        app.dispatch(CommandId("waveform.run_oracle"));
+
+        assert_eq!(app.inspector.group, PanelGroup::Automate);
+        assert!(!app.inspector.collapsed);
+        assert!(app.inspector.is_open("waveform"));
+        let set = app.waveform.set().expect("fixture loaded");
+        assert!(set.is_well_formed());
+        assert_eq!(set.analysis, reticle_sim::AnalysisKind::Transient);
+    }
+
+    /// `waveform.export_csv` reports an honest status instead of exporting when
+    /// nothing has been loaded yet, and never touches the filesystem in that
+    /// case. The real write path (exercised only after a load) is intentionally
+    /// not dispatched in this suite, so a test run never leaves a stray
+    /// `waveforms.csv` in the working directory; `to_csv`'s content is covered
+    /// directly (and the app-to-`to_csv` wiring below), matching how
+    /// `export_metrology`'s equivalent native write path has no dedicated test.
+    #[test]
+    fn waveform_export_csv_command_reports_a_message_without_a_loaded_set() {
+        let mut app = App::new();
+        app.dispatch(CommandId("waveform.export_csv"));
+        assert!(
+            app.status.text.contains("run the oracle"),
+            "status should prompt to run the oracle first, got {:?}",
+            app.status.text
+        );
+    }
+
+    /// After `waveform.run_oracle`, the app's loaded set feeds
+    /// [`crate::waveform_panel::to_csv`] and round-trips the same integer values
+    /// `crate::waveform_panel`'s own fixture test pins (see the note above on why
+    /// the real file write is not exercised here).
+    #[test]
+    fn waveform_export_csv_data_matches_the_loaded_set_after_run_oracle() {
+        let mut app = App::new();
+        app.dispatch(CommandId("waveform.run_oracle"));
+        let set = app.waveform.set().expect("fixture loaded");
+        let csv = crate::waveform_panel::to_csv(set);
+        assert!(csv.starts_with("time_fs,out_nV\n"));
+        assert_eq!(csv.lines().count(), 1 + set.time_fs.len());
+    }
+    // --- end lane waveform-ui ---
 }

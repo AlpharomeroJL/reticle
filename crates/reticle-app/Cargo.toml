@@ -40,6 +40,15 @@ reticle-drc = { workspace = true }
 reticle-extract = { workspace = true }
 reticle-diff = { workspace = true }
 
+# The Waveform Inspector section (`crate::waveform_panel`) renders F4 `WaveformSet`
+# records: a shared integer time axis, per-probe integer-scaled samples, and axis
+# bounds. `reticle-sim` is pure data plus a validity check (no solver yet; that is
+# a separate lane's Gate-3 deliverable), so it builds for wasm32 too. First
+# consumer of this workspace member (see the root manifest).
+# --- lane waveform-ui: F4 waveform-record contract (ADR 0110) ---
+reticle-sim = { workspace = true }
+# --- end lane waveform-ui ---
+
 # The Generate panel (`crate::generate_panel`) drives the parameterized layout
 # generators: it lists them from the registry, builds a typed form from each
 # generator's schema, previews the geometry live, and places it as one undo-integrated

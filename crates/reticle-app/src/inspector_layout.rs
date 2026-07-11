@@ -183,6 +183,14 @@ pub const SECTIONS: &[SectionSpec] = &[
         group: PanelGroup::Automate,
         default_open: false,
     },
+    // --- lane waveform-ui: waveform viewer Inspector section (ADR 0110) ---
+    SectionSpec {
+        key: "waveform",
+        title: "Waveform",
+        group: PanelGroup::Automate,
+        default_open: false,
+    },
+    // --- end lane waveform-ui ---
     // Settings
     SectionSpec {
         key: "operations",
