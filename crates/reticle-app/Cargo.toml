@@ -80,6 +80,17 @@ reticle-io = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 
+# The real plan/approve/execute agent (`crate::agent_runner`, native only). The web
+# build keeps the model-free scripted preview: `reticle-agent`'s propose-verify-correct
+# loop uses blocking `ureq` HTTP, filesystem artifact writes, and (for the live-room
+# mode) `tokio`, none of which build for wasm32, so the dependency is native-only and
+# the browser never claims to run a live model. `reticle-bench` supplies the `BenchTask`
+# / `CheckerRegistry` / `ResultRecord` types `run_agent_task` is generic over. Both are
+# in-tree workspace crates already in the lockfile, so `just deny` gains no new external
+# license and the wasm bundle is unchanged.
+reticle-agent = { workspace = true }
+reticle-bench = { workspace = true }
+
 # The browser open path (`crate::webopen`, wasm only) fetches a `?gds=` URL and
 # persists the recent-files list in IndexedDB, so it needs the wasm-bindgen glue and
 # the specific `web-sys` interfaces (fetch/Response and the IndexedDB API). These are

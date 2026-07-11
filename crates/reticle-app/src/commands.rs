@@ -164,6 +164,20 @@ pub enum AppOp {
     ShareDialog,
     /// Copy the read-only viewer link to the clipboard (`share.copy_viewer_link`).
     CopyViewerLink,
+    // --- lane agent-panel: real agent commands (item 3) ---
+    /// Plan an agent run for the current prompt (`agent.plan`): stage a real plan on
+    /// native with a model, or start the scripted preview otherwise.
+    AgentPlan,
+    /// Approve the staged plan and execute it against the live model (`agent.approve`).
+    AgentApprove,
+    /// Approve the staged plan step (`agent.approve_step`); the interactive loop approves
+    /// the whole staged run, so this drives the same execute as `agent.approve`.
+    AgentApproveStep,
+    /// Stop the agent run, the native runner or the scripted preview (`agent.stop`).
+    AgentStop,
+    /// Open the last agent run in the replay theater (`agent.replay`).
+    AgentReplay,
+    // --- end lane agent-panel ---
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -921,6 +935,60 @@ static REGISTRY: &[CommandSpec] = &[
         run: RunAs::App(AppOp::CopyViewerLink),
         scope: Scope::Global,
     },
+    // --- lane agent-panel: real agent commands, moved live from the reserved table
+    // (item 3, ADR 0106). Palette-only (no menu path) and no chord, matching their
+    // reserved contract; the effects run through `run_app_op`. ---
+    CommandSpec {
+        id: CommandId("agent.plan"),
+        label: "Plan agent run",
+        category: "Agent",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::AgentPlan),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("agent.approve"),
+        label: "Approve plan",
+        category: "Agent",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::AgentApprove),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("agent.approve_step"),
+        label: "Approve step",
+        category: "Agent",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::AgentApproveStep),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("agent.stop"),
+        label: "Stop agent",
+        category: "Agent",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::AgentStop),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("agent.replay"),
+        label: "Replay agent run",
+        category: "Agent",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::AgentReplay),
+        scope: Scope::Global,
+    },
+    // --- end lane agent-panel ---
 ];
 
 /// The full command registry.
@@ -1106,24 +1174,8 @@ static RESERVED_CAMPAIGN_IDS: &[ReservedId] = &[
         None,
     ),
     ("snapshot.open", "Open snapshot", "snapshots", None, None),
-    // Phase 2: Agent + Full-Custom.
-    ("agent.plan", "Plan agent run", "agent-panel", None, None),
-    ("agent.approve", "Approve plan", "agent-panel", None, None),
-    (
-        "agent.approve_step",
-        "Approve step",
-        "agent-panel",
-        None,
-        None,
-    ),
-    ("agent.stop", "Stop agent", "agent-panel", None, None),
-    (
-        "agent.replay",
-        "Replay agent run",
-        "agent-panel",
-        None,
-        None,
-    ),
+    // Phase 2: Full-Custom. The agent.* ids shipped live into REGISTRY (lane
+    // agent-panel, ADR 0106), so they are no longer reserved here.
     (
         "nl_edit.submit",
         "Run natural-language edit",
