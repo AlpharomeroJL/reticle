@@ -839,6 +839,12 @@ pub struct App {
     /// itself.
     pub(crate) nl_edit_input: String,
     // --- end lane nl-edit ---
+    // --- lane xschem: SPICE export + probe import (ADR 0112) ---
+    /// The xschem-interop state: probes imported from an xschem-style probe list
+    /// (see [`crate::xschem::parse_probe_list`]), ready for a later lane to
+    /// visualize or feed into a `WaveformSet` once the sim-engine lands.
+    xschem: crate::xschem::XschemState,
+    // --- end lane xschem ---
 }
 
 /// The view the app opens into.
@@ -1294,6 +1300,9 @@ impl App {
             // --- lane nl-edit: natural-language edit command bar ---
             nl_edit_input: String::new(),
             // --- end lane nl-edit ---
+            // --- lane xschem: SPICE export + probe import ---
+            xschem: crate::xschem::XschemState::new(),
+            // --- end lane xschem ---
         }
     }
 
@@ -3927,8 +3936,96 @@ impl App {
             AppOp::AgentStop => self.agent_cmd_stop(),
             AppOp::AgentReplay => self.agent_cmd_replay(),
             // --- end lane agent-panel ---
+            // --- lane xschem: SPICE export + probe import ---
+            AppOp::ExportSpice => self.xschem_export_spice(),
+            AppOp::ImportXschemProbe => self.xschem_import_probe(),
+            // --- end lane xschem ---
         }
     }
+
+    // --- lane xschem: SPICE export + probe import (ADR 0112) ---
+    /// Exports the open design's extracted devices as a SPICE subcircuit
+    /// (`file.export_spice`).
+    ///
+    /// Runs the real, already-merged device recognition
+    /// (`reticle_extract::extract_devices`) over the open top cell, bridges the
+    /// result into the SPICE exchange contract shape with
+    /// [`crate::xschem::spice_netlist_from_devices`], and writes it through the
+    /// same [`write_export_text`](Self::write_export_text) path SVG and metrology
+    /// export already use. The model-name table and the decimal-micron formatting
+    /// inside that bridge are a temporary stand-in for the `netlist` lane's writer
+    /// (see the bridge's own doc comment and `docs/decisions/0112-xschem-interop.md`).
+    fn xschem_export_spice(&mut self) {
+        let tech = reticle_extract::DeviceTech::sky130();
+        let dn = reticle_extract::extract_devices(self.history.document(), &self.top_cell, &tech);
+        if dn.devices.is_empty() {
+            self.status.set(format!(
+                "No SPICE devices recognized on '{}'",
+                self.top_cell
+            ));
+            return;
+        }
+        let n = dn.devices.len();
+        let netlist =
+            crate::xschem::spice_netlist_from_devices(&dn, &self.top_cell, self.dbu_per_micron());
+        let text = crate::xschem::write_spice(&netlist);
+        match self.write_export_text("reticle-export.spice", &text) {
+            Ok(msg) => self.status.set(format!("{msg} ({n} device(s))")),
+            Err(e) => self.report_error("SPICE export failed", e.to_string()),
+        }
+    }
+
+    /// Imports an xschem-style probe list (`xschem.import_probe`): a blocking
+    /// native file pick, then [`crate::xschem::XschemState::import`] parses the
+    /// bytes and replaces the current probe selection.
+    ///
+    /// `xschem.import_probe` is [`Scope::NativeOnly`](crate::commands::Scope::NativeOnly),
+    /// so this is hidden from the web palette/menu; the wasm arm below stays real
+    /// (an honest status line, not a panic) if it is ever invoked directly, for
+    /// example from a test.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn xschem_import_probe(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("xschem probe list", &["txt", "probe", "xschem_probe"])
+            .pick_file()
+        else {
+            return;
+        };
+        match std::fs::read(&path) {
+            Ok(bytes) => match self.xschem.import(&bytes) {
+                Ok(n) => self
+                    .status
+                    .set(format!("Imported {n} probe(s): {}", self.xschem.summary())),
+                Err(e) => self.report_error("Probe import failed", e.to_string()),
+            },
+            Err(e) => self.report_error(
+                "Probe import failed",
+                format!("Could not read {}: {e}", path.display()),
+            ),
+        }
+    }
+
+    /// Web stub: the browser file picker for probe lists is not wired in this
+    /// lane (see `docs/src/xschem-interop.md`), so this honestly reports the gap
+    /// rather than silently doing nothing. Still calls the real
+    /// [`XschemState::import`](crate::xschem::XschemState::import) over an empty
+    /// input (a no-op today: parses to zero probes, changes nothing) so the parser
+    /// stays a live, compiled, reachable path on the wasm target rather than dead
+    /// code; a future browser picker only needs to supply real bytes here.
+    #[cfg(target_arch = "wasm32")]
+    fn xschem_import_probe(&mut self) {
+        let _ = self.xschem.import(&[]);
+        let loaded = self.xschem.summary();
+        let loaded = if loaded.is_empty() {
+            "none loaded yet".to_owned()
+        } else {
+            format!("currently loaded: {loaded}")
+        };
+        self.status.set(format!(
+            "Probe import needs a native build for now (browser picker not wired; {loaded})"
+        ));
+    }
+    // --- end lane xschem ---
 
     // --- lane nl-edit: natural-language edit command bar ---
     /// Parses [`nl_edit_input`](Self::nl_edit_input) as a natural-language edit

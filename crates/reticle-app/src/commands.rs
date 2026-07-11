@@ -204,6 +204,13 @@ pub enum AppOp {
     /// Open the last agent run in the replay theater (`agent.replay`).
     AgentReplay,
     // --- end lane agent-panel ---
+    // --- lane xschem: SPICE export + probe import (ADR 0112) ---
+    /// Exports the open design's extracted devices as a SPICE subcircuit
+    /// (`file.export_spice`).
+    ExportSpice,
+    /// Imports an xschem-style probe list, native only (`xschem.import_probe`).
+    ImportXschemProbe,
+    // --- end lane xschem ---
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -1108,6 +1115,29 @@ static REGISTRY: &[CommandSpec] = &[
         scope: Scope::Global,
     },
     // --- end lane agent-panel ---
+    // --- lane xschem: SPICE export + probe import (moved from
+    // RESERVED_CAMPAIGN_IDS; ids and labels unchanged, ADR 0106) ---
+    CommandSpec {
+        id: CommandId("file.export_spice"),
+        label: "Export SPICE netlist...",
+        category: "File",
+        menu_path: Some(&["File", "Export"]),
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::ExportSpice),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("xschem.import_probe"),
+        label: "Import xschem probe...",
+        category: "Xschem",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::ImportXschemProbe),
+        scope: Scope::NativeOnly,
+    },
+    // --- end lane xschem ---
 ];
 
 /// The full command registry.
@@ -1305,20 +1335,6 @@ static RESERVED_CAMPAIGN_IDS: &[ReservedId] = &[
         "waveform.export_csv",
         "Export waveforms CSV...",
         "waveform-ui",
-        None,
-        None,
-    ),
-    (
-        "file.export_spice",
-        "Export SPICE netlist...",
-        "xschem",
-        Some(&["File", "Export"]),
-        None,
-    ),
-    (
-        "xschem.import_probe",
-        "Import xschem probe...",
-        "xschem",
         None,
         None,
     ),

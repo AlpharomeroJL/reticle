@@ -170,6 +170,9 @@ pub mod viewer;
 pub mod viewexport;
 pub mod viewports;
 pub mod webopen;
+// --- lane xschem: SPICE export + xschem probe-list import (ADR 0112) ---
+mod xschem;
+// --- end lane xschem ---
 pub mod xsection;
 
 pub use app::{App, StartView};
