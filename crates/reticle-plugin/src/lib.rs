@@ -14,4 +14,14 @@
 
 pub mod manifest;
 
+// The wasm plugin host. Native-only: the interpreter (`wasmi`) and the
+// command/undo machinery it funnels edits through are `cfg(not(wasm32))`, so
+// nothing here enters the wasm bundle (ADR 0115/0116). The browser build gets
+// browse/preview and a "plugins run in the desktop app" disclaimer instead.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod host;
+
 pub use manifest::{ABI_VERSION, HostFn, Index, IndexEntry, Manifest, ManifestError, Permission};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use host::{EditDecodeError, Host, HostContext, HostError, Limits, RunOutcome};

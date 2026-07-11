@@ -16,5 +16,25 @@ workspace = true
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 
+# The wasm runtime (host module) is native-only: `host` is
+# `#[cfg(not(target_arch = "wasm32"))]`, mirroring reticle-agent's native-only
+# `live` module (ADR 0115). Scoping these deps to non-wasm targets keeps the
+# interpreter and the model out of the wasm bundle entirely (ADR 0116): the
+# browser gets browse/preview + a "plugins run in the desktop app" disclaimer,
+# the same pattern as native-only rhai and the real agent.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# wasmi: pure-Rust WebAssembly interpreter, dual Apache-2.0/MIT (license-clean),
+# no C/Cranelift tree. `default-features = false` drops the `wat` text-format
+# parser: the host accepts binary wasm ONLY (smaller untrusted-input surface),
+# and the test harness compiles the hand-authored `.wat` fixtures separately.
+wasmi = { version = "1.1.0", default-features = false, features = ["std"] }
+# The command/undo machinery the StageEdit funnel routes through, and the
+# geometry primitives a decoded edit builds. Native-only: used only by `host`.
+reticle-model = { workspace = true }
+reticle-geometry = { workspace = true }
+
 [dev-dependencies]
 serde_json = { workspace = true }
+# Compiles the hand-authored `.wat` plugin fixtures to binary wasm in the host
+# proof tests. Not a runtime dependency: the host itself accepts binary wasm only.
+wat = "1"
