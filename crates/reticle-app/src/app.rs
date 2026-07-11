@@ -429,7 +429,12 @@ pub struct App {
     /// generator, and its typed form values. Drives the live preview overlay and the
     /// undo-integrated placement (see [`crate::generate_panel`]).
     generate: crate::generate_panel::GeneratePanelState,
-
+    // --- lane pcell-inspect: PCell inspector panel ---
+    /// The PCell Inspector panel state: the user-PCell catalog, the selected PCell,
+    /// and its typed form values, mirroring `generate` above but for user-authored
+    /// PCells and their F2 provenance (see [`crate::pcell_panel`]).
+    pcell: crate::pcell_panel::PCellPanelState,
+    // --- end lane pcell-inspect ---
     /// The search / selection-depth panel: filter query bar, saved selection
     /// sets, select-similar, and the cell/instance outline tree.
     search: SearchState,
@@ -1131,6 +1136,9 @@ impl App {
             view3d: crate::view3d::View3d::new(),
             productivity: ProductivityState::new(),
             generate: crate::generate_panel::GeneratePanelState::new(),
+            // --- lane pcell-inspect: PCell inspector panel ---
+            pcell: crate::pcell_panel::PCellPanelState::new(),
+            // --- end lane pcell-inspect ---
             search: SearchState {
                 outline,
                 ..SearchState::default()
@@ -3849,6 +3857,10 @@ impl App {
                 self.dialogs.share_shown = !self.dialogs.share_shown;
             }
             AppOp::CopyViewerLink => self.copy_viewer_link(),
+            // --- lane pcell-inspect: PCell inspector panel ---
+            AppOp::PcellEditParams => self.pcell_edit_params(),
+            AppOp::PcellRegenerate => self.pcell_regenerate(),
+            // --- end lane pcell-inspect ---
         }
     }
 
@@ -5128,6 +5140,9 @@ impl App {
             PanelGroup::Automate => {
                 self.inspector_section(ui, ctx, "agent", "Agent (preview)", Self::agent_section);
                 self.inspector_section(ui, ctx, "generate", "Generate", Self::generate_section);
+                // --- lane pcell-inspect: PCell inspector panel ---
+                self.inspector_section(ui, ctx, "pcell", "PCell", Self::pcell_section);
+                // --- end lane pcell-inspect ---
             }
             PanelGroup::Settings => {
                 self.inspector_section(ui, ctx, "operations", "Operations", Self::ops_panel);
@@ -7314,6 +7329,102 @@ impl App {
         let tech = self.history.document().technology().clone();
         self.generate.preview_shapes(&tech)
     }
+
+    // --- lane pcell-inspect: PCell inspector panel ---
+    /// Draws the PCell Inspector section: pick a user PCell, fill the typed form
+    /// built from its schema, and show its F2 provenance read-only.
+    ///
+    /// Thin glue over [`crate::pcell_panel::PCellPanelState`], mirroring
+    /// [`generate_section`](Self::generate_section): the combo box selects the
+    /// PCell, [`params_form`](crate::pcell_panel::PCellPanelState::params_form)
+    /// renders the typed widgets from the schema, and the provenance readout below
+    /// is [`PCellDef::produce_meta`](reticle_gen::PCellDef::produce_meta) computed
+    /// live from the current form values. This lane never calls
+    /// `reticle_script::pcell::produce` (the `pcell-produce` lane wires the
+    /// sandboxed regenerate at Gate 2); the Regenerate button here only refreshes
+    /// the status-bar readout of the current `param_hash`.
+    fn pcell_section(&mut self, ui: &mut egui::Ui) {
+        // Pick the PCell by title; the catalog comes straight from the panel state.
+        egui::ComboBox::from_id_salt("pcell_pick")
+            .selected_text(self.pcell.selected_def().title.as_str())
+            .show_ui(ui, |ui| {
+                let count = self.pcell.ids().len();
+                for i in 0..count {
+                    let is_sel = self.pcell.selected() == i;
+                    if ui
+                        .selectable_label(is_sel, self.pcell.def_at(i).title.as_str())
+                        .clicked()
+                    {
+                        self.pcell.select(i);
+                    }
+                }
+            });
+
+        // A one-line description of the selected PCell.
+        ui.label(self.pcell.selected_def().description.as_str())
+            .on_hover_text(self.pcell.selected_def().id.as_str());
+
+        ui.separator();
+
+        // The typed parameter form (Int drag, Bool checkbox, Enum combo), the same
+        // widget mapping as the Generate panel's `params_form`.
+        self.pcell.params_form(ui);
+
+        if ui.button("Reset to defaults").clicked() {
+            self.pcell.reset_selected_to_defaults();
+        }
+
+        ui.separator();
+
+        // F2 provenance, read-only: computed locally from the current form values,
+        // not from a produced instance (this lane does not produce; see the module
+        // doc on `crate::pcell_panel`).
+        ui.label("Provenance");
+        let meta = self.pcell.selected_produce_meta();
+        ui.monospace(format!("{:<15}{}", "generator_id:", meta.generator_id));
+        ui.monospace(format!("{:<15}{}", "engine_version:", meta.engine_version));
+        ui.monospace(format!(
+            "{:<15}{}",
+            "script_ref:",
+            meta.script_ref.as_deref().unwrap_or("-")
+        ));
+        ui.monospace(format!("{:<15}{}", "param_hash:", meta.param_hash));
+        if meta.has_valid_hash() {
+            ui.colored_label(DARK.success, "Valid SHA-256 param_hash");
+        } else {
+            ui.colored_label(DARK.danger, "Malformed param_hash");
+        }
+
+        if ui.button("Regenerate").clicked() {
+            self.pcell_regenerate();
+        }
+    }
+
+    /// Opens the Inspector on the PCell section (`pcell.edit_params`), so the
+    /// palette or a future canvas action (selecting a PCell instance) can jump
+    /// straight to its parameter form.
+    fn pcell_edit_params(&mut self) {
+        self.inspector.reveal("pcell");
+    }
+
+    /// Refreshes the status bar with the selected PCell's current `param_hash`
+    /// (`pcell.regenerate`).
+    ///
+    /// This is the F2-consumer half only: it recomputes the identity a real
+    /// regenerate would key its cache lookup on, but it never calls
+    /// `reticle_script::pcell::produce` (that sandboxed run is the `pcell-produce`
+    /// lane's Gate 2 wiring). Once wired, this method becomes the one place that
+    /// dispatches to it, so the palette, a menu, and this section's button keep
+    /// sharing one effect path.
+    fn pcell_regenerate(&mut self) {
+        let meta = self.pcell.selected_produce_meta();
+        let short = &meta.param_hash[..meta.param_hash.len().min(12)];
+        self.status.set(format!(
+            "PCell {} param_hash {short}... (regenerate wiring pending Gate 2)",
+            meta.generator_id
+        ));
+    }
+    // --- end lane pcell-inspect ---
 
     /// The live array-preview shapes for the current selection and array parameters,
     /// or an empty list when preview is off, nothing is selected, or the count is
@@ -14236,6 +14347,56 @@ mod tests {
         // The default selection generates a non-empty preview.
         assert!(!app.generate_preview_shapes().is_empty());
     }
+
+    // --- lane pcell-inspect: PCell inspector panel ---
+    /// The PCell section renders headlessly without panicking: the schema-driven
+    /// form (drag value, checkbox, combo box) and the read-only F2 provenance
+    /// readout all build inside a real egui pass, mirroring
+    /// `generate_section_renders_without_panic` above.
+    #[test]
+    fn pcell_section_renders_without_panic() {
+        let mut app = App::new();
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        egui::Window::new("pcell test").show(&ctx, |ui| {
+            app.pcell_section(ui);
+        });
+        let _ = ctx.end_pass();
+        // The demo PCell's default parameters hash to a well-formed digest.
+        assert!(app.pcell.selected_produce_meta().has_valid_hash());
+    }
+
+    /// `pcell.edit_params` reveals the Inspector's PCell section (Automate group),
+    /// the same effect a future canvas action (selecting a PCell instance) will
+    /// trigger.
+    #[test]
+    fn pcell_edit_params_command_reveals_the_section() {
+        use crate::inspector_layout::PanelGroup;
+        let mut app = App::new();
+        // Start elsewhere and collapsed so a reveal is observable.
+        app.inspector.group = PanelGroup::Inspect;
+        app.inspector.collapsed = true;
+        app.inspector.set_open("pcell", false);
+        app.dispatch(CommandId("pcell.edit_params"));
+        assert_eq!(app.inspector.group, PanelGroup::Automate);
+        assert!(!app.inspector.collapsed);
+        assert!(app.inspector.is_open("pcell"));
+    }
+
+    /// `pcell.regenerate` refreshes the status bar with the current `param_hash`
+    /// without calling the sandboxed producer (this lane never calls
+    /// `reticle_script::pcell::produce`; the `pcell-produce` lane wires it at Gate 2).
+    #[test]
+    fn pcell_regenerate_command_reports_the_hash_in_status() {
+        let mut app = App::new();
+        app.dispatch(CommandId("pcell.regenerate"));
+        assert!(
+            app.status.text.contains("param_hash"),
+            "status reports the param_hash readout, got {:?}",
+            app.status.text
+        );
+    }
+    // --- end lane pcell-inspect ---
 
     /// The Share section renders headlessly without panicking, including the one-click
     /// Share and Copy-permalink buttons added this lane. It does not click them (that

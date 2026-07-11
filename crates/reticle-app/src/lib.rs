@@ -134,6 +134,7 @@ pub mod open;
 pub mod ops;
 pub mod outline;
 pub mod overlay;
+pub mod pcell_panel;
 pub mod productivity;
 pub mod qr;
 pub mod query;

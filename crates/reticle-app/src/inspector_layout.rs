@@ -169,6 +169,12 @@ pub const SECTIONS: &[SectionSpec] = &[
         group: PanelGroup::Automate,
         default_open: false,
     },
+    SectionSpec {
+        key: "pcell",
+        title: "PCell",
+        group: PanelGroup::Automate,
+        default_open: false,
+    },
     // Settings
     SectionSpec {
         key: "operations",

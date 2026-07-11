@@ -164,6 +164,14 @@ pub enum AppOp {
     ShareDialog,
     /// Copy the read-only viewer link to the clipboard (`share.copy_viewer_link`).
     CopyViewerLink,
+    // --- lane pcell-inspect: PCell inspector actions ---
+    /// Reveal the Inspector's PCell section (`pcell.edit_params`).
+    PcellEditParams,
+    /// Refresh the status-bar `param_hash` readout for the selected PCell
+    /// (`pcell.regenerate`); this lane never calls the sandboxed producer, which is
+    /// the `pcell-produce` lane's Gate 2 wiring.
+    PcellRegenerate,
+    // --- end lane pcell-inspect ---
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -921,6 +929,30 @@ static REGISTRY: &[CommandSpec] = &[
         run: RunAs::App(AppOp::CopyViewerLink),
         scope: Scope::Global,
     },
+    // --- lane pcell-inspect: PCell inspector actions (moved from the reserved
+    // campaign-ids table above; ids and labels unchanged from the F6 contract,
+    // ADR 0106). ---
+    CommandSpec {
+        id: CommandId("pcell.edit_params"),
+        label: "Edit PCell parameters",
+        category: "PCell",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::PcellEditParams),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("pcell.regenerate"),
+        label: "Regenerate PCell",
+        category: "PCell",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::PcellRegenerate),
+        scope: Scope::Global,
+    },
+    // --- end lane pcell-inspect ---
 ];
 
 /// The full command registry.
@@ -1128,20 +1160,6 @@ static RESERVED_CAMPAIGN_IDS: &[ReservedId] = &[
         "nl_edit.submit",
         "Run natural-language edit",
         "nl-edit",
-        None,
-        None,
-    ),
-    (
-        "pcell.edit_params",
-        "Edit PCell parameters",
-        "pcell-inspect",
-        None,
-        None,
-    ),
-    (
-        "pcell.regenerate",
-        "Regenerate PCell",
-        "pcell-inspect",
         None,
         None,
     ),
