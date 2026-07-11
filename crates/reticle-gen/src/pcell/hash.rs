@@ -89,8 +89,24 @@ mod tests {
         );
     }
 
-    // NOTE (pcell-harness lane): add a pinned known-answer vector here (compute the real
-    // digest for a fixed input once and freeze it) so a future change to the recipe cannot
-    // silently alter the produced-instance identity. Omitted from the scaffold rather than
-    // shipped with a fabricated value.
+    #[test]
+    fn pinned_known_answer_vector_guards_the_recipe() {
+        // A fixed (generator_id, engine_version, params) input, computed once with the real
+        // implementation and frozen here (never a hand-computed or guessed SHA-256 value): if
+        // the recipe (the "\n"-joined id/version/canonical-params input, the SHA-256 choice,
+        // or the canonicalization) ever changes, this literal digest stops matching and the
+        // test goes red, catching a silent, undocumented identity change. The params exercise
+        // every JSON shape the canonicalizer handles (an int, a string, an array, a nested
+        // object, a bool, and out-of-order keys) in one input.
+        let h = param_hash(
+            "pcell.harness.pinned_vector",
+            "1.0.0",
+            &json!({ "c": [3, 4], "a": 1, "nested": { "y": false, "x": true }, "b": "two" }),
+        );
+        assert_eq!(
+            h, "9a8acc3bdf930567c1c41ee474b764084d5b5ce17beb0c6db7cf9e7fe0126212",
+            "pinned known-answer param_hash vector (see the pcell-harness RESULT.md for how \
+             this literal digest was computed)"
+        );
+    }
 }
