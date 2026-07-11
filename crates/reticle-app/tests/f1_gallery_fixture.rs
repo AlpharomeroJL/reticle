@@ -129,7 +129,11 @@ fn gallery_show_paints_the_fixture_manifest_headlessly() {
     let ctx = egui::Context::default();
     ctx.begin_pass(egui::RawInput::default());
     egui::Window::new("f1 gallery fixture test").show(&ctx, |ui| {
-        gallery::show(ui, Ctx::dark(Density::default()), &manifest, "");
+        let clicked = gallery::show(ui, Ctx::dark(Density::default()), &manifest, "");
+        assert!(
+            clicked.is_none(),
+            "no button was clicked in a synthetic pass"
+        );
     });
     let _ = ctx.end_pass();
 }

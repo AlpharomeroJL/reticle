@@ -37,28 +37,94 @@
 //! camera restore through the app's existing, unmodified permalink machinery); see
 //! [`landmark_link`]'s own doc comment for why `layers=` is a deliberate exception.
 //!
-//! # Why no fixture data is wired into the live Start screen this wave
+//! # The Start screen renders this module's manifest directly
 //!
-//! The committed F1 contract fixture
-//! (`crates/reticle-index/tests/fixtures/contracts/f1_manifest.json`) is this wave's
-//! only manifest source; the real, published manifest is Gate 1 integration work.
-//! That fixture's dies carry placeholder provenance (`example.org` sources,
-//! synthetic license-text hashes) for the sole purpose of exercising the F1 schema's
-//! shapes (a verified+streaming die and an excluded die). Showing that placeholder
-//! provenance to a real visitor, unlabeled, would read as fabricated content, so
-//! [`show`] is exercised only by this crate's own tests
-//! (`crates/reticle-app/tests/f1_gallery_fixture.rs` builds it from the real fixture
-//! path) rather than being called from the unconditional Start-screen path in
-//! `crate::app`. Wiring it in is then a single call once a real manifest source
-//! exists; every function here is already generic over any [`GalleryManifest`].
+//! [`bundled_manifest`] loads the real, committed F1 manifest
+//! (`library/gallery-manifest.json`) with [`include_str!`] at compile time and
+//! parses+validates it once, cached behind a [`std::sync::OnceLock`]. `crate::app`'s
+//! Start screen calls it from a small marked block below the three curated example
+//! cards (`crate::startscreen::GALLERY`) and, when it returns `Some`, draws [`show`]
+//! as a separate "Open silicon library" section. If the committed manifest ever
+//! fails to parse or fails [`GalleryManifest::validate`], [`bundled_manifest`]
+//! returns `None` (after one console log line) and the Start screen renders exactly
+//! as it did before this section existed, with no library section at all, never a
+//! blank or malformed one.
+//!
+//! Today's committed manifest is a small proof sample, not a shipped bulk library
+//! (see `library/README.md`): one verified, streaming die and one deliberately
+//! excluded fixture die kept to prove the fail-closed license path end to end, not
+//! to claim anything about a real library's size. Every function here stays generic
+//! over any [`GalleryManifest`], so a larger manifest from a future pipeline run
+//! reaches the Start screen with no code change.
+//!
+//! A verified die's primary action opens it live, in-session, rather than copying a
+//! link: [`show`] returns the clicked die's archive URL for the frame it was
+//! clicked (`None` otherwise), and the app turns that into the same in-session open
+//! action the streamed example card's own "Open" button already drives. A landmark
+//! row's "Copy link" action is unchanged: it still composes and copies a
+//! [`landmark_link`] rather than opening in-session (see that function's own doc
+//! comment for why).
 
 use std::fmt::Write as _;
+use std::sync::OnceLock;
 
 use eframe::egui::{self, Sense, Vec2};
 
 use reticle_index::gallery_manifest::{DieEntry, GalleryManifest, Landmark, License};
 
 use crate::theme::components::Ctx;
+
+/// The real, committed F1 manifest this crate ships (see the module doc's "The Start
+/// screen renders this module's manifest directly" section for what it contains).
+const BUNDLED_MANIFEST_JSON: &str = include_str!("../../../library/gallery-manifest.json");
+
+/// Parses and validates a gallery manifest JSON string, logging one console line and
+/// returning `None` if it fails to parse or fails [`GalleryManifest::validate`].
+///
+/// A caller degrades to "no library section" on `None` rather than ever rendering
+/// malformed or unvalidated data; see [`bundled_manifest`], the one production
+/// caller.
+#[must_use]
+pub fn parse_manifest(json: &str) -> Option<GalleryManifest> {
+    let manifest: GalleryManifest = match serde_json::from_str(json) {
+        Ok(m) => m,
+        Err(e) => {
+            log_manifest_problem(&format!("gallery manifest failed to parse: {e}"));
+            return None;
+        }
+    };
+    if let Err(e) = manifest.validate() {
+        log_manifest_problem(&format!("gallery manifest failed validation: {e}"));
+        return None;
+    }
+    Some(manifest)
+}
+
+/// Logs a manifest parse/validate failure to the console (browser console on wasm,
+/// stderr on native); the one place either target writes this failure.
+fn log_manifest_problem(msg: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::console::warn_1(&msg.into());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        eprintln!("{msg}");
+    }
+}
+
+/// The real, committed F1 manifest (`library/gallery-manifest.json`), loaded with
+/// [`include_str!`] at compile time and parsed+validated once, cached behind a
+/// [`OnceLock`]. `None` if the committed file ever fails to parse or validate (never
+/// happens for a well-formed commit, but the Start screen must degrade safely rather
+/// than trust an unchecked file).
+#[must_use]
+pub fn bundled_manifest() -> Option<&'static GalleryManifest> {
+    static MANIFEST: OnceLock<Option<GalleryManifest>> = OnceLock::new();
+    MANIFEST
+        .get_or_init(|| parse_manifest(BUNDLED_MANIFEST_JSON))
+        .as_ref()
+}
 
 /// The default archive host a die's `archive_key` resolves against:
 /// `{DEFAULT_ARCHIVE_BASE_URL}/{archive_key}` (see [`die_archive_url`]).
@@ -252,28 +318,37 @@ fn badge(ui: &mut egui::Ui, text: &str, fill: egui::Color32, fg: egui::Color32) 
     ui.painter().galley(rect.min + pad, galley, fg);
 }
 
-/// Draws the F1-manifest die library: one card per die in `manifest`, generically
-/// (name, technology/dims/license badges, a streaming badge iff the die streams, and
-/// a landmarks list). `base_page` is forwarded to [`die_link`]/[`landmark_link`]
-/// (empty for a same-origin relative link).
+/// Draws the F1-manifest "Open silicon library" section: one card per die in
+/// `manifest`, generically (name, technology/dims/license badges, a streaming badge
+/// iff the die streams, and a landmarks list). `base_page` is forwarded to
+/// [`die_link`]/[`landmark_link`] (empty for a same-origin relative link). Returns
+/// the clicked verified die's archive URL for the frame a click happened this frame,
+/// `None` otherwise, so a caller can route it into an in-session open (`crate::app`'s
+/// Start screen does).
 ///
-/// Every card carries a `Copy link` action instead of an in-session "Open": clicking
-/// copies the die's [`die_link`] (or, for a landmark row, its [`landmark_link`]) to
-/// the clipboard, so a visitor pastes it into the address bar (or a new tab) and the
-/// existing, unmodified boot path opens straight to that die and view. This module
-/// has no access to the private `App` methods (`open_archive_demo`,
-/// `apply_permalink`) an in-session click would need, and reusing the app's own
-/// query-driven boot path exercises the exact same code a shared/bookmarked link
-/// already does, rather than a second, parallel open path.
+/// A verified die's primary action is `Open`: clicking it reports that die's archive
+/// URL out through the return value rather than acting directly (this module has no
+/// access to the private `App` methods an in-session open would need), so the caller
+/// opens it through the same seam a bundled example card's own `Open` button already
+/// drives. A landmark row's own action is unchanged: clicking `Copy link` still
+/// composes and copies a [`landmark_link`] to the clipboard so a visitor can paste it
+/// into the address bar or a new tab.
 ///
 /// An excluded die (no [`CardView`] `archive_url`) renders its metadata with its
-/// [`excluded_reason`] in place of the `Copy link` action, and its landmarks (if
-/// any) show their label with no link (there is no archive to link to).
-pub fn show(ui: &mut egui::Ui, cx: Ctx, manifest: &GalleryManifest, base_page: &str) {
+/// [`excluded_reason`] in place of the `Open` action, and its landmarks (if any) show
+/// their label with no link (there is no archive to link to).
+#[must_use]
+pub fn show(
+    ui: &mut egui::Ui,
+    cx: Ctx,
+    manifest: &GalleryManifest,
+    base_page: &str,
+) -> Option<String> {
     let t = cx.tokens;
+    let mut clicked_archive: Option<String> = None;
     egui::Frame::group(ui.style()).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.strong("Die library");
+        ui.strong("Open silicon library");
         ui.label(
             egui::RichText::new("Verified open-silicon dies from the F1 manifest.")
                 .weak()
@@ -328,9 +403,8 @@ pub fn show(ui: &mut egui::Ui, cx: Ctx, manifest: &GalleryManifest, base_page: &
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if let Some(archive_url) = &view.archive_url {
-                            if ui.button("Copy link").clicked() {
-                                let link = die_link(base_page, archive_url);
-                                ui.ctx().copy_text(link);
+                            if ui.button("Open").clicked() {
+                                clicked_archive = Some(archive_url.clone());
                             }
                         } else if let Some(reason) = excluded_reason(&view.die.license) {
                             ui.label(egui::RichText::new(reason).weak().small());
@@ -341,6 +415,7 @@ pub fn show(ui: &mut egui::Ui, cx: Ctx, manifest: &GalleryManifest, base_page: &
             ui.add_space(4.0);
         }
     });
+    clicked_archive
 }
 
 #[cfg(test)]
@@ -592,8 +667,9 @@ mod tests {
         };
         let ctx = egui::Context::default();
         ctx.begin_pass(egui::RawInput::default());
+        let mut clicked = None;
         egui::Window::new("gallery test").show(&ctx, |ui| {
-            show(
+            clicked = show(
                 ui,
                 Ctx::dark(crate::theme::tokens::Density::default()),
                 &manifest,
@@ -601,6 +677,10 @@ mod tests {
             );
         });
         let _ = ctx.end_pass();
+        assert!(
+            clicked.is_none(),
+            "no button was clicked in a synthetic pass"
+        );
     }
 
     #[test]
@@ -611,8 +691,9 @@ mod tests {
         };
         let ctx = egui::Context::default();
         ctx.begin_pass(egui::RawInput::default());
+        let mut clicked = None;
         egui::Window::new("gallery empty test").show(&ctx, |ui| {
-            show(
+            clicked = show(
                 ui,
                 Ctx::dark(crate::theme::tokens::Density::default()),
                 &manifest,
@@ -620,5 +701,77 @@ mod tests {
             );
         });
         let _ = ctx.end_pass();
+        assert!(clicked.is_none(), "an empty manifest has nothing to click");
+    }
+
+    #[test]
+    fn bundled_manifest_parses_validates_and_yields_the_committed_dies() {
+        // The real, committed library/gallery-manifest.json (F1 proof sample):
+        // one verified+streaming die and one excluded ledger row (library/README.md).
+        let manifest = bundled_manifest().expect("the committed manifest parses and validates");
+        let views = cards(manifest);
+        assert_eq!(views.len(), 2, "one verified die, one excluded die");
+
+        let verified: Vec<_> = views.iter().filter(|v| v.streaming).collect();
+        assert_eq!(verified.len(), 1, "exactly one verified, streaming die");
+        assert_eq!(
+            verified[0].archive_url.as_deref(),
+            Some("https://reticle-archive.josefdean.workers.dev/74a46ee5d3/sky130.inv-1.rtla")
+        );
+
+        let excluded: Vec<_> = views.iter().filter(|v| !v.streaming).collect();
+        assert_eq!(excluded.len(), 1, "exactly one excluded row");
+        assert_eq!(excluded[0].license_badge, "Excluded");
+        assert!(excluded[0].archive_url.is_none());
+    }
+
+    #[test]
+    fn parse_manifest_rejects_invalid_json_and_manifests_failing_validate() {
+        assert!(
+            parse_manifest("not json").is_none(),
+            "unparseable JSON falls back to None"
+        );
+        // Valid JSON, but an excluded die may never carry a streaming archive
+        // (GalleryManifest::validate's invariant).
+        let broken = r#"{"version":1,"dies":[{"id":"a","name":"A","technology":"t",
+            "width_dbu":1,"height_dbu":1,
+            "source":{"repo":"r","commit":"c","url":"u"},
+            "license":{"verdict":"excluded","reason":"x"},
+            "streaming":{"archive_key":"k","tile_count":1,"total_bytes":1},
+            "landmarks":[],
+            "provenance":{"fetched_utc":"2026-01-01T00:00:00Z","converter":"c","notice_path":"p"}
+        }]}"#;
+        assert!(
+            parse_manifest(broken).is_none(),
+            "an excluded die with a streaming archive fails validate()"
+        );
+    }
+
+    #[test]
+    fn malformed_manifest_fallback_paints_nothing_and_never_panics() {
+        // Mirrors the app.rs marked block's own fallback: parse_manifest returns
+        // None, so `show` is never called and no library section is drawn at all
+        // (the Start screen's existing example cards are untouched by construction).
+        let broken = "{ this is not valid json";
+        assert!(parse_manifest(broken).is_none());
+
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        let mut clicked = None;
+        egui::Window::new("malformed manifest fallback test").show(&ctx, |ui| {
+            if let Some(manifest) = parse_manifest(broken) {
+                clicked = show(
+                    ui,
+                    Ctx::dark(crate::theme::tokens::Density::default()),
+                    &manifest,
+                    "",
+                );
+            }
+        });
+        let _ = ctx.end_pass();
+        assert!(
+            clicked.is_none(),
+            "nothing to click when no section is drawn"
+        );
     }
 }

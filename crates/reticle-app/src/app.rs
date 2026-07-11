@@ -108,7 +108,7 @@ enum StartAction {
     /// Load a bundled example chip through the open seam.
     LoadExample(crate::startscreen::ExampleChip),
     /// Open a served archive by URL (web streaming path); a status note on native.
-    OpenArchive(&'static str),
+    OpenArchive(String),
     /// Request the native/file-open dialog (the reserved `file.open_dialog`, owned
     /// by lane 3B; a status hint until that lane wires the effect).
     OpenDialog,
@@ -5739,7 +5739,7 @@ impl App {
                                         StartAction::LoadExample(chip)
                                     }
                                     crate::startscreen::GalleryAction::Archive(url) => {
-                                        StartAction::OpenArchive(url)
+                                        StartAction::OpenArchive(url.to_owned())
                                     }
                                 });
                             }
@@ -5749,6 +5749,17 @@ impl App {
                 ui.add_space(4.0);
             }
         });
+        // --- lane gallery-live: F1 open-silicon library section ---
+        // Separate section below the curated examples above: the real committed F1
+        // manifest, rendered generically by crate::gallery::show. A parse/validate
+        // failure leaves this section undrawn (see gallery::bundled_manifest's doc).
+        if let Some(manifest) = crate::gallery::bundled_manifest() {
+            ui.add_space(10.0);
+            if let Some(url) = crate::gallery::show(ui, cx, manifest, "") {
+                *action = Some(StartAction::OpenArchive(url));
+            }
+        }
+        // --- end lane gallery-live ---
     }
 
     /// The secondary drag-and-drop hint under the primary actions: dropping a file
@@ -5816,7 +5827,7 @@ impl App {
             Some(StartAction::LoadExample(chip)) => {
                 self.open_example_chip(chip);
             }
-            Some(StartAction::OpenArchive(url)) => self.open_archive_demo(url),
+            Some(StartAction::OpenArchive(url)) => self.open_archive_demo(&url),
             Some(StartAction::OpenDialog) => self.request_open_dialog(),
             Some(StartAction::OpenTileWizard) => {
                 self.tt_wizard_open = true;
