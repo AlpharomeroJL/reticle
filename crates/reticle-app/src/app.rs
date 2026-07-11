@@ -645,6 +645,13 @@ pub struct App {
     /// publishes the editor's document and the sharer's presence so viewers stream them.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     sharer_transport: Option<crate::livesync::SharerTransport>,
+    // --- lane classroom: classroom mode (roster + follow over presence, ADR 0111) ---
+    /// Classroom teaching-mode state: the roster derived from
+    /// [`document`](Self::document)'s awareness map, each known peer's follow
+    /// bookkeeping, and the instructor's last broadcast view. See
+    /// [`crate::classroom`] and [`classroom_panel`](Self::classroom_panel).
+    classroom: crate::classroom::ClassroomState,
+    // --- end lane classroom ---
     /// The mailbox the socket callbacks post decoded [`LiveEvent`](crate::livesync::LiveEvent)s
     /// into and the egui loop drains each frame (mirrors [`web_open`](Self::web_open)).
     live_inbox: crate::livesync::LiveInbox,
@@ -977,6 +984,16 @@ impl App {
         app.share_room.clone_from(&target.room);
         app.viewer_session = Some(crate::viewer::ViewerSession::new());
         app.viewer_target = Some(target);
+        // --- lane classroom: classroom mode ---
+        // A read-only viewer is a classroom student: its own identity is the
+        // well-known viewer actor, distinct from the instructor's sharer identity, so
+        // it never excludes the instructor's row from its own roster (`is_instructor`
+        // is false here).
+        app.classroom = crate::classroom::ClassroomState::new(
+            crate::viewer::VIEWER_ACTOR,
+            crate::livesync::SHARER_ACTOR,
+        );
+        // --- end lane classroom ---
         // A viewer gets the shorter viewer-variant tour, not the editor walkthrough
         // (catalog 15). It stays dormant on the web (the tour is treated as seen so
         // it does not reopen every visit); the Help menu can relaunch it.
@@ -1239,6 +1256,16 @@ impl App {
             viewer_framed: false,
             viewer_transport: None,
             sharer_transport: None,
+            // --- lane classroom: classroom mode ---
+            // A plain editor is instructor-capable by default: its published presence
+            // (if it ever goes live) uses the well-known `SHARER_ACTOR` identity, so
+            // `self_actor == instructor_actor` here. `App::with_viewer` overrides this
+            // with the read-only viewer identity for a student session.
+            classroom: crate::classroom::ClassroomState::new(
+                crate::livesync::SHARER_ACTOR,
+                crate::livesync::SHARER_ACTOR,
+            ),
+            // --- end lane classroom ---
             live_inbox: crate::livesync::LiveInbox::new(),
             live_status: crate::livesync::LiveStatus::default(),
             live_started: false,
@@ -3927,8 +3954,105 @@ impl App {
             AppOp::AgentStop => self.agent_cmd_stop(),
             AppOp::AgentReplay => self.agent_cmd_replay(),
             // --- end lane agent-panel ---
+            // --- lane classroom: classroom mode ---
+            AppOp::ClassroomBringEveryone => self.classroom_bring_everyone(),
+            AppOp::ClassroomFollow => self.classroom_toggle_follow(),
+            AppOp::ClassroomUnlockStudent => self.classroom_unlock_next_student(),
+            // --- end lane classroom ---
         }
     }
+
+    // --- lane classroom: classroom mode (roster + follow over presence, ADR 0111) ---
+    /// Runs the palette-level `classroom.bring_everyone` command: records this
+    /// peer's current camera viewport as the broadcast target and marks every
+    /// known student as following
+    /// ([`ClassroomState::bring_everyone`](crate::classroom::ClassroomState::bring_everyone)),
+    /// so a currently-following student's next camera sync lands here.
+    fn classroom_bring_everyone(&mut self) {
+        self.classroom.sync_roster(self.document.awareness());
+        let Some(screen) = self.last_screen else {
+            self.status.set("Open a view before bringing everyone here");
+            return;
+        };
+        let viewport = self.camera.visible_world_rect(&screen);
+        self.classroom.bring_everyone(viewport);
+        self.status.set("Brought everyone to the current view");
+    }
+
+    /// Runs the palette-level `classroom.follow` command: toggles this peer's
+    /// own follow flag on its [`ViewerSession`](crate::viewer::ViewerSession),
+    /// the same flag the session chip's "Follow" checkbox drives, so the
+    /// existing per-frame camera sync (ADR 0038) rides the instructor's live
+    /// viewport. A no-op with a status message outside a viewer session (an
+    /// instructor has nobody to follow).
+    fn classroom_toggle_follow(&mut self) {
+        let Some(session) = self.viewer_session.as_mut() else {
+            self.status
+                .set("Follow instructor is available in a shared viewer session");
+            return;
+        };
+        let now_following = session.toggle_follow();
+        self.status.set(if now_following {
+            "Following the instructor"
+        } else {
+            "Working independently"
+        });
+    }
+
+    /// Runs the palette-level `classroom.unlock_student` command: releases the
+    /// first currently-following student in roster order. The classroom
+    /// panel's own per-row "Unlock" button ([`classroom_panel`](Self::classroom_panel))
+    /// targets a specific student directly; the palette entry point has no
+    /// per-student argument to route through, so this is the deterministic
+    /// default target.
+    fn classroom_unlock_next_student(&mut self) {
+        self.classroom.sync_roster(self.document.awareness());
+        let Some(entry) = self.classroom.roster().iter().find(|e| e.following) else {
+            self.status.set("No student is currently following");
+            return;
+        };
+        let name = entry.name.clone();
+        let actor = entry.actor.clone();
+        self.classroom.unlock_student(&actor);
+        self.status.set(format!("Unlocked {name}"));
+    }
+
+    /// Draws the small classroom teaching-mode window: the roster derived from
+    /// this session's presence, per-student follow bookkeeping, and the
+    /// instructor's bring-everyone/unlock actions (`crate::classroom`, ADR
+    /// 0111). Shown whenever a classroom-capable session is live (this app
+    /// went live as a sharer, or this app is a read-only viewer); a no-op
+    /// frame otherwise, so an ordinary offline editing session never shows it.
+    fn classroom_panel(&mut self, ctx: &egui::Context) {
+        if !(self.is_viewer() || self.sharer_transport.is_some()) {
+            return;
+        }
+        self.classroom.sync_roster(self.document.awareness());
+        let cx = self.theme_ctx();
+        let following = self
+            .viewer_session
+            .as_ref()
+            .map(crate::viewer::ViewerSession::is_following);
+        let mut action = None;
+        egui::Window::new("Classroom")
+            .id(egui::Id::new("classroom_window"))
+            .default_width(240.0)
+            .resizable(false)
+            .show(ctx, |ui| {
+                action = crate::classroom::roster_panel(ui, cx, &self.classroom, following);
+            });
+        match action {
+            Some(crate::classroom::RosterAction::BringEveryone) => self.classroom_bring_everyone(),
+            Some(crate::classroom::RosterAction::UnlockStudent(actor)) => {
+                if self.classroom.unlock_student(&actor) {
+                    self.status.set("Student unlocked");
+                }
+            }
+            Some(crate::classroom::RosterAction::ToggleFollow) => self.classroom_toggle_follow(),
+            None => {}
+        }
+    }
+    // --- end lane classroom ---
 
     // --- lane nl-edit: natural-language edit command bar ---
     /// Parses [`nl_edit_input`](Self::nl_edit_input) as a natural-language edit
@@ -13248,6 +13372,10 @@ impl eframe::App for App {
         // panels and windows.
         self.draw_offline_badge(&ctx);
         self.notifications_area(&ctx);
+
+        // --- lane classroom: classroom mode ---
+        self.classroom_panel(&ctx);
+        // --- end lane classroom ---
 
         // Open any URL queued this frame (Documentation, the prefilled issue link).
         if let Some(url) = self.pending_open_url.take() {

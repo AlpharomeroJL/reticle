@@ -103,6 +103,9 @@ pub mod agent_runner;
 pub mod app;
 pub mod archive;
 pub mod camera;
+// --- lane classroom: classroom teaching mode (roster + follow, ADR 0111) ---
+pub mod classroom;
+// --- end lane classroom ---
 pub mod command;
 pub mod commands;
 pub mod comment_pins;
