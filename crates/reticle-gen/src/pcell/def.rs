@@ -7,7 +7,7 @@
 //! The `pcell-params` lane implements the real body of [`PCellDef::validate_params`]
 //! (per-field type and range checking against the [`ParamSchema`]) and any authoring
 //! helpers; [`PCellDef::param_hash`] and [`PCellDef::produce_meta`] are already wired to the
-//! frozen [`param_hash`](crate::param_hash) primitive.
+//! frozen [`param_hash`] primitive.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -19,7 +19,7 @@ use crate::schema::ParamSchema;
 
 /// A user-defined parametric cell: a rhai script whose top-level parameter bindings are
 /// described by a [`ParamSchema`], produced into geometry (by the `pcell-produce` lane in
-/// `reticle_script`) with the stable content identity [`param_hash`](crate::param_hash)
+/// `reticle_script`) with the stable content identity [`param_hash`]
 /// gives it.
 ///
 /// A `PCellDef` is data: it names the cell, carries its parameter schema and its script

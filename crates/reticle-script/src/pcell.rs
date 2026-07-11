@@ -13,7 +13,7 @@
 //! * a fresh [`rhai::Engine`] with the create/edit/query API registered but **no**
 //!   filesystem, plugin-directory, or `import` access (a hostile script cannot read the
 //!   disk or exhaust it),
-//! * an [`Engine::on_progress`] operation-count limit and an output-size cap enforcing
+//! * an `Engine::on_progress` operation-count limit and an output-size cap enforcing
 //!   [`SandboxLimits`], so a runaway or adversarial script is rejected rather than hanging
 //!   the tab or exhausting memory (the untrusted-input invariant, applied to scripts),
 //! * parameter injection (bind each schema field's value into the script's scope) and
