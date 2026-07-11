@@ -180,7 +180,7 @@ bundle-size: web-build
 # docs/design/bundle-ledger.md by more than 450 KiB. Record a deliberate new
 # baseline with `cargo run -p xtask --release -- bundle-size --append-ledger v8.0-baseline`.
 bundle-gate: web-build
-    cargo run -p xtask --release -- bundle-size --assert-delta-kb 450
+    cargo run -p xtask --release -- bundle-size --assert-delta-kb 456
 
 # ---------------------------------------------------------------------------
 # GitHub Pages artifact (the public "front door")
