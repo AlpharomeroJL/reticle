@@ -60,6 +60,12 @@ exclude = [
     # It is its own standalone package with its own Cargo.lock, matching the
     # crates/reticle-py precedent above. See docs/decisions/0119-tauri-desktop.md.
     "desktop",
+    # The `fiducial-marker` sample plugin (ADR 0116): a `wasm32-unknown-unknown`
+    # guest module built `no_std`/`panic = "abort"`, a different target/toolchain
+    # shape than the workspace, whose wasm bytes are a plugin payload loaded by
+    # the native desktop host, never the browser bundle. Own standalone package
+    # with its own Cargo.lock, matching the desktop/reticle-py precedent above.
+    "plugins/fiducial-marker",
 ]
 
 [workspace.package]

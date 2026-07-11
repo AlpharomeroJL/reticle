@@ -1,0 +1,39 @@
+# The Reticle sample plugin `fiducial-marker` (ADR 0116: the v0 guest contract).
+#
+# WORKSPACE-EXCLUDED (see the root Cargo.toml's `[workspace].exclude`), exactly like
+# `desktop` (ADR 0119) and `crates/reticle-py` (ADR 0087): this is a `wasm32-unknown-unknown`
+# guest built `no_std` with `panic = "abort"`, a different target/toolchain shape than the
+# native-or-wasm32 workspace members, and its wasm bytes are a PLUGIN PAYLOAD loaded by the
+# native desktop host (ADR 0116) -- not the browser bundle `just wasm-build` produces, and it
+# must never enter `just ci`'s `--workspace` clippy/test/doc. Because it is excluded it
+# cannot use `.workspace = true` inheritance, so package fields are set directly here. It has
+# zero dependencies (the guest hand-encodes the v0 `AddShape` wire format itself; see
+# src/lib.rs) and its own committed Cargo.lock, matching the reticle-py/desktop precedent.
+[package]
+name = "fiducial-marker"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+description = "Reticle sample plugin (ABI v0): stamps a fiducial marker rectangle on TOP, sized by its existing shape count."
+
+# The compiled artifact is named `fiducial_marker.wasm` (Cargo/rustc normalize a hyphenated
+# package name to underscores for the cdylib file); set explicitly so the output name never
+# depends on that default going forward.
+[lib]
+name = "fiducial_marker"
+crate-type = ["cdylib"]
+
+# No [dependencies]: the guest hand-encodes the v0 AddShape wire record (see src/lib.rs)
+# instead of depending on reticle-model/reticle-geometry, so nothing here needs a path into
+# the workspace at all.
+
+[profile.release]
+opt-level = "z"    # this wasm is a small plugin payload, not a hot loop: optimize for size
+lto = true
+codegen-units = 1
+panic = "abort"    # no_std has no unwind support on wasm32; abort avoids needing eh_personality
+strip = true
+
+[profile.dev]
+panic = "abort"    # same reasoning; a no_std guest cannot use the unwind strategy either way
