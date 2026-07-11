@@ -67,6 +67,13 @@ pub use query::{
 pub use rules::{ConnectionRule, ConnectionRules};
 pub use union_find::DisjointSet;
 
+// --- lane netlist: spice writer ---
+pub mod spice;
+pub use spice::{
+    SpiceDevice, SpiceParseError, SpiceSubckt, SpiceTech, UNBOUND_NODE, format_spice, parse_spice,
+    to_spice_subckt, write_spice,
+};
+
 use reticle_model::{Document, DrawShape};
 
 /// The connectivity extractor.
