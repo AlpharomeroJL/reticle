@@ -87,6 +87,20 @@ rfd = "0.17"
 # SKY130 file through it.
 reticle-io = { workspace = true }
 
+# --- lane plugin-ui: plugin manager panel (`crate::plugin_panel`, ADR 0116/0120) ---
+# `Index`/`IndexEntry`/`Manifest` (the F5 contract) are pure serde with no wasm
+# dependency, so this is a PLAIN, cross-platform dependency, unlike
+# `reticle-script` below: the browser build browses and previews the same F5
+# index the native build does. The wasmi-bearing `reticle_plugin::host` module is
+# itself `cfg(not(target_arch = "wasm32"))` INSIDE reticle-plugin (ADR 0116), so
+# no browser code path can reach `Host`/`HostContext`/`Limits`/`RunOutcome`
+# regardless of this dependency edge; every reference this crate makes to those
+# types is separately `cfg(not(target_arch = "wasm32"))` (see `plugin_panel.rs`).
+# Not yet hoisted into the root `[workspace.dependencies]` table: that file is
+# outside this lane's owned-paths scope (ledgered as a trivial follow-up).
+reticle-plugin = { path = "../reticle-plugin", version = "8.0.0" }
+# --- end lane plugin-ui ---
+
 # The scripted demo-capture mode (`crate::demoscript`, native only) writes
 # full-window PNG frames with `image`; a windowed screenshot has no meaning on wasm,
 # so the dependency is kept out of the web graph. Matches the xtask media pipeline's
@@ -174,6 +188,13 @@ web-sys = { version = "0.3", features = [
 # real archived bytes, exactly what a native/wasm source would serve. Same 0.8 as above.
 [dev-dependencies]
 rkyv = "0.8.16"
+# --- lane plugin-ui: plugin manager panel test fixture (ADR 0116/0120) ---
+# Compiles a hand-authored `.wat` v0 test plugin to binary wasm in `crate::app`'s
+# native run-path test (the host itself accepts binary wasm only). Not a runtime
+# dependency; mirrors `reticle-plugin`'s own `[dev-dependencies] wat = "1"` exactly
+# (same version, already in the lockfile, so this adds no new dependency version).
+wat = "1"
+# --- end lane plugin-ui ---
 
 # The visual-regression suite (`tests/ui_snapshots.rs`, native only) drives the
 # gallery and full-app UI through egui_kittest and diffs each frame against a

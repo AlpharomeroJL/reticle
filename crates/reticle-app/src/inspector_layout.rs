@@ -191,6 +191,14 @@ pub const SECTIONS: &[SectionSpec] = &[
         default_open: false,
     },
     // --- end lane waveform-ui ---
+    // --- lane plugin-ui: plugin manager Inspector section (ADR 0116/0120) ---
+    SectionSpec {
+        key: "plugins",
+        title: "Plugins",
+        group: PanelGroup::Automate,
+        default_open: false,
+    },
+    // --- end lane plugin-ui ---
     // Settings
     SectionSpec {
         key: "operations",
