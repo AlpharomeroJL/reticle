@@ -236,6 +236,12 @@ pub enum AppOp {
     /// Imports an xschem-style probe list, native only (`xschem.import_probe`).
     ImportXschemProbe,
     // --- end lane xschem ---
+    // --- lane embed: harden embed mode (ADR 0106 F6 slot; catalog 94) ---
+    /// Flips embed mode live (`embed.toggle`): lets the full app preview the
+    /// minimal embed chrome without an iframe. The embed-to-full path already
+    /// exists (the "Open in Reticle" corner link `App::embed_canvas` draws).
+    ToggleEmbed,
+    // --- end lane embed ---
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -1221,6 +1227,19 @@ static REGISTRY: &[CommandSpec] = &[
         scope: Scope::NativeOnly,
     },
     // --- end lane xschem ---
+    // --- lane embed: moved from RESERVED_CAMPAIGN_IDS (id and label unchanged,
+    // ADR 0106); no default chord, matching the reserved table's `chord: None`. ---
+    CommandSpec {
+        id: CommandId("embed.toggle"),
+        label: "Toggle embed mode",
+        category: "Embed",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::ToggleEmbed),
+        scope: Scope::Global,
+    },
+    // --- end lane embed ---
 ];
 
 /// The full command registry.
@@ -1432,7 +1451,8 @@ static RESERVED_CAMPAIGN_IDS: &[ReservedId] = &[
         None,
         None,
     ),
-    ("embed.toggle", "Toggle embed mode", "embed", None, None),
+    // embed.toggle (lane embed) shipped: moved into REGISTRY above, out of this
+    // reserved table per the ADR 0106 disjointness rule.
 ];
 
 /// The reserved campaign command ids (see [`ReservedId`] and ADR 0106).
