@@ -216,6 +216,19 @@ pub enum AppOp {
     /// Exports the loaded set to CSV (`waveform.export_csv`).
     WaveformExportCsv,
     // --- end lane waveform-ui ---
+    // --- lane classroom: classroom teaching mode (ADR 0111) ---
+    /// The instructor broadcasts their current view so every following student
+    /// jumps to it (`classroom.bring_everyone`).
+    ClassroomBringEveryone,
+    /// A student toggles following the instructor's live viewport
+    /// (`classroom.follow`); routes through the existing read-only viewer
+    /// follow-mode (ADR 0038).
+    ClassroomFollow,
+    /// Releases the first currently-following student in roster order
+    /// (`classroom.unlock_student`); the classroom panel's own per-row
+    /// "Unlock" button targets a specific student directly.
+    ClassroomUnlockStudent,
+    // --- end lane classroom ---
 }
 
 /// How a command runs: either through the palette [`Command`] path or as an
@@ -1144,6 +1157,40 @@ static REGISTRY: &[CommandSpec] = &[
         scope: Scope::Global,
     },
     // --- end lane waveform-ui ---
+    // --- lane classroom: classroom teaching mode, moved from RESERVED_CAMPAIGN_IDS
+    // (ids and labels unchanged, ADR 0106); no default chord assigned, matching the
+    // reserved table's `chord: None` (ADR 0111). ---
+    CommandSpec {
+        id: CommandId("classroom.bring_everyone"),
+        label: "Bring everyone here",
+        category: "Classroom",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::ClassroomBringEveryone),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("classroom.follow"),
+        label: "Follow instructor",
+        category: "Classroom",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::ClassroomFollow),
+        scope: Scope::Global,
+    },
+    CommandSpec {
+        id: CommandId("classroom.unlock_student"),
+        label: "Unlock student",
+        category: "Classroom",
+        menu_path: None,
+        default_chord: None,
+        rebindable: false,
+        run: RunAs::App(AppOp::ClassroomUnlockStudent),
+        scope: Scope::Global,
+    },
+    // --- end lane classroom ---
 ];
 
 /// The full command registry.
@@ -1346,27 +1393,9 @@ static RESERVED_CAMPAIGN_IDS: &[ReservedId] = &[
         None,
         None,
     ),
-    (
-        "classroom.bring_everyone",
-        "Bring everyone here",
-        "classroom",
-        None,
-        None,
-    ),
-    (
-        "classroom.follow",
-        "Follow instructor",
-        "classroom",
-        None,
-        None,
-    ),
-    (
-        "classroom.unlock_student",
-        "Unlock student",
-        "classroom",
-        None,
-        None,
-    ),
+    // classroom.bring_everyone / classroom.follow / classroom.unlock_student shipped
+    // in REGISTRY above (lane classroom, ADR 0111); moved out of this reserved
+    // table per the ADR 0106 disjointness rule.
     // Phase 4: Reach.
     ("plugin.browse", "Browse plugins", "plugin-ui", None, None),
     ("plugin.install", "Install plugin", "plugin-ui", None, None),
