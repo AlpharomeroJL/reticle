@@ -40,7 +40,9 @@
 use eframe::egui;
 
 use reticle_gen::{FieldSchema, FieldType, PCellDef, PCellRegistry, ParamSchema, ProduceMeta};
+#[cfg(not(target_arch = "wasm32"))]
 use reticle_model::Technology;
+#[cfg(not(target_arch = "wasm32"))]
 use reticle_script::{SandboxLimits, produce};
 
 /// The one illustrative user PCell shipped until the `pcell-params` lane wires a real
@@ -263,6 +265,11 @@ impl PCellPanelState {
     /// stamped [`ProduceMeta`], or the sandbox's clean rejection message. Never
     /// panics: `reticle_script::produce` is itself panic-free on any script or
     /// parameter input (see its docs).
+    ///
+    /// Native-only: the rhai sandbox is kept out of the wasm bundle (ADR 0115), so
+    /// the browser shows the predicted provenance and defers live produce to the
+    /// desktop app, mirroring the native-only agent runner.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn regenerate(&mut self, tech: &Technology, limits: SandboxLimits) -> &ProduceOutcome {
         // Both borrows are shared (`selected_def`/`selected_params` take `&self`),
         // so this scope ends before `self.produced[..]` needs `&mut self`; no

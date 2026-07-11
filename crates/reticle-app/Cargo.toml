@@ -57,14 +57,10 @@ reticle-sim = { workspace = true }
 # unconditional.
 reticle-gen = { workspace = true }
 
-# The PCell Inspector's real Regenerate (`crate::pcell_panel`, the `f2f3-wiring`
-# lane, Gate 3): runs a selected PCell's script through the merged sandboxed
-# producer (`reticle_script::produce`, ADR 0107/0102) rather than only predicting
-# its provenance locally. `reticle-script` is already a workspace member built by
-# `just ci` (no new external dependency enters the lockfile) and builds for
-# wasm32 through its own graph (`rhai` has no OS-specific requirement), so the
-# sandboxed regenerate works in the browser too.
-reticle-script = { workspace = true }
+# `reticle-script` (the rhai PCell producer) is NATIVE-ONLY -- see the
+# cfg(not(wasm32)) dependencies section below (ADR 0115). Live PCell produce runs
+# in the desktop app; the browser shows the predicted provenance (fixture-backed)
+# rather than shipping the rhai scripting engine in the wasm bundle.
 
 # The agent panel and the replay theater drive the frozen agent command API
 # (`Session`, `Transcript`, `AgentCommand`). `reticle-agent-api` builds for wasm32
@@ -108,6 +104,14 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 # license and the wasm bundle is unchanged.
 reticle-agent = { workspace = true }
 reticle-bench = { workspace = true }
+
+# The rhai PCell producer (`reticle_script::produce`, the `f2f3-wiring` lane's live
+# Regenerate) is native-only: keeping the rhai scripting engine out of the wasm
+# bundle preserves the browser-native small-bundle budget (ADR 0115, measured). The
+# browser PCell panel shows the predicted F2 provenance plus an honest "live produce
+# runs in the desktop app" disclaimer, mirroring the native-only real agent above;
+# native runs the real sandboxed produce.
+reticle-script = { workspace = true }
 
 # The browser open path (`crate::webopen`, wasm only) fetches a `?gds=` URL and
 # persists the recent-files list in IndexedDB, so it needs the wasm-bindgen glue and

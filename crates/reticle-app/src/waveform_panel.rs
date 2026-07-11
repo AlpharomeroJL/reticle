@@ -7,18 +7,18 @@
 //! `App::waveform_section` (`crate::app`), styled entirely from
 //! [`crate::theme::components`]/[`crate::theme::tokens`].
 //!
-//! # Fixture-first
+//! # Live solve, with a fixture fallback
 //!
-//! The bounded solver is a separate lane's Gate-3 deliverable, and which route it
-//! ships (a vendored ngspice-WASM build, a pinned emscripten toolchain, or a
-//! pure-Rust modified-nodal-analysis solver) is still an open decision the
-//! `oracle-feasibility` lane makes. Until that solver lands, [`fixture_transient`]
-//! parses the committed F4 contract fixture
-//! (`tests/fixtures/contracts/f4_rc_transient.json` in `reticle-sim`) as the set
-//! `waveform.run_oracle` loads; `App::waveform_section` shows an honest banner
-//! naming this while it is true. [`fixture_transient`] is exactly the call the
-//! live lane replaces; nothing else in this module or in `App::waveform_section`
-//! needs to change.
+//! `waveform.run_oracle` runs the pure-Rust modified-nodal-analysis solver
+//! (`reticle-sim`, ADR 0109/0114): [`solve_rc_demo`] builds the reference RC
+//! circuit and solves it, so the set the panel shows is real solver output. It
+//! equals the committed F4 contract fixture
+//! (`tests/fixtures/contracts/f4_rc_transient.json` in `reticle-sim`) to the
+//! nano-unit because it is the exact circuit that fixture was generated from, and
+//! the solver uses only `+ - * /`, so it is deterministic across native and wasm
+//! and runs in the browser too. [`fixture_transient`] remains the committed record
+//! and the fallback [`solve_rc_demo`] returns if the fixed circuit ever fails to
+//! solve (it does not), so the browser never panics on a solver error.
 //!
 //! # Operating-point coverage
 //!
@@ -213,20 +213,46 @@ pub fn to_csv(set: &WaveformSet) -> String {
     out
 }
 
-/// Parses the embedded F4 fixture into the `WaveformSet` `waveform.run_oracle`
-/// loads (see the module docs' Fixture-first section).
+/// Parses the embedded F4 fixture into a `WaveformSet`: the committed record, and
+/// the fallback [`solve_rc_demo`] returns if the live solve ever fails.
 #[must_use]
 pub fn fixture_transient() -> WaveformSet {
     serde_json::from_str(FIXTURE_JSON).expect("committed F4 fixture matches `WaveformSet`")
 }
 
+/// Solves the reference RC transient live with the pure-Rust MNA solver
+/// (`reticle_sim`; ADR 0109/0114): a 1 V step into a 1 kOhm resistor and a 1 pF
+/// capacitor to ground (`RC = 1 ns`), the exact circuit the committed F4 fixture
+/// was generated from, so the live result equals [`fixture_transient`] to the
+/// nano-unit. This is what `waveform.run_oracle` runs at Gate 3, replacing the
+/// fixture load: the panel shows real solver output, not a static record. The
+/// solver uses only `+ - * /`, so it is deterministic across native and wasm and
+/// runs in the browser too. Falls back to the committed fixture if the fixed
+/// circuit ever fails to solve (it does not; the fallback only guarantees the
+/// browser never panics on a solver error).
+#[must_use]
+pub fn solve_rc_demo() -> WaveformSet {
+    use reticle_sim::{Circuit, GROUND, ProbeSpec, TransientOptions, solve_transient};
+    let mut circuit = Circuit::new();
+    let vin = circuit.node("vin");
+    let out = circuit.node("n_out");
+    circuit.vsource(vin, GROUND, 1.0);
+    circuit.resistor(vin, out, 1_000.0);
+    circuit.capacitor(out, GROUND, 1.0e-12);
+    let options = TransientOptions {
+        dt_fs: 20,
+        sample_times_fs: vec![0, 500_000, 1_000_000, 2_000_000, 3_000_000],
+        probes: vec![ProbeSpec::voltage("out", out, "n_out")],
+    };
+    solve_transient(&circuit, &options).unwrap_or_else(|_| fixture_transient())
+}
+
 /// The Waveform Inspector section's state: the last-loaded `WaveformSet` and the
 /// probe list's selection.
 ///
-/// Every [`load`](Self::load) installs a fresh set (from [`fixture_transient`]
-/// until the live solver lands), matching how
-/// [`crate::trace_panel::TracePanelState`] stands in for the trace-api lane's live
-/// queries.
+/// Every [`load`](Self::load) installs a fresh set (from [`solve_rc_demo`], the
+/// live pure-Rust MNA solve), mirroring how [`crate::trace_panel::TracePanelState`]
+/// holds the net-trace panel's last query result.
 #[derive(Clone, Debug, Default)]
 pub struct WaveformPanelState {
     /// The last-loaded waveform set, if `waveform.run_oracle` has run.

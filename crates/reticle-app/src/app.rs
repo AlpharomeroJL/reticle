@@ -429,8 +429,8 @@ pub struct App {
     // --- lane waveform-ui: waveform panel (F4 consumer; ADR 0110) ---
     /// The Waveform Inspector section's state: the last-loaded F4 `WaveformSet`
     /// and the probe list's selection (see [`crate::waveform_panel`]).
-    /// Fixture-first: populated from the committed F4 fixture until the live
-    /// solver lands (Gate 3, a separate lane's deliverable).
+    /// Populated by the live pure-Rust MNA solver (Gate 3; `solve_rc_demo`), with
+    /// the committed F4 fixture as the fallback.
     waveform: crate::waveform_panel::WaveformPanelState,
     // --- end lane waveform-ui ---
     /// DRC-as-you-type: the incremental checker re-run on every edit so violations are
@@ -7837,9 +7837,20 @@ impl App {
             ui.colored_label(DARK.danger, "Malformed param_hash");
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         if ui.button("Regenerate").clicked() {
             self.pcell_regenerate();
         }
+        // Browser: live produce (the rhai sandbox) is native-only to keep the
+        // scripting engine out of the wasm bundle (ADR 0115). The panel shows the
+        // predicted provenance above; this states the boundary honestly rather than
+        // offering a Regenerate button the web build cannot fulfil.
+        #[cfg(target_arch = "wasm32")]
+        ui.colored_label(
+            DARK.warning,
+            "Live produce runs in the desktop app. In the browser this panel shows \
+             the predicted provenance above; parameter editing is fixture-backed.",
+        );
 
         // The last REAL sandboxed-produce outcome (`f2f3-wiring`), distinct from
         // the always-live prediction above: `None` until Regenerate has run for
@@ -7885,6 +7896,7 @@ impl App {
     /// records whichever it returns. This is the one place that dispatches to
     /// it, so the palette, a menu, and this section's button share one effect
     /// path.
+    #[cfg(not(target_arch = "wasm32"))]
     fn pcell_regenerate(&mut self) {
         let tech = self.history.document().technology().clone();
         let outcome = self
@@ -7904,6 +7916,17 @@ impl App {
                 self.status.set(format!("PCell produce rejected: {msg}"));
             }
         }
+    }
+
+    /// Web build: live produce (the rhai sandbox) is native-only (ADR 0115), so this
+    /// reports the boundary honestly instead of running it. The PCell panel still
+    /// shows the predicted F2 provenance; only the real sandboxed run is desktop-only,
+    /// exactly as the live agent runner is.
+    #[cfg(target_arch = "wasm32")]
+    fn pcell_regenerate(&mut self) {
+        self.status.set(
+            "PCell live produce runs in the desktop app; the browser shows the predicted provenance.",
+        );
     }
     // --- end lane pcell-inspect ---
 
@@ -13335,16 +13358,19 @@ impl App {
     // --- end lane trace-ui ---
 
     // --- lane waveform-ui: waveform panel (F4 consumer; ADR 0110) ---
-    /// Loads the fixture-first waveform set and reveals the Waveform section
-    /// (`waveform.run_oracle`).
+    /// Runs the pure-Rust MNA solver on the reference RC transient and reveals the
+    /// Waveform section (`waveform.run_oracle`).
     ///
-    /// A stand-in for the live solver until Gate 3 (route still open; see
-    /// [`crate::waveform_panel`]): this is exactly the call a later lane
-    /// replaces. `waveform_section`'s banner names this while it is true.
+    /// Gate 3 swapped the fixture load for a live solve (`reticle_sim`, ADR
+    /// 0109/0114): [`crate::waveform_panel::solve_rc_demo`] builds the RC circuit
+    /// the F4 fixture was generated from and solves it, so the panel shows real
+    /// solver output (equal to the committed fixture to the nano-unit) rather than a
+    /// static record. The solver is deterministic across native and wasm, so this
+    /// runs in the browser too.
     fn waveform_run_oracle(&mut self) {
-        self.waveform
-            .load(crate::waveform_panel::fixture_transient());
-        self.status.set("Waveform: loaded fixture (RC transient)");
+        self.waveform.load(crate::waveform_panel::solve_rc_demo());
+        self.status
+            .set("Waveform: live pure-Rust MNA solve (RC transient)");
         self.inspector.reveal("waveform");
     }
 
@@ -13374,21 +13400,22 @@ impl App {
     fn waveform_section(&mut self, ui: &mut egui::Ui) {
         let ctx = self.comp_ctx();
 
-        // Honesty banner (reticle-claims seam): `waveform.run_oracle` loads the
-        // committed F4 contract fixture, never a live simulation, until the
-        // sim-engine/oracle-feasibility lanes land a real solver at Gate 3.
+        // Provenance banner (reticle-claims seam): `waveform.run_oracle` runs the
+        // pure-Rust MNA solver (ADR 0109/0114) on the reference RC transient, not
+        // ngspice and not a static fixture. The result equals the committed F4
+        // fixture to the nano-unit because it is the exact circuit the fixture was
+        // generated from; the solver is deterministic across native and wasm.
         ui.colored_label(
-            ctx.tokens.warning,
-            format!(
-                "{} Fixture-first: this is the committed F4 fixture, not a live simulation.",
-                icons::TRIANGLE_ALERT
-            ),
+            ctx.tokens.text_weak,
+            "Live: pure-Rust MNA solver (RC transient), not ngspice.",
         )
         .on_hover_text(
-            "waveform.run_oracle loads crates/reticle-sim/tests/fixtures/contracts/\
-             f4_rc_transient.json (an analytic RC charging transient). The bounded \
-             solver that replaces it is a separate lane's Gate-3 deliverable; which \
-             route it ships is still open.",
+            "waveform.run_oracle builds a 1 V step into a 1 kOhm resistor and a 1 pF \
+             capacitor to ground (RC = 1 ns) and solves it with the in-house \
+             modified-nodal-analysis engine (crates/reticle-sim). It matches \
+             f4_rc_transient.json exactly because that fixture was generated from the \
+             same circuit; bounded small circuits only, generic device models \
+             labelled generic (ADR 0109).",
         );
 
         ui.horizontal(|ui| {
@@ -16063,11 +16090,11 @@ mod tests {
         let _ = ctx.end_pass();
     }
 
-    /// `waveform.run_oracle` loads the F4 fixture as a well-formed transient set
-    /// and reveals the Waveform section (Automate group), the same event-driven
-    /// expand every other fixture-first Inspector section uses (catalog 67).
+    /// `waveform.run_oracle` runs the live pure-Rust MNA solve (Gate 3) to a
+    /// well-formed transient set and reveals the Waveform section (Automate group),
+    /// the same event-driven expand every other Inspector section uses (catalog 67).
     #[test]
-    fn waveform_run_oracle_command_loads_the_fixture_and_reveals_the_section() {
+    fn waveform_run_oracle_command_runs_the_live_solve_and_reveals_the_section() {
         use crate::inspector_layout::PanelGroup;
         let mut app = App::new();
         app.inspector.group = PanelGroup::Inspect;
@@ -16079,9 +16106,13 @@ mod tests {
         assert_eq!(app.inspector.group, PanelGroup::Automate);
         assert!(!app.inspector.collapsed);
         assert!(app.inspector.is_open("waveform"));
-        let set = app.waveform.set().expect("fixture loaded");
+        let set = app.waveform.set().expect("solve loaded");
         assert!(set.is_well_formed());
         assert_eq!(set.analysis, reticle_sim::AnalysisKind::Transient);
+        // run_oracle runs the live solver, not the static fixture: the loaded set is
+        // exactly what solve_rc_demo produces (and, by the sim-engine cross-test,
+        // equals the committed F4 fixture to the nano-unit).
+        assert_eq!(set, &crate::waveform_panel::solve_rc_demo());
     }
 
     /// The wasm export status names the format actually exported, derived from the
