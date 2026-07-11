@@ -1,0 +1,8 @@
+{
+  "id": "dev.reticle.test.twowasm",
+  "version": "0.1.0",
+  "api_version": 0,
+  "name": "Two Wasm Test Fixture",
+  "entry": "run",
+  "permissions": []
+}

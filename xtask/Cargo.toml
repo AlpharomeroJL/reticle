@@ -53,3 +53,17 @@ sha2 = "0.10"
 # version-matched addition.
 chrono = "0.4.45"
 # --- end lane pipeline-manifest ---
+# --- lane plugin-manifest-index: plugin-index subcommand deps ---
+# `reticle-plugin` supplies the F5 contract types (`Manifest`, `Index`, `IndexEntry`,
+# ADR 0105) directly, so the generator emits exactly what that crate serializes: no
+# hand-mirrored struct that could silently drift from the real contract. Depended on
+# by path (not routed through `[workspace.dependencies]`) so this addition stays inside
+# `xtask/`'s own manifest rather than touching the shared root `Cargo.toml`. xtask is a
+# native-only build tool (never compiled for wasm32), so pulling in reticle-plugin's
+# native-only `host` module (wasmi) here has zero bundle effect; `wasmi` is already in
+# the workspace's dependency graph via `reticle-plugin` itself (ADR 0116), so this adds
+# no new crate for `cargo deny` to re-evaluate.
+reticle-plugin = { path = "../crates/reticle-plugin", version = "8.0.0" }
+# sha2 is already a dependency above (pipeline-manifest lane); reused here for the
+# plugin wasm content hash, same `sha256_hex` shape, no new crate.
+# --- end lane plugin-manifest-index ---

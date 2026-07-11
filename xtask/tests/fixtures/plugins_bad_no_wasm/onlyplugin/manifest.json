@@ -1,0 +1,8 @@
+{
+  "id": "dev.reticle.test.nowasm",
+  "version": "0.1.0",
+  "api_version": 0,
+  "name": "No Wasm Test Fixture",
+  "entry": "run",
+  "permissions": []
+}
