@@ -67,12 +67,21 @@ test("FIXED CLASSES A+B (sky130 editor, headed)", async ({ page }) => {
   // The palette opens at default_pos (200,120); the first result row ("Rectangle
   // tool", Draw group) sits at ~(265,259). Click it.
   await page.mouse.click(265, 259);
-  await page.waitForTimeout(250);
+  // The row-click dispatches tool.rect immediately (last_command_id is tool.rect
+  // right away); the active-tool state switch applies on a later frame, and
+  // webgl2's frame cadence lags webgpu's, so poll for the tool rather than reading
+  // one fixed-delay snapshot. A pre-existing timing flake, not a dispatch bug: the
+  // command runs, only the tool-state read raced the 250 ms wait.
+  await expect
+    .poll(async () => (await stats(page)).active_tool, {
+      message: "palette row-click runs the row (tool.rect activates the Rect tool)",
+      timeout: 5_000,
+    })
+    .toBe("Rect");
   const aRow = await stats(page);
   // eslint-disable-next-line no-console
   console.log(`FIX palette.rowclick last_command_id=${aRow.last_command_id} tool=${aRow.active_tool}`);
   await page.screenshot({ path: `${SCRATCH}/fix-palette-after-row.png` });
-  expect(aRow.active_tool, "palette row-click runs the row").toBe("Rect");
   const toolNow = aRow;
   // eslint-disable-next-line no-console
   console.log(`FIX tool before draw=${toolNow.active_tool}`);

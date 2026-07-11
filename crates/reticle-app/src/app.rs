@@ -2117,6 +2117,24 @@ impl App {
             &JsValue::from_str("replay_total"),
             &JsValue::from_f64(replay_total as f64),
         );
+        // Phase-3 (Depth) panel seams: assertable state so the comprehensive headed
+        // pass proves each Inspector panel had an EFFECT, not just that its command
+        // fired. Additive (new keys only); the existing seams above are unchanged.
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("drc_ran"),
+            &JsValue::from_bool(self.drc.has_run()),
+        );
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("drc_violations"),
+            &JsValue::from_f64(self.drc.len() as f64),
+        );
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("waveform_probes"),
+            &JsValue::from_f64(self.waveform.set().map_or(0, |s| s.probes.len()) as f64),
+        );
     }
 
     /// Reports a hard failure to the app's one human-readable error surface.
