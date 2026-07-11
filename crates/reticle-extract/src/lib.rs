@@ -62,6 +62,7 @@ pub use intent_check::{check_intent, sky130_connection_rules, terminal};
 pub use netlist::{Net, NetLabel, Netlist};
 pub use query::{
     NetAtPoint, NetExtent, NetRef, OpenRecord, RectRecord, ShortRecord, ShortsOpensReport,
+    net_at_point, net_extent, shorts_opens,
 };
 pub use rules::{ConnectionRule, ConnectionRules};
 pub use union_find::DisjointSet;
