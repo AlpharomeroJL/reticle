@@ -724,8 +724,10 @@ pub struct App {
     presentation: bool,
     /// Whether embed mode is on (`?embed=1`, catalog 94, lane 2D): minimal chrome for
     /// an iframe, only the canvas plus a small "open in Reticle" affordance. Set once
-    /// from the page URL (see [`App::set_embed`]); unlike presentation it does not
-    /// toggle, since an embedding page fixes it.
+    /// from the page URL at boot (see [`App::set_embed`]). In normal use an embedding
+    /// page fixes it, since embed's own chrome offers no toggle back; the
+    /// `embed.toggle` command (lane embed) additionally flips it live so a developer
+    /// can preview the embed chrome from inside the full app without an iframe.
     embed: bool,
 
     /// View and export polish: the egui theme, per-document camera bookmarks, the
@@ -890,6 +892,33 @@ impl StartView {
         }
     }
 }
+
+// --- lane embed: chrome-layout precedence made explicit and testable (catalog 94) ---
+/// Which canvas-and-panel layout the current frame draws.
+///
+/// Exactly one applies per frame, decided by `App::chrome_layout` in this fixed
+/// precedence: embed, then presentation, then the read-only viewer, then the full
+/// editor. Embed is checked first so an embedded iframe can never fall through to
+/// the full editor's menu bar and Inspector (drawn only by `App::main_panels`), even
+/// if presentation mode or a viewer session is also active. `App::ui` matches on this
+/// to pick the canvas chrome; a headless test proves the precedence directly (no GPU
+/// or window needed, since this is plain state).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ChromeLayout {
+    /// `?embed=1` (catalog 94): only the canvas, plus the "open in Reticle" corner
+    /// link (`App::embed_canvas`).
+    Embed,
+    /// Presentation mode (catalog 93, the `P` chord): only the canvas
+    /// (`App::presentation_canvas`).
+    Presentation,
+    /// A read-only live-share viewer session (catalog 23): the viewer chrome
+    /// (`App::viewer_panels`).
+    Viewer,
+    /// The full editor: menu bar, toolbar, side panels, and Inspector
+    /// (`App::main_panels`).
+    FullEditor,
+}
+// --- end lane embed ---
 
 /// The thickness, in screen pixels, of the top and left ruler bars.
 ///
@@ -1872,6 +1901,34 @@ impl App {
     pub fn is_embedded(&self) -> bool {
         self.embed
     }
+
+    // --- lane embed: chrome-gate predicates, mirrored 1:1 by `App::ui` ---
+    /// Which canvas-and-panel layout this frame should draw; see [`ChromeLayout`].
+    fn chrome_layout(&self) -> ChromeLayout {
+        if self.embed {
+            ChromeLayout::Embed
+        } else if self.presentation {
+            ChromeLayout::Presentation
+        } else if self.is_viewer() {
+            ChromeLayout::Viewer
+        } else {
+            ChromeLayout::FullEditor
+        }
+    }
+
+    /// Whether this frame shows the Start screen: only a fresh, non-embedded session
+    /// (an embedded iframe, catalog 94, never shows it, even on a first-time visit).
+    fn shows_start_screen(&self) -> bool {
+        self.start_screen && !self.embed
+    }
+
+    /// Whether this frame hides the floating chrome: the palette, popovers, tour
+    /// overlay, and warnings window. Presentation and embed (catalog 93, 94) both
+    /// want only the canvas.
+    fn hides_floating_chrome(&self) -> bool {
+        self.presentation || self.embed
+    }
+    // --- end lane embed ---
 
     /// Places one fixed scripted rectangle so lane v8-1e's browser test can observe an
     /// edit propagate from this publisher to a viewer (only reached in `?e2e-edit=1`
@@ -4004,6 +4061,12 @@ impl App {
             AppOp::ExportSpice => self.xschem_export_spice(),
             AppOp::ImportXschemProbe => self.xschem_import_probe(),
             // --- end lane xschem ---
+            // --- lane embed: flip embed mode live (catalog 94) ---
+            AppOp::ToggleEmbed => {
+                self.set_embed(!self.is_embedded());
+                self.status
+                    .set(format!("Embed mode {}", on_off(self.is_embedded())));
+            } // --- end lane embed ---
         }
     }
 
@@ -13712,7 +13775,7 @@ impl eframe::App for App {
         // the gallery) is visible.
         // An embedded iframe (catalog 94) never shows the Start chooser: it opens
         // straight onto the canvas of whatever it was pointed at.
-        if self.start_screen && !self.embed {
+        if self.shows_start_screen() {
             self.start_screen_ui(ui);
             self.notifications_area(&ctx);
             ctx.request_repaint();
@@ -13796,21 +13859,20 @@ impl eframe::App for App {
         // palette/export) and the tour highlight rectangles. Lane 2D picks the chrome:
         // presentation mode (catalog 93) shows only the canvas; a read-only viewer
         // (catalog 23) gets the clean viewer chrome; otherwise the full editor.
-        let (canvas_screen, tour_targets) = if self.embed {
-            (
+        // --- lane embed: the precedence is now a named, tested `ChromeLayout` ---
+        let (canvas_screen, tour_targets) = match self.chrome_layout() {
+            ChromeLayout::Embed => (
                 self.embed_canvas(ui, gpu_format, &ctx),
                 TourTargets::default(),
-            )
-        } else if self.presentation {
-            (
+            ),
+            ChromeLayout::Presentation => (
                 self.presentation_canvas(ui, gpu_format, &ctx),
                 TourTargets::default(),
-            )
-        } else if self.is_viewer() {
-            self.viewer_panels(ui, gpu_format)
-        } else {
-            self.main_panels(ui, frame, gpu_format)
+            ),
+            ChromeLayout::Viewer => self.viewer_panels(ui, gpu_format),
+            ChromeLayout::FullEditor => self.main_panels(ui, frame, gpu_format),
         };
+        // --- end lane embed ---
         // Cache the canvas rect so next frame's view/export panel can frame the
         // current view (the panel draws before the canvas is measured).
         self.view_export.last_canvas = canvas_screen;
@@ -13819,7 +13881,7 @@ impl eframe::App for App {
         // windows, and tour overlay, leaving only the canvas (and critical toasts).
         // The 3D stack and Cross-section are managed panels inside `main_panels` now
         // (lane 2C, ADR 0096), so they are not floated here.
-        let minimal_chrome = self.presentation || self.embed;
+        let minimal_chrome = self.hides_floating_chrome(); // lane embed
         if !minimal_chrome {
             self.palette_window(&ctx, canvas_screen);
             // The numeric transform popover (item 51, lane 3A), over the canvas.
@@ -15801,6 +15863,124 @@ mod tests {
             app.is_embedded(),
             "embed mode is set from the page URL (catalog 94)"
         );
+    }
+
+    #[test]
+    fn embed_toggle_dispatches_through_the_registry_and_flips_live() {
+        // `embed.toggle` (lane embed, moved out of RESERVED_CAMPAIGN_IDS) routes
+        // through the same dispatch funnel as every other command, and flips embed
+        // mode live so the full app can preview the embed chrome without an iframe.
+        let mut app = App::new();
+        assert!(!app.is_embedded());
+        app.dispatch(CommandId("embed.toggle"));
+        assert!(app.is_embedded(), "embed.toggle flips embed mode on");
+        app.dispatch(CommandId("embed.toggle"));
+        assert!(!app.is_embedded(), "embed.toggle flips it back off");
+    }
+
+    #[test]
+    fn embed_wins_the_chrome_layout_precedence() {
+        // Embed must win even when presentation mode is ALSO on, so the full
+        // editor's menu bar and Inspector (`App::main_panels`) are structurally
+        // unreachable while embedded (catalog 94's minimal-chrome contract).
+        let mut app = App::new();
+        assert_eq!(app.chrome_layout(), ChromeLayout::FullEditor);
+        app.presentation = true;
+        assert_eq!(app.chrome_layout(), ChromeLayout::Presentation);
+        app.set_embed(true);
+        assert_eq!(
+            app.chrome_layout(),
+            ChromeLayout::Embed,
+            "embed wins over presentation too"
+        );
+    }
+
+    #[test]
+    fn embed_beats_the_viewer_chrome_too() {
+        let target = crate::share::ViewerTarget {
+            room: "room".to_owned(),
+            relay: "127.0.0.1:3030".to_owned(),
+        };
+        let mut app = App::with_viewer(target);
+        assert_eq!(app.chrome_layout(), ChromeLayout::Viewer);
+        app.set_embed(true);
+        assert_eq!(
+            app.chrome_layout(),
+            ChromeLayout::Embed,
+            "an embedded read-only viewer session still gets the minimal embed chrome, \
+             never the viewer's own panel chrome"
+        );
+    }
+
+    #[test]
+    fn embed_hides_the_start_screen_and_floating_chrome() {
+        let mut app = App::new();
+        app.start_screen = true;
+        assert!(
+            app.shows_start_screen(),
+            "a fresh non-embedded session offers the Start screen"
+        );
+        assert!(!app.hides_floating_chrome());
+
+        app.set_embed(true);
+        assert!(
+            !app.shows_start_screen(),
+            "an embedded iframe never shows the Start chooser (catalog 94)"
+        );
+        assert!(
+            app.hides_floating_chrome(),
+            "embed also hides the palette, floating windows, and tour overlay"
+        );
+    }
+
+    /// The embed flag and the permalink (`cell`/`layers`/`view`) are independent
+    /// parses over the same page query string (`web/src/main.rs` applies both
+    /// unconditionally at boot), so an embedded iframe still honors a shared
+    /// cell/camera/layers link exactly like the full app.
+    #[test]
+    fn embed_mode_still_composes_with_the_cell_layers_and_view_query_seams() {
+        let mut app = App::new();
+        app.set_embed(true);
+        app.open_outcome(
+            crate::startscreen::ExampleChip::TinyTapeoutMin
+                .open()
+                .expect("the bundled sample opens"),
+        );
+        let top = app.top_cell.clone();
+        let target = app.layer_state.rows()[0].id;
+
+        let query = format!(
+            "embed=1&cell={top}&view=1234,-5678,0.5&layers={}/{}",
+            target.layer, target.datatype
+        );
+        assert!(
+            crate::share::parse_embed(&query),
+            "the embed flag still parses alongside a permalink"
+        );
+        let parsed = crate::share::parse_permalink(&query);
+        assert_eq!(
+            parsed.cell.as_deref(),
+            Some(top.as_str()),
+            "cell= still parses"
+        );
+        app.apply_permalink(&parsed);
+
+        assert!(
+            app.is_embedded(),
+            "applying the permalink does not disturb embed mode"
+        );
+        assert_eq!(
+            app.camera.center(),
+            Point::new(1234, -5678),
+            "view= restores the camera while embedded"
+        );
+        for row in app.layer_state.rows() {
+            assert_eq!(
+                row.visible,
+                row.id == target,
+                "layers= restores visibility while embedded"
+            );
+        }
     }
 
     #[test]
