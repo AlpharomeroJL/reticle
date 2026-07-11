@@ -11,17 +11,27 @@
 //! [`crate::theme::components`]/[`crate::theme::tokens`], as [`crate::review_panel`]
 //! is for the review workflow.
 //!
-//! # Fixture-first
+//! # Live queries, fixture fallback
 //!
-//! The trace-api lane's live query functions are not wired in until Gate 2. Until
-//! then, [`fixture_at_point`], [`fixture_extent`], and [`fixture_report`] parse the
+//! [`query_at_point`], [`query_extent`], and [`query_report`] are the real thing
+//! (the `f2f3-wiring` lane, Gate 3): they extract connectivity over the OPEN
+//! document (`crate::app`'s marked hook supplies the document, top cell, and
+//! selection) and call [`reticle_extract::query`]'s live functions directly,
+//! `net_at_point`, `net_extent`, and `shorts_opens` over an [`IntentSpec`]
+//! derived from the target cell's own pins (`intent_spec_from_pins`, private).
+//! [`fixture_at_point`], [`fixture_extent`], and [`fixture_report`] parse the
 //! committed F3 contract fixture (`tests/fixtures/contracts/f3_trace.json` in
-//! `reticle-extract`) as a stand-in data source, so the panel is fully demoable
-//! now. Those three functions are exactly the seam the trace-api lane replaces
-//! with real query calls; nothing else in this module or in `App::trace_section`
-//! needs to change.
+//! `reticle-extract`) and remain the fallback `crate::app` uses when there is no
+//! document/selection to query for real: an honest stand-in for the empty case,
+//! not a permanent substitute.
 
 use reticle_extract::query::{NetAtPoint, NetExtent, OpenRecord, ShortRecord, ShortsOpensReport};
+use reticle_extract::{
+    Extractor, ForbiddenPair, IntentNet, IntentSpec, Netlist, Terminal, check_intent, net_at_point,
+    net_extent, shorts_opens,
+};
+use reticle_geometry::{Point, Shape as _};
+use reticle_model::{Cell, Document, DrawShape};
 
 /// The committed F3 contract fixture this phase renders against (see the module
 /// docs). Shared with the trace-api lane's own producer test
@@ -43,11 +53,12 @@ pub enum TraceRow {
 /// net-extent readouts, the last-loaded shorts/opens report, and the selected
 /// row in its combined navigable list.
 ///
-/// Every `load_*` method installs a fresh record (typically from
-/// [`fixture_at_point`]/[`fixture_extent`]/[`fixture_report`] until Gate 2, a real
-/// query result after); [`TracePanelState::load_report`] additionally resets the
-/// navigator, matching how a fresh DRC run replaces the selection in
-/// [`crate::drc_panel::DrcResults`].
+/// Every `load_*` method installs a fresh record, a real query result
+/// ([`query_at_point`]/[`query_extent`]/[`query_report`]) when `crate::app`'s hook
+/// can query the open document for real, else the fixture fallback
+/// ([`fixture_at_point`]/[`fixture_extent`]/[`fixture_report`]);
+/// [`TracePanelState::load_report`] additionally resets the navigator, matching
+/// how a fresh DRC run replaces the selection in [`crate::drc_panel::DrcResults`].
 #[derive(Clone, Debug, Default)]
 pub struct TracePanelState {
     /// The last net-at-point result, if a `trace.at_point` query has run.
@@ -184,8 +195,9 @@ fn fixture_root() -> serde_json::Value {
     serde_json::from_str(FIXTURE_JSON).expect("committed F3 fixture is valid JSON")
 }
 
-/// Parses the embedded F3 fixture's `net_at_point` record: a stand-in for the
-/// trace-api lane's live net-at-point query until Gate 2 (see the module docs).
+/// Parses the embedded F3 fixture's `net_at_point` record: the fallback for
+/// [`query_at_point`] when there is no document/selection to query for real
+/// (see the module docs).
 #[must_use]
 pub fn fixture_at_point() -> NetAtPoint {
     serde_json::from_value(fixture_root()["net_at_point"].clone())
@@ -205,6 +217,123 @@ pub fn fixture_extent() -> NetExtent {
 pub fn fixture_report() -> ShortsOpensReport {
     serde_json::from_value(fixture_root()["report"].clone())
         .expect("F3 fixture report matches `ShortsOpensReport`")
+}
+
+/// The center of `shape`'s bounding box, in DBU.
+///
+/// [`net_at_point`]'s coverage test
+/// (`reticle_extract::connectivity::shape_covers_point`, private to that crate
+/// but exercised here through [`net_at_point`] itself) only checks bounding-box
+/// containment, so this point is always "covered" by `shape` itself, whatever
+/// its kind (rect, polygon, or path). Used as the query point for a selected
+/// shape: the live Trace section has no separate coordinate-entry field (ADR
+/// 0103), so a selection's own footprint is the real point source `crate::app`'s
+/// `f2f3-wiring` hook feeds [`query_at_point`].
+#[must_use]
+pub fn shape_probe_point(shape: &DrawShape) -> Point {
+    let b = shape.bounding_box();
+    Point::new(
+        b.min.x + (b.max.x - b.min.x) / 2,
+        b.min.y + (b.max.y - b.min.y) / 2,
+    )
+}
+
+/// Extracts connectivity over the flattened `top` cell of `doc`: same-layer-only
+/// (no via/contact rules), matching `crate::netlight`'s net-highlight extraction
+/// so a live trace query agrees with clicking the same shape on canvas.
+fn extract_live(doc: &Document, top: &str) -> (Vec<DrawShape>, Netlist) {
+    let shapes = doc.flatten(top);
+    let netlist = Extractor::new().extract_shapes(&shapes);
+    (shapes, netlist)
+}
+
+/// Runs a REAL net-at-point query over `doc`'s flattened `top` cell (the live
+/// counterpart to [`fixture_at_point`]; see the module docs). `revision` is the
+/// caller's document-generation token, carried through into the result
+/// unchanged.
+#[must_use]
+pub fn query_at_point(doc: &Document, top: &str, point: Point, revision: u64) -> NetAtPoint {
+    let (shapes, netlist) = extract_live(doc, top);
+    net_at_point(&shapes, &netlist, point, revision)
+}
+
+/// Runs a REAL net-extent query for the net named `net_name` over `doc`'s
+/// flattened `top` cell (the live counterpart to [`fixture_extent`]), or `None`
+/// if no net of that name exists.
+#[must_use]
+pub fn query_extent(doc: &Document, top: &str, net_name: &str, revision: u64) -> Option<NetExtent> {
+    let (shapes, netlist) = extract_live(doc, top);
+    net_extent(&shapes, &netlist, net_name, revision)
+}
+
+/// The cap on distinct pin names [`intent_spec_from_pins`] turns into intent
+/// nets; see its doc comment.
+const MAX_INTENT_NETS: usize = 256;
+
+/// Derives a connectivity [`IntentSpec`] from `cell`'s own first-class
+/// `Pin` (`reticle_model::Pin`) list: the closest thing the document has to an
+/// authored connectivity intent, since no separate intent-authoring flow exists
+/// yet (`crate::pcell_panel` notes the equivalent gap on the PCell-authoring
+/// side).
+///
+/// Pins sharing a name become one [`IntentNet`] (every physical tap of the same
+/// net, e.g. two `VDD` pins, must join); every pair of distinctly named pins
+/// becomes a [`ForbiddenPair`] (differently named nets must stay apart). A cell
+/// with fewer than two distinct pin names yields an empty spec (nothing is
+/// checkable with one or zero named nets): a real, honest "nothing to check",
+/// not a fixture stand-in.
+///
+/// Capped at [`MAX_INTENT_NETS`] distinct pin names so a document with an
+/// unreasonable number of differently named pins cannot force the `O(n^2)`
+/// forbidden-pair construction to blow up; a pin whose name is past the cap is
+/// dropped from the derived spec (an additional tap of an already-included net
+/// name is never dropped, only additional net *names* past the cap).
+fn intent_spec_from_pins(cell: &Cell) -> IntentSpec {
+    let mut nets: Vec<IntentNet> = Vec::new();
+    for pin in &cell.pins {
+        if let Some(net) = nets.iter_mut().find(|n| n.name == pin.name) {
+            net.terminals.push(Terminal {
+                name: pin.name.clone(),
+                layer: pin.layer,
+                region: pin.region,
+            });
+        } else if nets.len() < MAX_INTENT_NETS {
+            nets.push(IntentNet {
+                name: pin.name.clone(),
+                terminals: vec![Terminal {
+                    name: pin.name.clone(),
+                    layer: pin.layer,
+                    region: pin.region,
+                }],
+            });
+        }
+    }
+
+    let mut forbidden = Vec::new();
+    for i in 0..nets.len() {
+        for j in (i + 1)..nets.len() {
+            forbidden.push(ForbiddenPair {
+                net_a: nets[i].name.clone(),
+                net_b: nets[j].name.clone(),
+            });
+        }
+    }
+    IntentSpec { nets, forbidden }
+}
+
+/// Runs a REAL shorts/opens check over `doc`'s `top` cell (the live counterpart
+/// to [`fixture_report`]; see the module docs): derives an [`IntentSpec`] from
+/// the cell's own pins (`intent_spec_from_pins`, private), checks it with
+/// [`check_intent`] (the SKY130 via/contact stack), and maps the result with
+/// [`shorts_opens`]. An unknown `top` (or one with no pins) yields an empty,
+/// real report rather than a fixture stand-in.
+#[must_use]
+pub fn query_report(doc: &Document, top: &str, revision: u64) -> ShortsOpensReport {
+    let spec = doc
+        .cell(top)
+        .map_or_else(IntentSpec::default, intent_spec_from_pins);
+    let report = check_intent(doc, top, &spec);
+    shorts_opens(&report, revision)
 }
 
 /// Formats a net-at-point result: the net name and shape count, or a miss
@@ -462,5 +591,148 @@ mod tests {
         assert!(open_text.starts_with("Open:"));
         assert!(open_text.contains("CLK"));
         assert!(open_text.contains('2'));
+    }
+
+    use reticle_geometry::{LayerId, Rect};
+    use reticle_model::{Pin, ShapeKind};
+
+    /// A document with two differently named pins (`NET_A`, `NET_B`) joined by
+    /// one real shape spanning both pin regions: a genuine short between two
+    /// intended-separate nets, derived entirely from the document's own pins
+    /// (no fixture, no `IntentSpec` authored by the test beyond the pins
+    /// themselves).
+    fn shorted_pins_doc() -> Document {
+        let layer = LayerId::new(3, 0);
+        let mut cell = Cell::new("TOP");
+        cell.pins.push(Pin::new(
+            "NET_A",
+            Rect::new(Point::new(0, 0), Point::new(10, 10)),
+            layer,
+        ));
+        cell.pins.push(Pin::new(
+            "NET_B",
+            Rect::new(Point::new(20, 20), Point::new(30, 30)),
+            layer,
+        ));
+        cell.shapes.push(DrawShape::new(
+            layer,
+            ShapeKind::Rect(Rect::new(Point::new(0, 0), Point::new(30, 30))),
+        ));
+        let mut doc = Document::new();
+        doc.insert_cell(cell);
+        doc.set_top_cells(vec!["TOP".to_owned()]);
+        doc
+    }
+
+    /// The success-bar test: given a document with a known short, the trace
+    /// panel's live query renders the REAL `ShortsOpensReport` from
+    /// `reticle_extract::query`, not the fixture.
+    #[test]
+    fn query_report_finds_a_real_short_from_the_documents_own_pins() {
+        let doc = shorted_pins_doc();
+        let report = query_report(&doc, "TOP", 42);
+        assert_eq!(report.revision, 42);
+        assert_eq!(
+            report.shorts.len(),
+            1,
+            "the two touching, differently named pins must short"
+        );
+        assert_eq!(report.shorts[0].net_a, "NET_A");
+        assert_eq!(report.shorts[0].net_b, "NET_B");
+        assert!(report.opens.is_empty());
+        assert_ne!(
+            report,
+            fixture_report(),
+            "must be the real computed report, not the canned fixture"
+        );
+    }
+
+    /// Two pins that never touch: a real, honest clean result, not the fixture
+    /// (whose report is never clean).
+    #[test]
+    fn query_report_over_a_clean_document_is_real_not_the_fixture() {
+        let layer = LayerId::new(3, 0);
+        let mut cell = Cell::new("TOP");
+        cell.pins.push(Pin::new(
+            "NET_A",
+            Rect::new(Point::new(0, 0), Point::new(10, 10)),
+            layer,
+        ));
+        cell.pins.push(Pin::new(
+            "NET_B",
+            Rect::new(Point::new(1000, 1000), Point::new(1010, 1010)),
+            layer,
+        ));
+        cell.shapes.push(DrawShape::new(
+            layer,
+            ShapeKind::Rect(Rect::new(Point::new(0, 0), Point::new(10, 10))),
+        ));
+        cell.shapes.push(DrawShape::new(
+            layer,
+            ShapeKind::Rect(Rect::new(Point::new(1000, 1000), Point::new(1010, 1010))),
+        ));
+        let mut doc = Document::new();
+        doc.insert_cell(cell);
+        doc.set_top_cells(vec!["TOP".to_owned()]);
+
+        let report = query_report(&doc, "TOP", 5);
+        assert_eq!(report.revision, 5);
+        assert!(report.is_clean());
+    }
+
+    #[test]
+    fn query_report_unknown_top_cell_is_a_real_empty_report() {
+        let doc = Document::new();
+        let report = query_report(&doc, "MISSING", 1);
+        assert!(report.is_clean());
+        assert_eq!(report.revision, 1);
+    }
+
+    /// `query_at_point`/`query_extent` over a real document, proving both call
+    /// into `reticle_extract::query`'s live functions rather than the fixture.
+    #[test]
+    fn query_at_point_and_extent_are_real_not_the_fixture() {
+        let layer = LayerId::new(5, 0);
+        let mut cell = Cell::new("TOP");
+        cell.shapes.push(DrawShape::new(
+            layer,
+            ShapeKind::Rect(Rect::new(Point::new(0, 0), Point::new(100, 100))),
+        ));
+        let mut doc = Document::new();
+        doc.insert_cell(cell);
+        doc.set_top_cells(vec!["TOP".to_owned()]);
+
+        let at = query_at_point(&doc, "TOP", Point::new(50, 50), 9);
+        assert_eq!(at.revision, 9);
+        let net = at
+            .net
+            .clone()
+            .expect("the point is covered by the one shape");
+        assert_eq!(net.shape_indices, vec![0]);
+
+        let extent =
+            query_extent(&doc, "TOP", &net.name, 9).expect("the resolved net has an extent");
+        assert_eq!(extent.shape_count, 1);
+        assert_eq!(extent.bbox.max_x, 100);
+        assert_ne!(
+            at,
+            fixture_at_point(),
+            "must be the real query, not the fixture"
+        );
+    }
+
+    #[test]
+    fn query_extent_unknown_net_is_none() {
+        let doc = shorted_pins_doc();
+        assert!(query_extent(&doc, "TOP", "NO_SUCH_NET", 1).is_none());
+    }
+
+    #[test]
+    fn shape_probe_point_is_the_bbox_center() {
+        let shape = DrawShape::new(
+            LayerId::new(1, 0),
+            ShapeKind::Rect(Rect::new(Point::new(0, 0), Point::new(10, 20))),
+        );
+        assert_eq!(shape_probe_point(&shape), Point::new(5, 10));
     }
 }

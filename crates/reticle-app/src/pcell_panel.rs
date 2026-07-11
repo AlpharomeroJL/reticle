@@ -10,17 +10,23 @@
 //! a bounded [`DragValue`](egui::DragValue), a [`Bool`](reticle_gen::FieldType::Bool)
 //! a checkbox, and an [`Enum`](reticle_gen::FieldType::Enum) a combo box.
 //!
-//! # Provenance, not production
+//! # Provenance, live and predicted
 //!
-//! This lane renders [`PCellDef::produce_meta`] (`generator_id`, `engine_version`,
-//! `script_ref`, `param_hash`) computed locally from the in-memory definition and
-//! the current form values, and shows it read-only. It never calls
-//! `reticle_script::pcell::produce`: the sandboxed rhai run is the `pcell-produce`
-//! lane's Gate 2 wiring. Everything in this module is pure (no egui) except
-//! [`PCellPanelState::params_form`], so the panel's plumbing (schema access,
-//! parameter round-trip, hashing) is unit-tested without a UI context; the
-//! egui-in-a-pass smoke test lives alongside the other Inspector sections in
-//! `crate::app`.
+//! [`PCellPanelState::selected_produce_meta`] renders [`PCellDef::produce_meta`]
+//! (`generator_id`, `engine_version`, `script_ref`, `param_hash`) computed locally
+//! from the in-memory definition and the current form values: a prediction of the
+//! identity a produce would stamp, available before any script ever runs.
+//! [`PCellPanelState::regenerate`] (the `f2f3-wiring` lane, Gate 3) is the real
+//! thing: it runs the selected PCell's script through the merged sandboxed
+//! producer (`reticle_script::produce`, the `pcell-produce` lane's Gate 2
+//! sandbox) and records whichever it returns, a produced top cell's
+//! shape/instance/array counts plus its stamped [`ProduceMeta`], or the
+//! sandbox's clean rejection message ([`ProduceOutcome`]). Both
+//! `reticle_script::produce` and this module's own logic are pure (no egui, no
+//! I/O) except [`PCellPanelState::params_form`], so the panel's plumbing (schema
+//! access, parameter round-trip, hashing, and now the sandboxed produce itself)
+//! is unit-tested without a UI context; the egui-in-a-pass smoke test lives
+//! alongside the other Inspector sections in `crate::app`.
 //!
 //! # The demo catalog
 //!
@@ -34,6 +40,8 @@
 use eframe::egui;
 
 use reticle_gen::{FieldSchema, FieldType, PCellDef, PCellRegistry, ParamSchema, ProduceMeta};
+use reticle_model::Technology;
+use reticle_script::{SandboxLimits, produce};
 
 /// The one illustrative user PCell shipped until the `pcell-params` lane wires a real
 /// authoring flow: a made-up "sensor" cell whose schema exercises Int, Bool, and Enum
@@ -43,8 +51,8 @@ fn demo_pcell() -> PCellDef {
     PCellDef {
         id: "user.sensor".to_owned(),
         title: "Sensor (example)".to_owned(),
-        description: "Illustrative user PCell: a placeholder script and schema until \
-            the pcell-params lane wires real authoring."
+        description: "Illustrative user PCell: a demo script and schema until the \
+            pcell-params lane wires real user authoring."
             .to_owned(),
         schema: ParamSchema {
             generator_id: "user.sensor".to_owned(),
@@ -61,11 +69,23 @@ fn demo_pcell() -> PCellDef {
                 ),
             ],
         },
-        // A placeholder script: only the `pcell-produce` lane's sandboxed engine will
-        // ever execute this. This lane renders only the definition's schema/identity.
-        script:
-            "// pcell-produce lane (Gate 2) executes this under a sandbox.\ncreate_cell(\"TOP\");"
-                .to_owned(),
+        // A real, runnable script: `PCellPanelState::regenerate` (the `f2f3-wiring`
+        // lane) actually executes this through the merged sandboxed producer. A
+        // square body on the chosen layer, sized by `width`, plus an outer square
+        // standing in for a guard ring when `guard_ring` is set, so every schema
+        // field genuinely drives the produced geometry and its `param_hash`. SKY130
+        // layer numbers (li1 67/20, met1 68/20, met2 69/20), matching
+        // `reticle_extract::intent_check`'s layer table, so this is real geometry on
+        // real conductor layers, not arbitrary numbers.
+        script: r#"create_cell("TOP");
+let ld = if layer == "li1" { 67 } else if layer == "met2" { 69 } else { 68 };
+add_rect("TOP", ld, 20, 0, 0, width, width);
+if guard_ring {
+    add_rect("TOP", ld, 20, -100, -100, width + 100, width + 100);
+}
+set_top_cells(["TOP"]);
+"#
+        .to_owned(),
         engine_version: "8.1.0".to_owned(),
     }
 }
@@ -79,6 +99,33 @@ fn default_params(schema: &ParamSchema) -> serde_json::Value {
         map.insert(field.name.clone(), field.default.clone());
     }
     serde_json::Value::Object(map)
+}
+
+/// The outcome of a REAL sandboxed produce of a PCell (see
+/// [`PCellPanelState::regenerate`]): either the produced top cell's
+/// shape/instance/array counts plus its stamped F2 [`ProduceMeta`], or the
+/// sandbox's clean rejection message. The sandbox (`reticle_script::produce`)
+/// never panics on any script or parameter input, so `Failed` always carries a
+/// readable diagnostic, never a crash.
+#[derive(Clone, PartialEq, Debug)]
+pub enum ProduceOutcome {
+    /// The sandboxed run produced a top cell.
+    Produced {
+        /// The produced top cell's own (unflattened) shape count.
+        shape_count: usize,
+        /// The produced top cell's instance-placement count.
+        instance_count: usize,
+        /// The produced top cell's array-placement count.
+        array_count: usize,
+        /// The F2 provenance the sandboxed run stamped over the effective
+        /// parameters: `generator_id`, `engine_version`, `script_ref`, and
+        /// `param_hash`.
+        meta: ProduceMeta,
+    },
+    /// The sandbox rejected the script or parameters: invalid parameters, a
+    /// script compile/runtime error, a sandbox resource limit, or no top cell.
+    /// The message is `reticle_script::ProduceError`'s `Display` text.
+    Failed(String),
 }
 
 /// The PCell Inspector panel's state: the user-PCell catalog, the current selection,
@@ -98,6 +145,13 @@ pub struct PCellPanelState {
     /// The current parameter object for each PCell, parallel to `ids`, each seeded
     /// from that PCell's schema defaults.
     params: Vec<serde_json::Value>,
+    /// The last real sandboxed-produce outcome for each PCell, parallel to `ids`.
+    /// `None` until [`PCellPanelState::regenerate`] has run for that PCell since it
+    /// was last selected; cleared again by an edited parameter
+    /// ([`PCellPanelState::params_form`]) or a reset
+    /// ([`PCellPanelState::reset_selected_to_defaults`]) so a shown outcome always
+    /// reflects the parameters currently in the form, never a stale one.
+    produced: Vec<Option<ProduceOutcome>>,
 }
 
 impl Default for PCellPanelState {
@@ -109,11 +163,13 @@ impl Default for PCellPanelState {
             .iter()
             .map(|id| default_params(&registry.get(id).expect("just listed").schema))
             .collect();
+        let produced = vec![None; ids.len()];
         Self {
             registry,
             ids,
             selected: 0,
             params,
+            produced,
         }
     }
 }
@@ -176,20 +232,62 @@ impl PCellPanelState {
         &self.params[self.selected]
     }
 
-    /// The F2 provenance for the selected PCell's current parameters: its
-    /// [`ProduceMeta`] (`generator_id`, `engine_version`, `script_ref`,
+    /// The predicted F2 provenance for the selected PCell's current parameters:
+    /// its [`ProduceMeta`] (`generator_id`, `engine_version`, `script_ref`,
     /// `param_hash`), computed locally from [`PCellDef::produce_meta`].
     ///
-    /// Read-only: computing it never produces geometry (see the module doc); this
-    /// lane does not call `reticle_script::pcell::produce`.
+    /// A prediction, not a produce: computing it never runs the script (see the
+    /// module doc). [`PCellPanelState::regenerate`] is the real thing.
     #[must_use]
     pub fn selected_produce_meta(&self) -> ProduceMeta {
         self.selected_def().produce_meta(self.selected_params())
     }
 
-    /// Resets the selected PCell's parameters to its schema defaults.
+    /// The selected PCell's last real sandboxed-produce outcome, if
+    /// [`PCellPanelState::regenerate`] has run since the selection or its
+    /// parameters last changed.
+    #[must_use]
+    pub fn selected_produce_outcome(&self) -> Option<&ProduceOutcome> {
+        self.produced[self.selected].as_ref()
+    }
+
+    /// Runs a REAL sandboxed produce of the selected PCell over its current
+    /// parameters (`reticle_script::produce`, under `limits` against `tech`),
+    /// records the outcome, and returns it.
+    ///
+    /// This is the live counterpart to
+    /// [`PCellPanelState::selected_produce_meta`]: rather than only predicting the
+    /// F2 provenance from the definition, it actually runs the selected PCell's
+    /// script through the merged sandboxed producer and keeps whichever it
+    /// returns, a produced top cell's shape/instance/array counts plus its
+    /// stamped [`ProduceMeta`], or the sandbox's clean rejection message. Never
+    /// panics: `reticle_script::produce` is itself panic-free on any script or
+    /// parameter input (see its docs).
+    pub fn regenerate(&mut self, tech: &Technology, limits: SandboxLimits) -> &ProduceOutcome {
+        // Both borrows are shared (`selected_def`/`selected_params` take `&self`),
+        // so this scope ends before `self.produced[..]` needs `&mut self`; no
+        // clone of the definition or parameters is needed just to call `produce`.
+        let outcome = match produce(self.selected_def(), self.selected_params(), tech, limits) {
+            Ok((cell, meta)) => ProduceOutcome::Produced {
+                shape_count: cell.shapes.len(),
+                instance_count: cell.instances.len(),
+                array_count: cell.arrays.len(),
+                meta,
+            },
+            Err(e) => ProduceOutcome::Failed(e.to_string()),
+        };
+        self.produced[self.selected] = Some(outcome);
+        self.produced[self.selected]
+            .as_ref()
+            .expect("just inserted Some above")
+    }
+
+    /// Resets the selected PCell's parameters to its schema defaults, and clears
+    /// its recorded produce outcome (which described the parameters before the
+    /// reset).
     pub fn reset_selected_to_defaults(&mut self) {
         self.params[self.selected] = default_params(self.selected_schema());
+        self.produced[self.selected] = None;
     }
 
     /// Renders the form for the selected PCell's parameters into `ui`, mutating the
@@ -262,14 +360,23 @@ impl PCellPanelState {
                 }
             });
         }
+        if changed {
+            // The shown produce outcome (if any) described the parameters before
+            // this edit; clear it so `crate::app`'s Inspector never displays a
+            // stale real result next to freshly edited, not-yet-regenerated
+            // parameters.
+            self.produced[self.selected] = None;
+        }
         changed
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::PCellPanelState;
+    use super::{PCellPanelState, ProduceOutcome};
     use reticle_gen::FieldType;
+    use reticle_model::Technology;
+    use reticle_script::SandboxLimits;
 
     /// The demo catalog seeds at least one PCell whose schema exercises every field
     /// kind the form renders (Int/Bool/Enum), with defaults that carry a well-formed
@@ -354,5 +461,86 @@ mod tests {
         let before = state.selected();
         state.select(9999);
         assert_eq!(state.selected(), before);
+    }
+
+    /// A fresh state has never been produced.
+    #[test]
+    fn new_state_has_no_produce_outcome_yet() {
+        let state = PCellPanelState::new();
+        assert!(state.selected_produce_outcome().is_none());
+    }
+
+    /// `regenerate` runs the REAL sandboxed producer (not a local prediction): it
+    /// yields real geometry and its stamped `param_hash` equals
+    /// `PCellDef::effective_param_hash` over the current parameters, the exact
+    /// identity a cache-aware caller would key a regenerate lookup on.
+    #[test]
+    fn regenerate_runs_the_real_sandbox_and_matches_effective_param_hash() {
+        let mut state = PCellPanelState::new();
+        let tech = Technology::default();
+        let expected_hash = state
+            .selected_def()
+            .effective_param_hash(state.selected_params());
+
+        let outcome = state.regenerate(&tech, SandboxLimits::default());
+        match outcome {
+            ProduceOutcome::Produced {
+                shape_count, meta, ..
+            } => {
+                assert!(*shape_count >= 1, "the demo script draws real geometry");
+                assert_eq!(meta.generator_id, "user.sensor");
+                assert_eq!(
+                    meta.param_hash, expected_hash,
+                    "produce's stamped hash must equal effective_param_hash"
+                );
+            }
+            ProduceOutcome::Failed(msg) => {
+                panic!("expected the demo PCell to produce, sandbox rejected it: {msg}");
+            }
+        }
+        assert!(
+            state.selected_produce_outcome().is_some(),
+            "the outcome is recorded and retrievable"
+        );
+    }
+
+    /// The demo script's `guard_ring` parameter genuinely drives the produced
+    /// geometry (not a fixed/faked shape count): turning it on adds a second
+    /// shape.
+    #[test]
+    fn regenerate_shape_count_is_param_driven() {
+        let mut state = PCellPanelState::new();
+        let tech = Technology::default();
+
+        state.selected_params_mut()["guard_ring"] = serde_json::Value::from(false);
+        let without = match state.regenerate(&tech, SandboxLimits::default()) {
+            ProduceOutcome::Produced { shape_count, .. } => *shape_count,
+            ProduceOutcome::Failed(msg) => panic!("sandbox rejected: {msg}"),
+        };
+
+        state.selected_params_mut()["guard_ring"] = serde_json::Value::from(true);
+        let with = match state.regenerate(&tech, SandboxLimits::default()) {
+            ProduceOutcome::Produced { shape_count, .. } => *shape_count,
+            ProduceOutcome::Failed(msg) => panic!("sandbox rejected: {msg}"),
+        };
+
+        assert_eq!(without, 1, "guard_ring off draws just the body rect");
+        assert_eq!(with, 2, "guard_ring on adds the outer rect");
+    }
+
+    /// A reset after a regenerate clears the recorded outcome: it described the
+    /// pre-reset parameters, so showing it after would be stale, not real.
+    #[test]
+    fn reset_after_regenerate_clears_the_stale_outcome() {
+        let mut state = PCellPanelState::new();
+        let tech = Technology::default();
+        state.regenerate(&tech, SandboxLimits::default());
+        assert!(state.selected_produce_outcome().is_some());
+
+        state.reset_selected_to_defaults();
+        assert!(
+            state.selected_produce_outcome().is_none(),
+            "a reset invalidates the stale outcome"
+        );
     }
 }
