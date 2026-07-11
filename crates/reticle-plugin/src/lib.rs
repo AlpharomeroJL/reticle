@@ -24,4 +24,7 @@ pub mod host;
 pub use manifest::{ABI_VERSION, HostFn, Index, IndexEntry, Manifest, ManifestError, Permission};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use host::{EditDecodeError, Host, HostContext, HostError, Limits, RunOutcome};
+pub use host::{
+    EditDecodeError, Host, HostContext, HostError, Limits, RunOutcome, SelectedShape,
+    decode_edit_v0,
+};

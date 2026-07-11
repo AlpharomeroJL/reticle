@@ -27,8 +27,8 @@
 //! - `query_shapes(cell_ptr, cell_len) -> i32` ([`Permission::ReadDocument`]):
 //!   the shape count of the named cell, or `-1` bad pointer / `-2` bad UTF-8 /
 //!   `-3` cell not found.
-//! - `query_selection() -> i32` ([`Permission::ReadSelection`]): the selected
-//!   shape count.
+//! - `query_selection() -> i32` ([`Permission::ReadSelection`]): the number of
+//!   selected shapes that resolve to a real shape in the pre-run document snapshot.
 //! - `query_technology() -> i32` ([`Permission::ReadTechnology`]): the active
 //!   technology's `dbu_per_micron`.
 //! - `stage_edit(ptr, len) -> i32` ([`Permission::StageEdit`]): decodes a v0 edit
@@ -44,24 +44,42 @@
 //!
 //! Untrusted guest bytes; every count is capped against the remaining byte budget
 //! and a short or malformed record errors ([`EditDecodeError`]) rather than
-//! panicking:
+//! panicking. Two shared sub-encodings recur:
 //!
 //! ```text
-//! u8  opcode                          0x01 = AddShape
-//! -- AddShape --
-//! u16 cell_name_len                   capped at Limits::max_query_len
-//! u8  cell_name[cell_name_len]        UTF-8
-//! u16 layer, u16 datatype
-//! i32 x0, y0, x1, y1                  rectangle corners in DBU
+//! name       := u16 len   (capped at Limits::max_query_len) ++ len bytes UTF-8
+//! transform  := u8 orientation (0..8, per Orientation::code)
+//!               i32 tx, i32 ty                (translation, DBU)
+//!               u32 mag_num, u32 mag_den      (magnification; den != 0)
 //! ```
 //!
-//! `AddShape` is the only opcode the spike decodes; plugin-host adds the rest of
-//! the [`Edit`] vocabulary against the same framing.
+//! The opcode byte selects the record; every [`Edit`] variant has one:
+//!
+//! ```text
+//! u8 opcode
+//! 0x01 AddShape     : name cell, u16 layer, u16 datatype, i32 x0,y0,x1,y1
+//! 0x02 AddCell      : name cell                         (adds an empty cell)
+//! 0x03 RemoveCell   : name cell
+//! 0x04 RemoveShape  : name cell, u32 index
+//! 0x05 AddInstance  : name cell, name child, transform
+//! 0x06 AddArray     : name cell, name child, transform,
+//!                     u32 columns, u32 rows, i32 column_pitch, i32 row_pitch
+//! 0x07 AddLabel     : name cell, name text, i32 x, i32 y,
+//!                     u16 layer, u16 datatype, u8 anchor (0..5, per Anchor)
+//! 0x08 RemoveLabel  : name cell, u32 index
+//! ```
+//!
+//! The spike pinned `AddShape` (ADR 0116); plugin-host adds the rest of the
+//! [`Edit`] vocabulary against the same framing and `Cursor` cap discipline
+//! (ADR 0117). An index or count field is decoded raw and validated by the funnel
+//! ([`EditableDocument::apply`] bounds-checks it), so a decoded record is always a
+//! well-formed [`Edit`] even when it will not apply to a given document.
 
 use crate::manifest::{HostFn, Manifest, ManifestError, Permission};
-use reticle_geometry::{LayerId, Point, Rect};
+use reticle_geometry::{LayerId, Magnification, Orientation, Point, Rect, Transform};
 use reticle_model::{
-    Document, DocumentStore, DrawShape, Edit, EditableDocument, ModelError, ShapeKind,
+    Anchor, ArrayInstance, Cell, Document, DocumentStore, DrawShape, Edit, EditableDocument,
+    Instance, Label, ModelError, ShapeKind,
 };
 use std::fmt;
 use wasmi::{
@@ -75,8 +93,23 @@ pub const HOST_MODULE: &str = "reticle";
 /// functions.
 pub const HOST_MEMORY_EXPORT: &str = "memory";
 
-/// The v0 edit opcode for `AddShape` (the only record the spike decodes).
+/// v0 edit opcodes: one per [`Edit`] variant. `AddShape` (`0x01`) was pinned by
+/// the spike (ADR 0116); the rest are pinned by ADR 0117 on the same framing.
 const OP_ADD_SHAPE: u8 = 0x01;
+/// Opcode: add an empty cell by name.
+const OP_ADD_CELL: u8 = 0x02;
+/// Opcode: remove a cell by name.
+const OP_REMOVE_CELL: u8 = 0x03;
+/// Opcode: remove the shape at an index from a cell.
+const OP_REMOVE_SHAPE: u8 = 0x04;
+/// Opcode: add a single instance placement to a cell.
+const OP_ADD_INSTANCE: u8 = 0x05;
+/// Opcode: add an array placement to a cell.
+const OP_ADD_ARRAY: u8 = 0x06;
+/// Opcode: append a label to a cell.
+const OP_ADD_LABEL: u8 = 0x07;
+/// Opcode: remove the label at an index from a cell.
+const OP_REMOVE_LABEL: u8 = 0x08;
 
 /// Default execution fuel: a generous ceiling for a small plugin; a runaway
 /// plugin exhausts it and traps. Measured consumption is reported in
@@ -127,13 +160,42 @@ impl Default for Limits {
     }
 }
 
+/// A read-only reference to one selected shape: the cell that owns it and the
+/// index of the shape within that cell's `shapes`. The host resolves each
+/// reference against the pre-run document snapshot, so `query_selection` counts
+/// only selections that name a real shape.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct SelectedShape {
+    /// Name of the cell the selected shape lives in.
+    pub cell: String,
+    /// Index into that cell's `shapes`.
+    pub index: usize,
+}
+
+impl SelectedShape {
+    /// A reference to the shape at `index` in cell `cell`.
+    pub fn new(cell: impl Into<String>, index: usize) -> Self {
+        Self {
+            cell: cell.into(),
+            index,
+        }
+    }
+}
+
 /// The read-only inputs a run exposes to the plugin's query host functions, over
 /// and above the document snapshot (which the host takes from the
 /// [`EditableDocument`] passed to [`Host::run`]).
-#[derive(Clone, Copy, Debug, Default)]
+///
+/// The selection is passed as real shape references rather than a precomputed
+/// count so `query_selection` answers from actual document state: the host
+/// resolves each reference against the pre-run snapshot and returns the number
+/// that name a shape that exists, so a stale reference cannot inflate the answer
+/// and the count is reproducible across identical runs.
+#[derive(Clone, Debug, Default)]
 pub struct HostContext {
-    /// The number of currently-selected shapes, returned by `query_selection`.
-    pub selection_count: i32,
+    /// The shapes selected when the run begins. `query_selection` returns how many
+    /// of these resolve to a real shape in the pre-run document snapshot.
+    pub selection: Vec<SelectedShape>,
 }
 
 /// The outcome of a plugin run: the edits it staged, how many the funnel applied,
@@ -253,6 +315,12 @@ pub enum EditDecodeError {
     },
     /// The cell name was not valid UTF-8.
     BadUtf8,
+    /// A transform orientation code was not one of the eight valid values (`0..8`).
+    BadOrientation(u8),
+    /// A transform magnification record had a zero denominator (an undefined ratio).
+    ZeroMagDenominator,
+    /// A label anchor code was not one of the valid anchors (`0..5`).
+    BadAnchor(u8),
 }
 
 impl fmt::Display for EditDecodeError {
@@ -267,6 +335,13 @@ impl fmt::Display for EditDecodeError {
                 write!(f, "edit cell name is {len} bytes, over the {cap} cap")
             }
             Self::BadUtf8 => write!(f, "edit cell name is not valid UTF-8"),
+            Self::BadOrientation(code) => {
+                write!(f, "edit transform orientation code {code} is not in 0..8")
+            }
+            Self::ZeroMagDenominator => {
+                write!(f, "edit transform magnification denominator is zero")
+            }
+            Self::BadAnchor(code) => write!(f, "edit label anchor code {code} is not in 0..5"),
         }
     }
 }
@@ -361,9 +436,23 @@ impl Host {
         // plugin's own in-progress edits (this is what makes runs reproducible).
         let snapshot = doc.document().clone();
         let dbu_per_micron = snapshot.technology().dbu_per_micron;
+        // Resolve the selection against the snapshot so `query_selection` reflects
+        // real document state: a reference to a missing cell or an out-of-range shape
+        // index is dropped rather than counted, and the answer is reproducible from
+        // the pre-run snapshot exactly like the other read-only queries.
+        let selection_count = i32::try_from(
+            ctx.selection
+                .iter()
+                .filter(|s| match snapshot.cell(&s.cell) {
+                    Some(cell) => s.index < cell.shapes.len(),
+                    None => false,
+                })
+                .count(),
+        )
+        .unwrap_or(i32::MAX);
         let state = HostState {
             doc: snapshot,
-            selection_count: ctx.selection_count,
+            selection_count,
             dbu_per_micron,
             staged: Vec::new(),
             max_staged: limits.max_staged_edits,
@@ -573,26 +662,31 @@ fn read_guest_bytes(
     Some(buf)
 }
 
-/// Decodes a v0 edit record (see the module docs) from untrusted guest bytes.
+/// Decodes a v0 edit record (see the module docs) from untrusted guest bytes into
+/// the [`Edit`] it names.
 ///
-/// Every count is capped against the remaining byte budget through [`Cursor`], so
-/// a truncated or hostile record errors rather than over-reading or panicking.
-fn decode_edit_v0(bytes: &[u8], max_name: usize) -> Result<Edit, EditDecodeError> {
+/// Every length is capped both against the remaining byte budget (through
+/// `Cursor`) and against `max_name`, so a truncated, oversized, or otherwise
+/// hostile record returns a structured [`EditDecodeError`] rather than over-reading,
+/// over-allocating, or panicking. This is the one decoder behind the `stage_edit`
+/// host function and the target of the `plugin_decode_edit` cargo-fuzz target.
+///
+/// A decoded record is always a well-formed [`Edit`], but not necessarily one that
+/// applies to a given document: an index or a target cell is validated by the funnel
+/// ([`EditableDocument::apply`]), which reports a [`ModelError`] the run records and
+/// skips rather than aborting on.
+///
+/// # Errors
+///
+/// Returns an [`EditDecodeError`] for an unknown opcode, a truncated record, a name
+/// over `max_name` or not valid UTF-8, or an out-of-range orientation, a zero
+/// magnification denominator, or an unknown anchor.
+pub fn decode_edit_v0(bytes: &[u8], max_name: usize) -> Result<Edit, EditDecodeError> {
     let mut c = Cursor::new(bytes);
     let opcode = c.u8()?;
     match opcode {
         OP_ADD_SHAPE => {
-            let name_len = c.u16()? as usize;
-            if name_len > max_name {
-                return Err(EditDecodeError::NameTooLong {
-                    len: name_len,
-                    cap: max_name,
-                });
-            }
-            let name_bytes = c.take(name_len)?;
-            let cell = std::str::from_utf8(name_bytes)
-                .map_err(|_| EditDecodeError::BadUtf8)?
-                .to_owned();
+            let cell = read_name(&mut c, max_name)?;
             let layer = c.u16()?;
             let datatype = c.u16()?;
             let x0 = c.i32()?;
@@ -603,7 +697,123 @@ fn decode_edit_v0(bytes: &[u8], max_name: usize) -> Result<Edit, EditDecodeError
             let shape = DrawShape::new(LayerId::new(layer, datatype), ShapeKind::Rect(rect));
             Ok(Edit::AddShape { cell, shape })
         }
+        OP_ADD_CELL => {
+            let name = read_name(&mut c, max_name)?;
+            Ok(Edit::AddCell {
+                cell: Cell::new(name),
+            })
+        }
+        OP_REMOVE_CELL => {
+            let name = read_name(&mut c, max_name)?;
+            Ok(Edit::RemoveCell { name })
+        }
+        OP_REMOVE_SHAPE => {
+            let cell = read_name(&mut c, max_name)?;
+            let index = c.u32()? as usize;
+            Ok(Edit::RemoveShape { cell, index })
+        }
+        OP_ADD_INSTANCE => {
+            let cell = read_name(&mut c, max_name)?;
+            let child = read_name(&mut c, max_name)?;
+            let transform = decode_transform(&mut c)?;
+            Ok(Edit::AddInstance {
+                cell,
+                instance: Instance {
+                    cell: child,
+                    transform,
+                },
+            })
+        }
+        OP_ADD_ARRAY => {
+            let cell = read_name(&mut c, max_name)?;
+            let child = read_name(&mut c, max_name)?;
+            let transform = decode_transform(&mut c)?;
+            let columns = c.u32()?;
+            let rows = c.u32()?;
+            let column_pitch = c.i32()?;
+            let row_pitch = c.i32()?;
+            Ok(Edit::AddArray {
+                cell,
+                array: ArrayInstance {
+                    cell: child,
+                    transform,
+                    columns,
+                    rows,
+                    column_pitch,
+                    row_pitch,
+                },
+            })
+        }
+        OP_ADD_LABEL => {
+            let cell = read_name(&mut c, max_name)?;
+            let text = read_name(&mut c, max_name)?;
+            let x = c.i32()?;
+            let y = c.i32()?;
+            let layer = c.u16()?;
+            let datatype = c.u16()?;
+            let anchor = decode_anchor(c.u8()?)?;
+            Ok(Edit::AddLabel {
+                cell,
+                label: Label {
+                    text,
+                    position: Point::new(x, y),
+                    layer: LayerId::new(layer, datatype),
+                    anchor,
+                },
+            })
+        }
+        OP_REMOVE_LABEL => {
+            let cell = read_name(&mut c, max_name)?;
+            let index = c.u32()? as usize;
+            Ok(Edit::RemoveLabel { cell, index })
+        }
         other => Err(EditDecodeError::UnknownOpcode(other)),
+    }
+}
+
+/// Reads a length-prefixed name: a `u16` length capped at `max_name` and against
+/// the bytes that remain, then that many bytes decoded as UTF-8.
+fn read_name(c: &mut Cursor, max_name: usize) -> Result<String, EditDecodeError> {
+    let len = c.u16()? as usize;
+    if len > max_name {
+        return Err(EditDecodeError::NameTooLong { len, cap: max_name });
+    }
+    let bytes = c.take(len)?;
+    let name = std::str::from_utf8(bytes)
+        .map_err(|_| EditDecodeError::BadUtf8)?
+        .to_owned();
+    Ok(name)
+}
+
+/// Decodes a placement [`Transform`]: a `u8` orientation code (`0..8`), an `i32`
+/// translation, and a `u32 / u32` magnification whose denominator must be non-zero.
+fn decode_transform(c: &mut Cursor) -> Result<Transform, EditDecodeError> {
+    let code = c.u8()?;
+    if usize::from(code) >= Orientation::ALL.len() {
+        return Err(EditDecodeError::BadOrientation(code));
+    }
+    let orientation = Orientation::from_code(u32::from(code));
+    let tx = c.i32()?;
+    let ty = c.i32()?;
+    let num = c.u32()?;
+    let den = c.u32()?;
+    let magnification = Magnification::new(num, den).ok_or(EditDecodeError::ZeroMagDenominator)?;
+    Ok(Transform {
+        translation: Point::new(tx, ty),
+        orientation,
+        magnification,
+    })
+}
+
+/// Maps a `u8` anchor code to its [`Anchor`], matching `Anchor`'s declaration order.
+fn decode_anchor(code: u8) -> Result<Anchor, EditDecodeError> {
+    match code {
+        0 => Ok(Anchor::Center),
+        1 => Ok(Anchor::SouthWest),
+        2 => Ok(Anchor::SouthEast),
+        3 => Ok(Anchor::NorthWest),
+        4 => Ok(Anchor::NorthEast),
+        other => Err(EditDecodeError::BadAnchor(other)),
     }
 }
 
@@ -649,6 +859,12 @@ impl<'a> Cursor<'a> {
     fn u16(&mut self) -> Result<u16, EditDecodeError> {
         let b = self.take(2)?;
         Ok(u16::from_le_bytes([b[0], b[1]]))
+    }
+
+    /// Reads a little-endian `u32`.
+    fn u32(&mut self) -> Result<u32, EditDecodeError> {
+        let b = self.take(4)?;
+        Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
     /// Reads a little-endian `i32`.
@@ -752,6 +968,128 @@ mod tests {
                 buf[0] = OP_ADD_SHAPE;
             }
             let _ = decode_edit_v0(&buf, 256);
+        }
+    }
+
+    /// Appends a v0 length-prefixed name (`u16` length ++ UTF-8 bytes).
+    fn enc_name(out: &mut Vec<u8>, name: &str) {
+        let len = u16::try_from(name.len()).expect("test name fits in u16");
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+    }
+
+    /// Appends a v0 transform (`u8` orientation ++ `i32` tx,ty ++ `u32` num,den).
+    fn enc_transform(out: &mut Vec<u8>, orient: u8, tx: i32, ty: i32, num: u32, den: u32) {
+        out.push(orient);
+        out.extend_from_slice(&tx.to_le_bytes());
+        out.extend_from_slice(&ty.to_le_bytes());
+        out.extend_from_slice(&num.to_le_bytes());
+        out.extend_from_slice(&den.to_le_bytes());
+    }
+
+    /// A full, valid record for each opcode (used by the truncation sweep).
+    fn every_opcode_record() -> Vec<Vec<u8>> {
+        let mut add_cell = vec![OP_ADD_CELL];
+        enc_name(&mut add_cell, "SUB");
+
+        let mut rm_cell = vec![OP_REMOVE_CELL];
+        enc_name(&mut rm_cell, "SUB");
+
+        let mut rm_shape = vec![OP_REMOVE_SHAPE];
+        enc_name(&mut rm_shape, "TOP");
+        rm_shape.extend_from_slice(&1u32.to_le_bytes());
+
+        let mut inst = vec![OP_ADD_INSTANCE];
+        enc_name(&mut inst, "TOP");
+        enc_name(&mut inst, "CHILD");
+        enc_transform(&mut inst, 1, 1, 2, 1, 1);
+
+        let mut arr = vec![OP_ADD_ARRAY];
+        enc_name(&mut arr, "TOP");
+        enc_name(&mut arr, "BIT");
+        enc_transform(&mut arr, 0, 0, 0, 1, 1);
+        arr.extend_from_slice(&2u32.to_le_bytes());
+        arr.extend_from_slice(&2u32.to_le_bytes());
+        arr.extend_from_slice(&5i32.to_le_bytes());
+        arr.extend_from_slice(&5i32.to_le_bytes());
+
+        let mut label = vec![OP_ADD_LABEL];
+        enc_name(&mut label, "TOP");
+        enc_name(&mut label, "VDD");
+        label.extend_from_slice(&0i32.to_le_bytes());
+        label.extend_from_slice(&0i32.to_le_bytes());
+        label.extend_from_slice(&0u16.to_le_bytes());
+        label.extend_from_slice(&0u16.to_le_bytes());
+        label.push(0);
+
+        let mut rm_label = vec![OP_REMOVE_LABEL];
+        enc_name(&mut rm_label, "TOP");
+        rm_label.extend_from_slice(&0u32.to_le_bytes());
+
+        vec![add_cell, rm_cell, rm_shape, inst, arr, label, rm_label]
+    }
+
+    /// An out-of-range transform orientation code is a clean error, not a panic.
+    #[test]
+    fn rejects_bad_orientation() {
+        let mut b = vec![OP_ADD_INSTANCE];
+        enc_name(&mut b, "TOP");
+        enc_name(&mut b, "CHILD");
+        enc_transform(&mut b, 8, 0, 0, 1, 1); // code 8 is outside 0..8
+        assert_eq!(
+            decode_edit_v0(&b, 256).unwrap_err(),
+            EditDecodeError::BadOrientation(8)
+        );
+    }
+
+    /// A zero magnification denominator is a clean error (the ratio is undefined).
+    #[test]
+    fn rejects_zero_magnification_denominator() {
+        let mut b = vec![OP_ADD_INSTANCE];
+        enc_name(&mut b, "TOP");
+        enc_name(&mut b, "CHILD");
+        enc_transform(&mut b, 0, 0, 0, 1, 0); // den = 0
+        assert_eq!(
+            decode_edit_v0(&b, 256).unwrap_err(),
+            EditDecodeError::ZeroMagDenominator
+        );
+    }
+
+    /// An unknown label anchor code is a clean error.
+    #[test]
+    fn rejects_bad_anchor() {
+        let mut b = vec![OP_ADD_LABEL];
+        enc_name(&mut b, "TOP");
+        enc_name(&mut b, "VDD");
+        b.extend_from_slice(&0i32.to_le_bytes());
+        b.extend_from_slice(&0i32.to_le_bytes());
+        b.extend_from_slice(&0u16.to_le_bytes());
+        b.extend_from_slice(&0u16.to_le_bytes());
+        b.push(9); // anchor 9 is not in 0..5
+        assert_eq!(
+            decode_edit_v0(&b, 256).unwrap_err(),
+            EditDecodeError::BadAnchor(9)
+        );
+    }
+
+    /// Every strict prefix of a full record for EVERY opcode errors rather than
+    /// panicking: the count-against-remaining discipline holds across the whole
+    /// vocabulary, and the full record decodes.
+    #[test]
+    fn every_truncation_of_every_opcode_errors() {
+        for full in every_opcode_record() {
+            for n in 0..full.len() {
+                assert!(
+                    decode_edit_v0(&full[..n], 256).is_err(),
+                    "opcode {:#04x}: prefix of length {n} must not decode",
+                    full[0]
+                );
+            }
+            assert!(
+                decode_edit_v0(&full, 256).is_ok(),
+                "opcode {:#04x}: the full record must decode",
+                full[0]
+            );
         }
     }
 }
