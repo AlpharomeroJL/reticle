@@ -222,6 +222,14 @@ pub const SECTIONS: &[SectionSpec] = &[
         group: PanelGroup::Settings,
         default_open: false,
     },
+    // --- lane underlay: image underlay Inspector section (ADR 0118) ---
+    SectionSpec {
+        key: "underlay",
+        title: "Underlay",
+        group: PanelGroup::Settings,
+        default_open: false,
+    },
+    // --- end lane underlay ---
 ];
 
 /// The remembered state of the right Inspector panel.

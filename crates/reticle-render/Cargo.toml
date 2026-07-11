@@ -23,18 +23,32 @@ pollster = "0.4.0"
 glam = { version = "0.33.2", features = ["bytemuck"] }
 bytemuck = { version = "1.25.0", features = ["derive"] }
 
-# `image` is PNG-only: golden tests need no other codecs, and this avoids the
-# heavy AVIF encoder chain (rav1e) and its unmaintained transitive `paste`.
 # `proptest` drives the compaction test against a CPU reference over random bitsets.
 # `reticle-io` parses the committed SKY130 technology file so the 3D stack tests
 # run against the real process stack rather than hand-built entries.
 [dev-dependencies]
-image = { version = "0.25.10", default-features = false, features = ["png"] }
 proptest = "1.11.0"
 reticle-io = { workspace = true }
 # `reticle-drc` is the CPU oracle the GPU DRC-heatmap proptest checks against: the
 # same width+spacing rules, evaluated on the CPU, must agree with the compute path.
 reticle-drc = { workspace = true }
+
+# --- lane underlay: image-underlay decode is native-only (ADR 0118) ---
+# `image` is PNG-only-in-dev-deps no longer: this crate's own tests already use
+# it for the golden PNG, and `crate::underlay_image` (native side of the
+# underlay decode) now uses it as a real dependency, both formats. It stays
+# OUT of the wasm32 graph entirely: a byte measurement (`just bundle-gate`)
+# showed even `png`-feature-only added about 60 KiB gz (moxcms, image 0.25's
+# unconditional color-management dependency, ships regardless of which format
+# feature is enabled), landing 43.4 KiB over the +450 KiB budget on its own,
+# before JPEG. The browser underlay decodes through the browser's own image
+# codec instead (`reticle_app::underlay::decode_via_browser`, `createImageBitmap`
+# + a detached canvas readback), so the wasm32 bundle carries no Rust image
+# decoder at all and PNG/JPEG are equally supported in both native and browser
+# (see the ADR for the full measurement).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+# --- end lane underlay ---
 
 [[example]]
 name = "fps_bench"

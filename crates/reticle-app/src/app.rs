@@ -476,6 +476,21 @@ pub struct App {
     /// [`crate::tech_editor`]).
     tech_editor: TechEditorState,
 
+    // --- lane underlay: image underlay (die-photo/datasheet backdrop, ADR 0118) ---
+    /// The image-underlay state: the decoded image (if any), its
+    /// position/scale/opacity transform, and visibility (see
+    /// [`crate::underlay`]).
+    underlay: crate::underlay::UnderlayState,
+    /// The uploaded `egui` texture for the current underlay image, cached and
+    /// rebuilt only when `underlay`'s [`revision`](crate::underlay::UnderlayState::revision)
+    /// changes (see [`draw_underlay`](Self::draw_underlay)). Wrapped in
+    /// [`UnderlayTextureHandle`] because `egui::TextureHandle` itself has no
+    /// `Debug` impl.
+    underlay_texture: Option<UnderlayTextureHandle>,
+    /// The `underlay` revision [`underlay_texture`](Self::underlay_texture) was
+    /// built from; `None` before the first upload.
+    underlay_texture_rev: Option<u64>,
+    // --- end lane underlay ---
     /// The rebindable shortcut map every key press resolves through.
     keymap: Keymap,
     /// Whether the shortcuts editor window is open.
@@ -862,6 +877,30 @@ pub struct App {
     xschem: crate::xschem::XschemState,
     // --- end lane xschem ---
 }
+
+// --- lane underlay: image underlay (ADR 0118) ---
+/// Wraps an `egui::TextureHandle` so it can sit in a field of the
+/// `#[derive(Debug)]` [`App`] struct: `TextureHandle` itself has no `Debug`
+/// impl (it holds an opaque reference into the texture manager), so this
+/// prints just the id. Otherwise a thin pass-through: dropping it frees the
+/// texture exactly as dropping the wrapped handle would.
+struct UnderlayTextureHandle(egui::TextureHandle);
+
+impl std::fmt::Debug for UnderlayTextureHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("UnderlayTextureHandle")
+            .field(&self.0.id())
+            .finish()
+    }
+}
+
+impl UnderlayTextureHandle {
+    /// The texture id `egui::Painter::image` needs.
+    fn id(&self) -> egui::TextureId {
+        self.0.id()
+    }
+}
+// --- end lane underlay ---
 
 /// The view the app opens into.
 ///
@@ -1253,6 +1292,11 @@ impl App {
                 ..SearchState::default()
             },
             tech_editor: TechEditorState::new(),
+            // --- lane underlay: image underlay (ADR 0118) ---
+            underlay: crate::underlay::UnderlayState::default(),
+            underlay_texture: None,
+            underlay_texture_rev: None,
+            // --- end lane underlay ---
             keymap: load_keymap(),
             keymap_open: false,
             rebinding: None,
@@ -4067,6 +4111,17 @@ impl App {
                 self.status
                     .set(format!("Embed mode {}", on_off(self.is_embedded())));
             } // --- end lane embed ---
+            // --- lane underlay: image underlay ---
+            AppOp::UnderlayLoad => self.underlay_open_file_dialog(),
+            AppOp::UnderlayAlign => {
+                self.underlay.align_to_origin();
+                self.status.set("Underlay aligned to origin");
+            }
+            AppOp::UnderlayOpacity => {
+                self.underlay.step_opacity_preset();
+                let pct = (self.underlay.transform.opacity * 100.0).round() as i32;
+                self.status.set(format!("Underlay opacity {pct}%"));
+            } // --- end lane underlay ---
         }
     }
 
@@ -4245,6 +4300,244 @@ impl App {
         ));
     }
     // --- end lane xschem ---
+
+    // --- lane underlay: image underlay (die-photo/datasheet backdrop, ADR 0118) ---
+    /// Opens the native/browser file picker for a PNG or JPEG underlay image
+    /// (`underlay.load`).
+    ///
+    /// On native this blocks with `rfd::FileDialog`, reads the file, and
+    /// decodes it inline through the `image` crate
+    /// ([`apply_underlay_bytes`](Self::apply_underlay_bytes)), exactly
+    /// [`open_file_dialog`](Self::open_file_dialog)'s native arm. On the web
+    /// there is no filesystem, so `rfd::AsyncFileDialog` shows the hidden
+    /// HTML file input; the async task reads the bytes AND decodes them
+    /// through the browser's own codec (`crate::underlay::decode_via_browser`,
+    /// ADR 0118; not an intra-doc link, since the function only exists in a
+    /// wasm32 build), then posts the
+    /// already-decoded result into `self.underlay`'s pending-pick mailbox
+    /// (mirroring [`open_file_dialog`](Self::open_file_dialog)'s
+    /// `WebOpenInbox` use), which
+    /// [`drive_underlay_pick`](Self::drive_underlay_pick) drains on the next
+    /// frame.
+    fn underlay_open_file_dialog(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let picked = rfd::FileDialog::new()
+                .add_filter("Images", &["png", "jpg", "jpeg"])
+                .pick_file();
+            let Some(path) = picked else {
+                return;
+            };
+            let name = path.file_name().map_or_else(
+                || path.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            );
+            match std::fs::read(&path) {
+                Ok(bytes) => self.apply_underlay_bytes(&name, &bytes),
+                Err(e) => self.report_error(
+                    format!("Could not read {name}"),
+                    format!("path: {}\n{e}", path.display()),
+                ),
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mailbox = self.underlay.mailbox();
+            wasm_bindgen_futures::spawn_local(async move {
+                let Some(handle) = rfd::AsyncFileDialog::new()
+                    .add_filter("Images", &["png", "jpg", "jpeg"])
+                    .pick_file()
+                    .await
+                else {
+                    return;
+                };
+                let name = handle.file_name();
+                let bytes = handle.read().await;
+                let result = crate::underlay::decode_via_browser(&bytes).await;
+                mailbox.post(result.map(|image| (name, image)));
+            });
+        }
+    }
+
+    /// Drains the underlay's async browser-picker mailbox (a no-op on
+    /// native, where [`underlay_open_file_dialog`](Self::underlay_open_file_dialog)
+    /// reads and decodes inline; mirrors [`drive_web_open`](Self::drive_web_open)).
+    fn drive_underlay_pick(&mut self) {
+        if let Some(result) = self.underlay.take_pending_pick() {
+            self.apply_underlay_pick_result(result);
+        }
+    }
+
+    /// Applies one drained [`crate::underlay::PickResult`]: adopts a decoded
+    /// image or reports the failure. Split out of
+    /// [`drive_underlay_pick`](Self::drive_underlay_pick) so the outcome
+    /// logic is testable directly, independent of the mailbox itself (which
+    /// only actually carries a value on wasm32).
+    fn apply_underlay_pick_result(&mut self, result: crate::underlay::PickResult) {
+        match result {
+            Ok((name, image)) => self.apply_underlay_decoded(&name, image),
+            Err(msg) => self.report_error("Underlay load failed", msg),
+        }
+    }
+
+    /// Decodes `bytes` (named `name`, for the status/error message) through
+    /// the native `image` crate and adopts the result, revealing the
+    /// Inspector section on success and reporting the honest failure reason
+    /// otherwise. Native only: the wasm32 picker already decodes before it
+    /// ever reaches the mailbox (see
+    /// [`apply_underlay_decoded`](Self::apply_underlay_decoded)).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn apply_underlay_bytes(&mut self, name: &str, bytes: &[u8]) {
+        match self.underlay.load(bytes) {
+            Ok(()) => {
+                self.inspector.reveal("underlay");
+                self.status.set(format!("Loaded underlay '{name}'"));
+            }
+            Err(e) => self.report_error(format!("Could not load '{name}'"), e.to_string()),
+        }
+    }
+
+    /// Adopts an already-decoded underlay image (named `name`, for the status
+    /// message): the wasm32 browser-picker path, which decodes before
+    /// posting to the mailbox so `drive_underlay_pick` only ever adopts,
+    /// never fails, here.
+    fn apply_underlay_decoded(&mut self, name: &str, image: crate::underlay::DecodedImage) {
+        self.underlay.adopt_decoded(image);
+        self.inspector.reveal("underlay");
+        self.status.set(format!("Loaded underlay '{name}'"));
+    }
+
+    /// Paints the underlay image under the layout: called before
+    /// [`draw_grid`](Self::draw_grid) in the canvas paint order, so grid
+    /// lines and shapes always draw over it. Returns the shape index the
+    /// image was painted at (or `None` if nothing painted), so a test can
+    /// prove it lands first in a fresh layer's paint list (z-order is paint
+    /// order within a layer, `egui::Painter::image`'s return value);
+    /// production callers ignore the return value.
+    ///
+    /// Uploads (or re-uploads, on a new
+    /// [`revision`](crate::underlay::UnderlayState::revision)) an
+    /// `egui` texture from the decoded RGBA pixels the first time it is
+    /// needed, then paints it as a plain textured quad tinted by the
+    /// transform's opacity via `Color32::from_white_alpha` (not a raw
+    /// constructor: only the alpha channel is modulated, so the image's own
+    /// colors are never recolored).
+    fn draw_underlay(
+        &mut self,
+        painter: &egui::Painter,
+        screen: &ScreenRect,
+        ctx: &egui::Context,
+    ) -> Option<egui::layers::ShapeIdx> {
+        if !self.underlay.visible {
+            return None;
+        }
+        let (width, height) = {
+            let image = self.underlay.image()?;
+            (image.width, image.height)
+        };
+        if self.underlay_texture_rev != Some(self.underlay.revision()) {
+            let color_image = {
+                let image = self.underlay.image()?;
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [width as usize, height as usize],
+                    &image.rgba,
+                )
+            };
+            let handle = ctx.load_texture("underlay", color_image, egui::TextureOptions::default());
+            self.underlay_texture = Some(UnderlayTextureHandle(handle));
+            self.underlay_texture_rev = Some(self.underlay.revision());
+        }
+        let handle = self.underlay_texture.as_ref()?;
+        let world = self.underlay.transform.world_rect(width, height);
+        let (sx0, sy0) = self.camera.world_to_screen(screen, world.min);
+        let (sx1, sy1) = self.camera.world_to_screen(screen, world.max);
+        let rect = EguiRect::from_two_pos(Pos2::new(sx0, sy0), Pos2::new(sx1, sy1));
+        let uv = EguiRect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0));
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let alpha = (self.underlay.transform.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let tint = Color32::from_white_alpha(alpha);
+        Some(painter.image(handle.id(), rect, uv, tint))
+    }
+
+    /// Draws the Underlay Inspector section (Settings group; ADR 0118): the
+    /// load button and visibility toggle, the current image's size or load
+    /// error, and the position/scale/opacity fields the sliders (continuous)
+    /// and the `underlay.align` / `underlay.opacity` commands (discrete
+    /// presets) both drive through the same [`UnderlayTransform`](crate::underlay::UnderlayTransform)
+    /// setters.
+    fn underlay_section(&mut self, ui: &mut egui::Ui) {
+        let ctx = self.comp_ctx();
+
+        ui.horizontal(|ui| {
+            if components::Button::secondary("Load image...")
+                .show(ui, ctx)
+                .clicked()
+            {
+                self.underlay_open_file_dialog();
+            }
+            if self.underlay.has_image() {
+                let mut visible = self.underlay.visible;
+                if ui.checkbox(&mut visible, "Visible").changed() {
+                    self.underlay.visible = visible;
+                }
+            }
+        });
+
+        if let Some(msg) = self.underlay.last_error.clone() {
+            ui.colored_label(ctx.tokens.danger, msg);
+        }
+
+        let Some((width, height)) = self.underlay.image().map(|img| (img.width, img.height)) else {
+            ui.label(egui::RichText::new("No underlay image loaded.").color(ctx.tokens.text_weak));
+            return;
+        };
+        ui.label(egui::RichText::new(format!("{width}x{height} px")).color(ctx.tokens.text_weak));
+
+        ui.horizontal(|ui| {
+            ui.label("Position");
+            let mut x = self.underlay.transform.x;
+            let mut y = self.underlay.transform.y;
+            let changed_x = ui
+                .add(egui::DragValue::new(&mut x).speed(1.0).prefix("x: "))
+                .changed();
+            let changed_y = ui
+                .add(egui::DragValue::new(&mut y).speed(1.0).prefix("y: "))
+                .changed();
+            if changed_x || changed_y {
+                self.underlay.transform.set_position(x, y);
+            }
+        });
+
+        let mut scale = self.underlay.transform.scale;
+        if ui
+            .add(
+                egui::DragValue::new(&mut scale)
+                    .speed(0.01)
+                    .range(crate::underlay::MIN_SCALE..=1.0e6)
+                    .prefix("Scale: "),
+            )
+            .changed()
+        {
+            self.underlay.transform.set_scale(scale);
+        }
+
+        let mut opacity = self.underlay.transform.opacity;
+        if ui
+            .add(egui::Slider::new(&mut opacity, 0.0..=1.0).text("Opacity"))
+            .changed()
+        {
+            self.underlay.transform.set_opacity(opacity);
+        }
+
+        if components::Button::secondary("Align to origin")
+            .show(ui, ctx)
+            .clicked()
+        {
+            self.underlay.align_to_origin();
+            self.status.set("Underlay aligned to origin");
+        }
+    }
+    // --- end lane underlay ---
 
     // --- lane nl-edit: natural-language edit command bar ---
     /// Parses [`nl_edit_input`](Self::nl_edit_input) as a natural-language edit
@@ -5683,6 +5976,9 @@ impl App {
                     "Technology editor",
                     Self::tech_editor_panel,
                 );
+                // --- lane underlay: image underlay panel (ADR 0118) ---
+                self.inspector_section(ui, ctx, "underlay", "Underlay", Self::underlay_section);
+                // --- end lane underlay ---
             }
         }
     }
@@ -11239,6 +11535,12 @@ impl App {
             self.hover_pick = None;
         }
 
+        // --- lane underlay: paint the image underlay first, so the grid and
+        // every shape below always draw over it (ADR 0118). The returned
+        // shape index is only meaningful to the z-order test; discarded here.
+        let _ = self.draw_underlay(&painter, &screen, ui.ctx());
+        // --- end lane underlay ---
+
         // Draw grid + rulers under the geometry.
         if self.grid.visible {
             self.draw_grid(&painter, &screen);
@@ -13737,6 +14039,11 @@ impl eframe::App for App {
         // recent-list load on the first wasm frame, and apply whatever those async
         // tasks have posted since last frame. A no-op on native.
         self.drive_web_open(&ctx);
+
+        // --- lane underlay: drain the async image-picker mailbox (wasm only; a
+        // no-op on native, mirroring drive_web_open above, ADR 0118) ---
+        self.drive_underlay_pick();
+        // --- end lane underlay ---
 
         // Drive the served-archive browse: kick off the `?archive=` open on the first
         // wasm frame and install the streamed scene once it arrives. A no-op on native
@@ -16359,4 +16666,147 @@ mod tests {
         assert_eq!(csv.lines().count(), 1 + set.time_fs.len());
     }
     // --- end lane waveform-ui ---
+
+    // --- lane underlay: image underlay (die-photo/datasheet backdrop, ADR 0118) ---
+    /// Committed tiny (6x4) PNG fixture, shared with `crate::underlay`'s own
+    /// tests; `include_bytes!` resolves relative to this source file.
+    const UNDERLAY_TEST_PNG: &[u8] = include_bytes!("../tests/fixtures/underlay/tiny.png");
+
+    /// `draw_underlay` paints before `draw_grid` in the real canvas paint
+    /// order (see the call sites in the pane-drawing method): proves this
+    /// with the actual production functions rather than a parallel test-only
+    /// path. `egui::Painter::image`/`line_segment` append to the layer's
+    /// paint list in call order, so the underlay landing at shape index 0 on
+    /// a fresh layer means everything painted after it (the grid here,
+    /// shapes in the real frame) has a strictly higher index and therefore
+    /// sits on top (paint order is z-order within one layer).
+    #[test]
+    fn draw_underlay_paints_before_the_grid_so_it_sits_under_the_layout() {
+        let mut app = App::new();
+        app.underlay
+            .load(UNDERLAY_TEST_PNG)
+            .expect("tiny png loads");
+
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        let layer_id = egui::LayerId::new(egui::Order::Middle, egui::Id::new("underlay_z_order"));
+        let painter = egui::Painter::new(ctx.clone(), layer_id, EguiRect::EVERYTHING);
+        let screen = ScreenRect::new(0.0, 0.0, 400.0, 300.0);
+
+        let underlay_idx = app
+            .draw_underlay(&painter, &screen, &ctx)
+            .expect("a loaded, visible underlay paints a shape");
+        assert_eq!(
+            underlay_idx.0, 0,
+            "the underlay must be the first shape painted into a fresh layer"
+        );
+
+        app.draw_grid(&painter, &screen);
+        let _ = ctx.end_pass();
+    }
+
+    /// No image loaded, or loaded but hidden: `draw_underlay` paints nothing
+    /// (returns `None`) rather than a stray shape.
+    #[test]
+    fn draw_underlay_paints_nothing_when_empty_or_hidden() {
+        let mut app = App::new();
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        let layer_id = egui::LayerId::new(egui::Order::Middle, egui::Id::new("underlay_empty"));
+        let painter = egui::Painter::new(ctx.clone(), layer_id, EguiRect::EVERYTHING);
+        let screen = ScreenRect::new(0.0, 0.0, 400.0, 300.0);
+
+        assert!(
+            app.draw_underlay(&painter, &screen, &ctx).is_none(),
+            "nothing loaded yet"
+        );
+
+        app.underlay.load(UNDERLAY_TEST_PNG).expect("loads");
+        app.underlay.visible = false;
+        assert!(
+            app.draw_underlay(&painter, &screen, &ctx).is_none(),
+            "loaded but hidden"
+        );
+        let _ = ctx.end_pass();
+    }
+
+    /// `underlay.load`, `underlay.align`, and `underlay.opacity` are reachable
+    /// through the same registry `dispatch` path every other command uses
+    /// (not just the pure `UnderlayState` setters `crate::underlay`'s own
+    /// tests exercise directly).
+    // Exact literal comparisons: `underlay.align`/`underlay.opacity` assign
+    // fixed constants (origin, scale 1.0, the 0.75 preset), no accumulated
+    // float arithmetic, so equality is exact in IEEE 754 binary32 (matches
+    // `crate::underlay`'s own tests' convention).
+    #[allow(clippy::float_cmp)]
+    #[test]
+    fn underlay_align_and_opacity_commands_dispatch_through_the_registry() {
+        let mut app = App::new();
+        app.underlay.transform.set_position(42.0, -7.0);
+        app.underlay.transform.set_scale(3.0);
+        app.underlay.transform.set_opacity(1.0);
+
+        app.dispatch(CommandId("underlay.align"));
+        assert_eq!(
+            (app.underlay.transform.x, app.underlay.transform.y),
+            (0.0, 0.0)
+        );
+        assert_eq!(app.underlay.transform.scale, 1.0);
+
+        app.dispatch(CommandId("underlay.opacity"));
+        assert_eq!(app.underlay.transform.opacity, 0.75);
+    }
+
+    /// A malformed "image" (plain garbage bytes) reports a status/notification
+    /// failure rather than panicking, through the native decode path
+    /// (`apply_underlay_bytes`) the native file dialog calls.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_malformed_underlay_pick_reports_failure_not_panic() {
+        let mut app = App::new();
+        app.apply_underlay_bytes("bad.png", b"not an image, just garbage bytes");
+        assert!(!app.underlay.has_image());
+        assert_eq!(
+            app.notifications().max_severity(),
+            Some(crate::notify::Severity::Error),
+            "a malformed pick must surface as an error notification"
+        );
+    }
+
+    /// The wasm picker's outcome handling (`apply_underlay_pick_result`)
+    /// surfaces a decode failure the same way `apply_underlay_bytes` does,
+    /// exercised directly (rather than round-tripped through the mailbox,
+    /// which only actually carries a value on wasm32): an `Err` is what
+    /// `decode_via_browser` posts on a rejected `createImageBitmap` promise.
+    #[test]
+    fn a_failed_browser_decode_reports_failure_not_panic() {
+        let mut app = App::new();
+        app.apply_underlay_pick_result(Err("the browser could not decode the image".to_owned()));
+        assert!(!app.underlay.has_image());
+        assert_eq!(
+            app.notifications().max_severity(),
+            Some(crate::notify::Severity::Error)
+        );
+    }
+
+    /// The wasm picker's success path (`apply_underlay_pick_result` ->
+    /// `apply_underlay_decoded`) adopts an already-decoded image and reveals
+    /// the Inspector section, exercised directly for the same reason as the
+    /// failure case above.
+    #[test]
+    fn a_decoded_browser_pick_adopts_the_image_and_reveals_the_section() {
+        let mut app = App::new();
+        app.inspector.collapsed = true;
+        let image = crate::underlay::DecodedImage {
+            width: 6,
+            height: 4,
+            rgba: vec![0_u8; 6 * 4 * 4],
+        };
+        app.apply_underlay_pick_result(Ok(("tiny.png".to_owned(), image)));
+        assert!(app.underlay.has_image());
+        assert!(app.underlay.visible);
+        assert!(!app.inspector.collapsed);
+        assert!(app.inspector.is_open("underlay"));
+    }
+    // --- end lane underlay ---
 }

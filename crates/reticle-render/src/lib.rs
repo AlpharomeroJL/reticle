@@ -40,6 +40,9 @@ mod pipelines;
 mod retained;
 mod surface;
 mod target;
+// --- lane underlay: image-underlay decode (ADR 0118) ---
+mod underlay_image;
+// --- end lane underlay ---
 mod view;
 
 pub use context::WgpuContext;
@@ -63,6 +66,17 @@ pub use retained::{
 };
 pub use surface::RetainedRenderer;
 pub use target::{OFFSCREEN_SAMPLE_COUNT, OffscreenTarget, TARGET_FORMAT};
+// --- lane underlay: image-underlay decode (ADR 0118) ---
+// `DecodedImage` is the shared, unconditional result shape; the native decode
+// function and its error type are native-only (the wasm32 side decodes
+// through the browser's own codec instead, `reticle_app::underlay`; see
+// `underlay_image`'s module doc for the measured reason).
+pub use underlay_image::DecodedImage;
+#[cfg(not(target_arch = "wasm32"))]
+pub use underlay_image::{
+    MAX_DECODED_PIXELS, MAX_ENCODED_BYTES, UnderlayImageError, decode as decode_underlay_image,
+};
+// --- end lane underlay ---
 pub use view::ViewUniform;
 
 use reticle_model::{Camera, Document, Renderer};
