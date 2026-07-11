@@ -37,6 +37,7 @@
   - [Multi-writer collaboration](multi-writer.md)
   - [The relay: two implementations, one protocol](relay.md)
   - [Comments and annotations](comments.md)
+  - [Classroom mode](classroom.md)
 - [Scripting](scripting.md)
 
 # Automation and agents
@@ -51,6 +52,13 @@
   - [Multimodal verification](multimodal-verification.md)
   - [Leaderboard](leaderboard.md)
   - [Submitting a run](submitting.md)
+
+# Simulation
+
+- [Circuit simulation](simulation.md)
+- [SPICE netlist export](spice-export.md)
+- [xschem interoperability](xschem-interop.md)
+- [Waveform viewer](waveforms.md)
 
 # Tape-out
 

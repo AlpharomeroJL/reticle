@@ -1,0 +1,23 @@
+* Reticle SPICE exchange contract: an extracted CMOS inverter (sky130_fd_sc_hd__inv_1).
+*
+* This is the Phase 3 interchange fixture. The `netlist` lane's SPICE writer
+* (reticle-extract) emits this form from an extracted DeviceNetlist (device.rs);
+* the `xschem` lane reads it (file.export_spice round-trip and xschem.import_probe)
+* fixture-first, so the two lanes do not block on each other. See
+* spice_exchange_inverter.json for the canonical structural form and
+* docs/src/spice-export.md for the subset.
+*
+* Exchange subset (both read and written by Reticle):
+*   - '*' full-line comments and blank lines
+*   - one `.subckt NAME <ports...>` / `.ends` wrapper
+*   - subcircuit device instance 'X' cards: Xname <d> <g> <s> <b> <model> w= l=
+*   - decimal-micron device params w= (channel width) and l= (channel length)
+*   - `.end`
+* Node names are the extracted net names; models are the PDK device models.
+* Reticle's device recognition extracts kind + terminal nets + W/L only (see
+* device.rs scope); area/perimeter params (ad/pd/as/ps) are deliberately absent.
+.subckt sky130_fd_sc_hd__inv_1 VPB VNB VGND VPWR A Y
+X0 Y A VGND VNB sky130_fd_pr__nfet_01v8 w=0.65 l=0.15
+X1 Y A VPWR VPB sky130_fd_pr__pfet_01v8_hvt w=1 l=0.15
+.ends
+.end

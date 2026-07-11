@@ -1,0 +1,26 @@
+{
+  "_comment": "Phase 3 SPICE exchange contract, canonical structural form. Pairs with spice_exchange_inverter.spice. The netlist lane asserts its SPICE writer emits this structure from an extracted DeviceNetlist (reticle-extract device.rs: kind, terminal nets, and W/L in DBU); the xschem lane asserts its reader parses this structure. Params w/l are strings (decimal microns, DBU divided by the tech dbu-per-micron) so the fixture is byte-stable and free of float-formatting drift. Reticle extracts W/L only: area/perimeter (ad/pd/as/ps) are deliberately absent. Probes bridge SPICE nodes to F4 waveform records (Quantity variants voltage/current/charge).",
+  "subckt": "sky130_fd_sc_hd__inv_1",
+  "ports": ["VPB", "VNB", "VGND", "VPWR", "A", "Y"],
+  "nodes": ["VPB", "VNB", "VGND", "VPWR", "A", "Y"],
+  "devices": [
+    {
+      "kind": "nmos",
+      "name": "X0",
+      "terminals": { "drain": "Y", "gate": "A", "source": "VGND", "bulk": "VNB" },
+      "model": "sky130_fd_pr__nfet_01v8",
+      "params": { "w": "0.65", "l": "0.15" }
+    },
+    {
+      "kind": "pmos",
+      "name": "X1",
+      "terminals": { "drain": "Y", "gate": "A", "source": "VPWR", "bulk": "VPB" },
+      "model": "sky130_fd_pr__pfet_01v8_hvt",
+      "params": { "w": "1", "l": "0.15" }
+    }
+  ],
+  "probes": [
+    { "id": "in", "node": "A", "quantity": "voltage" },
+    { "id": "out", "node": "Y", "quantity": "voltage" }
+  ]
+}
