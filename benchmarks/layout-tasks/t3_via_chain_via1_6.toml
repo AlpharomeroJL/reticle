@@ -1,0 +1,5 @@
+id = "t3_via_chain_via1_6"
+tier = 3
+prompt = "Create a cell named top. Connect a met1 (68/20) strap to a met2 (69/20) strap with at least six via1 (68/44) vias, all sharing one met1/met2 net."
+technology = "sky130.tech"
+checker = "via_chain:via=68/44,vias=6"

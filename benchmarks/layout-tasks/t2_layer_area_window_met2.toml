@@ -1,0 +1,5 @@
+id = "t2_layer_area_window_met2"
+tier = 2
+prompt = "Create a cell named top and draw met2 (69/20) geometry whose total area falls between 100000 and 300000 dbu^2, inclusive, for example one 400x400 dbu rectangle (160000 dbu^2). Too little or too much met2 area fails."
+technology = "sky130.tech"
+checker = "layer_area:layer=69/20,min_area=100000,max_area=300000"

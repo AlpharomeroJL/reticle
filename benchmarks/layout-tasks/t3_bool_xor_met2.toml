@@ -1,0 +1,5 @@
+id = "t3_bool_xor_met2"
+tier = 3
+prompt = "Create a cell named top. Two 300x300 met1 (68/20) squares overlap in a 100x300 strip: one with its lower-left corner at (0,0) and one at (200,0). Write their XOR (symmetric difference) to met2 (69/20) and remove the met1 inputs; the result is the two 200x300 flanks, total area 120000 dbu^2, leaving met1 empty."
+technology = "sky130.tech"
+checker = "boolean_result:layer=69/20,min_area=119000,max_area=121000,cleared=68/20"

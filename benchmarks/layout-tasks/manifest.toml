@@ -23,7 +23,16 @@
 # generator to build a per-layer shape-count fingerprint the graded document must meet
 # and requires the result to be DRC-clean under the SKY130 subset. Bump `version` when
 # tasks change.
-version = "0.5.0"
+#
+# v0.6.0 adds 5 coverage tasks that exercise checker code paths no earlier task reached:
+# a `shape_count` with both a min and a max bound (the count-range branch), a `layer_area`
+# with both a min and a max bound (the area-window branch), a `contact_stack` on the via2
+# (69/44) met2/met3 stack with an enclosure floor, a `boolean_result` pinned to the XOR
+# area (union/intersection/difference were already covered, XOR was not), and a six-via
+# via1 chain. Each is proved solvable and graded by a deterministic MockModel script in
+# `crates/reticle-bench/tests/new_tasks_freeze.rs`, which also pins the frozen output
+# (result records and the rendered leaderboard) byte-for-byte across two runs.
+version = "0.6.0"
 tasks = [
     "t1_place_met1_rect",
     "t1_drc_clean_met1",
@@ -108,4 +117,9 @@ tasks = [
     "t3_gen_test_serpentine",
     "t3_gen_pad_ring",
     "t3_gen_seal_ring",
+    "t2_shape_count_range_li1",
+    "t2_layer_area_window_met2",
+    "t3_contact_stack_via2_enc",
+    "t3_bool_xor_met2",
+    "t3_via_chain_via1_6",
 ]
