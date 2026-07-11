@@ -75,4 +75,5 @@
 - [Deployment](deployment.md)
   - [Archive hosting](archive-hosting.md)
   - [Install and offline (PWA)](pwa.md)
+  - [Desktop (Tauri)](desktop.md)
 - [Contributing](contributing.md)

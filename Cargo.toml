@@ -50,7 +50,17 @@ members = [
 # The gate runs clippy/test/doc with `--workspace`, which ignores
 # `default-members`, so `exclude` is the only mechanism that truly keeps it out.
 # See docs/decisions/0087.
-exclude = ["tools/reticle-dev-mcp", "tools/crate-docs-mcp", "fuzz", "crates/reticle-py"]
+exclude = [
+    "tools/reticle-dev-mcp",
+    "tools/crate-docs-mcp",
+    "fuzz",
+    "crates/reticle-py",
+    # The Tauri desktop shell (ADR 0119): heavy Tauri/wry/webview2 deps that must
+    # never enter `just ci`, `just wasm-build`, or `cargo nextest run --workspace`.
+    # It is its own standalone package with its own Cargo.lock, matching the
+    # crates/reticle-py precedent above. See docs/decisions/0119-tauri-desktop.md.
+    "desktop",
+]
 
 [workspace.package]
 version = "8.1.0"
