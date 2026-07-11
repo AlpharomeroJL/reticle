@@ -156,6 +156,14 @@ pub const SECTIONS: &[SectionSpec] = &[
         group: PanelGroup::Review,
         default_open: false,
     },
+    // --- lane trace-ui: net-trace Inspector section (F3 consumer; ADR 0103) ---
+    SectionSpec {
+        key: "trace",
+        title: "Trace",
+        group: PanelGroup::Review,
+        default_open: false,
+    },
+    // --- end lane trace-ui ---
     // Automate
     SectionSpec {
         key: "agent",

@@ -155,6 +155,9 @@ pub mod tinytapeout;
 pub mod tinytapeout_example;
 pub mod tool;
 pub mod tour;
+// --- lane trace-ui: net-trace Inspector panel (F3 consumer; ADR 0103) ---
+pub mod trace_panel;
+// --- end lane trace-ui ---
 pub mod usecases;
 pub mod view3d;
 pub mod viewer;

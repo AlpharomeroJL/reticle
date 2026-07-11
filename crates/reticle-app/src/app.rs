@@ -400,6 +400,13 @@ pub struct App {
     /// (see [`crate::review_panel`]); appends its verdict as an ordinary comment.
     review: crate::review_panel::ReviewPanel,
     // --- end lane review ---
+    // --- lane trace-ui: net-trace panel (F3 consumer; ADR 0103) ---
+    /// The Trace Inspector section's state: net-at-point/net-extent readouts and
+    /// the shorts/opens navigator (see [`crate::trace_panel`]). Fixture-first:
+    /// populated from the committed F3 fixture until the trace-api lane's live
+    /// queries land (Gate 2).
+    trace: crate::trace_panel::TracePanelState,
+    // --- end lane trace-ui ---
     /// DRC-as-you-type: the incremental checker re-run on every edit so violations are
     /// underlined the moment geometry is drawn (see [`crate::live_drc`]).
     live_drc: crate::live_drc::LiveDrc,
@@ -1127,6 +1134,9 @@ impl App {
             // --- lane review: review panel ---
             review: crate::review_panel::ReviewPanel::new(),
             // --- end lane review ---
+            // --- lane trace-ui: net-trace panel ---
+            trace: crate::trace_panel::TracePanelState::new(),
+            // --- end lane trace-ui ---
             live_drc: crate::live_drc::LiveDrc::new(),
             live_drc_on: false,
             live_pending: crate::history::Dirty::None,
@@ -3861,6 +3871,13 @@ impl App {
             AppOp::PcellEditParams => self.pcell_edit_params(),
             AppOp::PcellRegenerate => self.pcell_regenerate(),
             // --- end lane pcell-inspect ---
+            // --- lane trace-ui: net-trace panel ---
+            AppOp::TraceAtPoint => self.trace_query_at_point(),
+            AppOp::TraceNetExtent => self.trace_query_extent(),
+            AppOp::TraceShortsOpens => self.trace_query_report(),
+            AppOp::TraceNext => self.trace_select_next(),
+            AppOp::TracePrev => self.trace_select_prev(),
+            // --- end lane trace-ui ---
         }
     }
 
@@ -5136,6 +5153,9 @@ impl App {
                 self.inspector_section(ui, ctx, "drc", "DRC", Self::drc_panel);
                 self.inspector_section(ui, ctx, "diff", "Layout diff", Self::diff_panel);
                 self.inspector_section(ui, ctx, "comments", "Comments", Self::comment_panel);
+                // --- lane trace-ui: net-trace panel ---
+                self.inspector_section(ui, ctx, "trace", "Trace", Self::trace_section);
+                // --- end lane trace-ui ---
             }
             PanelGroup::Automate => {
                 self.inspector_section(ui, ctx, "agent", "Agent (preview)", Self::agent_section);
@@ -12508,6 +12528,181 @@ impl App {
         let b = self.world_pos_to_screen(screen, r.max);
         EguiRect::from_two_pos(a, b)
     }
+
+    // --- lane trace-ui: net-trace panel (F3 consumer; ADR 0103) ---
+    /// Loads the net-at-point readout and reveals the Trace section
+    /// (`trace.at_point`; catalog 67 event-driven expand).
+    ///
+    /// A stand-in for the trace-api lane's live net-at-point query until Gate 2
+    /// (see [`crate::trace_panel`]): this is exactly the call the live lane
+    /// replaces.
+    fn trace_query_at_point(&mut self) {
+        self.trace
+            .load_at_point(crate::trace_panel::fixture_at_point());
+        self.status.set("Trace: net at point");
+        self.inspector.reveal("trace");
+    }
+
+    /// Loads the net-extent readout and reveals the Trace section
+    /// (`trace.net_extent`). See `trace_query_at_point`.
+    fn trace_query_extent(&mut self) {
+        self.trace.load_extent(crate::trace_panel::fixture_extent());
+        self.status.set("Trace: net extent");
+        self.inspector.reveal("trace");
+    }
+
+    /// Loads the shorts/opens report and reveals the Trace section
+    /// (`trace.shorts_opens`). See `trace_query_at_point`.
+    fn trace_query_report(&mut self) {
+        let report = crate::trace_panel::fixture_report();
+        let n = report.len();
+        self.trace.load_report(report);
+        self.status.set(format!("Trace: {n} short/open result(s)"));
+        self.inspector.reveal("trace");
+    }
+
+    /// Advances the shorts/opens navigator to the next row (`trace.next`).
+    fn trace_select_next(&mut self) {
+        self.trace.select_next();
+    }
+
+    /// Moves the shorts/opens navigator to the previous row (`trace.prev`).
+    fn trace_select_prev(&mut self) {
+        self.trace.select_prev();
+    }
+
+    /// Draws the Trace Inspector section: query actions, the net-at-point and
+    /// net-extent readouts, and (via `trace_result_list`) the shorts/opens
+    /// navigable list (ADR 0103).
+    ///
+    /// Modeled on [`crate::review_panel`]: [`crate::trace_panel::TracePanelState`]
+    /// carries the pure, unit-tested state and this method is the thin egui glue,
+    /// styled entirely from [`theme::components`]/[`theme::tokens`].
+    fn trace_section(&mut self, ui: &mut egui::Ui) {
+        let ctx = self.comp_ctx();
+        ui.horizontal(|ui| {
+            if components::Button::secondary("Net at point")
+                .show(ui, ctx)
+                .clicked()
+            {
+                self.trace_query_at_point();
+            }
+            if components::Button::secondary("Net extent")
+                .show(ui, ctx)
+                .clicked()
+            {
+                self.trace_query_extent();
+            }
+            if components::Button::secondary("Shorts/opens")
+                .show(ui, ctx)
+                .clicked()
+            {
+                self.trace_query_report();
+            }
+        });
+
+        if self.trace.is_empty() {
+            components::EmptyState::new(
+                "No trace results",
+                "Query a net or check shorts and opens to see results here.",
+            )
+            .show(ui, ctx);
+            return;
+        }
+        ui.separator();
+
+        if let Some(at_point) = self.trace.at_point() {
+            ui.label(
+                egui::RichText::new(format!(
+                    "Net at point: {}",
+                    crate::trace_panel::format_at_point(at_point)
+                ))
+                .color(ctx.tokens.text),
+            );
+        }
+        if let Some(extent) = self.trace.extent() {
+            ui.label(
+                egui::RichText::new(format!(
+                    "Net extent: {}",
+                    crate::trace_panel::format_extent(extent)
+                ))
+                .color(ctx.tokens.text),
+            );
+        }
+
+        // The shorts/opens navigator only appears once a check has run (distinct
+        // from a clean 0-result check, which still shows the count and a Clean
+        // badge: never fabricate a result for a query never made).
+        if self.trace.report().is_some() {
+            self.trace_result_list(ui, ctx);
+        }
+    }
+
+    /// Draws the shorts/opens count and Clean badge, the prev/next navigator, and
+    /// the scrollable navigable list. Split out of `trace_section` to keep each
+    /// method focused (mirrors how `drc_result_list` splits out of `drc_panel`).
+    fn trace_result_list(&mut self, ui: &mut egui::Ui, ctx: theme::components::Ctx) {
+        ui.separator();
+        let count = self.trace.row_count();
+        let clean = self
+            .trace
+            .report()
+            .is_some_and(reticle_extract::query::ShortsOpensReport::is_clean);
+        ui.horizontal(|ui| {
+            ui.label(format!("{count} short(s)/open(s)"));
+            if clean {
+                ui.colored_label(ctx.tokens.success, "Clean");
+            }
+        });
+
+        if count == 0 {
+            return;
+        }
+        ui.horizontal(|ui| {
+            if components::IconButton::new(icons::CHEVRON_UP, "Previous result")
+                .show(ui, ctx)
+                .clicked()
+            {
+                self.trace.select_prev();
+            }
+            if components::IconButton::new(icons::CHEVRON_DOWN, "Next result")
+                .show(ui, ctx)
+                .clicked()
+            {
+                self.trace.select_next();
+            }
+            if let Some(sel) = self.trace.selected() {
+                ui.label(format!("{}/{count}", sel + 1));
+            }
+        });
+
+        let selected = self.trace.selected();
+        let mut row_clicked: Option<usize> = None;
+        egui::ScrollArea::vertical()
+            .max_height(160.0)
+            .auto_shrink([false, false])
+            .id_salt("trace_list")
+            .show(ui, |ui| {
+                for i in 0..count {
+                    let Some(row) = self.trace.row(i) else {
+                        continue;
+                    };
+                    let severity = match row {
+                        crate::trace_panel::TraceRow::Short(_) => components::Severity::Danger,
+                        crate::trace_panel::TraceRow::Open(_) => components::Severity::Warning,
+                    };
+                    let text = egui::RichText::new(crate::trace_panel::format_row(&row))
+                        .color(severity.accent(&ctx.tokens));
+                    if ui.selectable_label(selected == Some(i), text).clicked() {
+                        row_clicked = Some(i);
+                    }
+                }
+            });
+        if let Some(i) = row_clicked {
+            self.trace.select(i);
+        }
+    }
+    // --- end lane trace-ui ---
 }
 
 impl eframe::App for App {
@@ -14673,4 +14868,41 @@ mod tests {
         app.run_command(Command::Undo, None);
         assert_eq!(app.scene.len(), before, "undo restores the cut shape");
     }
+
+    // --- lane trace-ui: net-trace panel (F3 consumer; ADR 0103) ---
+    /// The Trace section renders headlessly without panicking, both empty and
+    /// after each of the three fixture-stand-in queries populate it, exercising
+    /// the empty state, the readouts, and the shorts/opens navigable list.
+    #[test]
+    fn trace_section_renders_without_panic() {
+        let mut app = App::new();
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        egui::Window::new("trace test empty").show(&ctx, |ui| {
+            app.trace_section(ui);
+        });
+        let _ = ctx.end_pass();
+        assert!(app.trace.is_empty(), "nothing queried yet");
+
+        app.trace_query_at_point();
+        app.trace_query_extent();
+        app.trace_query_report();
+        assert!(!app.trace.is_empty());
+        assert!(app.trace.row_count() > 0, "the fixture report is not clean");
+
+        ctx.begin_pass(egui::RawInput::default());
+        egui::Window::new("trace test loaded").show(&ctx, |ui| {
+            app.trace_section(ui);
+        });
+        let _ = ctx.end_pass();
+
+        // Next/prev navigate the shorts/opens list without panicking, wrapping
+        // over the fixture's two rows.
+        let first = app.trace.selected();
+        app.trace_select_next();
+        assert_ne!(app.trace.selected(), first, "next moves the selection");
+        app.trace_select_prev();
+        assert_eq!(app.trace.selected(), first, "prev undoes the next");
+    }
+    // --- end lane trace-ui ---
 }
