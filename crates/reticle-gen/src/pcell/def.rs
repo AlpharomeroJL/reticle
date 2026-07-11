@@ -68,6 +68,38 @@ impl PCellDef {
         }
     }
 
+    /// The effective parameter object for a produce: each schema field's provided value, or
+    /// its schema default when the caller omitted it.
+    ///
+    /// This is the complete parameter set a produce validates, drives geometry from, and takes
+    /// its content identity over, so `produce(def, {})` and `produce(def, <defaults-spelled-out>)`
+    /// are one produce with one identity. Only schema fields appear, so a non-schema key (which
+    /// cannot drive the geometry) does not perturb the identity.
+    #[must_use]
+    pub fn effective_params(&self, params: &Value) -> Value {
+        let mut map = serde_json::Map::with_capacity(self.schema.fields.len());
+        for field in &self.schema.fields {
+            let value = params
+                .get(&field.name)
+                .cloned()
+                .unwrap_or_else(|| field.default.clone());
+            map.insert(field.name.clone(), value);
+        }
+        Value::Object(map)
+    }
+
+    /// The content-identity hash a produce of `params` stamps into its [`ProduceMeta`]: the
+    /// [`param_hash`](Self::param_hash) over the [`effective_params`](Self::effective_params)
+    /// (each field's provided-or-default value).
+    ///
+    /// A cache-aware caller computes this to key a produced-cell cache *before* producing, so a
+    /// repeat call that omits a defaulted parameter still resolves to the same cache entry the
+    /// first call inserted (whose key is this effective hash, not the raw input hash).
+    #[must_use]
+    pub fn effective_param_hash(&self, params: &Value) -> String {
+        self.param_hash(&self.effective_params(params))
+    }
+
     /// Validates `params` against this PCell's [`ParamSchema`]: every declared field must be
     /// present with a value of the right type and, for a bounded [`FieldType::Int`], within
     /// its declared `[min, max]` range.

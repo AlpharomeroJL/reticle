@@ -149,7 +149,7 @@ pub fn produce(
     //    caller omit a defaulted parameter: the schema default fills in, and the same complete
     //    object drives injection and the content-identity hash below, so an omitted default and
     //    a spelled-out default are one produce.
-    let effective = sandbox::effective_params(def, params);
+    let effective = def.effective_params(params);
     def.validate_params(&effective)
         .map_err(|e| ProduceError::InvalidParams(e.to_string()))?;
 

@@ -108,27 +108,6 @@ pub(super) fn inject_params(scope: &mut Scope, def: &PCellDef, params: &Value) {
     }
 }
 
-/// The effective parameter object for a produce: each schema field's provided value, or its
-/// schema default when the caller omitted it.
-///
-/// This single object is what the producer validates, injects, and hashes, so a PCell's
-/// content identity ([`PCellDef::param_hash`]) and its geometry are complete and stable no
-/// matter which defaulted params the caller left out: `produce(def, {})` and
-/// `produce(def, <all-defaults-spelled-out>)` are the same produce with the same identity.
-/// Only schema fields appear, so a non-schema key (which cannot drive the geometry) does not
-/// perturb the identity either.
-pub(super) fn effective_params(def: &PCellDef, params: &Value) -> Value {
-    let mut map = serde_json::Map::with_capacity(def.schema.fields.len());
-    for field in &def.schema.fields {
-        let value = params
-            .get(&field.name)
-            .cloned()
-            .unwrap_or_else(|| field.default.clone());
-        map.insert(field.name.clone(), value);
-    }
-    Value::Object(map)
-}
-
 /// Whether `params` nests deeper than [`MAX_PARAM_DEPTH`].
 ///
 /// The producer rejects such a parameter set up front so nothing downstream recurses over it:
@@ -183,19 +162,25 @@ fn json_to_dynamic(value: &Value, depth: u32) -> Dynamic {
     }
 }
 
-/// The number of shape records stored directly across all cells.
+/// The number of stored output records across all cells: authored shapes plus the instance
+/// and array *placement* records.
 ///
-/// This counts the script's *authored* geometry, not the flattened expansion of arrays.
-/// Counting the flattened expansion here would let a script with a large array multiplier
-/// (a small `add_array` with billions of repetitions) force an enormous allocation during
-/// produce, which is exactly the exhaustion the caps exist to prevent. Flattening a hierarchy
-/// is the consumer's concern and has its own guards.
-pub(super) fn stored_shape_count(doc: &Document) -> usize {
-    doc.cells().map(|c| c.shapes.len()).sum()
+/// This counts the script's *authored* records, not the flattened expansion of arrays. Counting
+/// the flattened expansion would let a script with a large array multiplier (a small `add_array`
+/// with billions of repetitions) force an enormous allocation during produce, which is exactly
+/// the exhaustion the caps exist to prevent; flattening a hierarchy is the consumer's concern
+/// and has its own guards. But each `add_instance`/`add_array` call stores a real, permanent
+/// record (heap-allocated, and duplicated into the undo log), so those records must be bounded
+/// too: a script that loops storing 10,000 instance or array records is exactly the "how much
+/// output" exhaustion `max_shapes` exists to reject, and counting only `shapes` left a hole.
+pub(super) fn stored_output_count(doc: &Document) -> usize {
+    doc.cells()
+        .map(|c| c.shapes.len() + c.instances.len() + c.arrays.len())
+        .sum()
 }
 
 /// Returns a message naming the first output cap `doc` exceeds, or `None` if it is within
-/// both the cell and shape caps.
+/// both the cell and output-record caps.
 pub(super) fn over_output_caps(
     doc: &Document,
     max_shapes: usize,
@@ -207,10 +192,10 @@ pub(super) fn over_output_caps(
             "cell limit exceeded ({cells} cells, limit {max_cells})"
         ));
     }
-    let shapes = stored_shape_count(doc);
-    if shapes > max_shapes {
+    let records = stored_output_count(doc);
+    if records > max_shapes {
         return Some(format!(
-            "shape limit exceeded ({shapes} shapes, limit {max_shapes})"
+            "output limit exceeded ({records} stored shape/instance/array records, limit {max_shapes})"
         ));
     }
     None
