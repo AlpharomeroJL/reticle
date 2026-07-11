@@ -35,10 +35,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-83934af5.js";
+            window.path_to_searchindex_js = "searchindex-a1303d68.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-4f1e5c30.js"></script>
+        <script src="toc-687d34b6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -230,6 +230,37 @@ checker enforces the tightened, post-refinement bar.</li>
 </ul>
 <p>The <code>refinement</code> field is additive on <code>BenchTask</code> (<code>#[serde(default)]</code>), so task TOML
 written before it existed still parses unchanged.</p>
+<!-- --- lane bench-2: v0.7.0 Phase-3 depth tasks --- -->
+<h3 id="phase-3-depth-task-families-v070"><a class="header" href="#phase-3-depth-task-families-v070">Phase-3 depth task families (v0.7.0)</a></h3>
+<p>Version 0.7.0 adds 7 tasks across three checker families, exercising Phase 2/3
+capability that no earlier wave reached:</p>
+<ul>
+<li><strong>Net-trace queries</strong> (3, tier 3): <code>net_trace_connected</code>, <code>net_trace_extent</code>, and
+<code>net_trace_isolated</code> are built directly on the F3 trace-query API
+(<code>reticle_extract::net_at_point</code>/<code>net_extent</code>) rather than re-deriving connectivity
+the way the <code>intent</code> checker does, so they exercise the same click-a-point,
+read-the-net sequence a trace UI runs: two probe points must resolve to the same
+net (<code>connected</code>), the net under one probe must span a minimum bounding box
+(<code>extent</code>), or two probes must resolve to different nets (<code>isolated</code>).</li>
+<li><strong>PCell params</strong> (2, tier 3): <code>pcell_box</code> exercises the Phase 2 user-PCell API
+(<code>reticle_gen::PCellDef::effective_params</code>/<code>effective_param_hash</code>/<code>validate_params</code>)
+for a fixed <code>bench.box_pad</code> PCell definition, one task leaving a parameter to the
+PCell’s schema default and one overriding it explicitly. The checker resolves
+parameters through the real <code>PCellDef</code> methods; the reference geometry itself is a
+Rust-native port of the PCell’s script (<code>reticle-bench</code> does not depend on
+<code>reticle-script</code>, the sandboxed producer, so it cannot run the script directly). See
+<code>docs/decisions/0113-phase3-benchmark-tasks.md</code>.</li>
+<li><strong>Multi-step edits</strong> (2, tier 4): <code>t4_multistep_grow_enclosure</code> and
+<code>t4_multistep_reposition_via</code> reuse the existing <code>contact_stack</code>/<code>via_chain</code>
+checkers but require a genuinely multi-iteration scripted solution that edits
+previously placed shapes in place (<code>offset_shapes</code>, <code>transform_shapes</code>) rather than
+the delete-and-redraw pattern every earlier correction script used.</li>
+</ul>
+<p>SPICE/netlist export (the fourth Phase-3 depth area named in the campaign brief) was
+investigated and ledgered rather than built into a task: no writer exists anywhere in
+the workspace yet, only a committed exchange-format fixture and a reserved,
+non-dispatched command id, so there is nothing yet for a checker to exercise.</p>
+<!-- --- end lane bench-2 --- -->
 <h2 id="the-propose-verify-correct-loop"><a class="header" href="#the-propose-verify-correct-loop">The propose-verify-correct loop</a></h2>
 <p>A run drives each task through the same loop the <code>reticle-agent</code> harness uses:</p>
 <pre class="mermaid">flowchart LR
