@@ -16,7 +16,7 @@ It is a separate, workspace-**excluded** crate (like `crates/reticle-py`, ADR
 `reticle-script` (the rhai PCell producer) and `reticle-agent` (the real
 propose-verify-correct agent) are native-only dependencies of `reticle-app`
 (ADR 0115): shipping either in the wasm bundle would blow the measured
-`+450 KiB` gz budget by an order of magnitude. The browser's PCell Inspector
+browser-bundle gz budget by an order of magnitude. The browser's PCell Inspector
 shows the *predicted* provenance and an honest disclaimer that live produce
 runs in the desktop app. This chapter's crate is that desktop app.
 

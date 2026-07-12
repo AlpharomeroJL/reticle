@@ -106,4 +106,25 @@ superseded decision is marked and linked to its replacement.
 | [0098](0098-style-ratchet-and-bundle-gate.md) | UI style-lint ratchet (grandfathered baseline that only tightens) and the measured bundle-size ledger + 450 KB gz budget gate in xtask |
 | [0099](0099-service-worker-cache-versioning.md) | Service-worker cache versioning (bumped name purges stale) and network-first for stable-named shell assets, cache-first for the immutable hashed bundle |
 | [0100](0100-deep-zoom-precision-not-reproduced.md) | Deep-zoom "starry" not reproduced on shipped near-origin examples; floating-origin fix deferred, zoom-cycle coherence guard added, f32 far-from-origin limit documented |
+| [0101](0101-f1-gallery-manifest-contract.md) | F1: the gallery-manifest contract, licence-checked and streamable-only |
+| [0102](0102-f2-pcell-produce-contract.md) | F2: the PCell produce-metadata contract and the param-hash recipe |
+| [0103](0103-f3-trace-query-contract.md) | F3: the trace-query contract carries a revision envelope |
+| [0104](0104-f4-waveform-record-contract.md) | F4: the waveform-record contract is integer-scaled and byte-stable |
+| [0105](0105-f5-plugin-manifest-abi-index-contract.md) | F5: the plugin manifest, ABI v0, and static index contract |
+| [0106](0106-f6-reserved-command-ids.md) | F6: reserved command ids live in a ledger disjoint from the registry |
+| [0107](0107-phase2-pcell-engine-scaffold.md) | Phase 2: the PCell engine scaffold and the script-to-gen edge |
+| [0108](0108-spice-netlist-export.md) | The SPICE writer's model table is caller-supplied, not derived |
+| [0109](0109-simulation-route.md) | The simulator route is a pure-Rust MNA solver, not ngspice-in-WASM |
+| [0110](0110-waveform-viewer.md) | Waveform viewer: normalized-point plotting, an honest banner, exact CSV |
+| [0111](0111-classroom-mode.md) | Classroom mode: roster and follow over the existing presence channel, no new wire message |
+| [0112](0112-xschem-interop.md) | xschem interop: a local probe-list format and a temporary export bridge |
+| [0113](0113-phase3-benchmark-tasks.md) | Phase-3 benchmark tasks: query the read-only API surface directly, port PCell geometry to Rust rather than add a checker dependency, ledger SPICE export |
+| [0114](0114-mna-solver.md) | The MNA solver integrates trapezoidally and pivots by magnitude |
+| [0115](0115-native-only-rhai-browser-frugal-runtime.md) | The rhai PCell producer is native-only (a browser-frugal runtime budget) |
+| [0116](0116-native-plugin-runtime.md) | The native embedded wasm plugin runtime (wasmi) and the v0 calling convention |
+| [0117](0117-plugin-host.md) | The production plugin host: the real query surface, the full v0 edit vocabulary, and the edit-decoder fuzz target |
+| [0118](0118-underlay-decode-avoids-image-crate-in-wasm.md) | The image underlay decodes through the browser's own codec on wasm32, not the `image` crate |
+| [0119](0119-tauri-desktop.md) | The desktop shell is Tauri wrapping the offline web bundle, and the native-only home |
+| [0120](0120-plugin-manager-browse-run-split.md) | The plugin manager panel: browser browse, desktop run |
 | [0121](0121-f5-plugin-index-generator.md) | The F5 static plugin index generator: reuse the real contract types, `manifest.json`, and a missing `plugins/` directory is valid, not an error |
+| [0122](0122-bundle-budget-amendment-v8.2.md) | A bounded v8.2 bundle-budget amendment (+450 to +456 KiB gz) |

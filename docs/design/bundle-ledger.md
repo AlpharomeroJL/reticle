@@ -2,8 +2,9 @@
 
 Measured by 'cargo run -p xtask -- bundle-size' over crates/web/dist (trunk release build,
 wasm-opt=z, content-hashed artifacts). Gzip is flate2 at best compression: it approximates
-but does not equal GitHub Pages' on-the-wire compression; the +450 KB gz budget gate
-(just bundle-gate) is self-consistent against the v8.0-baseline row below.
+but does not equal GitHub Pages' on-the-wire compression; the gz budget gate
+(just bundle-gate) is self-consistent against the v8.0-baseline row below. Its delta
+ceiling is +456 KiB gz since the ADR 0122 amendment (see below), +450 KiB gz through Gate 3.
 
 | date | commit | label | raw wasm | gz wasm | gz total | delta gz vs v8.0-baseline |
 |---|---|---|---|---|---|---|
