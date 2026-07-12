@@ -2,9 +2,11 @@
 
 ## Status
 
-Provisional, flagged for operator review at the v8.2.0 release gate. The release
-session re-verifies every public claim, including the bundle budget; if the
-operator prefers to stay at +450 KiB, the trim in "Options" below is the path.
+Accepted (v8.2.0 release-prep, 2026-07-11). The +456 KiB gz ceiling is final for
+v8.2. Option 2's trim (stay at +450) was reassessed against the actual code at
+release-prep and declined as a code contortion for a gz-noisy payoff; see
+"Finalization" below. The release gate re-confirms the measured number
+(`just bundle-gate`) but does not re-litigate the choice.
 
 ## Context
 
@@ -67,5 +69,35 @@ underlay, and the plugin manager). The small-and-fast-bundle positioning holds.
   that do not add code paths), so the tight margin is adequate.
 - The plugin runtime stays native-only (ADR 0115/0116); this amendment covers only
   the browser browse/preview and image-underlay decode, both already byte-attributed.
-- The release gate owns the final call: keep +456, or take Option 2's trim back to
-  +450. Recorded here with measured numbers so that choice is a small, informed one.
+- The final call was made at release-prep (see "Finalization"): keep +456. Option
+  2's trim back to +450 was evaluated against the code and declined.
+
+## Finalization (v8.2.0 release-prep, 2026-07-11)
+
+Re-confirmed on main d9a9420 (the amendment commit): `just bundle-gate` PASS, gz
+total 4463718 vs v8.0-baseline 3999044 = +453.8 KiB, budget +456 KiB, about 2.2
+KiB headroom (`scratch/logs/gate4-bundle-reconfirm.log`). The gz variance against
+the +453.9 KiB first measurement is 126 bytes, well inside the amendment margin.
+
+Option 2 (the +450 trim) was reassessed against the actual code and declined:
+
+- The browser index parse is already the lean typed path. `PluginPanelState::new`
+  (`crates/reticle-app/src/plugin_panel.rs`) calls `serde_json::from_str::<Index>`,
+  and `Index`/`IndexEntry`/`Manifest` (`crates/reticle-plugin/src/manifest.rs`) are
+  pure `#[derive(Deserialize)]` structs with no `serde_json::Value` field. There is
+  no dynamic-value machinery here to remove; the +6.7 KiB is the derived-`Deserialize`
+  codegen for those types, not a Value tree.
+- `serde_json` and its `Value` type are already unconditionally in the wasm bundle
+  via at least eight non-plugin browser panels (gallery, generate_panel, pcell_panel,
+  agent_panel, trace_panel, waveform_panel, xschem, replay) and reticle-app's
+  unconditional `serde_json` dependency. So the only trim that drops the +6.7 KiB is
+  to REPLACE the typed parse with a `serde_json::Value` hand-extraction that
+  re-implements the `Permission` enum's `#[serde(rename)]` mapping in a second place.
+  That is strictly more machinery and more fragile than the one-line typed parse it
+  replaces, for a payoff (+3.9 KiB over the old +450 line) that sits within gzip
+  run-to-run noise. Doing it would contort the code to chase a number, the outcome
+  the amendment exists to avoid.
+
+Both breach contributors (plugin-manager browse ADR 0120, image-underlay browser
+decode ADR 0118) are wanted browser features; cfg-gating either removes a shipped
+capability (Option 1, already rejected). +456 KiB gz is the final v8.2 ceiling.
