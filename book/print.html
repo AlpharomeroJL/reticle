@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a1303d68.js";
+            window.path_to_searchindex_js = "searchindex-28095561.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-687d34b6.js"></script>
+        <script src="toc-4721aa9c.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -4883,6 +4883,191 @@ controls the page after a reload; and, best-effort, that the app shell still
 renders after the network is cut and the page reloaded. The subpath boot gate
 (<code>just e2e-subpath</code>) separately proves the relative asset paths resolve under
 <code>/reticle/</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="embedding-reticle"><a class="header" href="#embedding-reticle">Embedding Reticle</a></h1>
+<p>The browser bundle can run inside another page’s <code>&lt;iframe&gt;</code>. <code>?embed=1</code> (catalog 94)
+hides every menu, panel, and dialog and leaves only the canvas, so the frame shows
+just the layout. It is the same wasm bundle the full app ships: embedding changes
+only the chrome, never the renderer or the import/streaming data path.</p>
+<h2 id="the-iframe-snippet"><a class="header" href="#the-iframe-snippet">The iframe snippet</a></h2>
+<pre><code class="language-html">&lt;iframe
+  src="https://alpharomerojl.github.io/reticle/?embed=1&amp;archive=https://example.com/chip.rtla"
+  width="960"
+  height="600"
+  style="border: 0"
+  loading="lazy"
+  title="Reticle layout viewer"
+&gt;&lt;/iframe&gt;
+</code></pre>
+<p>The canvas fills whatever box the <code>&lt;iframe&gt;</code> is given (<code>width</code>/<code>height</code> on the
+element, or CSS); there is no minimum size.</p>
+<h2 id="pointing-the-frame-at-a-design"><a class="header" href="#pointing-the-frame-at-a-design">Pointing the frame at a design</a></h2>
+<p><code>?embed=1</code> alone shows the bundle’s built-in default document, a static canvas with
+nothing loaded. The published bundle’s own public default view is the replay
+theater (ADR 0026), but the theater is a separate docked panel that never renders in
+embed’s minimal chrome, so a bare <code>?embed=1</code> link is not useful on its own. Add one of
+these to load real content:</p>
+<ul>
+<li><code>&amp;archive=&lt;url&gt;</code> streams a served <code>.rtla</code> archive read-only over HTTP Range
+requests, without importing the whole file (see <a href="#streamed-documents">Streamed documents</a>
+and <a href="#archive-hosting">Archive hosting</a>). Best for a large die.</li>
+<li><code>&amp;gds=&lt;url&gt;</code> fetches a <code>.gds</code>/<code>.oas</code> file from a URL into an editable document.
+Embed’s hidden menus and toolbar make it read-only in practice, since there is
+nothing to invoke an edit from. Best for a small design.</li>
+</ul>
+<p>Either composes with the existing permalink seam (see
+<a href="#permalinks">Permalinks</a>), unaffected by embed mode:</p>
+<ul>
+<li><code>&amp;cell=&lt;name&gt;</code> focuses a cell.</li>
+<li><code>&amp;view=&lt;x&gt;,&lt;y&gt;,&lt;zoom&gt;</code> sets the initial camera: the world point at the canvas
+center and the zoom in pixels per DBU.</li>
+<li><code>&amp;layers=&lt;csv&gt;</code> shows only the listed <code>layer/datatype</code> pairs (for example
+<code>68/20,69/20</code>), hiding every other layer.</li>
+</ul>
+<p>A full example, a streamed archive framed on one cell at a fixed zoom with two
+layers visible:</p>
+<pre><code class="language-text">https://alpharomerojl.github.io/reticle/?embed=1&amp;archive=https://example.com/chip.rtla&amp;cell=top&amp;view=0,0,4.0&amp;layers=68/20,69/20
+</code></pre>
+<h2 id="minimal-chrome"><a class="header" href="#minimal-chrome">Minimal chrome</a></h2>
+<p><code>?embed=1</code> suppresses, unconditionally:</p>
+<ul>
+<li>the Start screen (the worked-use-case chooser), even on a first-time visit;</li>
+<li>the menu bar, toolbar, and every docked panel (Layers, Inspector): the canvas
+layout selection (<code>App::chrome_layout</code>) picks the embed layout ahead of the full
+editor, presentation mode, and the read-only viewer, so none of their chrome can
+render while embedded, whatever else is also requested;</li>
+<li>the command palette, floating windows, and the guided-tour overlay.</li>
+</ul>
+<p>What remains is the canvas, plus a small “Open in Reticle” link in the bottom corner
+that reopens the same URL in a new tab with <code>embed=1</code> turned off, so a visitor can
+always reach the full app. Keyboard shortcuts still fire in embed mode; there is no
+overlay to discover them from, but nothing about embed disables input handling.</p>
+<p>This is asserted directly, not just eyeballed: <code>cargo test -p reticle-app embed</code>
+runs headless tests (no GPU, no window; plain app state) that check the exact gates
+<code>App::ui</code> reads, including that embed wins the chrome layout even when presentation
+mode or a read-only viewer session is requested at the same time.</p>
+<h2 id="previewing-embed-chrome-without-an-iframe"><a class="header" href="#previewing-embed-chrome-without-an-iframe">Previewing embed chrome without an iframe</a></h2>
+<p>The <code>embed.toggle</code> command (palette-only, no default chord) flips embed mode on and
+off inside the full app, so the minimal chrome can be previewed without standing up
+an iframe. It sets the same flag <code>?embed=1</code> does; toggling it again, or the corner
+link, returns the full chrome.</p>
+<h2 id="cross-origin-requirements"><a class="header" href="#cross-origin-requirements">Cross-origin requirements</a></h2>
+<p>The embedding page, the Reticle host, and a served design can all be different
+origins. Two things have to allow it:</p>
+<ul>
+<li><strong>Framing.</strong> The Reticle host must not send <code>X-Frame-Options: DENY</code> or a
+restrictive <code>Content-Security-Policy: frame-ancestors</code>, or the browser refuses to
+render the frame. The published demo sends neither header: checked 2026-07-11 with
+<code>curl -sD - -o /dev/null https://alpharomerojl.github.io/reticle/</code>; re-run that
+command against the live deploy before relying on it, since GitHub Pages’ response
+headers are outside this repository’s control.</li>
+<li><strong>The design fetch.</strong> A design loaded over <code>&amp;archive=</code> or <code>&amp;gds=</code> from a third
+origin must itself answer with a permissive <code>Access-Control-Allow-Origin</code> and, for
+<code>&amp;archive=</code>, allow <code>Range</code> requests (see <a href="#archive-hosting">Archive hosting</a>).
+This is the same requirement the non-embedded browse already has; embed mode adds
+no new cross-origin surface.</li>
+</ul>
+<h2 id="what-embed-mode-does-not-do-yet"><a class="header" href="#what-embed-mode-does-not-do-yet">What embed mode does not do yet</a></h2>
+<p>Embed mode is chrome-only today: there is no <code>postMessage</code> host API to script the
+frame from the embedding page, and the frame posts no resize or scroll events back
+out. Both are natural follow-ons, not yet built.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="desktop-tauri"><a class="header" href="#desktop-tauri">Desktop (Tauri)</a></h1>
+<p><code>desktop/</code> is a native desktop build: a window on the system webview (WebView2
+on Windows) that loads the same UI as the browser build, bundled for fully
+offline use, and the native-only home for features the browser build honestly
+defers (ADR 0115): the rhai PCell producer today, and the real agent on the
+roadmap. See <code>docs/decisions/0119-tauri-desktop.md</code> for the full design
+rationale.</p>
+<p>It is a separate, workspace-<strong>excluded</strong> crate (like <code>crates/reticle-py</code>, ADR
+0087): Tauri’s dependency chain (<code>wry</code>, <code>webview2-com</code>, <code>tao</code>) never enters
+<code>just ci</code>, <code>just wasm-build</code>, or <code>cargo nextest run --workspace</code>.</p>
+<h2 id="why-a-desktop-app-when-the-editor-already-runs-in-a-browser"><a class="header" href="#why-a-desktop-app-when-the-editor-already-runs-in-a-browser">Why a desktop app, when the editor already runs in a browser</a></h2>
+<p><code>reticle-script</code> (the rhai PCell producer) and <code>reticle-agent</code> (the real
+propose-verify-correct agent) are native-only dependencies of <code>reticle-app</code>
+(ADR 0115): shipping either in the wasm bundle would blow the measured
+<code>+450 KiB</code> gz budget by an order of magnitude. The browser’s PCell Inspector
+shows the <em>predicted</em> provenance and an honest disclaimer that live produce
+runs in the desktop app. This chapter’s crate is that desktop app.</p>
+<h2 id="build"><a class="header" href="#build">Build</a></h2>
+<p>Two steps, in order, from the repo root:</p>
+<pre><code class="language-sh"># 1. Build the offline web bundle the shell embeds.
+just web-build
+
+# 2. Build the desktop shell itself (its own Cargo.lock and, effectively, its
+#    own target dir, since it is workspace-excluded).
+cd desktop
+cargo build
+</code></pre>
+<p>There is no <code>cargo-tauri</code> CLI step: <code>desktop/build.rs</code> calls
+<code>tauri_build::build()</code> directly and <code>src/main.rs</code> calls
+<code>tauri::Builder::default()....run(tauri::generate_context!())</code>, so a plain
+<code>cargo build</code> is the whole build. Step 1 must run first and must be re-run
+whenever the web UI changes: <code>desktop/tauri.conf.json</code>’s <code>build.frontendDist</code>
+points at <code>../crates/web/dist</code>, and Tauri embeds whatever is in that directory
+into the compiled binary at compile time. Building the shell without a fresh
+<code>crates/web/dist</code> ships whatever was there last.</p>
+<h2 id="how-the-offline-bundling-works"><a class="header" href="#how-the-offline-bundling-works">How the offline bundling works</a></h2>
+<p>Tauri’s asset-embedding step (driven by <code>tauri::generate_context!()</code>) reads
+<code>crates/web/dist</code> at compile time and embeds every file’s bytes directly into
+the binary. At run time, the webview loads <code>tauri://localhost/</code> and Tauri’s own
+asset protocol answers from those embedded bytes. No local HTTP server is
+started, and after compilation nothing depends on <code>crates/web/dist</code> still
+existing on disk or on any network reachability. This is a stronger guarantee
+than the browser PWA’s offline story (a service worker cache populated over
+the network on first load, see <a href="#install-and-offline-pwa">Install and offline</a>): the desktop
+shell needs no service worker at all, because there is no network fetch for
+one to intercept.</p>
+<p>The web bundle’s HTML/CSS/JS already use only relative paths (the work that
+made the gh-pages subpath deploy correct also makes the bundle safe to serve
+from Tauri’s asset root), so no changes were needed to <code>crates/web</code> to make it
+embeddable.</p>
+<h2 id="the-native-only-proof-regenerate-demo-pcell"><a class="header" href="#the-native-only-proof-regenerate-demo-pcell">The native-only proof: Regenerate demo PCell</a></h2>
+<p>The window’s “Reticle” menu has one action: <strong>“Regenerate demo PCell (native,
+offline).”</strong> Choosing it runs the real sandboxed rhai producer
+(<code>reticle_script::produce</code>) against a small built-in fixture (a parametric
+pixel array; the same fixture shape used by
+<code>reticle_script::pcell::tests::sensor_def</code> and the browser PCell panel’s own
+demo) and shows the result, geometry counts and the stamped provenance, in an
+alert inside the window. It calls the production sandbox directly; nothing
+about the result is scripted or replayed.</p>
+<p>This runs as a native menu action rather than a button inside the (unmodified)
+web UI so that no change was needed to <code>reticle-app</code>’s source: a native
+menu-event handler is fully-trusted Rust code with no ACL/capability surface
+to configure, unlike a command invoked from the webview’s JS.</p>
+<h2 id="what-is-deferred"><a class="header" href="#what-is-deferred">What is deferred</a></h2>
+<ul>
+<li><strong>Installers, code signing, auto-update.</strong> <code>desktop/tauri.conf.json</code> leaves
+<code>bundle.active</code> at its default <code>false</code>; this crate builds a plain
+executable, not a signed package. Follow-on work.</li>
+<li><strong>The real agent.</strong> <code>reticle-agent</code> is already a dependency of <code>desktop/</code>
+(see <code>cargo tree</code> below), but no menu action calls it yet: its live run mode
+needs a reachable model backend, which does not fit an offline,
+network-disabled proof. Wiring an agent action is follow-on work.</li>
+<li><strong>Plugin exposure.</strong> After the plugin-host lane (wave B).</li>
+<li><strong>Live collaboration (“Go live”) from the desktop shell.</strong> The bundled CSP’s
+<code>connect-src</code> does not yet include the Share relay’s <code>wss://</code> origin. The
+feature already and correctly requires network; this is a small follow-on
+CSP amendment when prioritized, not a defect.</li>
+</ul>
+<h2 id="proof-1"><a class="header" href="#proof-1">Proof</a></h2>
+<pre><code class="language-sh"># From desktop/: the shell builds clean, on its own Cargo.lock, and both
+# native-only crates are reachable in its dependency graph.
+cd desktop
+cargo build
+cargo tree | grep -E "reticle-script|reticle-agent"
+cd ..
+
+# From the repo root: excluding desktop/ from the workspace does not disturb
+# the existing gate.
+just wasm-build
+cargo nextest run --workspace --no-run
+</code></pre>
+<p>The GUI half (opening the window with the network disabled, confirming the
+bundled UI loads with no request ever leaving the process, and reading a real
+produce result from the native menu action) is a headed, interactive check;
+see <code>scratch/lanes/tauri/RESULT.md</code> for the exact launch command and the
+expected observation.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="contributing"><a class="header" href="#contributing">Contributing</a></h1>
 <h2 id="the-build-gate"><a class="header" href="#the-build-gate">The build gate</a></h2>
