@@ -219,6 +219,11 @@ enum Boot {
     /// examples guard uses it because the Start-screen gallery cards are egui-painted
     /// and not DOM-clickable. Opens the embedded GDS through the normal open seam.
     Example(reticle_app::ExampleChip),
+    /// Boot straight into an EMPTY editable document (`?e2e-example=blank`): the
+    /// headed blank-doc gate case drives the draw and edit tools from zero starting
+    /// geometry. e2e-only, exactly like [`Boot::Example`]; a normal visitor never
+    /// sets it.
+    Blank,
     /// Open as a read-only viewer of the shared session named by a viewer link
     /// (`?view=viewer&room=..&relay=..`, ADR 0038/0058).
     Viewer(reticle_app::share::ViewerTarget),
@@ -269,6 +274,7 @@ impl Boot {
                 app.open_example_chip(chip);
                 Box::new(app)
             }
+            Boot::Blank => Box::new(App::blank_editor()),
             Boot::Viewer(target) => Box::new(App::with_viewer(target)),
             Boot::Tour => Box::new(App::with_tour()),
             Boot::Share {
@@ -381,11 +387,17 @@ fn boot_from_url() -> Boot {
     // `?e2e-example=<id>` boots straight into a compiled-in example (the headed examples
     // guard uses it; the Start-screen gallery cards are canvas-painted, not
     // DOM-clickable). A normal visitor never sets it.
-    if let Some(id) = params.get("e2e-example")
-        && let Some(chip) = reticle_app::ExampleChip::from_e2e_id(&id)
-    {
-        web_sys::console::log_1(&format!("reticle: e2e open example '{id}'").into());
-        return Boot::Example(chip);
+    if let Some(id) = params.get("e2e-example") {
+        // `blank` is the empty-document case (the draw/edit tools from zero geometry);
+        // every other id maps to a compiled-in example. Both are e2e-only.
+        if id.eq_ignore_ascii_case("blank") {
+            web_sys::console::log_1(&"reticle: e2e blank editor".into());
+            return Boot::Blank;
+        }
+        if let Some(chip) = reticle_app::ExampleChip::from_e2e_id(&id) {
+            web_sys::console::log_1(&format!("reticle: e2e open example '{id}'").into());
+            return Boot::Example(chip);
+        }
     }
 
     match params.get("view") {

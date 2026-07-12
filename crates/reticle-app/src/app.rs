@@ -1032,6 +1032,26 @@ impl App {
         Self::with_start_view(StartView::Editor)
     }
 
+    /// An editor opened on an EMPTY document: one empty top cell carrying the demo
+    /// technology (so its layers are named and a drawn shape lands on a real,
+    /// colored layer), reached by the e2e-only `?e2e-example=blank` boot hook.
+    ///
+    /// Mirrors [`new`](Self::new) but replaces the demo geometry with a blank
+    /// canvas through the same `install_document` path as an opened file, so the
+    /// headed blank-doc gate case can prove the draw and edit tools work
+    /// from zero starting geometry. A normal visitor never reaches it (the hook is
+    /// e2e-only, exactly like the `?e2e-example=<id>` example hook).
+    #[must_use]
+    pub fn blank_editor() -> Self {
+        let mut app = Self::new();
+        let mut doc = reticle_model::Document::new();
+        doc.set_technology(crate::demo::demo_technology());
+        doc.insert_cell(reticle_model::Cell::new(crate::demo::TOP_CELL));
+        app.install_document(doc, crate::demo::TOP_CELL.to_owned());
+        app.start_screen = false;
+        app
+    }
+
     /// Creates the app opening into `start_view`.
     ///
     /// [`StartView::Editor`] is the desktop default. [`StartView::ReplayTheater`]
@@ -2244,6 +2264,20 @@ impl App {
             &stats,
             &JsValue::from_str("waveform_probes"),
             &JsValue::from_f64(self.waveform.set().map_or(0, |s| s.probes.len()) as f64),
+        );
+        // Phase-4 (Reach) surface seams: assertable state so the comprehensive
+        // headed pass proves the image underlay actually loaded through the
+        // browser decode path and that embed mode toggled, not just that a
+        // command fired. Additive (new keys only); every seam above is unchanged.
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("underlay_loaded"),
+            &JsValue::from_bool(self.underlay.has_image()),
+        );
+        let _ = js_sys::Reflect::set(
+            &stats,
+            &JsValue::from_str("embed"),
+            &JsValue::from_bool(self.is_embedded()),
         );
     }
 
