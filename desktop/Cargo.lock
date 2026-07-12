@@ -3658,7 +3658,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-agent"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "clap",
  "futures-util",
@@ -3678,7 +3678,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-agent-api"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "image",
  "reticle-drc",
@@ -3695,7 +3695,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-bench"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "clap",
  "reticle-agent-api",
@@ -3724,7 +3724,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-drc"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "reticle-geometry",
  "reticle-index",
@@ -3735,7 +3735,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-extract"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "reticle-geometry",
  "reticle-index",
@@ -3745,7 +3745,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-gen"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "reticle-drc",
  "reticle-geometry",
@@ -3757,7 +3757,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-geometry"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "i_overlay",
  "serde",
@@ -3765,7 +3765,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-index"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "js-sys",
  "memmap2",
@@ -3780,7 +3780,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-io"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "chrono",
  "gds21",
@@ -3790,7 +3790,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-mcp"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "reticle-agent-api",
  "reticle-gen",
@@ -3802,14 +3802,14 @@ dependencies = [
 
 [[package]]
 name = "reticle-model"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "reticle-geometry",
 ]
 
 [[package]]
 name = "reticle-proto"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "prost",
  "prost-build",
@@ -3818,7 +3818,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-render"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "bytemuck",
  "glam",
@@ -3833,7 +3833,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-route"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "pathfinding",
  "reticle-geometry",
@@ -3843,7 +3843,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-script"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "reticle-drc",
  "reticle-gen",
@@ -3856,7 +3856,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-sync"
-version = "8.1.0"
+version = "8.2.0"
 dependencies = [
  "prost",
  "reticle-geometry",
