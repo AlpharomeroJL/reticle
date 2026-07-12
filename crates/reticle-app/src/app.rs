@@ -5437,12 +5437,15 @@ impl App {
             }
         }
 
-        // The onboarding checklist card, bottom-right above the status bar.
+        // The onboarding checklist card, bottom-center above the status bar. Anchored to
+        // the center (over the canvas) rather than the right edge so the first-run card
+        // never overlaps the right-hand Inspector, whose Plugins section carries the
+        // honest "plugins run in the desktop app" browser disclaimer.
         if self.checklist.is_visible() {
             let mut dismiss = false;
             let (done, total) = self.checklist.progress();
             egui::Area::new(egui::Id::new("onboarding_checklist"))
-                .anchor(Align2::RIGHT_BOTTOM, Vec2::new(-16.0, -48.0))
+                .anchor(Align2::CENTER_BOTTOM, Vec2::new(0.0, -48.0))
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
                     egui::Frame::popup(ui.style())
@@ -8509,6 +8512,12 @@ impl App {
             ui.label("No plugins in the index.");
             return;
         }
+        // Lead with the honest browser disclaimer so it is the first thing a first-time
+        // visitor reads when browsing plugins: above every entry, and high enough that a
+        // floating first-run overlay covering the bottom of the panel cannot bury it.
+        // Plugins never run in the browser tab (ADR 0120; the plugin-moat claim shape).
+        #[cfg(target_arch = "wasm32")]
+        ui.colored_label(DARK.warning, crate::plugin_panel::BROWSER_DISCLAIMER);
         egui::ComboBox::from_id_salt("plugin_pick")
             .selected_text(self.plugins.selected_entry().manifest.name.as_str())
             .show_ui(ui, |ui| {
@@ -8583,8 +8592,6 @@ impl App {
                 }
             }
         }
-        #[cfg(target_arch = "wasm32")]
-        ui.colored_label(DARK.warning, crate::plugin_panel::BROWSER_DISCLAIMER);
     }
 
     /// Reveals the Inspector's Plugins section (`plugin.browse`), the same shape

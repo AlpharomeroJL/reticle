@@ -362,6 +362,17 @@ capture-share:
     npm --prefix e2e install
     cd e2e; node capture-share.mjs
 
+# Real streaming-hero GIF (README hero): the live `?archive=` streaming flow the native
+# capture-ui harness cannot record. Builds the release bundle, then drives a headed
+# Chromium window that streams the featured live die (byte-count HUD), orbits the 3D
+# layer-stack panel, and fires copy-permalink, assembling docs/media/hero-gallery-stream.gif
+# with gifski (<= 6 MB). Needs `gifski` on PATH, a GPU/display, and internet (the default
+# archive is remote). Env knobs: HERO_URL (full page URL) and ARCHIVE_URL (the .rtla URL).
+capture-hero:
+    cd crates/web; trunk build index.html --release
+    npm --prefix e2e install
+    cd e2e; node capture-hero.mjs
+
 # ---------------------------------------------------------------------------
 # TinyTapeout precheck oracle (ADR 0054): run TinyTapeout's OWN precheck over a
 # GDS as the authoritative GDS-mode submission gate. Additive and NOT part of

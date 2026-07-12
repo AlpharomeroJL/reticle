@@ -12,7 +12,7 @@ Your files never leave your machine.
 [![Chip library](https://img.shields.io/badge/chip%20library-open%20silicon-blue)](https://alpharomerojl.github.io/reticle/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-lightgrey)](#license)
 
-![Opening a verified die from the gallery: it streams in with the byte-count HUD in the corner, then orbits as a 3D layer stack, then a share link is copied](docs/media/hero-gallery-stream.gif)
+![A 3.01 GiB layout streams in over the network with the byte-count HUD in the corner (188 KiB fetched), then orbits as a 3D layer stack, then a share link is copied](docs/media/hero-gallery-stream.gif)
 
 ## Try it in sixty seconds
 
