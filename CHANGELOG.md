@@ -3,6 +3,106 @@
 All notable changes to Reticle are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com), and the project uses
 [conventional commits](https://www.conventionalcommits.org).
+## [8.2.0] - 2026-07-12
+
+### Features
+
+- Freeze F4 waveform and F5 plugin-manifest contracts
+- Freeze F1 gallery-manifest contract
+- Freeze F2 produce-metadata and F3 trace-query contracts
+- Freeze F6 reserved command-id ledger
+- CIF classic-subset reader with capped parsing
+- STL and glTF mesh export from the 3D layer stack
+- DXF 2D subset reader with capped parsing
+- Reticle-cli diff subcommand and a diff GitHub Action
+- Conformant OASIS reader (writer-subset round-trip)
+- GF180MCU layer map and DRC subset (3.3V, sourced)
+- GenTech gf180 -- generators DRC-clean on a third PDK
+- Design-review states on comment threads and a review-link mint
+- Rerunnable fetch-convert-verify pipeline and F1 manifest generator
+- Render the F1-manifest die library generically
+- Wire CIF/DXF/conformant-OASIS readers into the open path
+- Immutable snapshot permalinks
+- Wire F1 open-silicon library live on the Start screen
+- Bound PCellCache to a capacity with LRU eviction
+- Implement F3 net-trace query functions (ADR 0103)
+- Implement PCellDef::validate_params and PCellRegistry::infos
+- Freeze agent suite determinism and add v0.6.0 coverage tasks
+- Implement the sandboxed PCell producer (ADR 0107)
+- Add PCell Inspector panel (F2 provenance consumer)
+- Net-trace Inspector panel over the F3 trace-query contract
+- Deterministic natural-language edit command bar
+- M3 replay-DRC-view split, theater minimize/scrub, native real agent
+- SPICE netlist writer for extracted DeviceNetlist (netlist lane)
+- V0.7.0 -- Phase-3 depth tasks (net-trace, PCell params, multi-step)
+- Pure-Rust dense-MNA solver in reticle-sim (ADR 0109)
+- Fixture-first F4 waveform viewer panel (ADR 0110)
+- Wire PCell regenerate and net-trace panel to real produce/query
+- Classroom teaching mode -- roster and follow over presence (ADR 0111)
+- SPICE export + xschem probe-list import (fixture-first)
+- Native-only rhai (bundle back under budget) + F4 live MNA solve
+- Native wasmi plugin host prototype + v0 calling convention (ADR 0116)
+- Embed -- harden embed mode into a documented, testable viewer
+- Tauri desktop shell -- offline bundle + native PCell produce (ADR 0119)
+- Plugin-sample -- real fiducial-marker guest plugin (ADR 0116)
+- Production wasm plugin host (ADR 0117)
+- Image underlay -- native+browser decode, bundle-safe (ADR 0118)
+- Plugin-manifest-index -- F5 static plugin index generator, ADR 0121
+- Plugin-ui -- plugin manager panel, browser-browse/desktop-run split (ADR 0120)
+- Gate-4 headed coverage -- underlay/embed seams + blank-doc boot + e2e spec
+- Real v0.7.0 claude-code leaderboard row; rows keyed per suite
+- Lead the plugin panel with its browser disclaimer; recenter onboarding card; fresh README media
+
+### Bug fixes
+
+- Stop the agent preview from promising a DRC fix it never performs
+- Bound the vision second-oracle request so a live model cannot hang the gate
+- Make DEFAULT_DBU_PER_MICRON pub so the dxf module doc link resolves
+- Snapshot.rs doc uses plain backticks for private relay_ws_base (gate doc-build)
+- Vision-oracle availability probes over bounded HTTP, never the ollama CLI
+- Spell 'unparsable' per the typos gate in gallery fallback tests
+- Drop redundant/broken doc links in the PCell scaffold (workspace doc-build)
+- Produce validates and hashes the effective params (pcell-params integration)
+- Close two pcell-harness findings (sandbox output cap + cache key API)
+- Sandbox doc link points to PCellDef::effective_params after the move
+- Wasm export status names the actual format, not hardcoded SVG
+
+### Documentation and media
+
+- ADR 0109 picks pure-Rust MNA sim route; reject ngspice-WASM and emscripten
+- Stage project-paper skeleton under docs/paper
+- Bundle-ledger Gate-4 row + ADR 0122 note at +454.5 gz
+- Backfill ADR index 0101-0122 + bundle-ceiling consistency
+- Promote v8.2.0 STATUS, honest-limits ledger, disposition table
+- Drop uniqueness claims, reframe positioning to positive measured claims
+- Fix doc-accuracy issues from the two-skeptic review
+- Rewrite README to the v8.2.0 product page; two-skeptic fixes
+
+### Testing
+
+- Recapture ui baselines for the start-screen open-silicon library section
+- Snapshot the editor and palette surfaces, not the start screen
+- Adversarial harness for the PCell producer (pcell-harness)
+- Point pcell-harness cache helper at effective_param_hash; mark both findings closed
+- Comprehensive headed e2e for Phase-3 panels + DRC; agent-async wait
+- Registry-driven exhaustive headed sweep as a permanent gate
+
+### Build, tooling, and CI
+
+- Replace em-dashes in the drag_press_pos doc
+- Keep local-only CLAUDE.md and AGENTS.md untracked
+- Scaffold reticle-sim and reticle-plugin as empty workspace members
+- Reserve cif and dxf reader modules (Phase 1 pre-fan-out)
+- Reconcile Cargo.lock (reticle-script for reticle-app after f2f3-wiring)
+- Regenerate F5 plugin index to fold fiducial-marker sample
+- Bundle amendment +456 gz (ADR 0122) + browser panel reads the real F5 index
+- Finalize bundle amendment ADR 0122 at +456 gz (trim declined)
+- Sync Cargo.lock with reticle-render image/jpeg deps (underlay ADR 0118)
+
+### Other
+
+- PCell engine interface + script-to-gen edge (ADR 0107)
+- SPICE exchange contract fixture + Phase 3 doc chapter stubs
 ## [8.1.0] - 2026-07-09
 
 Re-cut on a fixed head with post-tag fixes (wasm replay-hash determinism,

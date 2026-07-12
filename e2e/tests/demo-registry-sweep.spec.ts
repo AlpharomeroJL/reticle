@@ -364,7 +364,7 @@ test("ZOOM LADDER: zoom-in/out rungs with a screenshot each (sky130)", async ({
   const startPpd =
     ((await stats(page)).camera as Camera | undefined)?.pixels_per_dbu ?? 0;
   let rung = 0;
-  const record = async (dir: string) => {
+  const record = async (dir: string): Promise<number> => {
     const s = await stats(page);
     const ppd = (s.camera as Camera | undefined)?.pixels_per_dbu ?? 0;
     await page.screenshot({
@@ -375,13 +375,15 @@ test("ZOOM LADDER: zoom-in/out rungs with a screenshot each (sky130)", async ({
     expect(s.active_tool ?? null, `frame loop dead at zoom rung ${rung}`).not.toBeNull();
     expect(s.render_nonblank, `not painting at zoom rung ${rung}`).toBe(true);
     rung++;
+    return ppd;
   };
 
   await record("start");
+  let peakPpd = startPpd;
   for (let i = 0; i < 4; i++) {
     await page.mouse.wheel(0, -400);
     await page.waitForTimeout(280);
-    await record("in");
+    peakPpd = Math.max(peakPpd, await record("in"));
   }
   for (let i = 0; i < 4; i++) {
     await page.mouse.wheel(0, 400);
@@ -389,13 +391,14 @@ test("ZOOM LADDER: zoom-in/out rungs with a screenshot each (sky130)", async ({
     await record("out");
   }
 
-  const zoomedPpd =
-    ((await stats(page)).camera as Camera | undefined)?.pixels_per_dbu ?? 0;
-  // The wheel actually zoomed the camera at some rung (not a frozen view).
+  // The zoom-in rungs magnified the view well above the start; the ladder then returns
+  // near the start fit, so assert the PEAK rather than the end. An end-vs-start delta is
+  // flaky: the equal in-and-out cancels back to the exact fit ppd (a zero delta) at some
+  // camera-settle timings.
   expect(
-    Math.abs(zoomedPpd - startPpd),
-    "the zoom ladder never changed the camera scale",
-  ).toBeGreaterThan(0);
+    peakPpd,
+    "the zoom-in rungs never magnified the view",
+  ).toBeGreaterThan(startPpd * 1.5);
   expect(errors.filter(isFatal), `fatal errors:\n${errors.join("\n")}`).toHaveLength(0);
 });
 
