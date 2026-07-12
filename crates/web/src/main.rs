@@ -67,6 +67,15 @@ fn main() {
                         .and_then(|w| w.location().search().ok())
                         .unwrap_or_default();
                     app.set_pending_permalink(reticle_app::share::parse_permalink(&search));
+                    // e2e-only (debug builds): an `?e2e-example=` boot opens its document
+                    // synchronously, so it has no async open event to flush the pending
+                    // permalink the way a `?gds=` link does. Apply it now for the
+                    // already-open example/blank document so the headed share-round-trip
+                    // sweep can reopen a permalink. Compiled out of the `--release` bundle
+                    // (see `reticle_app::App::apply_pending_permalink_for_e2e` and
+                    // e2e/tests/demo-registry-sweep.spec.ts).
+                    #[cfg(debug_assertions)]
+                    app.apply_pending_permalink_for_e2e();
                     // `?embed=1` (lane 2D, catalog 94) hides all chrome for iframes; a
                     // modifier that composes with whatever view above was chosen.
                     app.set_embed(reticle_app::share::parse_embed(&search));

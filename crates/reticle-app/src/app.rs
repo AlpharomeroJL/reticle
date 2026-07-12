@@ -1866,6 +1866,36 @@ impl App {
         self.pending_permalink = if empty { None } else { Some(permalink) };
     }
 
+    /// e2e-only (debug wasm): flushes any pending permalink onto the already-open
+    /// document immediately, for a synchronous `?e2e-example=` boot.
+    ///
+    /// A `?gds=` link flushes its pending permalink on the async open event (see the
+    /// `WebOpenEvent::Opened` arm of [`apply_web_open_event`](Self::apply_web_open_event));
+    /// an `?e2e-example=` boot opens its document during construction, so there is no such
+    /// event to consume it. The web entry calls this right after
+    /// [`set_pending_permalink`](Self::set_pending_permalink), so the headed
+    /// share-round-trip sweep can reopen a permalink
+    /// (`?e2e-example=..&view=..&cell=..&layers=..`) and read the restored camera, cell,
+    /// and layers back through the `window.__reticle_stats` seam.
+    ///
+    /// Scoped to the `e2e-example=` query key so a real `?gds=` permalink is left for its
+    /// own open path and no normal visitor is ever touched. Gated
+    /// `#[cfg(all(target_arch = "wasm32", debug_assertions))]` so it is absent from the
+    /// measured `--release` bundle (`just web-build` / `just bundle-gate`), present only
+    /// in the debug e2e Trunk build (`just e2e` / `just e2e-headed`).
+    #[cfg(all(target_arch = "wasm32", debug_assertions))]
+    pub fn apply_pending_permalink_for_e2e(&mut self) {
+        let is_e2e_example = web_sys::window()
+            .and_then(|w| w.location().search().ok())
+            .is_some_and(|search| search.contains("e2e-example="));
+        if !is_e2e_example {
+            return;
+        }
+        if let Some(permalink) = self.pending_permalink.take() {
+            self.apply_permalink(&permalink);
+        }
+    }
+
     /// Applies a permalink to the currently open document: focuses the named cell,
     /// restores the camera, and applies the layer visibility set.
     ///
@@ -3960,6 +3990,110 @@ impl App {
             &JsValue::from_str("last_command_mutated"),
             &JsValue::from_bool(self.history.revision() != rev_before),
         );
+    }
+
+    /// e2e-only bridge (debug wasm): publishes the registry command-id catalog and the
+    /// dispatch entry point, then fires whatever the page has enqueued through the SAME
+    /// [`dispatch`](Self::dispatch) funnel every surface (shortcuts, menus, palette,
+    /// toolbar, context menus) routes through.
+    ///
+    /// Two seams are installed once, on the first frame:
+    /// * `window.__reticle_e2e_command_ids`: every live [`commands::registry`] entry as
+    ///   `{ id, label, scope }`, so the exhaustive Playwright sweep enumerates commands
+    ///   from the live registry (never a hand-kept list that could drift) and can drive
+    ///   the ones that are not uniquely palette-addressable.
+    /// * `window.__reticle_e2e_dispatch(id)`: validates `id` against the static registry,
+    ///   enqueues it for the next frame's drain, and returns whether it named a real
+    ///   command. It captures no app state (only the static registry and a thread-local
+    ///   queue), so it is `'static` and safe to `forget` for the page lifetime.
+    ///
+    /// Each frame this drains the queue and fires every enqueued id via
+    /// [`dispatch`](Self::dispatch), so `last_command_id`/`last_command_mutated` update
+    /// exactly as a palette dispatch would.
+    ///
+    /// Additive: it only sets NEW `window.__reticle_e2e_*` properties and never rewrites
+    /// an existing `__reticle_stats` key or any other seam. Gated
+    /// `#[cfg(all(target_arch = "wasm32", debug_assertions))]`: the debug e2e Trunk build
+    /// (`just e2e` / `just e2e-headed`, no `--release`) carries it; the measured
+    /// `--release` bundle (`just web-build` / `just bundle-gate`) does not, so the byte
+    /// budget is untouched.
+    #[cfg(all(target_arch = "wasm32", debug_assertions))]
+    fn drive_e2e_registry_bridge(&mut self) {
+        use std::cell::{Cell, RefCell};
+        use wasm_bindgen::JsValue;
+        use wasm_bindgen::closure::Closure;
+
+        thread_local! {
+            /// Command ids enqueued by `window.__reticle_e2e_dispatch`, drained each frame.
+            static E2E_QUEUE: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+            /// Whether the one-shot `window.__reticle_e2e_*` seams were installed.
+            static E2E_INSTALLED: Cell<bool> = const { Cell::new(false) };
+        }
+
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+
+        if !E2E_INSTALLED.with(Cell::get) {
+            // The command-id catalog: every registry entry as { id, label, scope }.
+            let catalog = js_sys::Array::new();
+            for spec in commands::registry() {
+                let entry = js_sys::Object::new();
+                let _ = js_sys::Reflect::set(
+                    &entry,
+                    &JsValue::from_str("id"),
+                    &JsValue::from_str(spec.id.0),
+                );
+                let _ = js_sys::Reflect::set(
+                    &entry,
+                    &JsValue::from_str("label"),
+                    &JsValue::from_str(spec.label),
+                );
+                let scope = match spec.scope {
+                    commands::Scope::Global => "Global",
+                    commands::Scope::NativeOnly => "NativeOnly",
+                    commands::Scope::WasmOnly => "WasmOnly",
+                };
+                let _ = js_sys::Reflect::set(
+                    &entry,
+                    &JsValue::from_str("scope"),
+                    &JsValue::from_str(scope),
+                );
+                let _ = catalog.push(&entry);
+            }
+            let _ = js_sys::Reflect::set(
+                window.as_ref(),
+                &JsValue::from_str("__reticle_e2e_command_ids"),
+                catalog.as_ref(),
+            );
+
+            // The dispatch entry point: validate against the static registry, enqueue for
+            // the next frame's drain, and report whether the id is a real command.
+            let dispatch = Closure::<dyn Fn(String) -> bool>::new(|id: String| -> bool {
+                let known = commands::registry().iter().any(|spec| spec.id.0 == id);
+                if known {
+                    E2E_QUEUE.with(|queue| queue.borrow_mut().push(id));
+                }
+                known
+            });
+            let _ = js_sys::Reflect::set(
+                window.as_ref(),
+                &JsValue::from_str("__reticle_e2e_dispatch"),
+                dispatch.as_ref(),
+            );
+            dispatch.forget();
+            E2E_INSTALLED.with(|installed| installed.set(true));
+        }
+
+        // Drain and fire whatever the page enqueued since the last frame. Each runtime id
+        // is resolved back to the registry's 'static `CommandId` so `dispatch` (and its
+        // `last_command_id` seam) sees the real registry id, not a caller-owned slice.
+        let pending: Vec<String> = E2E_QUEUE.with(|queue| std::mem::take(&mut *queue.borrow_mut()));
+        for id in pending {
+            if let Some(spec) = commands::registry().iter().find(|spec| spec.id.0 == id) {
+                self.dispatch(spec.id);
+            }
+        }
     }
 
     /// Runs an [`AppOp`]: an app-level effect with no palette [`Command`]
@@ -14353,6 +14487,12 @@ impl eframe::App for App {
         // hash_check) so the headed demo guards can read them from the DOM.
         #[cfg(target_arch = "wasm32")]
         self.record_frame_stats();
+        // e2e-only (debug wasm): publish the registry command-id catalog and drain any
+        // command ids the page enqueued through `window.__reticle_e2e_dispatch`, firing
+        // each through the same dispatch funnel the palette/toolbar use. Absent from the
+        // measured `--release` bundle (see `drive_e2e_registry_bridge`).
+        #[cfg(all(target_arch = "wasm32", debug_assertions))]
+        self.drive_e2e_registry_bridge();
 
         self.handle_shortcuts(&ctx);
 

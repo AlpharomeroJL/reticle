@@ -1,0 +1,3 @@
+(deliberately corrupt CIF fixture);
+B abc def 0 0;
+E
