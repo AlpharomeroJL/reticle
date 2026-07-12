@@ -183,14 +183,17 @@ checker-graded agent surface).
 Grounding: `docs/src/positioning.md` (the honest map, the not-list, and the
 "what the established tools do that Reticle does not" section).
 
-<!-- Uniqueness claims DROPPED (operator decision, 2026-07-12). The two former
-     absence-of-evidence claims ("no other browser-native IC layout editor"; "no other
-     physically-verified layout-agent benchmark with a public leaderboard") are not made
-     anywhere in v8.2.0. A release-gate landscape re-verification found the first refuted by a
-     live browser-native editor (Layout Studio) and the second challenged (physically-verified
-     layout-agent benchmarks exist without public leaderboards). Positioning is stated as
-     positive, measured capability only; see docs/src/positioning.md and the refutation record
-     in docs/honest-limits.md. -->
+<!-- Uniqueness framing (operator-owned, 2026-07-12). The two BROAD absence-of-evidence
+     claims ("no other browser-native IC layout editor"; "no other physically-verified
+     layout-agent benchmark with a public leaderboard") are NOT made in this paper: a
+     release-gate landscape re-verification found the first refuted by a live browser-native
+     editor (Layout Studio) and the second challenged (physically-verified layout-agent
+     benchmarks exist without public leaderboards). This paper and docs/src/positioning.md
+     state positioning as positive, measured capability only. The README "How it compares"
+     section carries two narrow, dated (2026-07-12), scoped absence-of-evidence differentiators
+     with a counterexample invite (editing + microsecond incremental DRC + multi-GiB streaming
+     not found combined in any browser tool; no other physically-verified layout-agent
+     benchmark with a public leaderboard found), recorded in docs/honest-limits.md. -->
 
 ## 8. Results (placeholder)
 

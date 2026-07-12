@@ -114,8 +114,13 @@ reproduced here so the paper does not accidentally strengthen them.
 
 ## Positioning (operator-owned, positive and measured only)
 
-Positioning is stated as positive, measured capability. No "only / first / no other"
-uniqueness or absence-of-evidence claim is made anywhere in v8.2.0.
+Positioning is stated as positive, measured capability. This paper and
+`docs/src/positioning.md` make no uniqueness claim. The README "How it compares" section
+makes two narrow, dated (2026-07-12), scoped absence-of-evidence differentiators, each
+phrased as such with a counterexample invite and recorded in `docs/honest-limits.md`: no
+browser tool found combines editing, incremental microsecond-latency DRC, and multi-GiB
+streaming; and no other physically-verified layout-agent benchmark with a public leaderboard
+found.
 
 | # | Claim (honest shape) | Grounding artifact | Verify command | Evidence kind |
 |---|----------------------|--------------------|----------------|---------------|
@@ -124,12 +129,14 @@ uniqueness or absence-of-evidence claim is made anywhere in v8.2.0.
 | C38 | A sustained 60 fps target met at one million shapes (measured 295 fps at 1920x1080) | `docs/PERF.md`, `reticle-render` fps_bench | `cargo run -p reticle-render --example fps_bench --release` | measured |
 | C43 | A deterministic, byte-stable, public agent leaderboard generated from committed records | `docs/src/leaderboard.md`, `crates/reticle-bench` | `cargo run -p reticle-bench -- leaderboard --out -` run twice is byte-identical | measured |
 
-DROPPED 2026-07-12 (operator decision): the two former uniqueness claims, "no other
+DROPPED 2026-07-12 (operator decision): the two BROAD uniqueness claims, "no other
 browser-native IC layout editor" and "no other physically-verified layout-agent benchmark with
 a public leaderboard." A release-gate landscape re-verification refuted the first (Layout Studio
 is a live browser-native editor with in-browser DRC) and challenged the second
-(physically-verified layout-agent benchmarks exist without public leaderboards). Neither is
-asserted; the refutation is recorded in `docs/honest-limits.md` for history.
+(physically-verified layout-agent benchmarks exist without public leaderboards). In their place
+the README makes two narrow, dated, scoped absence-of-evidence differentiators (see the
+Positioning note above and `docs/honest-limits.md`); this paper and `docs/src/positioning.md`
+make no uniqueness claim.
 
 ## Campaign-in-progress (Phase 3 and Phase 4; confirm at the phase close)
 
@@ -149,8 +156,12 @@ and the disposition at the phase close, and applies the fixed claim shape above.
 - No value cell in this file or in the paper's results table holds a number. Fill
   each from its command on the recorded host at the Phase 5 close (or from a
   valley-queue run), and state the host with every measured figure.
-- The two former absence-of-evidence uniqueness claims were dropped 2026-07-12 (see the
+- The two former BROAD absence-of-evidence uniqueness claims were dropped 2026-07-12 (see the
   Positioning section above and docs/honest-limits.md). C37, C38, and C43 are positive,
-  measured claims. No absence-of-evidence or "only / first / no other" claim is made anywhere.
+  measured claims. This paper and docs/src/positioning.md make no uniqueness claim; the README
+  carries two narrow, dated, scoped absence-of-evidence differentiators (editing + microsecond
+  incremental DRC + multi-GiB streaming not found combined in any browser tool; no other
+  physically-verified layout-agent benchmark with a public leaderboard found), each with a
+  counterexample invite and recorded in docs/honest-limits.md.
 - The conditional rows (C39 to C42) are dropped or reworded to match what the
   phase actually delivered. Do not carry a claim past its record.

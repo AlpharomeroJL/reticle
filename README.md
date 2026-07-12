@@ -1,84 +1,143 @@
-<p align="center">
-  <img src="assets/hero.png" alt="The Reticle editor on an imported SKY130 standard cell: layers panel, a populated design-rule-check panel, the properties inspector, a minimap, and a highlighted net on the canvas" width="100%" />
-</p>
-
 # Reticle
 
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![Runs in the browser via WebGPU and WASM](https://img.shields.io/badge/web-WebGPU%20%2B%20WASM-orange.svg)](https://alpharomerojl.github.io/reticle/)
-[![Sponsor AlpharomeroJL](https://img.shields.io/badge/Sponsor-AlpharomeroJL-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/AlpharomeroJL)
+**Open a real chip in your browser.**
 
-A local 20B model solves 52 of 75 design-rule-verified layout tasks in this editor's
-command API. The editor itself runs in your browser.
+A chip's physical design is a few billion rectangles placed with nanometer care.
+Reticle is an editor for that world, and it runs entirely in a browser tab: it
+streams a 3.01 GiB layout by fetching 188 KiB, checks design rules in microseconds
+as you type, and lets anyone walk your exact view from a link. Nothing to install.
+Your files never leave your machine.
 
-Reticle is an editor for very large hierarchical 2D layout scenes, the kind a chip's
-physical design is made of. It renders and edits integer-coordinate geometry (rectangles,
-polygons, and paths on named layers) organized into cells, instances, and arrays. A cell
-placed thousands of times expands to billions of leaf shapes that still browse at 60 fps,
-because the hierarchy is never flattened for viewing. It is written in Rust and compiled
-to native and to WebAssembly from one codebase.
+[![Live demo](https://img.shields.io/badge/demo-live-2ea44f)](https://alpharomerojl.github.io/reticle/)
+[![Chip library](https://img.shields.io/badge/chip%20library-open%20silicon-blue)](https://alpharomerojl.github.io/reticle/)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-lightgrey)](#license)
 
-There are three things you can do with it, below. Then: the live demo, a quickstart, how
-it works, what it does not do, and the license.
+![Opening a verified die from the gallery: it streams in with the byte-count HUD in the corner, then orbits as a 3D layer stack, then a share link is copied](docs/media/hero-gallery-stream.gif)
 
-## Open and share real chips in a browser
+## Try it in sixty seconds
 
-Import a GDSII or OASIS layout and browse it at interactive speed, with nothing installed.
-Open a local file, drop one onto the window, or pass `?gds=<url>` to load a stream from a
-link. A session can be made read-only and shared, so a reviewer opens the exact view you
-are looking at and pans it themselves without being able to change it. One click mints a
-room, goes live, and copies the viewer link; a permalink (`?cell=`, `?view=x,y,z`,
-`?layers=`) deep-links a specific cell, camera, and layer set on top of the file; and a
-phone that opens a shared link navigates by touch (pinch to zoom, two fingers to pan).
+1. **[Open the streaming demo.](https://alpharomerojl.github.io/reticle/?archive=https://reticle-archive.josefdean.workers.dev/f04af90fbb06786c.rtla)**
+   A 3.01 GiB archive starts streaming immediately; the HUD in the corner shows
+   exactly how few bytes that takes (188 KiB for the first view, 0.006% of the file).
+2. **Open the gallery.** Every die in it is real fabricated open silicon,
+   license-verified before it ships; today that is one die, SkyWater's `sky130`
+   inverter, alongside an excluded fixture that proves the license gate. The
+   fetch-convert-verify-exclude pipeline that placed it can add more as they clear
+   licensing. Zoom until you hit the transistors.
+3. **Share what you found.** Copy a permalink to the exact cell, camera, and layers
+   you are looking at. Whoever opens it sees what you see, pans it themselves, and
+   cannot change a thing.
 
-The clip below is the live share itself, captured from two real browser contexts talking
-over the relay: on the left an editor opens a chip and shares a room, on the right a
-read-only viewer materializes the same design as the sharer publishes it. The viewer browses
-the shared design on its own and cannot change it.
+Works today in Chrome and Edge on WebGPU, and falls back to WebGL2 in other current
+browsers.
 
-<p align="center"><img src="assets/tour-share.gif" alt="An editor sharing a live room on the left and a read-only viewer mirroring it over the relay on the right, the sharer's cursor moving in both panes" width="100%" /></p>
+## The numbers that make it work
 
-## Generate verified structures from language
+Every figure here is measured, not estimated. Most trace to a committed test or
+bench you can run; the live streaming figures are a reading from the
+`window.__reticle_stats` seam on the deployed demo.
 
-Six parameterized generators turn a few numbers into the repetitive structure a layout
-engineer would otherwise draw by hand: a guard ring, a via farm, a pad ring, a seal ring,
-a density fill, or a probe-able test structure. Each generator is a pure function from
-typed parameters to geometry, and each is **DRC-clean by construction**: a property test
-runs every generator over random valid parameter sets - now across **two PDKs, SKY130 and
-IHP SG13G2** - and asserts zero design-rule violations under each process's real checker
-(`crates/reticle-gen/tests/`). The process numbers are data (a `GenTech` derived from the
-technology), not baked constants, so the same generators run against either PDK.
+- **Streaming:** a 3.01 GiB archive browses over plain HTTP Range from static
+  hosting. First view: 188 KiB fetched, 0.006% of the file, reported live in the
+  streaming HUD. Separately, the converter turns a 30M-entry layout into a tiled
+  archive at 127 MiB peak RAM.
+- **Scale:** 10,000,000 leaf shapes render at about 113 fps on an RTX 4060 Ti, up
+  from 6.1 fps before the retained renderer (the native offscreen render bench; see
+  `docs/PERF.md`). Hierarchy is never flattened to
+  browse; a cell placed thousands of times stays one cell.
+- **Verification speed:** an edit re-checks only its neighbourhood: 5 us at 100k
+  shapes, 37 us at 1M, against a 100 ms interactivity budget. Design rules run while
+  you type, like a spellchecker.
+- **Referee-checked:** a documented subset of KLayout DRC decks runs on Reticle's
+  engine and is validated verdict-for-verdict against KLayout headless in a pinned
+  container. LEF/DEF import is cross-checked against OpenROAD the same way. The
+  official TinyTapeout precheck runs on a committed tile, and every Magic and KLayout
+  DRC and geometry check in it passes; the pin and Verilog checks that need
+  submission artifacts a geometry tile does not produce do not, and no tile here is
+  claimed to pass the precheck in full. The incumbents are the referees, on purpose.
 
-The same six generators surface three ways from one schema. The **Generate panel** builds
-a typed form from each generator's schema, previews the geometry live on the canvas, and
-places it as one undo step. The **MCP server** exposes one tool per generator (named for
-its id: `guard_ring`, `via_farm`, `pad_ring`, `seal_ring`, `fill`, `test_structure`), so a
-model host can call a generator with a target cell and its parameters. And a
-`RunGenerator` command makes every generator run a replayable, undoable transcript edit,
-exactly like a hand-drawn shape.
+## Who it is for
 
-The clip below drives the Generate panel: pick the guard-ring generator, grow its region,
-place the ring as one undoable step, then switch to the via-farm generator and place a 5x5
-farm. Both structures are DRC-clean the moment they land.
+| You are | Reticle gives you |
+|---|---|
+| Curious what a chip actually looks like inside | The gallery. Real silicon, one click, zoom to the wires |
+| A TinyTapeout or open-shuttle participant | Your tile in a tab, the official precheck run on it, and a share link for showing it off |
+| An analog or full-custom designer | User-defined PCells with typed parameters and sandboxed produce scripts, net trace, shorts and opens, SPICE export, xschem probe import |
+| A reviewer on an open-silicon repo | A rendered layout diff of what changed, painted over the canvas, and a pull-request diff Action (authored, not yet exercised on live CI) |
+| An instructor | Classroom mode: students follow your viewport live, view-only until you unlock them. The whole lab is a URL |
+| A researcher studying agents on real tasks | A frozen, citable benchmark with checkers that must reject wrong answers, and a deterministic public leaderboard |
+| On a locked-down or offline machine | The desktop build runs the same editor with the network unplugged |
 
-<p align="center"><img src="assets/tour-generate.gif" alt="Driving the Generate panel: selecting the guard-ring generator, growing its region, placing the ring, then placing a 5x5 via farm, each as one undo step" width="100%" /></p>
+## What you can do
 
-## Benchmark agents on physically verified tasks
+**Open and share real chips.** Import GDSII or OASIS, drop a file on the window, or
+pass `?gds=<url>`. A permalink (`?cell`, `?view`, `?layers`) deep-links the exact
+cell, camera, and layers on the static site with no server. Live rooms add real-time
+sharing: one click mints a read-only viewer link, and the viewer materializes your
+design as you edit it and cannot write back, enforced at the transport, not the UI.
+That live path is proven end to end over the relay in tests; the public demo's relay
+endpoint is operator-configured (see `docs/honest-limits.md`), so live sharing is a
+capability rather than a guaranteed feature of the hosted demo. Phones navigate
+shared links by touch.
 
-The same engine is drivable by an agent. A serializable command API exposes every edit,
-and a propose-verify-correct harness makes a model build layouts under the real
-design-rule and connectivity checks, so a task passes only when an objective checker
-accepts it. Each checker is two-way tested: it must accept the intended solution and
-reject a perturbed one. Every result is labeled with the backend, model, and quantization
-that produced it.
+**Edit with guardrails.** Rectangles, polygons, paths, cells, arrays, on three real
+PDKs: SKY130, IHP SG13G2, and GF180MCU. DRC underlines violations as you draw.
+Boolean ops, vertex editing, array duplication, all one undo step each.
 
-The suite is [`benchmarks/layout-tasks/manifest.toml`](benchmarks/layout-tasks/manifest.toml),
-now version 0.5.0, 83 tasks across five tiers (the generator tasks above are among them).
-The rows below are aggregated from the committed result records by
-[the leaderboard](docs/src/leaderboard.md), which is generated deterministically from
-`benchmarks/results/` and is the live source of truth for these numbers. Each row carries the
-suite version it actually ran and its own denominator; the numbers are never compared across
-different denominators or suite versions.
+**Generate instead of drawing.** Six built-in generators (guard ring, via farm, pad
+ring, seal ring, fill, test structure) are DRC-clean by construction: a property
+test sweeps each across random valid parameters on all three PDKs and asserts zero
+violations under each process's real checker. **User-defined PCells** extend that:
+typed parameters, a sandboxed Rhai produce function with an operation budget and
+memory cap, instance caching, and DRC checked on every generate before the result
+commits. Live produce runs in the desktop app; in the browser the inspector edits an
+instance's parameters and shows predicted provenance, and says so.
+
+![Selecting the guard-ring generator, growing its region, placing the ring, then a 5x5 via farm, each one undo step](docs/media/generate-panel.gif)
+
+**Review where the work lives.** A `reticle-diff` pass compares two versions and
+paints what changed over the canvas (added green, removed red), pinned by property
+tests including a single-insertion oracle. A composite layout-diff GitHub Action is
+authored to render a before/after into a pull request; it is valid YAML and reasoned
+through, not yet run on live GitHub Actions (this repo ships no workflows; recorded
+in `docs/honest-limits.md`). Comments anchor to a shape or cell and survive a document
+schema migration proven byte-for-byte against a pre-migration fixture.
+
+**Trace and verify.** Click a shape, light up its net. Shorts and opens report into
+the Inspector. MOSFET recognition with LVS-lite, SPICE netlist export with per-PDK
+model names carried as data, antenna and area metrology to byte-stable CSV.
+
+**Automate it.** Every edit is a serializable, replayable command with a document
+hash. An MCP server exposes 39 tools, the Python bindings display a layout inline in
+a Jupyter notebook, a sandboxed Rhai producer builds user-defined PCells, and the
+CLI runs the whole pipeline headless. The in-editor agent panel plans, waits for
+your approval, executes, and replays; on native with a key or a local Ollama it
+drives a real model, and the web build shows a scripted preview and says so.
+
+**Extend it.** Sandboxed WASM plugins with declared permissions gated at
+instantiation, memory and fuel limits, and writes only through the same staged-edit
+funnel as every other input, so a plugin cannot make an edit that is not undoable
+and replayable. Plugins run in the desktop app; the browser build lists and previews
+the committed plugin index behind an in-UI disclaimer and never runs one (the
+runtime, `wasmi`, ships zero browser bytes). The package index is a deterministic
+file committed to this repo. No accounts, no server.
+
+**Take it anywhere.** Installable PWA with an offline shell. A desktop build for
+air-gapped review. An `?embed=1` mode drops the read-only viewer into an iframe, a
+course page, or a paper, with an "Open in Reticle" corner link back to the full
+editor.
+
+## The benchmark: how we know what works
+
+Machine-edited layout is only interesting if you can prove an edit is correct, so
+Reticle ships the proving apparatus: the suite is
+[`benchmarks/layout-tasks/manifest.toml`](benchmarks/layout-tasks/manifest.toml),
+frozen and citable at version 0.7.0, 95 tasks across five tiers, where a task passes
+only when an objective design-rule and connectivity checker accepts it. Every
+checker is **two-way tested**: it must accept the intended solution and reject a
+perturbed one before it is allowed to grade anything. The leaderboard is generated
+deterministically from committed records; every recorded row replays green before it
+counts.
 
 | What it is | Suite it ran | Result |
 |---|---|---:|
@@ -87,66 +146,66 @@ different denominators or suite versions.
 | `qwen2.5-coder:16k` (Q4_K_M), a bare local model on Reticle's own loop | 0.4.0 (75 tasks) | 29/75 (39%) |
 | `claude-sonnet-5` via Claude Code, an earlier ad-hoc run | adhoc (81 of 83 recorded) | 72/81 (89%) |
 
-The two bare rows ran the full 75-task 0.4.0 suite. They are small quantized local models,
-so the numbers are a floor, not an upper bound.
-
-The distinction the table makes is real. The two local models are *bare models*: Reticle
-supplies the loop, feeds the checker's violations back, and decides when a task passes.
-Claude Code is an *agent system* with its own planning-and-tool loop, so pointed at
-Reticle's MCP server it does not run the same harness the two bare rows do; its rows are not
-a like-for-like comparison with them, and its denominators are different task sets than the
-bare rows' 75. The featured Claude Code row is a real authenticated run against the current
-frozen v0.7.0 suite: 48 of 53 recorded tasks passed across all five tiers. The denominator is
-53, not 95, because the remaining 42 tasks were never recorded when the subscription rate
-limits stopped the run; an unrecorded task is an honest not-run, never a pass or a fail. An
-earlier ad-hoc run against a smaller task set recorded 72 of 81 and is kept as its own row. Per task the harness launches `reticle-mcp`, runs
-`claude -p` over it, replays the captured transcript, and runs the task's checker. To run
-the full suite when the rate window is clear: `just bench-agent-claude-code` (on Windows set
-`RETICLE_CLAUDE_BIN` to the resolved `claude.cmd` and `RETICLE_MCP_BIN` to a current
-`reticle-mcp`). See [the leaderboard](docs/src/leaderboard.md) for the aggregated records and
+Bare-model rows run Reticle's loop; agent systems bring their own, so the two are
+never compared head-to-head, and rows are never compared across denominators. The
+featured Claude Code row is a real authenticated run against the current frozen
+v0.7.0 suite: 48 of 53 recorded tasks passed across all five tiers. The denominator
+is 53, not 95, because the remaining 42 tasks were never recorded when the
+subscription rate limits stopped the run; an unrecorded task is an honest not-run,
+never a pass and never a fail. A gym-style RL environment wraps the editor (reset,
+step, reward-from-checker, replayable episodes) for anyone who wants to train
+against it. This is verification infrastructure: the editor is a normal editor, and
+you never have to touch the agents. See
+[the leaderboard](docs/src/leaderboard.md) for the aggregated records and
 [Benchmark methodology](docs/src/benchmark.md) for how a run is scored and replayed.
 
-## The live demo
+## Two promises
 
-**[Open the live demo.](https://alpharomerojl.github.io/reticle/)** It runs entirely in
-your browser on WebGPU and WebAssembly. Use current Chrome or Edge for the WebGPU path;
-the app falls back to WebGL2 elsewhere. The page opens into a recorded
-propose-verify-correct run playing in the replay theater, with the full editor one click
-away.
+**Links are load-bearing.** A permalink you share today is meant to open in ten
+years. Link rot is treated as a bug with the same severity as a rendering bug,
+because a shared link that dies takes someone's forum answer, course page, or code
+review with it.
 
-Each clip below is a full-window capture of the running application, produced by
-`just capture-ui` from a committed script under
-[`crates/reticle-app/demo-scripts/`](crates/reticle-app/demo-scripts/).
+**Your files stay yours.** Opening a local GDS converts it in a Web Worker inside
+your browser; nothing uploads. The proof is not this paragraph, it is your network
+tab: open a file and watch zero bytes of it leave.
 
-**Find and fix a design-rule violation.** Run DRC, the violation list fills, click one,
-the canvas frames its marker.
+## How it compares
 
-<p align="center"><img src="assets/tour-drc.gif" alt="Running DRC, the violation list populating, and the canvas zooming to a clicked violation" width="100%" /></p>
+As of 2026-07-12, the nearest browser-native neighbours are GDSJam, a collaborative
+GDS viewer, and Layout Studio, a browser GDS and OASIS editor with draw tools and a
+basic minimum-spacing and feature-size design-rule check that runs on the open file.
+Searching for prior art on that date, no browser tool was found that combines all
+three of editing, incremental design-rule checking at microsecond latency, and
+streaming a multi-gigabyte layout over the network; and no other physically verified
+layout-agent benchmark with a public leaderboard was found. These are
+absence-of-evidence judgments with a date attached, not proofs. If you know a
+counterexample, open an issue. I would like to read it.
 
-**Draw and edit real geometry.** Draw a polygon, drag a vertex, boolean-union two shapes,
-then array-duplicate the result. Every step is one undoable edit.
+|  | Reticle | KLayout | Magic | Commercial (Virtuoso-class) |
+|---|---|---|---|---|
+| Runs in a browser, zero install | yes | no | no | no |
+| Live multiplayer, per-actor undo | yes | no | no | no |
+| Incremental DRC while typing | microseconds | no | yes (corner-stitching) | in-design, full decks |
+| User-defined PCells | yes, sandboxed scripts | yes, Ruby/Python | partial | yes, SKILL |
+| Agent API + verified benchmark | yes | no | no | no |
+| Full-deck signoff DRC/LVS | no, and not a goal | via decks | yes | yes |
+| Timing, parasitics, tape-out signoff | no | no | partial | yes |
 
-<p align="center"><img src="assets/tour-edit.gif" alt="Drawing a polygon, moving a vertex, boolean-union, and array-duplicate" width="100%" /></p>
-
-**Watch the agent close the loop.** The replay theater plays a recorded run: the narration
-feed advances and the violation counter reaches zero.
-
-<p align="center"><img src="assets/tour-agent.gif" alt="The replay theater playing an agent run, narration advancing and the violation count reaching zero" width="100%" /></p>
-
-**See it in 3D.** Switch to the layer-stack view and orbit the extruded metals.
-
-<p align="center"><img src="assets/tour-3d.gif" alt="Orbiting the 3D extruded layer stack of a SKY130 cell" width="100%" /></p>
+Reticle does not compete on signoff depth. It competes on access, collaboration,
+scale-in-a-tab, and machine-checkability, and it uses KLayout, Magic, and OpenROAD
+as its own referees.
 
 ## Quickstart
 
 Prerequisites: a recent Rust toolchain (see `rust-toolchain.toml`) and
-[`just`](https://github.com/casey/just). A WebGPU-capable browser (current Chrome or Edge)
-is needed for the web demo. The local-model benchmark additionally needs a running
-[Ollama](https://ollama.com) endpoint.
+[`just`](https://github.com/casey/just). A WebGPU-capable browser (current Chrome or
+Edge) is needed for the web demo. The local-model benchmark additionally needs a
+running [Ollama](https://ollama.com) endpoint.
 
 ```sh
-# Build everything and run the full local gate (style, format, clippy, tests, docs, wasm,
-# licenses, spelling). There is no CI service; this recipe is the gate.
+# Build everything and run the full local gate: style, format, clippy, tests,
+# docs, wasm, licenses, spelling. There is no CI service. This recipe is the gate.
 just ci
 
 # Native application.
@@ -155,213 +214,147 @@ cargo run -p reticle-app --release
 # Web demo (WebGPU with a WebGL2 fallback), served locally.
 just web-serve
 
-# Regenerate the README media (hero still plus the tour GIFs) from committed demo scripts.
-just capture-ui
+# Desktop build (offline-complete Tauri shell). Build the web bundle first;
+# the shell embeds crates/web/dist at compile time.
+just web-build
+cd desktop && cargo build
 
-# Headless pipeline: import, DRC, route, extract, export, render-to-image.
+# Headless pipeline: import, DRC, route, extract, netlist, export, render.
 cargo run -p reticle-cli --release -- --help
 
-# Generate a deterministic chip-like layout to browse or benchmark.
-just gen-layout 1000000 8 3 scratch/gen.gds
+# Exercise the user-defined-PCell property harness (typed params, sandboxed Rhai
+# produce, DRC checked on every generate); the shipped example is
+# crates/reticle-script/examples/param_cell.rhai.
+cargo nextest run -p reticle-script
 
-# Score the agent across the suite (deterministic mock by default).
+# Run the official TinyTapeout precheck on a committed tile.
+just tt-precheck examples/tapeout/tt_um_reticle_tile.gds
+
+# Score an agent across the suite (deterministic mock by default).
 just bench-agent
-
-# Score it against a LOCAL model via Ollama (set the model first).
-# $env:RETICLE_MODEL_NAME = 'gpt-oss:16k'
-just bench-agent-ollama
-
-# Score it through Claude Code (needs an authenticated `claude` CLI on PATH).
-just bench-agent-claude-code
 ```
 
 ## How it works
 
-**Hierarchy culling.** Geometry is indexed in a bulk-loaded R-tree and a tile/level-of-detail
-pyramid. Hierarchy is never flattened to browse; each cell's bounding box is computed once,
-and rendering culls whole instances and arrays that fall outside the view. A compute shader
-flags which cell boxes overlap the viewport, a workgroup scan compacts the survivors into an
-indirect-draw buffer, and one indirect draw paints them, so the draw count comes from the GPU.
-The retained renderer caches per-cell tessellation once and uploads geometry to fixed-size
-GPU pages, so each frame is a draw, not a rebuild; that lifts a 10,000,000-leaf-shape scene
-from 6.1 to about 113 fps on an RTX 4060 Ti (see [PERF.md](docs/PERF.md)).
+<details>
+<summary><b>Streaming</b>: 3.01 GiB archive, 188 KiB first view</summary>
 
-**Design-rule checking.** A declarative engine evaluates width, spacing, enclosure,
-extension, notch, area, density, and angle rules against the indexed geometry. On an edit it
-re-checks only the changed neighbourhood: 5 us at 100k shapes and 37 us at 1M, against the
-100 ms interactive target. A property test pins the engine to a naive reference oracle over
-400 random layouts. A cited SKY130 rule subset grounds the periphery rules. A documented
-subset of KLayout `.lydrc` DRC decks compiles down to the same engine, validated
-verdict-for-verdict against KLayout headless in the pinned container.
+A forward-only GDSII record reader (wasm-clean) feeds a bounded-memory tiled-archive
+builder: a 30M-entry layout becomes a tiled archive at 127 MiB peak RSS. The browser
+streams an archive over HTTP Range, reading only the header, the directory, and the
+tiles the viewport needs; the first view of the live 3.01 GiB archive fetched
+188 KiB. Library dies are served from R2 behind an edge cache with content-hash keys;
+every die carries a license manifest verified before upload, and unverifiable dies
+are excluded rather than shipped.
+</details>
 
-**Metrology.** A CPU metrology pass reports
-exact per-layer area and perimeter (union on the `i_overlay` integer engine, overlaps counted
-once), connectivity statistics (net count, shapes per net, max fanout), and a simplified
-per-net antenna ratio over a SKY130 layer subset, exported to byte-stable CSV and Markdown. A
-property test pins area and perimeter to a coordinate-compression oracle. The GPU density
-overlay is deferred; see [ADR 0077](docs/decisions/0077-cpu-metrology-reports.md).
+<details>
+<summary><b>Rendering</b>: hierarchy is never flattened</summary>
 
-**Installable PWA.** The browser bundle is an installable Progressive Web App whose app shell
-loads offline: a relative web manifest, a service worker that caches the shell and the hashed
-wasm bundle (network-first navigation, cache-first assets, cache scope derived from
-`self.registration.scope`), and registration wired into `index.html`. Every path is relative, so
-it is correct at the dev root and under the gh-pages `/reticle/` subpath; a Playwright e2e proves
-the manifest, the registration, and an offline shell reload. See
-[ADR 0078](docs/decisions/0078-installable-pwa-app-shell-offline.md).
+Geometry lives in a bulk-loaded R-tree and a level-of-detail pyramid. A compute
+shader flags which cell boxes overlap the viewport, a workgroup scan compacts
+survivors into an indirect-draw buffer, and one indirect draw paints them, so the
+draw count comes from the GPU. Per-cell tessellation is cached once; each frame is a
+draw, not a rebuild. See [`docs/PERF.md`](docs/PERF.md) for the measurement
+methodology behind every fps number above.
+</details>
 
-**Layout diff.** A pure `reticle-diff` crate answers "what changed between two versions?":
-`diff(before, after)` compares the flattened top cells as multisets keyed by exact geometry and
-reports the shapes added, removed, and (deferred in v1) changed. Property tests pin it, including a
-single-insertion oracle. The app paints the result over the canvas (added green, removed red,
-changed amber) with a show/hide toggle, fed by a snapshot/diff flow over two in-memory documents. A
-comparison-document file loader and a true `changed` classification are deferred; see
-[ADR 0079](docs/decisions/0079-layout-diff-overlay.md).
+<details>
+<summary><b>DRC</b>: microseconds per edit, pinned to an oracle</summary>
 
-**Comments and annotations.** Notes anchored to a shape or cell persist inside the layout
-document through a schema bump, V1 to V2. The new `comments` field is additive, so every pre-V2
-document still decodes, and `migrate_document` upgrades a V1 document to V2 losslessly. The migration
-is proven against a golden fixture captured and committed from the pre-V2 build *before* the schema
-was edited: a test decodes those real pre-V2 bytes with the V2 code and asserts the geometry is
-byte-for-byte identical across the migration. The app lists comments and paints a numbered pin at
-each anchor; wiring the in-app pins into document save/load (and the CRDT) is deferred. See
-[ADR 0080](docs/decisions/0080-comments-schema-v1-v2-migration.md).
+A declarative engine evaluates width, spacing, enclosure, extension, notch, area,
+density, and angle rules, re-checking only the changed neighbourhood. A property
+test pins it to a naive reference oracle over 400 random layouts. Per-PDK subsets
+ship as data for all three PDKs, each two-way tested: a seeded violation is caught,
+the corrected layout passes. The subsets are a fast first filter, not tape-out
+clean, and this README will keep saying so.
+</details>
 
-**Multi-writer collaboration.** Several editors' edits merge and converge to a byte-identical
-document, and each editor's undo is *selective*: it tags local edits with a per-actor CRDT origin
-and drives a `yrs` undo manager scoped to that origin, so undo reverts only that editor's own last
-edit, leaves a concurrent peer's edit intact, and still reconverges after exchange. Read-only is
-enforced in depth: the relay drops a view-mode connection's frames (native and Durable Object
-worker alike) and the viewer transport has no publish method at all. Proven natively (two-writer
-convergence, selective-undo-then-reconverge, redo convergence) and end-to-end over the relay (two
-editors converge, a viewer sees the union but its write is dropped). Making the in-app editor
-CRDT-backed so it merges inbound peer edits live is deferred. See
-[ADR 0081](docs/decisions/0081-multi-writer-convergence-view-permission-selective-undo.md).
+<details>
+<summary><b>PCells</b>: sandboxed produce, checked on generate</summary>
 
-**Generators.** Each of the six generators is a pure function from a typed `ParamSchema` to
-geometry. One schema drives all three surfaces (the Generate panel, the MCP tools, the
-benchmark checker), and a property test runs every generator over 400 random valid parameter
-sets and asserts zero DRC violations, so the structures are clean by construction rather than
-by inspection.
+A PCell is typed parameters plus a Rhai produce function running under an operation
+budget and memory cap with no I/O. It emits into a staging cell, DRC runs on the
+result, and only then does it commit, as one undo step. Instances are cached on
+(pcell id, engine version, canonical parameter hash) and invalidated when the
+script's content hash changes. A property harness sweeps parameter ranges per PDK
+and shrinks failures to a minimal offending set. The honest claim split: the six
+shipped generators and shipped example PCells are clean by construction under the
+harness; your PCells are DRC-checked on every generate. Live produce is native-only
+(the Rhai crate is the single largest dependency and stays out of the browser
+bundle).
+</details>
 
-**The agent verify loop.** A serializable command API exposes every edit as a replayable
-transcript with a document hash. The harness drives a model against the SKY130 DRC subset and
-a connectivity intent, feeds the violations back, and stops only when an objective checker
-passes. For a local repair it can hand the model a region-scoped context pack instead of the
-whole layout, and a user can fold a new constraint into the running loop between iterations.
+<details>
+<summary><b>Collaboration</b>: CRDT convergence, review, classroom</summary>
 
-**Multimodal verification.** A second, best-effort oracle renders a task's layout through
-the same headless `RenderPng` path and asks a local vision model (`llava:7b` over Ollama,
-about 4.7 GB resident) a yes/no question about the render, reported beside the authoritative
-DRC/checker oracle as an agreement rate (ADR 0090). The graded pass/fail
-stays the deterministic checker's; the vision verdict is corroboration, not the verdict of
-record. A missing model or a host with no GPU is an honest not-run, never an error and never
-a fabricated number. On the development host the live oracle ran (`llava:7b`) and agreed with
-the authoritative checker on both fixtures of a faithful-versus-empty pair.
+The document mirrors onto a `yrs` CRDT with actor:counter keys; concurrent edits
+converge regardless of delivery order, and undo is per-actor: yours reverts, your
+collaborator's stays, and the documents still reconverge. Read-only viewers have no
+publish method at all, enforced at the transport (native relay and Cloudflare
+Durable Object alike). Convergence, selective undo, and the dropped-viewer-write are
+proven natively and end to end over the relay; the public demo's relay endpoint is
+operator-configured and may not be live, tracked in `docs/honest-limits.md`. The
+classroom instructor roster is
+honestly empty until a write-capable presence path lands; the student-follow half is
+real today.
+</details>
 
-**CRDT sync.** The document mirrors onto a `yrs` CRDT with unique `actor:counter` keys, so
-concurrent edits converge regardless of delivery order, proven by order-independent
-convergence tests. A thin relay broadcasts updates and presence; edits made offline
-reconcile on reconnect. A remote edit echoes to a peer in about 788 us on the localhost relay.
+<details>
+<summary><b>Formats</b>: read the world, write it back</summary>
 
-**LEF/DEF import.** A `reticle-lefdef` crate reads the technology and macro abstracts (LEF)
-and the placed, routed design (DEF) an OpenROAD run emits, and lowers them to the document
-plus the run metadata a viewer overlays (die area, rows, sites, nets with per-net segments,
-and pins). It parses a defined subset (ADR 0082), skips the rest with a warning instead of
-failing, and never panics or hangs on malformed input. It carries no external dependency, so
-it builds for the browser alongside the rest. The import is cross-checked against OpenROAD
-running in a pinned container (ADR 0088): a faithful import matches the tool on macro,
-component, and pin counts and the die area, a corrupted DEF diverges, and the check skips
-honestly when Docker is absent. The live cross-check ran on the development host in about
-22 seconds.
+GDSII read/write, hardened and fuzzed, every stream-supplied count capped against
+remaining input. OASIS read and write, round-trip property tested both directions
+and validated by KLayout reading the output back. CIF and DXF subset import. LEF/DEF
+import cross-checked against OpenROAD in a pinned container. STL/GLTF export of the
+3D layer stack. Image underlay aligns a licensed die photo under its own layout with
+a two-point affine fit.
+</details>
 
-**Conformant OASIS writer.** Alongside Reticle's in-house archive format, an `OasisStd`
-writer emits standards-conformant OASIS (SEMI P39) for a practical subset: rectangles,
-polygons, paths, placements (carrying magnification and angle), and text, with fully
-explicit modal state and cell-name and cell tables. It is export-only and uncompressed,
-and arrays are expanded to individual placements, so large arrays inflate and it is not a
-general exporter. Its output is validated by KLayout reading it back in the pinned
-container (correct cells, shapes, and database unit), so a third-party tool accepts the
-file rather than only Reticle round-tripping it. See
-[ADR 0086](docs/decisions/0086-conformant-oasis-writer-scope-and-oasis-rename.md).
+<details>
+<summary><b>The verify loop</b>: propose, check, correct</summary>
 
-**Python bindings.** A `reticle-py` PyO3 extension exposes the read, generate, render, and
-save paths to Python as a stable-ABI (`abi3`) wheel, so one wheel imports on any CPython
-3.9 or newer (built against 3.14, verified importing the same wheel under 3.13). From
-Python it opens a GDSII or OASIS-subset document, lists cells, places a generator by id,
-renders a PNG, and shows a layout inline in a Jupyter notebook. It is native-only (a host
-with no GPU returns no render rather than failing) and lives outside the Cargo workspace,
-so the local gate stays Python-free. See
-[ADR 0087](docs/decisions/0087-python-bindings-abi3-nondefault.md).
+Every edit is a replayable transcript entry with a document hash. The harness drives
+a model against the real DRC subset and a connectivity intent, feeds violations back,
+and stops only when the objective checker passes. A second, best-effort vision
+oracle corroborates renders but is never the verdict of record; a missing model is an
+honest not-run, never a fabricated number.
+</details>
 
-**In-browser conversion.** The browser
-converts a GDS to a streamable `.rtla` archive itself, with no server and no upload: a Web
-Worker runs the frozen streaming GDS reader and an additive in-memory archive builder
-(`build_rtla_to_vec`, byte-identical to the native builder for browser-scale layouts),
-writes the archive into the Origin Private File System (OPFS), and reopens it through the
-existing `?archive=` streaming path via a service-worker Range bridge. It mirrors the
-native converter's v1 flatten and leveling scope (ADR 0072); very large dies stay a
-native-converter job. OPFS is used honestly (a secure context and a Worker), and the
-`browser-convert` e2e proves the full path headless. See
-[ADR 0091](docs/decisions/0091-in-browser-gds-to-rtla-conversion-opfs.md).
+## What it does not do
 
-## What it does not do, and where it is thin
+Reticle is honest about its edges; the audited list lives in
+[`docs/STATUS.md`](docs/STATUS.md), with a completeness ledger in
+[`docs/honest-limits.md`](docs/honest-limits.md).
 
-Reticle is a portfolio-grade engineering project and a research vehicle for machine-driven
-layout, not a production EDA tool. It is honest about its edges, audited in
-[docs/STATUS.md](docs/STATUS.md):
+- No synthesis, no timing, no parasitic extraction, no tape-out signoff. LVS-lite
+  compares device counts and terminal nets; it is not a full LVS. The DRC subsets
+  are fast first filters.
+- SoC-scale place-and-route belongs to OpenROAD; Reticle visualizes P&R output and
+  does not compute it.
+- The plugin ABI is v0 and will break. The index is a committed file, not a hosted
+  registry.
+- Native mobile editing is out of scope; touch viewing and annotation stay.
+- A bounded pure-Rust MNA oracle simulates small extracted circuits (linear R/C/L
+  and independent sources, DC operating point and fixed-step transient). It is not
+  ngspice, is labeled that way everywhere, and is never signoff.
 
-- No logic or physical synthesis, no timing (no STA, no parasitic extraction), and no
-  tape-out signoff. Extraction is geometric net connectivity plus SKY130 MOSFET
-  recognition (poly over diffusion) with a device-level LVS-lite that compares device
-  count and terminal nets, checked against Magic's own extraction of a production
-  inverter; it stops short of device-parameter and parasitic matching, so it is not a
-  full LVS. The SKY130 DRC subset is a fast first filter, not tape-out clean.
-- The benchmark's bare rows are small quantized local models, a realistic floor rather
-  than a ceiling. The Claude Code row is a real authenticated run recorded in the
-  leaderboard, but as an agent system with its own loop it is not head-to-head comparable
-  with the bare-model rows, and it ran a different task set than they did.
-- The in-editor "ask the agent to fix this violation" button scopes the run by narration,
-  not yet by a hard region constraint on the model.
-- The fuzz targets are committed but libFuzzer does not link under Windows/MSVC; parser and
-  boolean robustness are covered instead by proptests in the gate. Run the fuzzers on Linux.
-- OASIS round-trips rectangles, polygons, paths, instances, and arrays; GDSII carries the
-  full hierarchy.
-- A streamed-archive path (`.rtla`) underpins large-layout browsing: a forward-only GDSII
-  record reader with no `gds21` dependency (wasm-clean) and an external, bounded-memory
-  tiled-archive builder that turns a 30M-entry layout into an archive at 127 MiB peak RSS.
-  On the read side the browser streams a 3.01 GiB archive over HTTP Range, reading only
-  the header plus the directory entries and tiles a viewport needs: the initial view of
-  the live 3.01 GiB archive fetched 188 KiB, 0.006% of the file, reported live in the
-  streaming HUD. A 3.01 GiB archive
-  [streams in the browser](https://alpharomerojl.github.io/reticle/?archive=https://reticle-archive.josefdean.workers.dev/f04af90fbb06786c.rtla).
-  The in-browser converter that produces one in a Web Worker into OPFS now ships (above);
-  very large dies still stay a native-converter job.
+## Star, sponsor, correct me
 
-For where Reticle sits among layout tools and the full list of non-goals, see
-[Positioning](docs/src/positioning.md).
+If this is useful or just cool, star the repo; it is genuinely how the next person
+finds it. Found a chip the gallery should carry, a claim that needs correcting, or a
+counterexample to the comparison above? Open an issue. Development is one person plus
+a lot of verification; you can support it on
+[GitHub Sponsors](https://github.com/sponsors/AlpharomeroJL).
+
+Built solo with agentic coding campaigns. Every public number is measured, not
+estimated.
 
 ## Tech stack
 
-Rust, `wgpu` (WebGPU / Vulkan / Metal / DX12 with a WebGL2 fallback), `egui` and `eframe`
-(with an `egui-wgpu` paint callback for the canvas), `i_overlay`, `rstar`, `gds21`, `lyon`,
-`yrs`, `axum`, `prost`, `rhai`, `pathfinding`, `criterion`, `proptest`, and `cargo-fuzz`.
-
-## Sponsor
-
-If Reticle is useful to you, you can support its development on GitHub Sponsors:
-
-[![Sponsor AlpharomeroJL](https://img.shields.io/badge/Sponsor-AlpharomeroJL-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/AlpharomeroJL)
-
-<!--
-GitHub strips <iframe> from README markdown, so the badge above is used here.
-The official iframe embeds below render on external sites / GitHub Pages:
-
-Button:
-<iframe src="https://github.com/sponsors/AlpharomeroJL/button" title="Sponsor AlpharomeroJL" height="32" width="114" style="border: 0; border-radius: 6px;"></iframe>
-
-Card:
-<iframe src="https://github.com/sponsors/AlpharomeroJL/card" title="Sponsor AlpharomeroJL" height="225" width="600" style="border: 0;"></iframe>
--->
+Rust, `wgpu` (WebGPU, Vulkan, Metal, DX12, WebGL2 fallback), `egui` and `eframe`,
+`i_overlay`, `rstar`, `gds21`, `lyon`, `yrs`, `axum`, `prost`, `rhai`, `wasmi`,
+`pathfinding`, `criterion`, `proptest`, `cargo-fuzz`.
 
 ## License
 

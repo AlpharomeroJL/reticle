@@ -73,17 +73,24 @@ distinct from an earlier ad-hoc run and from the local-model rows. Every row car
 suite and denominator and is never compared across denominators. CHECK:
 `cargo run -p reticle-bench -- leaderboard --out -` run twice is byte-identical.
 
-Positioning is stated as positive, measured capability, not by any uniqueness or
-"only / first / no other" claim. See `docs/src/positioning.md` for the honest map, the
-not-list (no synthesis, no timing, no device-LVS, no tape-out signoff), and what the
-established tools do that Reticle does not. The headline figures are measured and
+Positioning is stated as positive, measured capability. See `docs/src/positioning.md` for
+the honest map, the not-list (no synthesis, no timing, no device-LVS, no tape-out signoff),
+and what the established tools do that Reticle does not. The headline figures are measured and
 reproducible: about 188 KiB (0.006%) fetched for the first view of a live 3.01 GiB streamed
 archive, reported through the `window.__reticle_stats` seam; a sustained 60 fps target met at
 one million shapes (measured 295 fps at 1920x1080, `cargo run -p reticle-render --example
 fps_bench --release`); and a deterministic, byte-stable, public agent leaderboard generated
-from committed records. Two former absence-of-evidence uniqueness claims were dropped at the
-release gate; the 2026-07-12 landscape re-verification that prompted it is recorded in
-`docs/honest-limits.md` so the history stays honest.
+from committed records. The two BROAD uniqueness claims ("no other browser-native editor";
+"no other public layout-agent benchmark") were dropped at the release gate after the
+2026-07-12 landscape re-verification (Layout Studio refuted the first; the second is recorded
+in `docs/honest-limits.md`). In their place the README "How it compares" section makes two
+NARROW, dated (2026-07-12), scoped absence-of-evidence differentiators, each phrased as such
+with a counterexample invite: no browser tool found combines editing, incremental
+microsecond-latency DRC, and multi-GiB streaming; and no other physically-verified
+layout-agent benchmark with a public leaderboard found. This file, `docs/src/positioning.md`,
+and the paper make no uniqueness claim; the differentiators live in the README and are
+recorded in `docs/honest-limits.md`. CHECK: read the dated statements in `README.md` and the
+honest-limits uniqueness row.
 
 ## v8.0.0 run in progress (Wave 0 recorded 2026-07-07)
 
@@ -537,7 +544,8 @@ New subsystems, itemized with their honest limits:
 
 Honest limitations (v7.0.0, shipped 2026-07-07), consolidated: (1) the Claude Code
 benchmark row is a **real but partial** run: 24 of 25 tasks that ran passed (96%, well
-above either local model), but subscription rate limits stopped it before all 83, so its
+above either local model; a v7.0.0-era partial run, since superseded as the published
+Claude Code figure by the v8.2.0 leaderboard rows), but subscription rate limits stopped it before all 83, so its
 denominator differs from the full-suite local rows (ADR 0058 covers the four backend fixes
 that made it drive the tools at all); (2) the TinyTapeout **precheck was run to a verdict**
 (ADR 0059): the worked tile passes every Magic and KLayout DRC and geometry check against
