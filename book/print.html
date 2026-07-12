@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-28095561.js";
+            window.path_to_searchindex_js = "searchindex-49a26fec.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4721aa9c.js"></script>
@@ -322,7 +322,7 @@ flows that Reticle does not have. This list is deliberately blunt.</p>
 <ul>
 <li><strong>Full-fidelity format coverage.</strong> Reticle reads and writes GDSII with full
 hierarchy (via <code>gds21</code>). Its <code>Oasis</code> type is <strong>not</strong> interoperable OASIS: it is an
-in-house, OASIS-inspired <em>container</em> (ADR 0004) that no other tool reads, used only
+in-house, OASIS-inspired <em>container</em> (ADR 0004) that other tools do not read, used only
 to round-trip Reticle’s own geometry. A separate conformant-OASIS <strong>writer</strong>
 (<code>oasis_std</code>) emits a practical SEMI P39 subset that KLayout does read - export only,
 verified against KLayout in-container (see the <a href="#gds--oasis-interop">GDS / OASIS interop</a>
@@ -3682,7 +3682,7 @@ VRAM budget, and the honest-not-run policy.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="leaderboard"><a class="header" href="#leaderboard">Leaderboard</a></h1>
 <p>This page is generated deterministically from the committed benchmark result records under <code>benchmarks/results/</code>. It does not run the suite; it aggregates the <code>*.result.json</code> records the runs already wrote. Regenerate it with <code>cargo run -p reticle-bench -- leaderboard</code>. The record format is the API: to add a row, run the suite and open a pull request with your records (see <a href="#submitting-a-run">Submitting a run</a>).</p>
-<p>It aggregates <strong>231</strong> committed result record(s) into <strong>3</strong> row(s), one per <code>backend</code> / <code>model</code> / <code>quantization</code> triple. The numbers are exactly what the committed records say and grow as more runs are committed.</p>
+<p>It aggregates <strong>284</strong> committed result record(s) into <strong>4</strong> row(s), one per <code>backend</code> / <code>model</code> / <code>quantization</code> triple and <code>suite_version</code>, so a model’s runs against different suite versions stay separate rows and no row blends two suite denominators. The numbers are exactly what the committed records say and grow as more runs are committed.</p>
 <h2 id="how-to-read-a-row"><a class="header" href="#how-to-read-a-row">How to read a row</a></h2>
 <ul>
 <li><strong>Kind</strong> labels a row as a <em>bare model</em> (a model driven through Reticle’s own propose-verify-correct loop), an <em>agent system</em> (a system that brings its own loop and scaffold, such as Claude Code), or a <em>multi-agent</em> system. A bare-model row and an agent-system row measure different things and are <strong>not</strong> comparable head to head (see the <a href="#benchmark-methodology">methodology</a>).</li>
@@ -3697,6 +3697,7 @@ VRAM budget, and the honest-not-run policy.</p>
 <tr><th>Kind</th><th>Model</th><th>Backend</th><th>Quantization</th><th>Suite</th><th style="text-align: right">Tier 1</th><th style="text-align: right">Tier 2</th><th style="text-align: right">Tier 3</th><th style="text-align: right">Tier 4</th><th style="text-align: right">Tier 5</th><th style="text-align: right">Overall</th><th></th></tr>
 </thead>
 <tbody>
+<tr><td>agent system</td><td><code>claude-sonnet-5</code></td><td>claude-code</td><td>-</td><td>0.7.0</td><td style="text-align: right">5/5</td><td style="text-align: right">8/8</td><td style="text-align: right">26/28</td><td style="text-align: right">4/7</td><td style="text-align: right">5/5</td><td style="text-align: right"><strong>48/53 (91%)</strong></td><td></td></tr>
 <tr><td>agent system</td><td><code>claude-sonnet-5</code></td><td>claude-code</td><td>-</td><td>adhoc</td><td style="text-align: right">8/9</td><td style="text-align: right">10/11</td><td style="text-align: right">38/41</td><td style="text-align: right">7/11</td><td style="text-align: right">9/9</td><td style="text-align: right"><strong>72/81 (89%)</strong></td><td></td></tr>
 <tr><td>bare model</td><td><code>gpt-oss:16k</code></td><td>ollama</td><td>MXFP4</td><td>0.4.0</td><td style="text-align: right">9/9</td><td style="text-align: right">11/11</td><td style="text-align: right">19/34</td><td style="text-align: right">5/11</td><td style="text-align: right">8/10</td><td style="text-align: right"><strong>52/75 (69%)</strong></td><td></td></tr>
 <tr><td>bare model</td><td><code>qwen2.5-coder:16k</code></td><td>ollama</td><td>Q4_K_M</td><td>0.4.0</td><td style="text-align: right">6/9</td><td style="text-align: right">8/11</td><td style="text-align: right">6/34</td><td style="text-align: right">3/11</td><td style="text-align: right">6/10</td><td style="text-align: right"><strong>29/75 (39%)</strong></td><td></td></tr>
@@ -3784,7 +3785,9 @@ file name ending in <code>.result.json</code> (the extension the leaderboard agg
 <pre><code>cargo run -p reticle-bench -- leaderboard
 </code></pre>
 <p>Open the pull request with both the records and the regenerated <code>docs/src/leaderboard.md</code>.
-Your row is aggregated per <code>backend</code> / <code>model</code> / <code>quantization</code> triple, labeled by
+Your row is aggregated per <code>backend</code> / <code>model</code> / <code>quantization</code> triple and <code>suite_version</code>
+(so a run against a new suite version is always its own row, never blended into an older
+one), labeled by
 <a href="#how-to-read-a-row">kind</a> (a bare model, an agent system, or a multi-agent
 system), and marked <strong>PARTIAL</strong> if it does not span all five tiers. A bare-model row and an
 agent-system row are not comparable head to head; both are welcome, and the labeling keeps
@@ -4986,7 +4989,7 @@ rationale.</p>
 <p><code>reticle-script</code> (the rhai PCell producer) and <code>reticle-agent</code> (the real
 propose-verify-correct agent) are native-only dependencies of <code>reticle-app</code>
 (ADR 0115): shipping either in the wasm bundle would blow the measured
-<code>+450 KiB</code> gz budget by an order of magnitude. The browser’s PCell Inspector
+browser-bundle gz budget by an order of magnitude. The browser’s PCell Inspector
 shows the <em>predicted</em> provenance and an honest disclaimer that live produce
 runs in the desktop app. This chapter’s crate is that desktop app.</p>
 <h2 id="build"><a class="header" href="#build">Build</a></h2>

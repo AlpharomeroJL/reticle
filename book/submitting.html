@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-28095561.js";
+            window.path_to_searchindex_js = "searchindex-49a26fec.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4721aa9c.js"></script>
@@ -256,7 +256,9 @@ file name ending in <code>.result.json</code> (the extension the leaderboard agg
 <pre><code>cargo run -p reticle-bench -- leaderboard
 </code></pre>
 <p>Open the pull request with both the records and the regenerated <code>docs/src/leaderboard.md</code>.
-Your row is aggregated per <code>backend</code> / <code>model</code> / <code>quantization</code> triple, labeled by
+Your row is aggregated per <code>backend</code> / <code>model</code> / <code>quantization</code> triple and <code>suite_version</code>
+(so a run against a new suite version is always its own row, never blended into an older
+one), labeled by
 <a href="leaderboard.html#how-to-read-a-row">kind</a> (a bare model, an agent system, or a multi-agent
 system), and marked <strong>PARTIAL</strong> if it does not span all five tiers. A bare-model row and an
 agent-system row are not comparable head to head; both are welcome, and the labeling keeps

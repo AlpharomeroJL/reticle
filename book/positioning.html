@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "navy";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-28095561.js";
+            window.path_to_searchindex_js = "searchindex-49a26fec.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-4721aa9c.js"></script>
@@ -250,7 +250,7 @@ flows that Reticle does not have. This list is deliberately blunt.</p>
 <ul>
 <li><strong>Full-fidelity format coverage.</strong> Reticle reads and writes GDSII with full
 hierarchy (via <code>gds21</code>). Its <code>Oasis</code> type is <strong>not</strong> interoperable OASIS: it is an
-in-house, OASIS-inspired <em>container</em> (ADR 0004) that no other tool reads, used only
+in-house, OASIS-inspired <em>container</em> (ADR 0004) that other tools do not read, used only
 to round-trip Reticle’s own geometry. A separate conformant-OASIS <strong>writer</strong>
 (<code>oasis_std</code>) emits a practical SEMI P39 subset that KLayout does read - export only,
 verified against KLayout in-container (see the <a href="interop.html">GDS / OASIS interop</a>
