@@ -78,6 +78,9 @@ Re-confirmed on main d9a9420 (the amendment commit): `just bundle-gate` PASS, gz
 total 4463718 vs v8.0-baseline 3999044 = +453.8 KiB, budget +456 KiB, about 2.2
 KiB headroom (`scratch/logs/gate4-bundle-reconfirm.log`). The gz variance against
 the +453.9 KiB first measurement is 126 bytes, well inside the amendment margin.
+The Gate-4 headed-coverage seams (b70c3d7, the additive `underlay_loaded`/`embed`
+frame stats) later measured +454.5 KiB, still under the +456 ceiling with about
+1.5 KiB headroom (`scratch/logs/gate4-bundle-seams.log`).
 
 Option 2 (the +450 trim) was reassessed against the actual code and declined:
 
