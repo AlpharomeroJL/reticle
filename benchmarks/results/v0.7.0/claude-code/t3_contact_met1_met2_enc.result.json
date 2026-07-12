@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_contact_met1_met2_enc",
+    "model": "claude-sonnet-5",
+    "suite_version": "0.7.0",
+    "success": true,
+    "iterations": 5,
+    "first_proposal_violations": 1,
+    "final_violations": 1,
+    "wall_ms": 48131,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]

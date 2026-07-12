@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_pcell_box_pad_default_margin",
+    "model": "claude-sonnet-5",
+    "suite_version": "0.7.0",
+    "success": false,
+    "iterations": 2,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 47025,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]

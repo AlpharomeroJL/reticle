@@ -102,7 +102,9 @@ cargo run -p reticle-bench -- leaderboard
 ```
 
 Open the pull request with both the records and the regenerated `docs/src/leaderboard.md`.
-Your row is aggregated per `backend` / `model` / `quantization` triple, labeled by
+Your row is aggregated per `backend` / `model` / `quantization` triple and `suite_version`
+(so a run against a new suite version is always its own row, never blended into an older
+one), labeled by
 [kind](leaderboard.md#how-to-read-a-row) (a bare model, an agent system, or a multi-agent
 system), and marked **PARTIAL** if it does not span all five tiers. A bare-model row and an
 agent-system row are not comparable head to head; both are welcome, and the labeling keeps

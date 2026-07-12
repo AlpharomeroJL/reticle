@@ -1,8 +1,10 @@
 //! A deterministic static leaderboard rendered from committed [`ResultRecord`]s.
 //!
 //! This module reads the committed result records (it never runs the suite),
-//! aggregates them per provenance triple (`backend`, `model`, `quantization`) with a
-//! per-tier breakdown, and renders a Markdown book page. The render is a pure function
+//! aggregates them per provenance triple (`backend`, `model`, `quantization`) and
+//! `suite_version` with a per-tier breakdown, and renders a Markdown book page. Keying by
+//! suite version keeps a model's runs against different suites as separate rows, so no row
+//! ever blends two suite denominators. The render is a pure function
 //! of the record set: the same records produce the same bytes, with no timestamps and a
 //! stable total ordering, which is what the golden byte-stability test in
 //! `tests/leaderboard_deterministic.rs` pins.
@@ -56,12 +58,16 @@ pub fn system_kind(backend: &str) -> &'static str {
     }
 }
 
-/// The provenance triple a leaderboard row aggregates over.
+/// The provenance a leaderboard row aggregates over: the backend/model/quantization
+/// triple plus the suite version. Suite version is part of the key so a model's runs
+/// against two different suite versions never blend into one denominator (a v0.7.0 run
+/// and an earlier-suite run are separate rows, each carrying its own suite and total).
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 struct GroupKey {
     backend: String,
     model: String,
     quantization: Option<String>,
+    suite_version: String,
 }
 
 /// Running pass/total counts for a tier (or a whole row).
@@ -147,6 +153,7 @@ impl Row {
         String,
         String,
         String,
+        String,
     ) {
         (
             std::cmp::Reverse(self.overall.rate_permille()),
@@ -154,6 +161,7 @@ impl Row {
             self.key.backend.clone(),
             self.key.model.clone(),
             self.key.quantization.clone().unwrap_or_default(),
+            self.key.suite_version.clone(),
         )
     }
 }
@@ -172,6 +180,7 @@ fn aggregate(records: &[ResultRecord]) -> Vec<Row> {
             backend: record.backend.clone(),
             model: record.model.clone(),
             quantization: record.quantization.clone(),
+            suite_version: record.suite_version.clone(),
         };
         rows.entry(key.clone())
             .or_insert_with(|| Row::new(key))
@@ -204,8 +213,10 @@ pub fn render_leaderboard(records: &[ResultRecord]) -> String {
     let _ = write!(
         out,
         "It aggregates **{}** committed result record(s) into **{}** row(s), one per \
-         `backend` / `model` / `quantization` triple. The numbers are exactly what the \
-         committed records say and grow as more runs are committed.\n\n",
+         `backend` / `model` / `quantization` triple and `suite_version`, so a model's \
+         runs against different suite versions stay separate rows and no row blends two \
+         suite denominators. The numbers are exactly what the committed records say and \
+         grow as more runs are committed.\n\n",
         records.len(),
         rows.len(),
     );

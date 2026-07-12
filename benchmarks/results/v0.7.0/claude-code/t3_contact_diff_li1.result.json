@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_contact_diff_li1",
+    "model": "claude-sonnet-5",
+    "suite_version": "0.7.0",
+    "success": true,
+    "iterations": 6,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 54633,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]

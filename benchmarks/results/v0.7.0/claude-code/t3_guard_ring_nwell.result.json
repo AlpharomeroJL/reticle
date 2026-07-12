@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_guard_ring_nwell",
+    "model": "claude-sonnet-5",
+    "suite_version": "0.7.0",
+    "success": true,
+    "iterations": 7,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 48899,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]

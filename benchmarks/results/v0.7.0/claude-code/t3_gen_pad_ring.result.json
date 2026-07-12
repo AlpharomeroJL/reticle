@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t3_gen_pad_ring",
+    "model": "claude-sonnet-5",
+    "suite_version": "0.7.0",
+    "success": true,
+    "iterations": 4,
+    "first_proposal_violations": 0,
+    "final_violations": 0,
+    "wall_ms": 36708,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]

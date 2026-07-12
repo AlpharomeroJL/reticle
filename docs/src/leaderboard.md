@@ -2,7 +2,7 @@
 
 This page is generated deterministically from the committed benchmark result records under `benchmarks/results/`. It does not run the suite; it aggregates the `*.result.json` records the runs already wrote. Regenerate it with `cargo run -p reticle-bench -- leaderboard`. The record format is the API: to add a row, run the suite and open a pull request with your records (see [Submitting a run](submitting.md)).
 
-It aggregates **231** committed result record(s) into **3** row(s), one per `backend` / `model` / `quantization` triple. The numbers are exactly what the committed records say and grow as more runs are committed.
+It aggregates **284** committed result record(s) into **4** row(s), one per `backend` / `model` / `quantization` triple and `suite_version`, so a model's runs against different suite versions stay separate rows and no row blends two suite denominators. The numbers are exactly what the committed records say and grow as more runs are committed.
 
 ## How to read a row
 
@@ -15,6 +15,7 @@ It aggregates **231** committed result record(s) into **3** row(s), one per `bac
 
 | Kind | Model | Backend | Quantization | Suite | Tier 1 | Tier 2 | Tier 3 | Tier 4 | Tier 5 | Overall | |
 | ---- | ----- | ------- | ------------ | ----- | -----: | -----: | -----: | -----: | -----: | ------: | -- |
+| agent system | `claude-sonnet-5` | claude-code | - | 0.7.0 | 5/5 | 8/8 | 26/28 | 4/7 | 5/5 | **48/53 (91%)** |  |
 | agent system | `claude-sonnet-5` | claude-code | - | adhoc | 8/9 | 10/11 | 38/41 | 7/11 | 9/9 | **72/81 (89%)** |  |
 | bare model | `gpt-oss:16k` | ollama | MXFP4 | 0.4.0 | 9/9 | 11/11 | 19/34 | 5/11 | 8/10 | **52/75 (69%)** |  |
 | bare model | `qwen2.5-coder:16k` | ollama | Q4_K_M | 0.4.0 | 6/9 | 8/11 | 6/34 | 3/11 | 6/10 | **29/75 (39%)** |  |

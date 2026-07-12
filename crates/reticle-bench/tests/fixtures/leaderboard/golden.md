@@ -2,7 +2,7 @@
 
 This page is generated deterministically from the committed benchmark result records under `benchmarks/results/`. It does not run the suite; it aggregates the `*.result.json` records the runs already wrote. Regenerate it with `cargo run -p reticle-bench -- leaderboard`. The record format is the API: to add a row, run the suite and open a pull request with your records (see [Submitting a run](submitting.md)).
 
-It aggregates **11** committed result record(s) into **3** row(s), one per `backend` / `model` / `quantization` triple. The numbers are exactly what the committed records say and grow as more runs are committed.
+It aggregates **11** committed result record(s) into **3** row(s), one per `backend` / `model` / `quantization` triple and `suite_version`, so a model's runs against different suite versions stay separate rows and no row blends two suite denominators. The numbers are exactly what the committed records say and grow as more runs are committed.
 
 ## How to read a row
 

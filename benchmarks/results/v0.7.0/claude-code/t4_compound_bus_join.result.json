@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t4_compound_bus_join",
+    "model": "claude-sonnet-5",
+    "suite_version": "0.7.0",
+    "success": true,
+    "iterations": 24,
+    "first_proposal_violations": 13,
+    "final_violations": 13,
+    "wall_ms": 135895,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]

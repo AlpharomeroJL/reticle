@@ -1,0 +1,14 @@
+[
+  {
+    "task_id": "t4_multistep_reposition_via",
+    "model": "claude-sonnet-5",
+    "suite_version": "0.7.0",
+    "success": true,
+    "iterations": 9,
+    "first_proposal_violations": 6,
+    "final_violations": 6,
+    "wall_ms": 57199,
+    "backend": "claude-code",
+    "quantization": null
+  }
+]
