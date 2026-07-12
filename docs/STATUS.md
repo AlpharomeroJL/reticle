@@ -5,7 +5,8 @@ what is genuinely implemented and tested, what is partial, and what is claimed b
 not yet built. It is written to be checked, not believed, every claim below has a
 command you can run yourself (see [How to verify each claim](#how-to-verify-each-claim-yourself)).
 
-- **Date of audit:** 2026-07-01 for the v3/v4 baseline below; the v5.0.0 agent layer
+- **Date of audit:** 2026-07-12 for the v8.2.0 campaign (see the v8.2.0 section below);
+  2026-07-01 for the v3/v4 baseline below; the v5.0.0 agent layer
   was audited 2026-07-03 (see [v5.0.0 progress](#v500-progress-the-agent-layer-audited-2026-07-03)).
 - **Machine:** NVIDIA GeForce RTX 4060 Ti 16 GB, Windows 11, Rust 1.94.1 stable
 - **Gate:** `just ci`, fmt, clippy (`-D warnings`, pedantic), nextest, doctests, doc
@@ -13,6 +14,72 @@ command you can run yourself (see [How to verify each claim](#how-to-verify-each
 - **Tests:** 291 `#[test]`/`#[tokio::test]` functions across 45 files, plus proptest
   cases; nextest reports **291 passed, 1 skipped** (the one skip is a corpus-
   regeneration utility, not a hidden failure, see below).
+
+## v8.2.0 (audited 2026-07-12): the outward-reach campaign
+
+v8.2.0 is a multi-phase campaign shipped and deployed gate by gate (Gate 1 through Gate 4),
+each behind `just ci` GREEN and a smoke-passed gh-pages deploy. The live site is
+web-466ed5fe877ba93c. Full detail lives in three companion documents, each meant to be read
+alongside this report:
+
+- **Honest limits:** `docs/honest-limits.md` is the completeness roll-call of every
+  fixture-backed, native-only, parked, deferred, and honest-gap surface.
+- **Every campaign item:** `docs/disposition-table.md` walks all of Phases 0 through 4 as
+  shipped / ledgered / gated / parked / deferred, with evidence.
+- **Decisions:** ADRs 0101 through 0123 under `docs/decisions/`.
+
+What shipped, by phase (each merged, gated GREEN, and where a phase deployed, live behind a
+smoke-passed deploy):
+
+- **Open silicon, formats, review (Phase 1):** CIF and DXF readers, a conformant OASIS
+  reader, a GF180MCU layer map plus a sourced 3.3V DRC subset, STL and glTF mesh export, a
+  start-screen die gallery with a live verified open-silicon library, a design-review
+  workflow, and immutable snapshot permalinks.
+- **PCell engine, agent, full-custom (Phase 2):** a sandboxed rhai PCell producer
+  (native-only) with an adversarially-tested sandbox, a PCell parameter and provenance
+  inspector, deterministic command-mapped natural-language editing (no LLM), F3 net-trace
+  queries and panel, and a real native agent behind an availability gate.
+- **Depth (Phase 3):** a pure-Rust modified-nodal-analysis circuit simulator (not ngspice,
+  labelled as such everywhere) that reproduces the F4 contract fixture byte-exact, a SPICE
+  netlist writer, xschem interop, classroom teaching mode (honest empty roster when solo),
+  and a live waveform viewer.
+- **Reach (Phase 4):** a native embedded wasm plugin runtime (wasmi) with a production host
+  and a real sample plugin, a plugin manager UI (the browser browses and previews the F5
+  index behind an honest "plugins run in the desktop app" disclaimer; the desktop app runs
+  them for real), an image underlay decoded browser-native, a live embed-mode toggle, and a
+  Tauri desktop shell.
+
+CHECK (whole campaign gate): `just ci` (check-style, fmt, clippy `-D warnings`, nextest,
+doctests, doc build, wasm build, deny, typos).
+
+Native-only surfaces, worded to the native capability and never as "runs in the browser":
+the rhai PCell producer, the real plan/approve/execute agent, and plugin execution all run
+in the desktop app; the browser shows predicted or browse/preview state behind in-UI
+disclaimers and never fakes a run. The full list, with the browser-vs-native split for each,
+is in `docs/honest-limits.md`.
+
+Measured bundle: the deployed Gate-4 browser bundle is +454.5 KiB gz over the v8.0 baseline,
+within the +456 KiB gz ceiling set by ADR 0122 (raised from +450 for two wanted browser
+features; the plugin runtime and rhai producer stay native-only and add zero browser bytes).
+CHECK: `just bundle-gate`.
+
+Agent benchmark and leaderboard: the frozen v0.7.0 suite (95 tasks) is byte-stable under a
+deterministic mock. The public leaderboard (`docs/src/leaderboard.md`) is generated from
+committed records, one row per backend / model / quantization / suite version, so no row
+blends two suite denominators. It carries a real `claude-code` agent-system run against the
+frozen v0.7.0 suite (`claude-sonnet-5`: 48 of 53 connected tasks passing across all five
+tiers; the other 42 were rate-limited and recorded as honest not-runs), shown as its own row
+distinct from an earlier ad-hoc run and from the local-model rows. Every row carries its own
+suite and denominator and is never compared across denominators. CHECK:
+`cargo run -p reticle-bench -- leaderboard --out -` run twice is byte-identical.
+
+Operator-owned claim slots (deliberately not asserted here; see `docs/honest-limits.md`): the
+two uniqueness claims were re-verified 2026-07-12. A "browser-native IC layout editor" claim
+is refuted by a live competitor (Layout Studio, which draws and DRC-checks in the browser) and
+is not made. The "physically-verified layout-agent benchmark with a public leaderboard" claim
+survives only on the narrow public-leaderboard qualifier (physically-verified layout-agent
+benchmarks such as PDAgent-Bench now exist without public leaderboards) and awaits an operator
+reframe. Paper framing and any headline claim remain the operator's to write.
 
 ## v8.0.0 run in progress (Wave 0 recorded 2026-07-07)
 
