@@ -183,12 +183,14 @@ checker-graded agent surface).
 Grounding: `docs/src/positioning.md` (the honest map, the not-list, and the
 "what the established tools do that Reticle does not" section).
 
-<!-- TODO(operator): the two uniqueness claims ("no other browser-native IC layout editor
-     found"; "no other physically-verified layout-agent benchmark with a public leaderboard
-     found") are absence-of-evidence judgments. They must be cited, dated, and RE-VERIFIED
-     immediately before any citable use, per the claim shape. Do not state either without a
-     fresh landscape re-scan and its date (Phase 5 has a landscape re-scan and claims re-date
-     step). Leave them as dated absence-of-evidence, never as an absolute. -->
+<!-- Uniqueness claims DROPPED (operator decision, 2026-07-12). The two former
+     absence-of-evidence claims ("no other browser-native IC layout editor"; "no other
+     physically-verified layout-agent benchmark with a public leaderboard") are not made
+     anywhere in v8.2.0. A release-gate landscape re-verification found the first refuted by a
+     live browser-native editor (Layout Studio) and the second challenged (physically-verified
+     layout-agent benchmarks exist without public leaderboards). Positioning is stated as
+     positive, measured capability only; see docs/src/positioning.md and the refutation record
+     in docs/honest-limits.md. -->
 
 ## 8. Results (placeholder)
 
@@ -249,8 +251,8 @@ until then, treat any campaign-in-progress item as provisional.
    (source: `docs/src/positioning.md`, `docs/src/sky130.md`,
    `docs/src/second-pdk.md`.)
 4. OASIS is a subset, and the in-house container is not interoperable. Reticle's
-   `Oasis` type is an in-house, OASIS-inspired container that no other tool
-   reads. A separate conformant `oasis_std` writer emits a practical SEMI P39
+   `Oasis` type is an in-house, OASIS-inspired container that other tools do not
+   read. A separate conformant `oasis_std` writer emits a practical SEMI P39
    subset (export-only, uncompressed, arrays expanded to individual placements),
    validated by KLayout reading it back in a pinned container. It is not a
    general OASIS exporter; GDSII carries the full hierarchy. (source: `README.md`,

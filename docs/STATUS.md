@@ -73,13 +73,17 @@ distinct from an earlier ad-hoc run and from the local-model rows. Every row car
 suite and denominator and is never compared across denominators. CHECK:
 `cargo run -p reticle-bench -- leaderboard --out -` run twice is byte-identical.
 
-Operator-owned claim slots (deliberately not asserted here; see `docs/honest-limits.md`): the
-two uniqueness claims were re-verified 2026-07-12. A "browser-native IC layout editor" claim
-is refuted by a live competitor (Layout Studio, which draws and DRC-checks in the browser) and
-is not made. The "physically-verified layout-agent benchmark with a public leaderboard" claim
-survives only on the narrow public-leaderboard qualifier (physically-verified layout-agent
-benchmarks such as PDAgent-Bench now exist without public leaderboards) and awaits an operator
-reframe. Paper framing and any headline claim remain the operator's to write.
+Positioning is stated as positive, measured capability, not by any uniqueness or
+"only / first / no other" claim. See `docs/src/positioning.md` for the honest map, the
+not-list (no synthesis, no timing, no device-LVS, no tape-out signoff), and what the
+established tools do that Reticle does not. The headline figures are measured and
+reproducible: about 188 KiB (0.006%) fetched for the first view of a live 3.01 GiB streamed
+archive, reported through the `window.__reticle_stats` seam; a sustained 60 fps target met at
+one million shapes (measured 295 fps at 1920x1080, `cargo run -p reticle-render --example
+fps_bench --release`); and a deterministic, byte-stable, public agent leaderboard generated
+from committed records. Two former absence-of-evidence uniqueness claims were dropped at the
+release gate; the 2026-07-12 landscape re-verification that prompted it is recorded in
+`docs/honest-limits.md` so the history stays honest.
 
 ## v8.0.0 run in progress (Wave 0 recorded 2026-07-07)
 

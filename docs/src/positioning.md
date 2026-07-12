@@ -77,7 +77,7 @@ flows that Reticle does not have. This list is deliberately blunt.
 
 - **Full-fidelity format coverage.** Reticle reads and writes GDSII with full
   hierarchy (via `gds21`). Its `Oasis` type is **not** interoperable OASIS: it is an
-  in-house, OASIS-inspired *container* (ADR 0004) that no other tool reads, used only
+  in-house, OASIS-inspired *container* (ADR 0004) that other tools do not read, used only
   to round-trip Reticle's own geometry. A separate conformant-OASIS **writer**
   (`oasis_std`) emits a practical SEMI P39 subset that KLayout does read - export only,
   verified against KLayout in-container (see the [GDS / OASIS interop](interop.md)

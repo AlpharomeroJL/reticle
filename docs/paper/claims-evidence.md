@@ -29,10 +29,11 @@ reproduced here so the paper does not accidentally strengthen them.
 - Benchmark rows: every row carries its suite version and its own denominator;
   never compared across denominators; an unrecorded task is "an honest not-run,"
   never a pass or a fail.
-- The two uniqueness claims ("no other browser-native IC layout editor found";
-  "no other physically-verified layout-agent benchmark with a public leaderboard
-  found"): absence-of-evidence judgments, cited, dated, and re-verified before any
-  citable use.
+- The two former uniqueness claims were DROPPED (operator decision, 2026-07-12): a
+  release-gate landscape re-verification refuted the browser-native-editor claim (Layout
+  Studio is a live browser-native editor with in-browser DRC) and challenged the
+  benchmark-leaderboard claim, so neither is asserted. Positioning is positive and measured
+  only; see the Positioning section below and the refutation record in docs/honest-limits.md.
 - Plugin moat: "sandboxed plugins that run in the browser build" ONLY if the
   browser host path shipped; if the spike fell back to native-first, the claim is
   reworded BEFORE any public use.
@@ -111,13 +112,24 @@ reproduced here so the paper does not accidentally strengthen them.
 | C34 | The installable PWA app shell loads offline; the manifest, registration, and offline reload are proven | `docs/src/pwa.md`, ADR 0078, the `pwa` e2e | `just e2e` (pwa project); orchestrator-run | integration |
 | C35 | Deployable at every gate, deployed at phase gates and release, insurance deploys logged | the campaign plan deploy ceremony, `docs/STATUS.md` deploy records | `just deploy-pages` then propagation-confirmed `just smoke-pages` | deploy |
 
-## Positioning and uniqueness (operator-owned, dated)
+## Positioning (operator-owned, positive and measured only)
+
+Positioning is stated as positive, measured capability. No "only / first / no other"
+uniqueness or absence-of-evidence claim is made anywhere in v8.2.0.
 
 | # | Claim (honest shape) | Grounding artifact | Verify command | Evidence kind |
 |---|----------------------|--------------------|----------------|---------------|
 | C36 | Reticle is a browser-native viewer and editor with a verified checker core and a checker-graded agent layer, not a production EDA tool; the not-list (no synthesis, no timing, no device-LVS, no tape-out signoff) is stated plainly | `docs/src/positioning.md` | read the positioning chapter (the map, the not-list, the "what the established tools do that Reticle does not" section) | structural |
-| C37 | "No other browser-native IC layout editor found" | a dated landscape scan (operator) | operator landscape re-scan; date it; re-verify immediately before any citable use (Phase 5 has a landscape re-scan and claims re-date step) | absence |
-| C38 | "No other physically-verified layout-agent benchmark with a public leaderboard found" | a dated landscape scan (operator) | operator landscape re-scan; date it; re-verify immediately before any citable use | absence |
+| C37 | About 188 KiB (0.006%) fetched for the first view of a live 3.01 GiB streamed archive | `window.__reticle_stats` seam; PERF.md | open an `?archive=` link and read the fetched-bytes / percent from the stats seam | measured |
+| C38 | A sustained 60 fps target met at one million shapes (measured 295 fps at 1920x1080) | `docs/PERF.md`, `reticle-render` fps_bench | `cargo run -p reticle-render --example fps_bench --release` | measured |
+| C39 | A deterministic, byte-stable, public agent leaderboard generated from committed records | `docs/src/leaderboard.md`, `crates/reticle-bench` | `cargo run -p reticle-bench -- leaderboard --out -` run twice is byte-identical | measured |
+
+DROPPED 2026-07-12 (operator decision): the two former uniqueness claims, "no other
+browser-native IC layout editor" and "no other physically-verified layout-agent benchmark with
+a public leaderboard." A release-gate landscape re-verification refuted the first (Layout Studio
+is a live browser-native editor with in-browser DRC) and challenged the second
+(physically-verified layout-agent benchmarks exist without public leaderboards). Neither is
+asserted; the refutation is recorded in `docs/honest-limits.md` for history.
 
 ## Campaign-in-progress (Phase 3 and Phase 4; confirm at the phase close)
 
