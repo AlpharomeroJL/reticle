@@ -29,8 +29,9 @@ const BASELINE_LABEL: &str = "v8.0-baseline";
 const LEDGER_HEADER: &str = "# Bundle ledger\n\n\
 Measured by 'cargo run -p xtask -- bundle-size' over crates/web/dist (trunk release build,\n\
 wasm-opt=z, content-hashed artifacts). Gzip is flate2 at best compression: it approximates\n\
-but does not equal GitHub Pages' on-the-wire compression; the +450 KB gz budget gate\n\
-(just bundle-gate) is self-consistent against the v8.0-baseline row below.\n\n\
+but does not equal GitHub Pages' on-the-wire compression; the gz budget gate\n\
+(just bundle-gate) is self-consistent against the v8.0-baseline row below (delta ceiling\n\
++456 KiB gz since the ADR 0122 amendment, +450 KiB gz through Gate 3).\n\n\
 | date | commit | label | raw wasm | gz wasm | gz total | delta gz vs v8.0-baseline |\n\
 |---|---|---|---|---|---|---|\n";
 

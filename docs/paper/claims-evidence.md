@@ -120,9 +120,9 @@ uniqueness or absence-of-evidence claim is made anywhere in v8.2.0.
 | # | Claim (honest shape) | Grounding artifact | Verify command | Evidence kind |
 |---|----------------------|--------------------|----------------|---------------|
 | C36 | Reticle is a browser-native viewer and editor with a verified checker core and a checker-graded agent layer, not a production EDA tool; the not-list (no synthesis, no timing, no device-LVS, no tape-out signoff) is stated plainly | `docs/src/positioning.md` | read the positioning chapter (the map, the not-list, the "what the established tools do that Reticle does not" section) | structural |
-| C37 | About 188 KiB (0.006%) fetched for the first view of a live 3.01 GiB streamed archive | `window.__reticle_stats` seam; PERF.md | open an `?archive=` link and read the fetched-bytes / percent from the stats seam | measured |
+| C37 | About 188 KiB (0.006%) fetched for the first view of a live 3.01 GiB streamed archive | `window.__reticle_stats` seam (app-measured; README.md, CHANGELOG.md) | open an `?archive=` link and read the fetched-bytes / percent from the stats seam | measured |
 | C38 | A sustained 60 fps target met at one million shapes (measured 295 fps at 1920x1080) | `docs/PERF.md`, `reticle-render` fps_bench | `cargo run -p reticle-render --example fps_bench --release` | measured |
-| C39 | A deterministic, byte-stable, public agent leaderboard generated from committed records | `docs/src/leaderboard.md`, `crates/reticle-bench` | `cargo run -p reticle-bench -- leaderboard --out -` run twice is byte-identical | measured |
+| C43 | A deterministic, byte-stable, public agent leaderboard generated from committed records | `docs/src/leaderboard.md`, `crates/reticle-bench` | `cargo run -p reticle-bench -- leaderboard --out -` run twice is byte-identical | measured |
 
 DROPPED 2026-07-12 (operator decision): the two former uniqueness claims, "no other
 browser-native IC layout editor" and "no other physically-verified layout-agent benchmark with
@@ -149,8 +149,8 @@ and the disposition at the phase close, and applies the fixed claim shape above.
 - No value cell in this file or in the paper's results table holds a number. Fill
   each from its command on the recorded host at the Phase 5 close (or from a
   valley-queue run), and state the host with every measured figure.
-- Rows C37 and C38 are the only absence-of-evidence claims. They are not stated
-  in the paper without a fresh, dated landscape re-scan. Leave them dated and
-  phrased as absence, never as an absolute.
+- The two former absence-of-evidence uniqueness claims were dropped 2026-07-12 (see the
+  Positioning section above and docs/honest-limits.md). C37, C38, and C43 are positive,
+  measured claims. No absence-of-evidence or "only / first / no other" claim is made anywhere.
 - The conditional rows (C39 to C42) are dropped or reworded to match what the
   phase actually delivered. Do not carry a claim past its record.

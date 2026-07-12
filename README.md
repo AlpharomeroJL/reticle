@@ -76,15 +76,16 @@ The suite is [`benchmarks/layout-tasks/manifest.toml`](benchmarks/layout-tasks/m
 now version 0.5.0, 83 tasks across five tiers (the generator tasks above are among them).
 The rows below are aggregated from the committed result records by
 [the leaderboard](docs/src/leaderboard.md), which is generated deterministically from
-`benchmarks/results/` and is the live source of truth for these numbers. The recorded runs
-predate the current suite, so each row carries the suite it actually ran and its own
-denominator; the numbers are never compared across different denominators.
+`benchmarks/results/` and is the live source of truth for these numbers. Each row carries the
+suite version it actually ran and its own denominator; the numbers are never compared across
+different denominators or suite versions.
 
 | What it is | Suite it ran | Result |
 |---|---|---:|
+| `claude-sonnet-5` via Claude Code, an agent system (its own loop) | 0.7.0 (53 of 95 recorded) | 48/53 (91%) |
 | `gpt-oss:16k` (MXFP4), a bare local model on Reticle's own loop | 0.4.0 (75 tasks) | 52/75 (69%) |
 | `qwen2.5-coder:16k` (Q4_K_M), a bare local model on Reticle's own loop | 0.4.0 (75 tasks) | 29/75 (39%) |
-| `claude-sonnet-5` via Claude Code, an agent system (its own loop) | 81 of 83 recorded | 72/81 (89%) |
+| `claude-sonnet-5` via Claude Code, an earlier ad-hoc run | adhoc (81 of 83 recorded) | 72/81 (89%) |
 
 The two bare rows ran the full 75-task 0.4.0 suite. They are small quantized local models,
 so the numbers are a floor, not an upper bound.
@@ -92,12 +93,13 @@ so the numbers are a floor, not an upper bound.
 The distinction the table makes is real. The two local models are *bare models*: Reticle
 supplies the loop, feeds the checker's violations back, and decides when a task passes.
 Claude Code is an *agent system* with its own planning-and-tool loop, so pointed at
-Reticle's MCP server it does not run the same harness the two bare rows do; its row is not
-a like-for-like comparison with them, and its 81-task denominator is a different task set
-than the bare rows' 75. It is a real authenticated run: 72 of 81 recorded tasks passed
-across all five tiers. The denominator is 81, not 83, because 2 tier-5 tasks were never
-recorded when the subscription rate limits stopped the run; an unrecorded task is an honest
-not-run, never a pass or a fail. Per task the harness launches `reticle-mcp`, runs
+Reticle's MCP server it does not run the same harness the two bare rows do; its rows are not
+a like-for-like comparison with them, and its denominators are different task sets than the
+bare rows' 75. The featured Claude Code row is a real authenticated run against the current
+frozen v0.7.0 suite: 48 of 53 recorded tasks passed across all five tiers. The denominator is
+53, not 95, because the remaining 42 tasks were never recorded when the subscription rate
+limits stopped the run; an unrecorded task is an honest not-run, never a pass or a fail. An
+earlier ad-hoc run against a smaller task set recorded 72 of 81 and is kept as its own row. Per task the harness launches `reticle-mcp`, runs
 `claude -p` over it, replays the captured transcript, and runs the task's checker. To run
 the full suite when the rate window is clear: `just bench-agent-claude-code` (on Windows set
 `RETICLE_CLAUDE_BIN` to the resolved `claude.cmd` and `RETICLE_MCP_BIN` to a current

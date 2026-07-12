@@ -18,8 +18,9 @@ ceiling is +456 KiB gz since the ADR 0122 amendment (see below), +450 KiB gz thr
 
 Ceiling amendment (ADR 0122): the delta ceiling was +450 KiB gz through Gate 3; Gate 4's
 two browser features (image-underlay browser decode ADR 0118 +6.6 KiB, plugin-manager F5
-browse ADR 0120 +6.7 KiB) breach it by +3.9 KiB combined. Ceiling raised to +456 KiB gz,
-bounded to the +453.9 KiB measurement (+2.1 KiB margin). `just bundle-gate` asserts 456.
+browse ADR 0120 +6.7 KiB) breach it by +3.9 KiB combined. Ceiling raised to +456 KiB gz; the
+deployed Gate-4 bundle is +454.5 KiB gz (the +453.9 KiB amendment-time measurement plus
++0.7 KiB of Gate-4 test seams), about +1.5 KiB under the ceiling. `just bundle-gate` asserts 456.
 Accepted final (v8.2.0 release-prep, 2026-07-11): re-confirmed +453.8 KiB gz on d9a9420
 (`scratch/logs/gate4-bundle-reconfirm.log`); the +450 trim was evaluated against the code
 and declined as a contortion (see ADR 0122 Finalization). +456 KiB gz is the final ceiling.
