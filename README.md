@@ -9,10 +9,12 @@ as you type, and lets anyone walk your exact view from a link. Nothing to instal
 Your files never leave your machine.
 
 [![Live demo](https://img.shields.io/badge/demo-live-2ea44f)](https://alpharomerojl.github.io/reticle/)
+[![WebGPU + WASM](https://img.shields.io/badge/web-WebGPU%20%2B%20WASM-orange)](https://alpharomerojl.github.io/reticle/)
 [![Chip library](https://img.shields.io/badge/chip%20library-open%20silicon-blue)](https://alpharomerojl.github.io/reticle/)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-lightgrey)](#license)
+[![Sponsor AlpharomeroJL](https://img.shields.io/badge/Sponsor-AlpharomeroJL-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/AlpharomeroJL)
 
-![A 3.01 GiB layout streams in over the network with the byte-count HUD in the corner (188 KiB fetched), then orbits as a 3D layer stack, then a share link is copied](docs/media/hero-gallery-stream.gif)
+![A 3.01 GiB layout streams over the network, the byte-count HUD in the corner showing a fraction of the file fetched; its layers orbit as a colored 3D stack; then a permalink to the exact view is copied](docs/media/hero-gallery-stream.gif)
 
 ## Try it in sixty seconds
 
@@ -84,6 +86,10 @@ shared links by touch.
 PDKs: SKY130, IHP SG13G2, and GF180MCU. DRC underlines violations as you draw.
 Boolean ops, vertex editing, array duplication, all one undo step each.
 
+![Drawing a polygon, dragging one of its vertices, drawing a second polygon, boolean-union, then array-duplicate, each a single undoable edit](docs/media/tour-edit.gif)
+
+![Running DRC on a SKY130 cell: the violation list populates with real spacing and extension violations, then the canvas zooms to a clicked one](docs/media/tour-drc.gif)
+
 **Generate instead of drawing.** Six built-in generators (guard ring, via farm, pad
 ring, seal ring, fill, test structure) are DRC-clean by construction: a property
 test sweeps each across random valid parameters on all three PDKs and asserts zero
@@ -114,6 +120,8 @@ CLI runs the whole pipeline headless. The in-editor agent panel plans, waits for
 your approval, executes, and replays; on native with a key or a local Ollama it
 drives a real model, and the web build shows a scripted preview and says so.
 
+![The replay theater plays a recorded propose-verify-correct agent run over a standard-cell array, the step counter and violation count advancing](docs/media/tour-agent.gif)
+
 **Extend it.** Sandboxed WASM plugins with declared permissions gated at
 instantiation, memory and fuel limits, and writes only through the same staged-edit
 funnel as every other input, so a plugin cannot make an edit that is not undoable
@@ -126,6 +134,8 @@ file committed to this repo. No accounts, no server.
 air-gapped review. An `?embed=1` mode drops the read-only viewer into an iframe, a
 course page, or a paper, with an "Open in Reticle" corner link back to the full
 editor.
+
+![Orbiting the extruded 3D layer stack of a SKY130 cell, the metal, poly, and diffusion layers reading in depth](docs/media/tour-3d.gif)
 
 ## The benchmark: how we know what works
 
@@ -347,8 +357,7 @@ counterexample to the comparison above? Open an issue. Development is one person
 a lot of verification; you can support it on
 [GitHub Sponsors](https://github.com/sponsors/AlpharomeroJL).
 
-Built solo with agentic coding campaigns. Every public number is measured, not
-estimated.
+Every public number is measured, not estimated.
 
 ## Tech stack
 

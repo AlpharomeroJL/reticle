@@ -58,6 +58,140 @@ pub fn is_nonblank(frame: &Frame) -> bool {
     frame.rgba.chunks_exact(4).any(|px| px != first)
 }
 
+/// The minimum non-background significant color buckets a shipped media frame must show.
+/// A starry point-scatter, a blank readback, or a flat fill has fewer. Mirrors the JS
+/// media gate (`e2e/media-gate.mjs` `MIN_NONBG_BUCKETS`) so the native tour captures and
+/// the headed browser captures gate on the same rule.
+pub const MIN_NONBG_BUCKETS: usize = 3;
+
+/// Significant-color-bucket statistics for the media gate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BucketStats {
+    /// Buckets covering at least 0.5% of pixels (background included).
+    pub significant: usize,
+    /// Significant buckets excluding the single most common (background) bucket.
+    pub non_background: usize,
+}
+
+/// Histograms `frame` into 5-bit-per-channel color buckets and reports how many are
+/// significant (cover at least 0.5% of pixels). A correct multi-layer render has several
+/// non-background buckets; a starry point-scatter or a flat fill has few. This is the same
+/// rule the browser gate applies to a canvas screenshot.
+#[must_use]
+pub fn color_buckets(frame: &Frame) -> BucketStats {
+    let total = (frame.rgba.len() / 4) as u64;
+    if total == 0 {
+        return BucketStats {
+            significant: 0,
+            non_background: 0,
+        };
+    }
+    // 5 bits per channel => 32768 buckets.
+    let mut counts = vec![0u32; 1 << 15];
+    for px in frame.rgba.chunks_exact(4) {
+        let key = (usize::from(px[0] >> 3) << 10)
+            | (usize::from(px[1] >> 3) << 5)
+            | usize::from(px[2] >> 3);
+        counts[key] = counts[key].saturating_add(1);
+    }
+    // Significant = covers >= 0.5% (1/200) of pixels; integer form avoids float.
+    let significant = counts
+        .iter()
+        .filter(|&&n| u64::from(n) * 200 >= total)
+        .count();
+    BucketStats {
+        significant,
+        non_background: significant.saturating_sub(1),
+    }
+}
+
+/// Like [`color_buckets`] but over the CENTRAL geometry viewport only, excluding the left
+/// layer panel, the right inspector, the top toolbar, and the bottom status bar. In this
+/// egui app the whole UI paints to one surface, so a full-frame histogram is dominated by
+/// chrome (already several colors) and would pass even a starry or empty viewport. The
+/// media gate uses this so it measures the geometry, not the chrome.
+#[must_use]
+pub fn color_buckets_center(frame: &Frame) -> BucketStats {
+    let w = frame.width as usize;
+    let h = frame.height as usize;
+    if w == 0 || h == 0 || frame.rgba.len() < w.saturating_mul(h).saturating_mul(4) {
+        return BucketStats {
+            significant: 0,
+            non_background: 0,
+        };
+    }
+    // The geometry viewport as a fraction of the window (panels/toolbar/status excluded).
+    let frac = |f: f32, n: usize| ((f * n as f32) as usize).min(n);
+    let x0 = frac(0.20, w);
+    let x1 = frac(0.70, w);
+    let y0 = frac(0.12, h);
+    let y1 = frac(0.88, h);
+    let total = (x1.saturating_sub(x0) as u64) * (y1.saturating_sub(y0) as u64);
+    if total == 0 {
+        return BucketStats {
+            significant: 0,
+            non_background: 0,
+        };
+    }
+    let mut counts = vec![0u32; 1 << 15];
+    for y in y0..y1 {
+        let row = y * w;
+        for x in x0..x1 {
+            let i = (row + x) * 4;
+            let px = &frame.rgba[i..i + 3];
+            let key = (usize::from(px[0] >> 3) << 10)
+                | (usize::from(px[1] >> 3) << 5)
+                | usize::from(px[2] >> 3);
+            counts[key] = counts[key].saturating_add(1);
+        }
+    }
+    let significant = counts
+        .iter()
+        .filter(|&&n| u64::from(n) * 200 >= total)
+        .count();
+    BucketStats {
+        significant,
+        non_background: significant.saturating_sub(1),
+    }
+}
+
+/// The media-gate verdict over a captured clip's per-frame non-background bucket counts.
+///
+/// A still (`is_snap`) must itself clear [`MIN_NONBG_BUCKETS`]; a GIF's MEDIAN frame must
+/// clear it (a few transition or legitimate solid-fill frames are tolerated), and no frame
+/// may be blank. On failure the capture aborts so nothing starry/flat ships
+/// (reject-and-recapture).
+///
+/// # Errors
+///
+/// Returns an error if the clip is empty, a captured frame is blank, or the representative
+/// frame has fewer than [`MIN_NONBG_BUCKETS`] non-background color buckets.
+pub fn gate_verdict(nonbg_per_frame: &[usize], is_snap: bool) -> Result<(), String> {
+    if nonbg_per_frame.is_empty() {
+        return Err("media gate: no frames were captured".to_owned());
+    }
+    let mut sorted = nonbg_per_frame.to_vec();
+    sorted.sort_unstable();
+    if sorted[0] < 1 {
+        return Err(format!(
+            "media gate: a captured frame is blank (0 non-background buckets); distribution {sorted:?}"
+        ));
+    }
+    let representative = if is_snap {
+        sorted[0]
+    } else {
+        sorted[sorted.len() / 2]
+    };
+    if representative < MIN_NONBG_BUCKETS {
+        return Err(format!(
+            "media gate: {} frame has {representative} non-background buckets \
+             (< {MIN_NONBG_BUCKETS}); the clip is starry/flat. distribution {sorted:?}",
+            if is_snap { "still" } else { "median" }
+        ));
+    }
+    Ok(())
+}
+
 /// Writes `frame` to `path` as a PNG, creating parent directories.
 ///
 /// # Errors
@@ -175,7 +309,99 @@ impl CaptureState {
 
 #[cfg(test)]
 mod tests {
-    use super::{Frame, is_nonblank};
+    use super::{
+        Frame, MIN_NONBG_BUCKETS, color_buckets, color_buckets_center, gate_verdict, is_nonblank,
+    };
+
+    /// A 20x20 frame split into four colored quadrants (or one flat color if `flat`).
+    fn quadrant_frame(flat: bool) -> Frame {
+        let colors = [[20u8, 20, 20], [220, 20, 20], [20, 220, 20], [20, 20, 220]];
+        let mut rgba = Vec::with_capacity(20 * 20 * 4);
+        for y in 0..20u32 {
+            for x in 0..20u32 {
+                let q = if flat {
+                    0
+                } else {
+                    usize::from(x >= 10) + 2 * usize::from(y >= 10)
+                };
+                let c = colors[q];
+                rgba.extend_from_slice(&[c[0], c[1], c[2], 255]);
+            }
+        }
+        Frame {
+            width: 20,
+            height: 20,
+            rgba,
+        }
+    }
+
+    /// A one-row frame from a list of opaque RGB pixels.
+    fn frame_from_pixels(pixels: &[[u8; 3]]) -> Frame {
+        let mut rgba = Vec::with_capacity(pixels.len() * 4);
+        for p in pixels {
+            rgba.extend_from_slice(&[p[0], p[1], p[2], 255]);
+        }
+        Frame {
+            width: u32::try_from(pixels.len()).unwrap(),
+            height: 1,
+            rgba,
+        }
+    }
+
+    #[test]
+    fn color_buckets_counts_distinct_layers() {
+        let four = frame_from_pixels(&[[10, 10, 10], [200, 10, 10], [10, 200, 10], [10, 10, 200]]);
+        let b = color_buckets(&four);
+        assert_eq!(b.significant, 4);
+        assert_eq!(b.non_background, 3);
+
+        let flat = frame_from_pixels(&[[10, 10, 10], [10, 10, 10]]);
+        assert_eq!(
+            color_buckets(&flat).non_background,
+            0,
+            "a flat fill has no layers"
+        );
+
+        // Starry: a dark field with a few sparse specks, each below 0.5% of pixels.
+        let mut px = vec![[8, 8, 8]; 1000];
+        px.push([250, 250, 250]);
+        px.push([250, 10, 10]);
+        px.push([10, 250, 10]);
+        let starry = frame_from_pixels(&px);
+        assert_eq!(
+            color_buckets(&starry).non_background,
+            0,
+            "sparse specks are not significant, so a starry frame gates as blank",
+        );
+    }
+
+    #[test]
+    fn color_buckets_center_ignores_the_chrome_and_measures_the_viewport() {
+        // Four colored quadrants across the central crop => three non-background buckets.
+        assert_eq!(
+            color_buckets_center(&quadrant_frame(false)).non_background,
+            3
+        );
+        // A flat central region gates as blank even if a real frame's chrome is colorful.
+        assert_eq!(
+            color_buckets_center(&quadrant_frame(true)).non_background,
+            0
+        );
+    }
+
+    #[test]
+    fn gate_verdict_matches_the_asset_rules() {
+        // A still must itself clear the bar.
+        assert!(gate_verdict(&[5], true).is_ok());
+        assert!(gate_verdict(&[2], true).is_err());
+        // A GIF passes on its MEDIAN frame; a few sparse/solid frames are tolerated.
+        assert!(gate_verdict(&[1, 1, 5, 6, 6], false).is_ok());
+        // But a blank frame always fails, and a starry median fails.
+        assert!(gate_verdict(&[0, 3, 3], false).is_err());
+        assert!(gate_verdict(&[1, 2, 2, 2, 2], false).is_err());
+        assert!(gate_verdict(&[], false).is_err());
+        assert_eq!(MIN_NONBG_BUCKETS, 3);
+    }
 
     #[test]
     fn nonblank_detects_variation() {

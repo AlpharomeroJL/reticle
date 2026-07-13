@@ -3448,7 +3448,11 @@ impl App {
                 eprintln!("demo: step {step:?} not yet implemented");
             }
             // Handled by the scheduler, never dispatched as an action.
-            Step::Wait(_) | Step::Capture { .. } | Step::Snap(_) | Step::Orbit(..) => {}
+            Step::Wait(_)
+            | Step::Settle(_)
+            | Step::Capture { .. }
+            | Step::Snap(_)
+            | Step::Orbit(..) => {}
         }
     }
 
@@ -3482,7 +3486,7 @@ impl App {
                 match shot {
                     Some(image) => {
                         let frame = crate::demoscript::frame_from_color_image(&image);
-                        demo.store_frame(&frame);
+                        demo.receive_frame(&frame);
                     }
                     None => demo.miss(),
                 }
@@ -3495,6 +3499,12 @@ impl App {
                         path.display()
                     ),
                     Err(e) => eprintln!("demo: manifest write failed: {e}"),
+                }
+                // The media gate: a starry/blank/flat capture must not ship. Fail the
+                // process (like a bad script) so `xtask capture-ui` does not assemble it.
+                if let Err(e) = demo.media_gate() {
+                    eprintln!("demo: {e}");
+                    std::process::exit(1);
                 }
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 return;

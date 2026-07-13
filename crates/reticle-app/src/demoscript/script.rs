@@ -29,6 +29,10 @@ pub enum Step {
     UseCase(UseCase),
     /// Idle for this many frames (let an edit or animation settle).
     Wait(u32),
+    /// Idle until the rendered frame shows filled colored geometry (a non-blank,
+    /// non-starry render), probing up to this many frames before giving up. An explicit
+    /// render-settle wait so a capture never starts on an unrendered frame.
+    Settle(u32),
     /// Record `frames` frames at `fps` into the current segment (a GIF clip).
     Capture {
         /// Number of frames to record.
@@ -128,6 +132,9 @@ impl Script {
                 )),
                 "wait" => steps.push(Step::Wait(
                     parse_u32(rest).map_err(|e| format!("{}: {e}", at()))?,
+                )),
+                "settle" => steps.push(Step::Settle(
+                    parse_settle(rest).map_err(|e| format!("{}: {e}", at()))?,
                 )),
                 "capture" => steps.push(parse_capture(rest).map_err(|e| format!("{}: {e}", at()))?),
                 "snap" => steps.push(Step::Snap(
@@ -235,6 +242,20 @@ fn parse_capture(s: &str) -> Result<Step, String> {
         None => 20,
     };
     Ok(Step::Capture { frames, fps })
+}
+
+/// The default `settle` probe budget when the directive omits a count (~3 s at 60 fps).
+const DEFAULT_SETTLE_FRAMES: u32 = 180;
+
+/// Parses a `settle` budget: the maximum frames to probe for a colored render before
+/// proceeding. An empty argument means [`DEFAULT_SETTLE_FRAMES`]; an explicit count is
+/// clamped to at least one probe.
+fn parse_settle(s: &str) -> Result<u32, String> {
+    if s.is_empty() {
+        Ok(DEFAULT_SETTLE_FRAMES)
+    } else {
+        parse_u32(s).map(|n| n.max(1))
+    }
 }
 
 fn parse_on_off(s: &str) -> Result<bool, String> {
@@ -379,6 +400,23 @@ capture 50
                 frames: 30,
                 fps: 20
             }]
+        );
+    }
+
+    #[test]
+    fn parses_settle_with_and_without_a_budget() {
+        assert_eq!(
+            Script::parse("settle").expect("parse").steps,
+            vec![Step::Settle(super::DEFAULT_SETTLE_FRAMES)],
+        );
+        assert_eq!(
+            Script::parse("settle 60").expect("parse").steps,
+            vec![Step::Settle(60)],
+        );
+        // A zero budget is clamped to at least one probe.
+        assert_eq!(
+            Script::parse("settle 0").expect("parse").steps,
+            vec![Step::Settle(1)],
         );
     }
 

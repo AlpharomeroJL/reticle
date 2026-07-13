@@ -3,7 +3,7 @@
 # so the whole clip is a smooth turn around the stack.
 viewport 1600x1000
 use-case inspect-cell
-wait 20
+settle
 view3d on
 wait 8
 orbit 4 0

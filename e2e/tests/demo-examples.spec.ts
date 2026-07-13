@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { significantColorBuckets } from "../media-gate.mjs";
 
 // Headed per-example render guard (packet v8.1.0-R, examples lane).
 //
@@ -52,43 +53,8 @@ function readStats(page: import("@playwright/test").Page) {
   );
 }
 
-// Count the "significant" distinct color buckets on the canvas: screenshot the
-// #reticle-canvas (Playwright captures the real composited pixels, bypassing the wgpu
-// no-readback limitation), then decode that PNG in-page via an Image element (a decoded
-// image draws to a 2D canvas cleanly, unlike the wgpu canvas) and histogram colors into
-// 5-bit-per-channel buckets. Returns the number of buckets covering >= 0.5% of pixels.
-// A correct multi-layer render has several (background + layer colors + alpha blends); a
-// flat single-color fill has one, and a two-tone blob (background + one blob) has two.
-async function significantColorBuckets(
-  page: import("@playwright/test").Page,
-): Promise<number> {
-  const png = await page.locator("#reticle-canvas").screenshot();
-  const b64 = png.toString("base64");
-  return page.evaluate(async (data) => {
-    const img = new Image();
-    await new Promise<void>((res, rej) => {
-      img.onload = () => res();
-      img.onerror = () => rej(new Error("decode"));
-      img.src = "data:image/png;base64," + data;
-    });
-    const c = document.createElement("canvas");
-    c.width = img.naturalWidth;
-    c.height = img.naturalHeight;
-    const ctx = c.getContext("2d")!;
-    ctx.drawImage(img, 0, 0);
-    const { data: px } = ctx.getImageData(0, 0, c.width, c.height);
-    const total = c.width * c.height;
-    const counts = new Map<number, number>();
-    for (let i = 0; i < px.length; i += 4) {
-      const key =
-        ((px[i] >> 3) << 10) | ((px[i + 1] >> 3) << 5) | (px[i + 2] >> 3);
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    let significant = 0;
-    for (const n of counts.values()) if (n >= total * 0.005) significant++;
-    return significant;
-  }, b64);
-}
+// The significant-color-bucket histogram is the shared media gate (../media-gate.mjs):
+// the SAME check the capture pipeline enforces before any GIF or still ships.
 
 // On the WebGL2 project, hide navigator.gpu so wgpu deterministically takes the WebGL2
 // fallback. The WebGPU project leaves it in place to exercise the real adapter.

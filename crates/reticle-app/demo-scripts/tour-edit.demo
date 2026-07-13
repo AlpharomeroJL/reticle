@@ -3,7 +3,7 @@
 # two, then array-duplicate the result. Each edit is a real undoable operation.
 viewport 1600x1000
 use-case build
-wait 20
+settle
 add-poly 300,300 900,300 900,700 300,700
 wait 4
 capture 30 20

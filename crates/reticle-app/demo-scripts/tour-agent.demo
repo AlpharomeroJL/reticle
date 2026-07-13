@@ -4,5 +4,5 @@
 # two seconds.
 viewport 1600x1000
 use-case watch-agent
-wait 16
+settle
 capture 150 20

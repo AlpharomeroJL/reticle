@@ -5,7 +5,7 @@
 # by construction against the SKY130 subset; the panel scrolls into view as it drives.
 viewport 1600x1000
 use-case build
-wait 20
+settle
 generator guard_ring
 wait 6
 capture 30 20

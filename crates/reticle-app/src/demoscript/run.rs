@@ -13,7 +13,7 @@
 
 use std::path::PathBuf;
 
-use super::{Frame, Script, Step, save_frame_png};
+use super::{Frame, MIN_NONBG_BUCKETS, Script, Step, color_buckets_center, save_frame_png};
 
 /// What `App` should do on the current frame, decided by [`DemoRun::next_tick`].
 #[derive(Clone, Debug)]
@@ -57,6 +57,12 @@ pub struct DemoRun {
     awaiting: bool,
     misses: u32,
     frames: Vec<String>,
+    /// Non-background color-bucket count of each stored frame, for the media gate.
+    nonbg: Vec<usize>,
+    /// Remaining `settle` probe budget while waiting for a colored render, or `None`.
+    settling: Option<u32>,
+    /// Whether the screenshot in flight is a `settle` probe (checked, not stored).
+    probing: bool,
     done: bool,
 }
 
@@ -81,6 +87,9 @@ impl DemoRun {
             awaiting: false,
             misses: 0,
             frames: Vec::new(),
+            nonbg: Vec::new(),
+            settling: None,
+            probing: false,
             done: false,
         }
     }
@@ -120,6 +129,13 @@ impl DemoRun {
                 self.wait -= 1;
                 return Tick::Idle;
             }
+            if self.settling.is_some() {
+                // Probe the current frame for a colored render; the reply routes to the
+                // settle check (receive_frame), not to a stored capture.
+                self.awaiting = true;
+                self.probing = true;
+                return Tick::Capture { orbit: (0.0, 0.0) };
+            }
             if self.seg_remaining > 0 {
                 self.awaiting = true;
                 return Tick::Capture { orbit: self.orbit };
@@ -132,6 +148,7 @@ impl DemoRun {
             self.cursor += 1;
             match step {
                 Step::Wait(n) => self.wait = n,
+                Step::Settle(max) => self.settling = Some(max.max(1)),
                 Step::Orbit(dx, dy) => self.orbit = (dx, dy),
                 Step::Capture { frames, fps } => {
                     self.kind = Kind::Gif;
@@ -147,8 +164,27 @@ impl DemoRun {
         }
     }
 
-    /// Stores a captured frame; the app calls this after reading the `Screenshot`
-    /// event that a [`Tick::Capture`] produced.
+    /// Routes a captured screenshot the app read on a [`Tick::Save`]: during a `settle`
+    /// probe it checks whether the frame is a colored render (clearing the settle once it
+    /// is, or after the probe budget runs out), otherwise it stores the frame as a capture.
+    pub fn receive_frame(&mut self, frame: &Frame) {
+        if self.probing {
+            self.awaiting = false;
+            self.misses = 0;
+            self.probing = false;
+            if color_buckets_center(frame).non_background >= MIN_NONBG_BUCKETS {
+                self.settling = None;
+            } else if let Some(budget) = self.settling {
+                let left = budget.saturating_sub(1);
+                self.settling = (left > 0).then_some(left);
+            }
+            return;
+        }
+        self.store_frame(frame);
+    }
+
+    /// Stores a captured frame and records its non-background color-bucket count for the
+    /// media gate; the app reaches this through [`receive_frame`](Self::receive_frame).
     pub fn store_frame(&mut self, frame: &Frame) {
         self.awaiting = false;
         self.misses = 0;
@@ -158,7 +194,18 @@ impl DemoRun {
             eprintln!("demo: failed to write {}: {e}", path.display());
         }
         self.frames.push(name);
+        self.nonbg.push(color_buckets_center(frame).non_background);
         self.seg_remaining = self.seg_remaining.saturating_sub(1);
+    }
+
+    /// The media-gate verdict over the captured frames: fails if the clip is starry,
+    /// blank, or flat so a bad asset never assembles (reject-and-recapture).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error describing the failing per-frame distribution.
+    pub fn media_gate(&self) -> Result<(), String> {
+        super::gate_verdict(&self.nonbg, self.kind == Kind::Snap)
     }
 
     /// Records that no `Screenshot` reply was present on a [`Tick::Save`]; gives up if
@@ -247,11 +294,86 @@ mod tests {
         assert!(matches!(run.next_tick(), Tick::Done));
     }
 
+    #[test]
+    fn settle_probes_until_a_colored_render_then_proceeds() {
+        let script = Script {
+            viewport: (8, 8),
+            steps: vec![Step::Settle(5), Step::Capture { frames: 1, fps: 20 }],
+        };
+        let mut run = DemoRun::new(
+            script,
+            std::env::temp_dir().join("reticle-demo-test-settle"),
+        );
+        for _ in 0..DemoRun::WARMUP_FRAMES {
+            assert!(matches!(run.next_tick(), Tick::Idle));
+        }
+        // First settle probe: a blank frame keeps it settling and stores nothing.
+        assert!(matches!(run.next_tick(), Tick::Capture { .. }));
+        assert!(matches!(run.next_tick(), Tick::Save));
+        run.receive_frame(&blank_frame());
+        assert_eq!(run.frame_count(), 0, "a probe frame is not stored");
+        // Second probe: a colored frame ends the settle.
+        assert!(matches!(run.next_tick(), Tick::Capture { .. }));
+        assert!(matches!(run.next_tick(), Tick::Save));
+        run.receive_frame(&colored_frame());
+        // Now the real capture segment runs and stores its frame.
+        assert!(matches!(run.next_tick(), Tick::Capture { .. }));
+        assert!(matches!(run.next_tick(), Tick::Save));
+        run.receive_frame(&colored_frame());
+        assert_eq!(run.frame_count(), 1);
+        assert!(matches!(run.next_tick(), Tick::Done));
+        assert!(run.media_gate().is_ok());
+    }
+
+    #[test]
+    fn media_gate_rejects_a_blank_capture() {
+        let script = Script {
+            viewport: (8, 8),
+            steps: vec![Step::Capture { frames: 1, fps: 20 }],
+        };
+        let mut run = DemoRun::new(script, std::env::temp_dir().join("reticle-demo-test-gate"));
+        for _ in 0..DemoRun::WARMUP_FRAMES {
+            run.next_tick();
+        }
+        assert!(matches!(run.next_tick(), Tick::Capture { .. }));
+        assert!(matches!(run.next_tick(), Tick::Save));
+        run.receive_frame(&blank_frame());
+        assert!(
+            run.media_gate().is_err(),
+            "a blank capture must fail the gate"
+        );
+    }
+
     fn blank_frame() -> super::Frame {
+        // A 20x20 flat fill: large enough for the central crop, but a single color, so it
+        // gates as blank (zero non-background buckets).
+        let mut rgba = Vec::with_capacity(20 * 20 * 4);
+        for _ in 0..(20 * 20) {
+            rgba.extend_from_slice(&[0, 0, 0, 255]);
+        }
         super::Frame {
-            width: 1,
-            height: 1,
-            rgba: vec![0, 0, 0, 255],
+            width: 20,
+            height: 20,
+            rgba,
+        }
+    }
+
+    fn colored_frame() -> super::Frame {
+        // A 20x20 frame in four distinctly colored quadrants: the central crop sees all
+        // four, i.e. three non-background buckets.
+        let colors = [[20u8, 20, 20], [220, 20, 20], [20, 220, 20], [20, 20, 220]];
+        let mut rgba = Vec::with_capacity(20 * 20 * 4);
+        for y in 0..20u32 {
+            for x in 0..20u32 {
+                let q = usize::from(x >= 10) + 2 * usize::from(y >= 10);
+                let c = colors[q];
+                rgba.extend_from_slice(&[c[0], c[1], c[2], 255]);
+            }
+        }
+        super::Frame {
+            width: 20,
+            height: 20,
+            rgba,
         }
     }
 }
