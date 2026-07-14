@@ -135,6 +135,48 @@ pub struct LayerInfo {
     pub visible: bool,
 }
 
+/// A fixed palette of distinct opaque colors for layers with no real technology entry,
+/// indexed by a key derived from the layer and datatype numbers.
+const FALLBACK_LAYER_COLORS: [u32; 8] = [
+    0x1f77_b4ff, // blue
+    0xff7f_0eff, // orange
+    0x2ca0_2cff, // green
+    0xd627_28ff, // red
+    0x9467_bdff, // purple
+    0x8c56_4bff, // brown
+    0xe377_c2ff, // pink
+    0x7f7f_7fff, // gray
+];
+
+/// The distinct fallback display color (packed `0xRRGGBBAA`) for `id`, keyed by its layer
+/// and datatype numbers.
+///
+/// A bare import (no technology file) colors its synthesized placeholder layers from this
+/// palette, and the renderer falls back to the same palette for any layer absent from the
+/// technology table, so an imported layout renders as distinct-colored layers rather than a
+/// single white blob.
+#[must_use]
+pub fn fallback_layer_color(id: LayerId) -> u32 {
+    let key = usize::from(id.layer) ^ (usize::from(id.datatype) << 3);
+    FALLBACK_LAYER_COLORS[key % FALLBACK_LAYER_COLORS.len()]
+}
+
+impl LayerInfo {
+    /// A placeholder layer entry for a bare import with no technology file: a
+    /// `L{layer}D{datatype}` name and a DISTINCT [`fallback_layer_color`], so the imported
+    /// layout renders as distinct-colored layers rather than a white blob (the previous
+    /// behavior colored every placeholder opaque white and overpainted them to one blob).
+    #[must_use]
+    pub fn placeholder(id: LayerId) -> Self {
+        Self {
+            id,
+            name: format!("L{}D{}", id.layer, id.datatype),
+            color_rgba: fallback_layer_color(id),
+            visible: true,
+        }
+    }
+}
+
 /// Physical layer-stack data for one layer: where the layer sits in z and how
 /// thick it is, both in integer nanometers.
 ///
@@ -424,4 +466,49 @@ fn translate_shape(shape: &DrawShape, dx: Dbu, dy: Dbu) -> DrawShape {
         )),
     };
     DrawShape::new(shape.layer, kind)
+}
+
+#[cfg(test)]
+mod placeholder_tests {
+    use super::{LayerInfo, fallback_layer_color};
+    use reticle_geometry::LayerId;
+
+    #[test]
+    fn placeholder_layers_get_distinct_non_white_colors() {
+        // The bug this guards: a bare import colored every layer opaque white
+        // (0xFFFF_FFFF), so they overpainted to one white blob. Placeholders must get
+        // distinct, opaque, non-white colors instead.
+        let ids = [
+            LayerId::new(66, 20),
+            LayerId::new(67, 20),
+            LayerId::new(68, 20),
+            LayerId::new(69, 20),
+        ];
+        let colors: Vec<u32> = ids.iter().map(|&id| fallback_layer_color(id)).collect();
+        for &c in &colors {
+            assert_ne!(
+                c, 0xFFFF_FFFF,
+                "a placeholder layer must not be opaque white"
+            );
+            assert_eq!(c & 0xFF, 0xFF, "fallback colors are opaque");
+        }
+        assert!(
+            colors
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                > 1,
+            "adjacent layers must get distinct colors, got {colors:?}",
+        );
+    }
+
+    #[test]
+    fn placeholder_names_and_colors_the_layer() {
+        let id = LayerId::new(68, 20);
+        let info = LayerInfo::placeholder(id);
+        assert_eq!(info.name, "L68D20");
+        assert_eq!(info.color_rgba, fallback_layer_color(id));
+        assert_ne!(info.color_rgba, 0xFFFF_FFFF);
+        assert!(info.visible);
+    }
 }

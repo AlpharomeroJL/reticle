@@ -39,19 +39,6 @@ impl Rgba {
     }
 }
 
-/// A fixed fallback palette (opaque) for layers absent from the technology table.
-/// Indexed by `layer_id % LEN`.
-const FALLBACK: [u32; 8] = [
-    0x1f77_b4ff, // blue
-    0xff7f_0eff, // orange
-    0x2ca0_2cff, // green
-    0xd627_28ff, // red
-    0x9467_bdff, // purple
-    0x8c56_4bff, // brown
-    0xe377_c2ff, // pink
-    0x7f7f_7fff, // gray
-];
-
 /// Resolves layer ids to colors using a technology's layer table, falling back to
 /// a fixed palette for unknown layers.
 #[derive(Clone, Debug)]
@@ -91,10 +78,11 @@ impl Palette {
             .map_or_else(|| Self::fallback(layer), |(_, color, _)| *color)
     }
 
-    /// The fallback color for a layer id, keyed by its layer and datatype numbers.
+    /// The fallback color for a layer id, keyed by its layer and datatype numbers. Shares
+    /// the palette with a bare import's placeholder layers (`reticle_model`), so an
+    /// imported layout and the renderer agree on the same distinct colors.
     #[must_use]
     pub fn fallback(layer: LayerId) -> Rgba {
-        let key = usize::from(layer.layer) ^ (usize::from(layer.datatype) << 3);
-        Rgba::from_packed(FALLBACK[key % FALLBACK.len()])
+        Rgba::from_packed(reticle_model::fallback_layer_color(layer))
     }
 }

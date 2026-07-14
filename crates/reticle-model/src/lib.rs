@@ -22,7 +22,7 @@ mod traits;
 
 pub use document::{
     ArrayInstance, Cell, Document, DrawShape, Instance, LayerInfo, ShapeKind, StackEntry,
-    Technology,
+    Technology, fallback_layer_color,
 };
 pub use edit::Edit;
 pub use editable::EditableDocument;

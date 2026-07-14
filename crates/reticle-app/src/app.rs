@@ -3443,8 +3443,17 @@ impl App {
                 // Reframe so the placed structure is on screen.
                 self.fit_requested = true;
             }
-            // Free camera nudges are not used by any committed script yet.
-            Step::Zoom(_) | Step::Pan(..) => {
+            // Zoom about the current center by `factor` (the fit view centers the cell, so
+            // this zooms into the transistors for the hero reel). >1 zooms in.
+            Step::Zoom(factor) => {
+                self.cancel_view_move();
+                self.camera = ViewCamera::new(
+                    self.camera.center(),
+                    self.camera.pixels_per_dbu() * f64::from(*factor),
+                );
+            }
+            // Pan is not used by any committed script yet.
+            Step::Pan(..) => {
                 eprintln!("demo: step {step:?} not yet implemented");
             }
             // Handled by the scheduler, never dispatched as an action.
@@ -6030,7 +6039,9 @@ impl App {
                 self.inspector.reveal("search");
             }
             if self.demo_focus_generate {
-                self.inspector.reveal("generate");
+                // Solo so the open-by-default Agent section (same Automate group) does not
+                // dominate the Generate capture.
+                self.inspector.reveal_solo("generate");
             }
         }
 

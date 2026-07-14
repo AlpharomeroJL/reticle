@@ -14,7 +14,7 @@ Your files never leave your machine.
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-lightgrey)](#license)
 [![Sponsor AlpharomeroJL](https://img.shields.io/badge/Sponsor-AlpharomeroJL-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/AlpharomeroJL)
 
-![A 3.01 GiB layout streams over the network, the byte-count HUD in the corner showing a fraction of the file fetched; its layers orbit as a colored 3D stack; then a permalink to the exact view is copied](docs/media/hero-gallery-stream.gif)
+![A SKY130 standard cell rendered in full color, a zoom into its transistors, then its layers orbiting as an extruded 3D stack](docs/media/hero-gallery-stream.gif)
 
 ## Try it in sixty seconds
 

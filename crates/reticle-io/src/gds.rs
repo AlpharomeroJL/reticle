@@ -419,14 +419,11 @@ fn library_to_document(lib: &GdsLibrary, warnings: &mut Warnings) -> Document {
         }
     }
     layers.sort_unstable();
+    // Distinct fallback colors, not a uniform white: a bare GDS (no technology file) then
+    // renders as distinct-colored layers rather than a single white blob.
     tech.layers = layers
         .into_iter()
-        .map(|id| reticle_model::LayerInfo {
-            id,
-            name: format!("L{}D{}", id.layer, id.datatype),
-            color_rgba: 0xFFFF_FFFF,
-            visible: true,
-        })
+        .map(reticle_model::LayerInfo::placeholder)
         .collect();
     doc.set_technology(tech);
 

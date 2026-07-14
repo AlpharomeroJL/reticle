@@ -321,6 +321,21 @@ impl InspectorState {
         }
     }
 
+    /// Like [`reveal`](Self::reveal) but also CLOSES every other section in the target's
+    /// group, so a scripted capture frames that one section cleanly. The Automate group's
+    /// Agent section is open by default and, listed first, would otherwise dominate a
+    /// Generate capture even after `reveal` opened Generate below it.
+    pub fn reveal_solo(&mut self, key: &str) {
+        if let Some(spec) = SECTIONS.iter().find(|s| s.key == key) {
+            self.group = spec.group;
+            self.collapsed = false;
+            let group = spec.group;
+            for s in SECTIONS.iter().filter(|s| s.group == group) {
+                self.open.insert(s.key, s.key == key);
+            }
+        }
+    }
+
     /// The sections belonging to `group`, in render order.
     pub fn sections_in(group: PanelGroup) -> impl Iterator<Item = &'static SectionSpec> {
         SECTIONS.iter().filter(move |s| s.group == group)
@@ -444,5 +459,21 @@ mod tests {
         assert_eq!(state.group, PanelGroup::Review);
         assert!(!state.collapsed);
         assert!(state.is_open("comments"));
+    }
+
+    #[test]
+    fn reveal_solo_opens_only_the_target_in_its_group() {
+        let mut state = InspectorState::default();
+        // Agent is open by default in the Automate group; revealing Generate solo must
+        // close it so the Generate capture is not dominated by the Agent panel.
+        state.set_open("agent", true);
+        state.reveal_solo("generate");
+        assert_eq!(state.group, PanelGroup::Automate);
+        assert!(state.is_open("generate"));
+        assert!(
+            !state.is_open("agent"),
+            "reveal_solo must close sibling sections"
+        );
+        assert!(!state.is_open("pcell"));
     }
 }

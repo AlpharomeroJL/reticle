@@ -58,7 +58,7 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Reticle",
         native_options,
-        Box::new(move |_cc| {
+        Box::new(move |cc| {
             let mut app = if gallery {
                 App::gallery()
             } else if tour {
@@ -66,11 +66,21 @@ fn main() -> eframe::Result {
             } else {
                 App::new()
             };
+            let capturing = smoke.is_some() || demo.is_some();
             if let Some(path) = smoke {
                 app.set_screenshot_smoke(std::path::PathBuf::from(path));
             }
             if let Some(script) = demo {
                 app.set_demo_script(script, std::path::PathBuf::from(out_dir));
+            }
+            if capturing {
+                // A resting cursor over a panel would otherwise raise a stray hover
+                // tooltip in a captured frame; delay tooltips far beyond any capture so
+                // the media shows only the feature under test.
+                for theme in [eframe::egui::Theme::Dark, eframe::egui::Theme::Light] {
+                    cc.egui_ctx
+                        .style_mut_of(theme, |s| s.interaction.tooltip_delay = 3600.0);
+                }
             }
             Ok(Box::new(app))
         }),

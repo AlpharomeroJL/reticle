@@ -726,7 +726,9 @@ impl ParseState {
         self.layers.push(LayerInfo {
             id,
             name,
-            color_rgba: 0xFFFF_FFFF,
+            // Distinct fallback color, not uniform white, so imported layers do not
+            // overpaint to a white blob.
+            color_rgba: reticle_model::fallback_layer_color(id),
             visible: true,
         });
         id

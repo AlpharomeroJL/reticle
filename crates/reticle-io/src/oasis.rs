@@ -425,15 +425,9 @@ fn derive_layers(doc: &Document) -> Vec<LayerInfo> {
         }
     }
     layers.sort_unstable();
-    layers
-        .into_iter()
-        .map(|id| LayerInfo {
-            id,
-            name: format!("L{}D{}", id.layer, id.datatype),
-            color_rgba: 0xFFFF_FFFF,
-            visible: true,
-        })
-        .collect()
+    // Distinct fallback colors, not a uniform white (see gds.rs): a bare OASIS renders as
+    // distinct-colored layers rather than a single white blob.
+    layers.into_iter().map(LayerInfo::placeholder).collect()
 }
 
 /// Reads a record tag and checks it matches, naming the record in any error.

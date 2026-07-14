@@ -1,0 +1,15 @@
+# hero-reel: the README hero. A dense SKY130 standard cell rendered in full color, a zoom
+# into its transistors, then the 3D layer stack orbits. Every frame is filled colored
+# geometry -- never the sparse big-die overview scatter. The media gate (color_buckets_center)
+# rejects the capture if any frame goes flat or blank.
+viewport 1600x1000
+use-case inspect-cell
+settle
+capture 20 20
+zoom 2.0
+wait 4
+capture 26 20
+view3d on
+wait 8
+orbit 4 0
+capture 96 20
