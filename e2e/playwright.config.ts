@@ -72,14 +72,14 @@ export default defineConfig({
   projects: [
     {
       name: "webgl2",
-      // The subpath, share-live, served-archive, pwa, convert, and phone specs each run
-      // in their own project below.
-      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts|phone-touch\.spec\.ts|demo-.*\.spec\.ts/,
+      // The subpath, share-live, served-archive, pwa, convert, phone, and doc-switch specs
+      // each run in their own project below.
+      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts|phone-touch\.spec\.ts|doc-switch\.spec\.ts|demo-.*\.spec\.ts/,
       use: { launchOptions: { args: WEBGL2_ARGS } },
     },
     {
       name: "webgpu",
-      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts|phone-touch\.spec\.ts|demo-.*\.spec\.ts/,
+      testIgnore: /subpath-boot\.spec\.ts|share-live\.spec\.ts|served-archive\.spec\.ts|pwa\.spec\.ts|convert-opfs\.spec\.ts|phone-touch\.spec\.ts|doc-switch\.spec\.ts|demo-.*\.spec\.ts/,
       use: { launchOptions: { args: WEBGPU_ARGS } },
     },
     {
@@ -106,6 +106,21 @@ export default defineConfig({
       // WebGPU adapter here.
       name: "served-archive",
       testMatch: /served-archive\.spec\.ts/,
+      use: { launchOptions: { args: WEBGL2_ARGS } },
+    },
+    {
+      // The document-switch RC1 acceptance (lane e2e-revive). Streams a served `.rtla`
+      // over `?archive=` (document A), then opens a regular GDS (document B) IN-SESSION by
+      // dragging it onto the canvas, and asserts the rendered/interactive document is B and
+      // that Run DRC re-enabled -- the browser-level bar for RC1 (exiting archive browse on
+      // open). Headless WebGL2 fallback, like served-archive: the die paints and the editor
+      // stats populate without a WebGPU adapter, and no foreground/headed browser is needed
+      // because a single Playwright page is the visible tab (its rAF loop runs). Uses the
+      // same root serve-dist (8080) bundle and the ranged serve-archive (8082) fixture, so
+      // it needs the debug e2e Trunk build (the `__reticle_e2e_dispatch` bridge it drives is
+      // debug-only). Served at root by serve-dist.mjs.
+      name: "doc-switch",
+      testMatch: /doc-switch\.spec\.ts/,
       use: { launchOptions: { args: WEBGL2_ARGS } },
     },
     {

@@ -48,7 +48,7 @@ lane-done name:
 # Fail-fast order: the cheapest checks run first (style grep, fmt), then clippy,
 # then tests, then the slow tail (docs, wasm, deny, typos), so a broken lane
 # learns in seconds rather than minutes.
-ci: check-style fmt-check clippy test doctest doc-build wasm-build deny typos
+ci: check-style fmt-check clippy test doctest doc-build wasm-build deny typos e2e-ci
     Write-Output "ci: GREEN"
 
 # ---- Formatting ----
@@ -222,6 +222,24 @@ e2e:
     npm --prefix e2e install
     cd e2e; npx playwright install chromium
     cd e2e; npx playwright test --project=webgl2 --project=webgpu
+
+# The headless e2e gate step for `just ci` (lane e2e-revive). Builds the debug e2e Trunk
+# bundle once (debug so the `__reticle_e2e_dispatch` bridge the doc-switch spec drives is
+# present), then drives the HEADLESS-capable projects in a single Playwright run (one
+# webServer startup): `webgl2` + `webgpu` boot, `served-archive` streaming, and `doc-switch`
+# (the RC1 archive-browse -> in-session-open acceptance). The headed `demo-*` projects are
+# deliberately NOT gated here: eframe pauses its requestAnimationFrame loop in a backgrounded
+# or occluded tab, so those need a FOREGROUND headed browser and an interactive desktop
+# (`just e2e-headed`), which a headless CI gate does not have. `subpath`, `share-live`,
+# `pwa`, `phone`, and `browser-convert` keep their own `just e2e-*` recipes (each needs a
+# different build flag, the relay binary, or an OPFS/PWA surface). `npx playwright test` is
+# the trailing native command so its exit code is the recipe's (a true exit; no pipe masks
+# it, and just aborts the recipe if the build or install line above fails).
+e2e-ci:
+    cd crates/web; trunk build index.html
+    npm --prefix e2e install
+    cd e2e; npx playwright install chromium
+    cd e2e; npx playwright test --project=webgl2 --project=webgpu --project=served-archive --project=doc-switch
 
 # gh-pages subpath boot gate. Builds the bundle WITH `--public-url /reticle/`
 # (the deploy shape) and runs the `ghpages-subpath` Playwright project, which
