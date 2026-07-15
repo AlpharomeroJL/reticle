@@ -129,3 +129,4 @@ superseded decision is marked and linked to its replacement.
 | [0121](0121-f5-plugin-index-generator.md) | The F5 static plugin index generator: reuse the real contract types, `manifest.json`, and a missing `plugins/` directory is valid, not an error |
 | [0122](0122-bundle-budget-amendment-v8.2.md) | A bounded v8.2 bundle-budget amendment (+450 to +456 KiB gz) |
 | [0123](0123-leaderboard-rows-per-suite-version.md) | Leaderboard rows are keyed per suite version, not just the provenance triple |
+| [0124](0124-wave-b-pointwise-fixes-owned-invalidation-deferred.md) | Wave B fixes the three derived-view lesions pointwise; owned invalidation and a fuller browser harness are deferred |
