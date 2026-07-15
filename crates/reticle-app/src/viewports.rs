@@ -173,6 +173,19 @@ impl Viewports {
         }
     }
 
+    /// Resets every pane's stored camera to the default, keeping the split mode and
+    /// focused pane.
+    ///
+    /// Called on a document switch: the stored cameras frame the old document's world
+    /// coordinates, so an inactive pane would otherwise keep showing empty old-doc
+    /// space. The focused pane holds the live camera, which the caller reframes on the
+    /// next frame via its deferred fit; this drops the stale mirrors behind it.
+    pub fn reset_cameras(&mut self) {
+        for cam in &mut self.cameras {
+            *cam = ViewCamera::default();
+        }
+    }
+
     /// Moves focus to `pane`, swapping cameras through `live`.
     ///
     /// The live camera is saved into the previously focused slot and the target

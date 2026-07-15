@@ -1538,14 +1538,66 @@ impl App {
         self.selection.clear();
         self.netlight.clear();
         self.drc.clear();
+        // The stale-DRC flag keys on `history.revision()`, which resets to 0 on every
+        // install, so a key left over from the old document's timeline would false-match
+        // the new document at revision 0 (reads "up to date" with no results) or read
+        // spuriously stale. Drop it with the results it partners.
+        self.drc_ran_revision = None;
         // Drop the diff baseline: it snapshotted the previous document, so a diff
         // against the fresh one would be meaningless until re-snapshotted.
         self.diff_overlay.clear();
+        // The diff row selection and per-layer filter index into the (now-cleared) change
+        // list and key against the old technology's LayerIds; clear them with the overlay
+        // they partner so a dangling row or an absent LayerId cannot survive the switch.
+        self.diff_selected = None;
+        self.diff_layer_filter = None;
         // Drop the live index and its underlines; the new document builds a fresh one
         // on the next edit (and the pending dirt from `History::new` is drained then).
         self.live_drc.clear();
         self.live_pending = crate::history::Dirty::None;
         self.live_reprepare_accum = 0.0;
+        // --- lane fix-doc-switch-reset: exit archive browse + drop old-doc-anchored state ---
+        // Opening a document is the one event that ends a served-archive browse
+        // (`?archive=`): nothing else ever clears `self.archive`, so without this the draw
+        // dispatch stays on the streamed tiles, the layer panel stays suppressed, and the
+        // batch DRC/SPICE-export guard keeps reporting "no editable document." Reset the
+        // whole archive cluster to its as-constructed, not-browsing state.
+        self.archive = None;
+        self.archive_framed = false;
+        self.archive_started = false;
+        self.pending_archive_url = None;
+        self.archive_hud_visible = true;
+        self.archive_fade = LevelFade::new(0.15);
+        // Saved selection sets are raw scene indices captured against the OLD scene; on the
+        // new scene they address different or out-of-range shapes. Drop them on the switch
+        // (the same reasoning that clears `self.selection`); `restore_selection_set` also
+        // bounds-checks, so a set saved and restored within one document is safe too.
+        self.search.saved = crate::outline::SavedSets::new();
+        // Old-document overlays anchored in the old coordinate space or old shape indices:
+        // comment pins (old world DBU, paint over the new layout), an in-progress
+        // polygon/path (old-doc vertices), and the net-trace readouts (queried over the old
+        // document). Drop them so nothing paints or reads against a document that is gone.
+        self.comment_pins.clear();
+        self.draw.reset();
+        self.trace = crate::trace_panel::TracePanelState::new();
+        // View bookmarks and the inactive split-pane cameras are snapshots in the old
+        // document's world coordinates; the deferred fit below only reframes the live
+        // camera, so a recalled bookmark or a second pane would frame empty old-doc space.
+        // Reset them; the split layout itself is a view preference and is kept.
+        self.bookmarks.clear();
+        self.viewports.reset_cameras();
+        // KEPT deliberately: `underlay` (a die-photo/datasheet backdrop) and `snap.guides`
+        // are user-provided assets, not derived from the document; the image underlay is a
+        // reference the user placed and guides are session view state. Both are
+        // coordinate-anchored, but resetting a user asset on every open is more surprising
+        // than leaving it; the user can clear either explicitly. `waveform` results are a
+        // detached panel plot (not painted over the layout), left until re-run.
+        //
+        // LEDGERED (docs/honest-limits.md): the live-share mirror (`sharer_doc`,
+        // `published_revision`) is intentionally NOT reset here; switching documents
+        // mid-live-session merges both into one CRDT. Resetting live state is riskier than
+        // the switch bug it would fix and is out of this lane's scope.
+        // --- end lane fix-doc-switch-reset ---
         self.fit_requested = true;
     }
 
@@ -7558,12 +7610,26 @@ impl App {
     }
 
     /// Restores a saved selection set into the live selection by name.
+    ///
+    /// The set stores raw scene indices captured when it was saved; the scene it is
+    /// restored against can be smaller (an edit deleted shapes, or the set outlived a
+    /// document switch), so any index at or past the current shape count is dropped
+    /// rather than selected. Without this bound a stale index would select the wrong
+    /// shape or address past the scene. The status line reports how many were dropped.
     fn restore_selection_set(&mut self, name: &str) {
         if let Some(indices) = self.search.saved.restore(name) {
-            let indices = indices.to_vec();
-            let n = indices.len();
-            self.selection.set(indices);
-            self.status.set(format!("Restored '{name}' ({n} shape(s))"));
+            let bound = self.scene.shapes().len();
+            let kept: Vec<usize> = indices.iter().copied().filter(|&i| i < bound).collect();
+            let dropped = indices.len() - kept.len();
+            let n = kept.len();
+            self.selection.set(kept);
+            if dropped > 0 {
+                self.status.set(format!(
+                    "Restored '{name}' ({n} shape(s), {dropped} stale dropped)"
+                ));
+            } else {
+                self.status.set(format!("Restored '{name}' ({n} shape(s))"));
+            }
         }
     }
     /// Draws the technology-editor panel and the upgraded layer manager at the end
@@ -16082,6 +16148,158 @@ mod tests {
             app.status.text
         );
     }
+
+    // --- lane fix-doc-switch-reset: document-switch reset regression tests ---
+    /// A document whose technology declares exactly `layers` (in order) and whose
+    /// top cell holds one rectangle per layer, so the installed layer table and scene
+    /// are non-empty and reflect only this document's layer set.
+    fn doc_with_layers(top: &str, layers: &[LayerId]) -> reticle_model::Document {
+        use reticle_model::{Cell, Document, DrawShape, LayerInfo, ShapeKind, Technology};
+        let mut cell = Cell::new(top);
+        for (i, &id) in layers.iter().enumerate() {
+            let x = (i as i32) * 100;
+            cell.shapes.push(DrawShape::new(
+                id,
+                ShapeKind::Rect(Rect::new(Point::new(x, 0), Point::new(x + 50, 50))),
+            ));
+        }
+        let mut doc = Document::new();
+        doc.set_technology(Technology {
+            name: "TEST_TECH".to_owned(),
+            dbu_per_micron: 1000,
+            layers: layers
+                .iter()
+                .map(|&id| LayerInfo {
+                    id,
+                    name: format!("LAYER_{}_{}", id.layer, id.datatype),
+                    color_rgba: 0x1122_33ff,
+                    visible: true,
+                })
+                .collect(),
+            rules: Vec::new(),
+            stack: Vec::new(),
+        });
+        doc.insert_cell(cell);
+        doc.set_top_cells(vec![top.to_owned()]);
+        doc
+    }
+
+    #[test]
+    fn switching_documents_resets_archive_layers_selection_and_verification_state() {
+        // The RC1 invariant (test-gap.md invariant 1): opening a document must exit an
+        // active archive browse and drop every derived/accumulated view of the old
+        // document. Without install_document clearing self.archive this goes RED on the
+        // archive assertion (the draw dispatch would stay stuck on the streamed tiles);
+        // it also guards the revision-key / diff-index / overlay resets.
+        use reticle_model::{RuleKind, Violation};
+        let mut app = App::new();
+
+        // Populate per-document state against document A (the demo App::new starts with).
+        let idx = app.scene.query(app.scene.bounds().unwrap())[0];
+        app.highlight_net_of(idx);
+        assert!(
+            !app.netlight.is_empty(),
+            "net highlight populated for doc A"
+        );
+        app.selection.set([idx]);
+        app.drc.set_violations(vec![Violation {
+            rule: "doc_a_rule".to_owned(),
+            kind: RuleKind::Width,
+            layer: LayerId::new(9, 9),
+            other_layer: None,
+            measured: 1,
+            required: 2,
+            location: Rect::new(Point::new(0, 0), Point::new(1, 1)),
+            message: "doc A".to_owned(),
+        }]);
+        app.drc_ran_revision = Some(app.history.revision());
+        app.diff_selected = Some(0);
+        app.diff_layer_filter = Some(LayerId::new(3, 0));
+        app.bookmarks.push(ViewCamera::default());
+        app.search.saved.save("doc-a-set", [idx]);
+
+        // Enter served-archive browse mode: the operator's confirmed stuck state.
+        app.archive = Some(crate::archive::ArchiveBrowse::browse_for_test());
+        assert!(app.archive.is_some(), "archive browse is live");
+
+        // Switch to document B, whose technology declares a DIFFERENT layer set.
+        let b_layers = [LayerId::new(42, 0), LayerId::new(77, 5)];
+        app.install_document(doc_with_layers("B", &b_layers), "B".to_owned());
+
+        // (a) archive browse exited: the draw dispatch renders B, the layer panel returns,
+        //     and the batch DRC/SPICE guard passes again.
+        assert!(
+            app.archive.is_none(),
+            "opening a document must exit archive browse"
+        );
+        assert!(
+            app.batch_verify_block().is_none(),
+            "batch DRC/SPICE must re-enable once the archive is gone"
+        );
+
+        // (b) the layer table reflects document B's layers only.
+        let ids: Vec<LayerId> = app.layer_state.rows().iter().map(|r| r.id).collect();
+        assert_eq!(
+            ids,
+            b_layers.to_vec(),
+            "layer table must reflect only document B's layers"
+        );
+
+        // (c) selection and net highlight (old-doc shape indices) cleared.
+        assert!(app.selection.is_empty(), "selection must clear on switch");
+        assert!(
+            app.netlight.is_empty(),
+            "net highlight must clear on switch"
+        );
+
+        // (d) verification caches cleared, including the revision key and diff row/filter.
+        assert!(!app.drc.has_run(), "DRC results must clear on switch");
+        assert_eq!(
+            app.drc_ran_revision, None,
+            "the stale-DRC revision key must reset (it false-matches at revision 0)"
+        );
+        assert!(
+            !app.diff_overlay.has_run(),
+            "diff overlay must clear on switch"
+        );
+        assert_eq!(app.diff_selected, None, "diff row selection must reset");
+        assert_eq!(app.diff_layer_filter, None, "diff layer filter must reset");
+        assert!(app.live_drc.is_empty(), "live DRC must clear on switch");
+
+        // Old-doc overlays and index-based assets are gone too.
+        assert!(
+            app.search.saved.sets().is_empty(),
+            "saved selection sets (old-doc indices) must clear on switch"
+        );
+        assert!(
+            app.bookmarks.is_empty(),
+            "old-doc view bookmarks must clear on switch"
+        );
+    }
+
+    #[test]
+    fn restoring_a_saved_set_drops_out_of_range_indices() {
+        // Guards restore_selection_set: a set saved against a larger scene (or before a
+        // delete) holds raw indices that can address past the current scene. Without the
+        // bounds check the out-of-range index is selected; with it, only in-range indices
+        // survive. This goes RED without the filter added to restore_selection_set.
+        let mut app = App::new();
+        let bound = app.scene.shapes().len();
+        assert!(bound > 0, "the demo scene has shapes");
+        app.search.saved.save("mixed", [0usize, bound + 25]);
+        app.restore_selection_set("mixed");
+        assert!(app.selection.contains(0), "the in-range index is restored");
+        assert!(
+            app.selection.iter().all(|i| i < bound),
+            "no restored index may address past the current scene"
+        );
+        assert!(
+            !app.selection.contains(bound + 25),
+            "the out-of-range index must be dropped, not selected"
+        );
+        assert_eq!(app.selection.len(), 1, "only the in-range index survives");
+    }
+    // --- end lane fix-doc-switch-reset ---
 
     #[test]
     fn run_drc_populates_violations_from_demo() {
