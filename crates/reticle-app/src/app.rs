@@ -4432,6 +4432,11 @@ impl App {
     /// inside that bridge are a temporary stand-in for the `netlist` lane's writer
     /// (see the bridge's own doc comment and `docs/decisions/0112-xschem-interop.md`).
     fn xschem_export_spice(&mut self) {
+        if let Some(reason) = self.batch_verify_block() {
+            self.status
+                .set(format!("SPICE export unavailable: {reason}"));
+            return;
+        }
         let tech = reticle_extract::DeviceTech::sky130();
         let dn = reticle_extract::extract_devices(self.history.document(), &self.top_cell, &tech);
         if dn.devices.is_empty() {
@@ -8762,8 +8767,27 @@ impl App {
         }
     }
 
+    /// Batch verification (DRC, device extraction) needs the editable document to
+    /// index and check. A streamed-archive browse (`self.archive`) decouples the die
+    /// on screen from the editable document, so these actions would otherwise verify or
+    /// export the boot document while a different die is shown, and report the result as
+    /// the die's. Returns the reason they are unavailable, or `None` when they can run.
+    ///
+    /// Live DRC (`poll_live_drc`), the layer table, and the canvas overlays are already
+    /// suppressed in archive mode; this closes the same gap for the batch verify/export
+    /// paths, which are reachable from the command dispatch and menu, not only a button.
+    fn batch_verify_block(&self) -> Option<&'static str> {
+        self.archive
+            .is_some()
+            .then_some("browsing a streamed archive has no editable document to verify")
+    }
+
     /// Runs DRC over the flattened top cell and stores the violations.
     fn run_drc(&mut self) {
+        if let Some(reason) = self.batch_verify_block() {
+            self.status.set(format!("DRC unavailable: {reason}"));
+            return;
+        }
         let n = self.drc.run(self.history.document(), &self.top_cell);
         self.drc_ran_revision = Some(self.history.revision());
         if n == 0 {
@@ -8825,6 +8849,18 @@ impl App {
     /// location on the next frame (once the real canvas size is known).
     fn drc_panel(&mut self, ui: &mut egui::Ui) {
         let ctx = self.comp_ctx();
+        // A streamed-archive browse has no editable document to check, so DRC is
+        // unavailable here (mirrors the layer panel and live-DRC archive guards).
+        // Disabling the action with a reason keeps the tool from reporting a result
+        // about the boot document while a different die is on screen.
+        if self.archive.is_some() {
+            theme::components::EmptyState::new(
+                "DRC unavailable",
+                "A streamed archive has no editable document to check.",
+            )
+            .show(ui, ctx);
+            return;
+        }
         ui.horizontal(|ui| {
             if ui.button("Run DRC").clicked() {
                 self.run_drc();
@@ -16010,6 +16046,41 @@ mod tests {
         app.selection.set([0, 1, 2]);
         app.run_command(Command::ClearSelection, None);
         assert!(app.selection.is_empty());
+    }
+
+    #[test]
+    fn batch_drc_is_disabled_while_browsing_an_archive() {
+        // Commit-zero honesty guard: in archive-browse mode the editable document is
+        // decoupled from the die on screen, so Run DRC must NOT verify the boot
+        // document and report it as the die's. It reports unavailable instead. Without
+        // the guard in run_drc this test goes red (drc runs against the demo).
+        let mut app = App::new();
+        app.archive = Some(crate::archive::ArchiveBrowse::browse_for_test());
+        assert!(!app.drc.has_run());
+        app.run_drc();
+        assert!(
+            !app.drc.has_run(),
+            "run_drc must be a no-op while an archive is on screen"
+        );
+        assert!(
+            app.status.text.contains("unavailable"),
+            "status should explain why DRC did not run: {}",
+            app.status.text
+        );
+    }
+
+    #[test]
+    fn spice_export_is_disabled_while_browsing_an_archive() {
+        // The same guard for device extraction / SPICE export, which reads the editable
+        // document a streamed archive does not provide.
+        let mut app = App::new();
+        app.archive = Some(crate::archive::ArchiveBrowse::browse_for_test());
+        app.xschem_export_spice();
+        assert!(
+            app.status.text.contains("unavailable"),
+            "SPICE export should report unavailable in archive mode: {}",
+            app.status.text
+        );
     }
 
     #[test]

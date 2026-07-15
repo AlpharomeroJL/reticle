@@ -402,7 +402,7 @@ impl ArchiveBrowse {
     /// tests of the drain/residency bookkeeping (the fetch glue is wasm-only).
     #[cfg(test)]
     #[must_use]
-    fn for_test(scene: StreamedScene, file_size: u64) -> Self {
+    pub(crate) fn for_test(scene: StreamedScene, file_size: u64) -> Self {
         Self {
             host: DocHost::streamed(scene),
             inbox: TileInbox::new(),
@@ -413,6 +413,28 @@ impl ArchiveBrowse {
                 ..ArchiveStats::default()
             },
         }
+    }
+
+    /// A minimal streamed-archive browse for cross-module unit tests: enough for a
+    /// caller that only needs `self.archive` to be `Some` (for example, asserting
+    /// that batch verification is disabled while an archive is on screen). Not wired
+    /// to a network source; the fetch glue is wasm-only.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn browse_for_test() -> Self {
+        use reticle_geometry::{Point, Rect};
+        use reticle_index::streaming::ArchivableRect;
+        use reticle_index::{LevelDims, RTLA_MAGIC, RTLA_VERSION, RtlaHeader};
+        let world = Rect::new(Point::new(0, 0), Point::new(1000, 1000));
+        let header = RtlaHeader {
+            magic: RTLA_MAGIC,
+            version: RTLA_VERSION,
+            world: ArchivableRect::from_rect(world),
+            dbu_per_micron: 1000,
+            levels: vec![LevelDims { cols: 1, rows: 1 }],
+        };
+        let scene = StreamedScene::new(header, 64).expect("valid test header");
+        Self::for_test(scene, 4096)
     }
 
     /// The read-only streamed scene being browsed.
