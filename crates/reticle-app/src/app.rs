@@ -12231,11 +12231,16 @@ impl App {
             let (snapped, hint) = self.snap_world(raw);
             self.cursor_world = Some(snapped);
             self.snap_hint = hint;
+            // Hover only pre-highlights shapes on visible layers: a hidden shape is not
+            // drawn, so an outline over its (off-screen) bounds would stroke empty
+            // canvas. `pick_visible_at` keeps locked-but-visible shapes hoverable.
+            // --- lane fix-pick-visibility: hover ignores hidden layers (RC2) ---
             self.hover_pick = if self.tools.active() == Tool::Select {
-                self.scene.pick(raw)
+                self.pick_visible_at(raw)
             } else {
                 None
             };
+            // --- end lane fix-pick-visibility ---
         } else {
             self.cursor_world = None;
             self.snap_hint = None;
@@ -12651,11 +12656,43 @@ impl App {
     /// A shape on a locked layer stays drawn but is not selectable (catalog 57);
     /// an out-of-range index or an unknown layer is pickable so stray geometry is
     /// never silently locked.
-    fn is_pickable(&self, idx: usize) -> bool {
+    /// Whether shape `idx` sits on a currently-visible layer, i.e. one the renderer
+    /// actually drew this frame. `draw_shapes` skips hidden layers, so a hidden shape is
+    /// off-screen and must be excluded from every pick interaction. This is the single
+    /// visibility gate shared by click-select ([`Self::is_pickable`]), the hover
+    /// pre-highlight, and double-click-fit (the latter two via [`Self::pick_visible_at`])
+    /// so the three sites cannot drift apart.
+    // --- lane fix-pick-visibility: shared pick visibility gate (RC2) ---
+    fn picks_visible_shape(&self, idx: usize) -> bool {
         self.scene
             .shapes()
             .get(idx)
-            .is_none_or(|s| !self.layer_state.is_locked(s.layer))
+            .is_none_or(|s| self.layer_state.is_visible(s.layer))
+    }
+
+    /// The topmost shape at world `point`, restricted to visible layers. Used by the
+    /// hover pre-highlight and double-click-fit, which must never land on a hidden
+    /// (not-drawn) shape. Locked-but-visible shapes are still returned: a lock blocks
+    /// click-select (catalog 57), not hover or fit.
+    fn pick_visible_at(&self, point: Point) -> Option<usize> {
+        self.scene
+            .pick(point)
+            .filter(|&idx| self.picks_visible_shape(idx))
+    }
+    // --- end lane fix-pick-visibility ---
+
+    fn is_pickable(&self, idx: usize) -> bool {
+        // A hidden layer is not drawn, so it is never pickable; a locked-but-visible
+        // layer is drawn but not click-selectable (catalog 57). The visibility half is
+        // shared with hover and double-click-fit via `picks_visible_shape`.
+        // --- lane fix-pick-visibility: gate click-select on visibility (RC2) ---
+        self.picks_visible_shape(idx)
+            && self
+                .scene
+                .shapes()
+                .get(idx)
+                .is_none_or(|s| !self.layer_state.is_locked(s.layer))
+        // --- end lane fix-pick-visibility ---
     }
 
     fn handle_select_input(
@@ -12672,7 +12709,11 @@ impl App {
             && let Some(pos) = response.interact_pointer_pos()
         {
             let world = self.camera.screen_to_world(screen, pos.x, pos.y);
-            if let Some(idx) = self.scene.pick(world) {
+            // Double-click frames the shape under the cursor, but only one that is
+            // actually drawn: a hidden shape must not be framed (it would zoom to empty
+            // canvas). `pick_visible_at` still frames locked-but-visible shapes.
+            // --- lane fix-pick-visibility: double-click-fit ignores hidden layers (RC2) ---
+            if let Some(idx) = self.pick_visible_at(world) {
                 if let Some(shape) = self.scene.shapes().get(idx) {
                     let bounds = shape.bounding_box();
                     let mut cam = self.camera;
@@ -12681,6 +12722,7 @@ impl App {
                     self.begin_view_move(cam);
                     self.status.set("Fit shape");
                 }
+            // --- end lane fix-pick-visibility ---
             } else {
                 self.fit_requested = true;
                 self.status.set("Fit all");
@@ -16057,6 +16099,168 @@ mod tests {
         let after = count_visible(&app);
         assert!(after < before, "hiding a layer should shrink the draw list");
     }
+
+    // --- lane fix-pick-visibility: pick/hover/caption respect layer visibility (RC2) ---
+    /// A shape on a hidden (but unlocked) layer must not be selectable. Pick indexes
+    /// `self.scene`, which has no visibility concept, so before the fix `is_pickable`
+    /// rejected only locked layers and a hidden shape stayed clickable over empty
+    /// canvas. This mirrors the draw filter in `draw_shapes`, which skips hidden
+    /// layers. Locked-but-visible layers stay selectable-blocked exactly as before.
+    #[test]
+    fn hidden_layer_shape_is_not_pickable() {
+        let mut app = App::new();
+        // A shape the demo scene actually draws, and a point inside its bounds
+        // (`Rect::contains` is `[min, max)`, so `min` lies inside a positive-area box).
+        let idx = app.scene.query(app.scene.bounds().unwrap())[0];
+        let layer = app.scene.shapes()[idx].layer;
+        let inside = app.scene.shapes()[idx].bounding_box().min;
+
+        // While the layer is visible and unlocked, the click path treats it as pickable.
+        assert!(
+            !app.layer_state.is_locked(layer),
+            "precondition: the layer is unlocked"
+        );
+        assert!(
+            app.is_pickable(idx),
+            "a visible, unlocked shape is pickable"
+        );
+
+        // Hide the layer, leaving it unlocked, and repeat the exact click-path filter.
+        assert!(
+            app.layer_state.set_visible(layer, false),
+            "the layer was found and hidden"
+        );
+        assert!(
+            !app.layer_state.is_locked(layer),
+            "the layer is only hidden, still unlocked"
+        );
+        assert!(
+            !app.is_pickable(idx),
+            "a shape on a hidden layer must not be pickable"
+        );
+
+        // The full click path (`scene.pick` then filtered by `is_pickable`, as in
+        // `handle_select_input`) must not select anything living on the hidden layer.
+        let picked = app.scene.pick(inside).filter(|&i| app.is_pickable(i));
+        assert!(
+            picked.is_none_or(|i| app.scene.shapes()[i].layer != layer),
+            "clicking over a hidden shape must not select anything on that layer"
+        );
+    }
+
+    /// Property: for many generated viewports and hidden/locked layer configurations,
+    /// every shape the click path would select (`scene.pick` then `is_pickable`) for an
+    /// in-viewport point is also in the draw-filtered set for that frame -- the mirror
+    /// of `draw_shapes`: `scene.query(viewport)` kept only where the layer `is_visible`.
+    /// Pins "pick and draw never disagree on visibility" as a standing invariant, not
+    /// just the single hidden-layer case above.
+    #[test]
+    fn picked_shape_is_always_in_this_frames_query_output() {
+        // Deterministic xorshift64 PRNG: no wall-clock and no `rand` dependency, so the
+        // generated cases are reproducible across runs.
+        struct Rng(u64);
+        impl Rng {
+            fn next_u64(&mut self) -> u64 {
+                let mut x = self.0;
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                self.0 = x;
+                x
+            }
+            fn below(&mut self, n: usize) -> usize {
+                (self.next_u64() % n as u64) as usize
+            }
+        }
+
+        let mut app = App::new();
+        let layers: Vec<LayerId> = app.layer_state.rows().iter().map(|r| r.id).collect();
+        let scene_bounds = app.scene.bounds().expect("the demo scene is non-empty");
+        let shape_count = app.scene.len();
+        assert!(shape_count > 0 && !layers.is_empty());
+
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        for _ in 0..400 {
+            // Randomize visibility (~25% hidden) and lock (~12% locked) so pick and draw
+            // are evaluated against the same per-frame layer state.
+            for &id in &layers {
+                app.layer_state.set_visible(id, (rng.next_u64() & 3) != 0);
+                app.layer_state
+                    .set_locked(id, rng.next_u64().trailing_zeros() >= 3);
+            }
+
+            // A point inside a random shape's bounds guarantees `pick` can return a hit.
+            let bb = app.scene.shapes()[rng.below(shape_count)].bounding_box();
+            let point = bb.min;
+
+            // The draw-filtered set for the whole scene (a superset of any viewport that
+            // contains `point`): query, then keep only visible layers, exactly as
+            // `draw_shapes` does.
+            let viewport = scene_bounds;
+            if !viewport.contains(point) {
+                continue;
+            }
+            let draw_set: std::collections::BTreeSet<usize> = app
+                .scene
+                .query(viewport)
+                .into_iter()
+                .filter(|&i| app.layer_state.is_visible(app.scene.shapes()[i].layer))
+                .collect();
+
+            // The click path: topmost pick filtered by `is_pickable`.
+            if let Some(picked) = app.scene.pick(point).filter(|&i| app.is_pickable(i)) {
+                assert!(
+                    draw_set.contains(&picked),
+                    "pick returned shape {picked} on layer {:?} that the draw filter excluded",
+                    app.scene.shapes()[picked].layer
+                );
+            }
+        }
+    }
+
+    /// The hover pre-highlight and double-click-fit both resolve the shape under the
+    /// cursor through `pick_visible_at`. A hidden (not-drawn) layer must be excluded from
+    /// both, so `hover_pick` never becomes a hidden shape and a double-click cannot frame
+    /// one; a locked-but-visible layer stays hoverable and fittable (only click-select is
+    /// blocked, catalog 57).
+    #[test]
+    fn hidden_layer_shape_is_hoverable_and_fittable_only_while_visible() {
+        let mut app = App::new();
+        // A shape the pick index actually resolves at one of its own corners, so the
+        // baseline hover/fit query is guaranteed to return it.
+        let (idx, inside) = (0..app.scene.len())
+            .map(|i| app.scene.shapes()[i].bounding_box().min)
+            .find_map(|p| app.scene.pick(p).map(|i| (i, p)))
+            .expect("the demo scene has a shape pickable at its corner");
+        let layer = app.scene.shapes()[idx].layer;
+
+        // Visible and unlocked: hover and double-click-fit both resolve a shape.
+        assert!(
+            app.pick_visible_at(inside).is_some(),
+            "a visible layer is hoverable and fittable"
+        );
+
+        // Locked but still visible: hover and fit keep working; only click-select stops.
+        assert!(app.layer_state.set_locked(layer, true));
+        assert!(
+            app.pick_visible_at(inside).is_some(),
+            "a locked-but-visible shape is still hoverable and fittable"
+        );
+        assert!(
+            !app.is_pickable(idx),
+            "a locked layer is not click-selectable"
+        );
+
+        // Hidden (still locked): excluded from hover and double-click-fit entirely, so
+        // `hover_pick` never becomes this shape and a double-click cannot frame it.
+        assert!(app.layer_state.set_visible(layer, false));
+        assert!(
+            app.pick_visible_at(inside)
+                .is_none_or(|i| app.scene.shapes()[i].layer != layer),
+            "a hidden shape is neither hovered nor framed by double-click-fit"
+        );
+    }
+    // --- end lane fix-pick-visibility ---
 
     #[test]
     fn undo_redo_command_restores_scene() {
