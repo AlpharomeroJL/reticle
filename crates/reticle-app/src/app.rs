@@ -3592,6 +3592,8 @@ impl App {
     /// selection is cleared because shape indices are no longer valid.
     fn rebuild_scene(&mut self) {
         self.scene = SceneIndex::build(self.history.document(), &self.top_cell);
+        // --- lane fix-layer-table-live: keep the layer table live with edited geometry ---
+        self.sync_layer_table();
         self.selection.clear();
         // Shape indices are no longer valid: drop the index-based net highlight and
         // bump the revision so the net-extraction cache re-extracts on the next pick.
@@ -3599,6 +3601,25 @@ impl App {
         self.doc_generation = self.doc_generation.wrapping_add(1);
         // The cell hierarchy may have changed, so refresh the outline tree.
         self.search.outline = OutlineTree::build(self.history.document());
+    }
+
+    // --- lane fix-layer-table-live: keep the layer table live with edited geometry ---
+    /// Surfaces a layer-table row for any layer an edit drew that the load-time
+    /// technology never listed, so the layer manager and GPU palette stay in step with
+    /// what is actually on the canvas.
+    ///
+    /// `layer_state` is otherwise assigned only when a document loads
+    /// (`from_technology`), so an edit that draws on a layer id absent at load leaves the
+    /// shape rendering via the palette fallback and pickable, but with no panel row:
+    /// unlistable, untoggleable, unrecolorable. Deriving off the freshly rebuilt scene --
+    /// the exact geometry the canvas renders and hit-tests -- is what closes that gap;
+    /// [`LayerState::ensure_rows_for`] preserves surviving rows' overrides and is a no-op
+    /// when every drawn layer already has a row, so an ordinary edit pays only the cheap
+    /// scan and never churns the table.
+    fn sync_layer_table(&mut self) {
+        let drawn: std::collections::BTreeSet<LayerId> =
+            self.scene.shapes().iter().map(|s| s.layer).collect();
+        self.layer_state.ensure_rows_for(drawn);
     }
 
     /// The technology database-units-per-micron for the current document.
@@ -16035,6 +16056,79 @@ mod tests {
         assert!(app.layer_state.is_visible(id));
         app.run_command(Command::ToggleLayer(0), None);
         assert!(!app.layer_state.is_visible(id));
+    }
+
+    // --- lane fix-layer-table-live: the layer table stays live with edited geometry ---
+
+    #[test]
+    fn edit_on_a_new_layer_surfaces_a_table_row() {
+        // RC3: an edit that draws on a layer id absent from the load-time technology must
+        // grow the layer table a row for it. Without the fix `rebuild_scene` rebuilds the
+        // SceneIndex but never touches `layer_state`, so the shape renders (via the palette
+        // fallback) and is pickable, yet the panel has no row: unlistable, untoggleable,
+        // unrecolorable. This asserts the row exists after the edit, and goes RED without
+        // the derivation added alongside `rebuild_scene`.
+        let mut app = App::new();
+        let new_id = LayerId::new(200, 5);
+        assert!(
+            !app.layer_state.rows().iter().any(|r| r.id == new_id),
+            "precondition: the new layer is absent from the load-time technology table",
+        );
+
+        let c = app.camera.center();
+        let rect = Rect::new(
+            c,
+            Point::new(c.x.saturating_add(500), c.y.saturating_add(500)),
+        );
+        let added = app.add_shapes_undoable(vec![DrawShape::new(new_id, ShapeKind::Rect(rect))]);
+        assert_eq!(added, 1, "the edit committed a shape on the new layer");
+
+        let row = app
+            .layer_state
+            .rows()
+            .iter()
+            .find(|r| r.id == new_id)
+            .expect("the edit surfaced a layer-table row for the new id");
+        assert!(row.visible, "a freshly surfaced layer starts visible");
+        assert!(
+            app.layer_state.toggle(new_id).is_some(),
+            "the new row is toggleable",
+        );
+        assert!(
+            app.layer_state.set_color(new_id, 0x11_22_33_44),
+            "the new row is recolorable",
+        );
+    }
+
+    #[test]
+    fn unrelated_edit_preserves_layer_overrides() {
+        // The companion guard: an edit that does NOT change the layer set must keep the
+        // user's overrides. A naive `LayerState::from_technology(..)` on every edit would
+        // clobber a hidden or recolored layer back to its technology defaults; the merge
+        // must leave surviving rows untouched.
+        let mut app = App::new();
+        let target = app.scene.shapes()[0].layer;
+        assert!(app.layer_state.set_visible(target, false));
+        assert!(app.layer_state.set_color(target, 0x0A_0B_0C_0D));
+
+        // A further edit that draws on a layer already in the table leaves the set
+        // unchanged, so the derivation is a no-op and the overrides stand.
+        app.add_demo_rectangle();
+
+        assert!(
+            !app.layer_state.is_visible(target),
+            "a hidden layer stays hidden across an unrelated edit",
+        );
+        let row = app
+            .layer_state
+            .rows()
+            .iter()
+            .find(|r| r.id == target)
+            .expect("the overridden layer still has its row");
+        assert_eq!(
+            row.color_rgba, 0x0A_0B_0C_0D,
+            "the recolor survives an unrelated edit",
+        );
     }
 
     #[test]

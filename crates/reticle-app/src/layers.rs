@@ -8,7 +8,7 @@
 //! mutates (or undoes into) the model.
 
 use reticle_geometry::LayerId;
-use reticle_model::Technology;
+use reticle_model::{LayerInfo, Technology};
 use std::collections::HashMap;
 
 /// How a layer's shapes are drawn in the layer-manager preview and the canvas
@@ -129,6 +129,46 @@ impl LayerState {
             filter: String::new(),
             presets: Vec::new(),
         }
+    }
+
+    // --- lane fix-layer-table-live: keep the table live with edited geometry ---
+    /// Appends a row for every id in `drawn` that the table does not already have,
+    /// returning whether any row was added.
+    ///
+    /// A new row is synthesized with [`LayerInfo::placeholder`] semantics: the
+    /// `L{layer}D{datatype}` name and the [`reticle_model::fallback_layer_color`] the
+    /// renderer already paints such a layer with, so the freshly listed row matches
+    /// exactly what is on the canvas. It starts visible, solid, and unlocked.
+    ///
+    /// Existing rows are left completely untouched, so a surviving layer's user
+    /// overrides (color, visibility, lock, fill, table order) are preserved -- this is
+    /// the merge the panel needs after an edit changes the drawn layer set, in place of
+    /// a wholesale [`Self::from_technology`] rebuild that would clobber them.
+    ///
+    /// Rows are never dropped here: a layer that loses its last shape keeps its row,
+    /// matching the panel's existing "show every technology layer" behavior where an
+    /// empty layer still lists. A layer surfaced by an edit thus stays listable exactly
+    /// like a technology layer, rather than flickering out of the table when its
+    /// geometry is deleted or undone.
+    pub fn ensure_rows_for(&mut self, drawn: impl IntoIterator<Item = LayerId>) -> bool {
+        let mut added = false;
+        for id in drawn {
+            if self.by_id.contains_key(&id) {
+                continue;
+            }
+            let info = LayerInfo::placeholder(id);
+            self.by_id.insert(id, self.rows.len());
+            self.rows.push(LayerRow {
+                id,
+                name: info.name,
+                color_rgba: info.color_rgba,
+                visible: info.visible,
+                fill: FillStyle::default(),
+                locked: false,
+            });
+            added = true;
+        }
+        added
     }
 
     /// All layer rows, in technology order.
